@@ -36,6 +36,8 @@ describe('CalendarService', () => {
   const mockPrisma = {
     class: {
       findMany: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
     },
     makeupScheduleEvent: {
       findMany: jest.fn(),
@@ -48,7 +50,11 @@ describe('CalendarService', () => {
       count: jest.fn(),
     },
   };
-  const googleCalendarService = {};
+  const googleCalendarService = {
+    deleteCalendarEvent: jest.fn(),
+    createOrUpdateClassScheduleRecurringEvent: jest.fn(),
+    createOrUpdateMakeupScheduleEvent: jest.fn(),
+  };
 
   let service: CalendarService;
 
@@ -65,6 +71,8 @@ describe('CalendarService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.class.findMany.mockResolvedValue([]);
+    mockPrisma.class.findUnique.mockResolvedValue(null);
+    mockPrisma.class.update.mockResolvedValue({});
     mockPrisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
     mockPrisma.studentExamSchedule.findMany.mockResolvedValue([]);
     mockPrisma.staffInfo.findMany.mockResolvedValue([]);
@@ -260,6 +268,124 @@ describe('CalendarService', () => {
       total: 1,
       page: 2,
       limit: 12,
+    });
+  });
+
+  it('uses the responsible teacher fixed Meet link in fixed calendar events', async () => {
+    mockPrisma.class.findMany.mockResolvedValue([
+      {
+        id: 'class-1',
+        name: 'Toán 9A',
+        schedule: [
+          {
+            id: 'slot-1',
+            dayOfWeek: 1,
+            from: '19:00:00',
+            to: '20:30:00',
+            teacherId: 'teacher-1',
+            meetLink: 'https://meet.google.com/old-slot-link',
+          },
+        ],
+        teachers: [
+          {
+            teacherId: 'teacher-1',
+            teacher: {
+              id: 'teacher-1',
+              googleMeetLink: 'https://meet.google.com/fixed-teacher-link',
+              user: {
+                first_name: 'An',
+                last_name: 'Nguyễn',
+                email: 'an@example.com',
+              },
+            },
+          },
+        ],
+      },
+    ]);
+
+    const result = await service.getStaffScheduleEvents('teacher-1', {
+      startDate: '2026-05-18',
+      endDate: '2026-05-18',
+    } as never);
+
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        occurrenceId: 'fixed:class-1:slot-1:2026-05-18',
+        meetLink: 'https://meet.google.com/fixed-teacher-link',
+      }),
+    ]);
+  });
+
+  it('stores the staff fixed Meet link on schedule entries during Google Calendar sync', async () => {
+    const staffService = {
+      ensureTutorMeetLink: jest
+        .fn()
+        .mockResolvedValue('https://meet.google.com/fixed-teacher-link'),
+    };
+    const syncService = new CalendarService(
+      mockPrisma as never,
+      googleCalendarService as never,
+      staffService as never,
+    );
+
+    mockPrisma.class.findUnique.mockResolvedValue({
+      id: 'class-1',
+      name: 'Toán 9A',
+      schedule: [
+        {
+          id: 'slot-1',
+          dayOfWeek: 1,
+          from: '19:00:00',
+          to: '20:30:00',
+          teacherId: 'teacher-1',
+          meetLink: 'https://meet.google.com/old-slot-link',
+        },
+      ],
+      teachers: [
+        {
+          teacherId: 'teacher-1',
+          teacher: {
+            id: 'teacher-1',
+            user: {
+              email: 'an@example.com',
+              first_name: 'An',
+              last_name: 'Nguyễn',
+            },
+          },
+        },
+      ],
+    });
+    googleCalendarService.createOrUpdateClassScheduleRecurringEvent.mockResolvedValue(
+      {
+        eventId: 'calendar-event-1',
+        meetLink: 'https://meet.google.com/generated-per-event-link',
+      },
+    );
+
+    await syncService.syncScheduleWithCalendar('class-1', []);
+
+    expect(
+      googleCalendarService.createOrUpdateClassScheduleRecurringEvent,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meetLink: 'https://meet.google.com/fixed-teacher-link',
+      }),
+    );
+    expect(mockPrisma.class.update).toHaveBeenCalledWith({
+      where: { id: 'class-1' },
+      data: {
+        schedule: [
+          {
+            id: 'slot-1',
+            dayOfWeek: 1,
+            from: '19:00:00',
+            to: '20:30:00',
+            teacherId: 'teacher-1',
+            googleCalendarEventId: 'calendar-event-1',
+            meetLink: 'https://meet.google.com/fixed-teacher-link',
+          },
+        ],
+      },
     });
   });
 });

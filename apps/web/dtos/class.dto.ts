@@ -10,6 +10,8 @@ export interface ClassScheduleItem {
     from: string;
     to: string;
     teacherId?: string;
+    googleCalendarEventId?: string | null;
+    meetLink?: string | null;
 }
 
 export interface ClassListItem {

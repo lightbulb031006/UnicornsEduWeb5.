@@ -2,6 +2,7 @@
 
 import { useId, type ReactNode } from "react";
 import StaffSpecializationMarkdown from "@/components/staff/StaffSpecializationMarkdown";
+import StaffMeetActionButton from "./StaffMeetActionButton";
 import StaffQrCard from "./StaffQrCard";
 
 function InlineFact({
@@ -31,6 +32,7 @@ export type StaffIdentityOverviewProps = {
   university?: string | null;
   specialization?: string | null;
   personalAchievementLink?: string | null;
+  googleMeetLink?: string | null;
   qrLink: string | null;
   onQrEdit: () => void;
   /** When false, QR block is view-only (no edit / add link). Default true. */
@@ -43,6 +45,7 @@ export default function StaffIdentityOverview({
   university,
   specialization,
   personalAchievementLink,
+  googleMeetLink,
   qrLink,
   onQrEdit,
   allowQrEdit = true,
@@ -51,6 +54,7 @@ export default function StaffIdentityOverview({
   const achievementsTitleId = useId();
 
   const trimmedAchievementLink = personalAchievementLink?.trim() || null;
+  const trimmedGoogleMeetLink = googleMeetLink?.trim() || null;
 
   return (
     <section
@@ -97,6 +101,24 @@ export default function StaffIdentityOverview({
           </a>
         </div>
       ) : null}
+
+      <div className="mt-4 flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            Google Meet
+          </p>
+          <p
+            className="mt-1 truncate text-sm text-text-primary"
+            title={trimmedGoogleMeetLink ?? undefined}
+          >
+            {trimmedGoogleMeetLink ?? "Chưa có link Google Meet"}
+          </p>
+        </div>
+        <StaffMeetActionButton
+          meetLink={trimmedGoogleMeetLink}
+          className="shrink-0"
+        />
+      </div>
 
       <div className="mt-5 border-t border-border-default pt-4">
         <h3 id={achievementsTitleId} className={SECTION_HEADING}>

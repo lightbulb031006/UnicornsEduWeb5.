@@ -129,6 +129,7 @@ export default function AdminClassDetailPage() {
     adminAccess.isAdmin || adminAccess.isAssistant || adminAccess.isAccountant;
   /** POST /sessions is admin-only; keep the CTA aligned with backend. */
   const canCreateSession = isAdmin;
+  const canManageClassStudents = isAdmin;
   const canOpenStudentDetails = true;
   const canManageMakeupSchedule = adminAccess.isAdmin || adminAccess.isAssistant;
 
@@ -445,11 +446,13 @@ export default function AdminClassDetailPage() {
         teachers={popupTeachers}
         defaultTeacherId={currentClassTeacherId}
       />
-      <EditClassStudentsPopup
-        open={studentsPopupOpen}
-        onClose={() => setStudentsPopupOpen(false)}
-        classDetail={classDetail}
-      />
+      {canManageClassStudents ? (
+        <EditClassStudentsPopup
+          open={studentsPopupOpen}
+          onClose={() => setStudentsPopupOpen(false)}
+          classDetail={classDetail}
+        />
+      ) : null}
 
       {canCreateSession && addSessionPopupOpen ? (
         <AddSessionPopup
@@ -539,13 +542,15 @@ export default function AdminClassDetailPage() {
           title="Danh sách học sinh"
           className="w-full"
           action={
-            <button
-              type="button"
-              onClick={() => setStudentsPopupOpen(true)}
-              className="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
-            >
-              Chỉnh sửa
-            </button>
+            canManageClassStudents ? (
+              <button
+                type="button"
+                onClick={() => setStudentsPopupOpen(true)}
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
+              >
+                Chỉnh sửa
+              </button>
+            ) : null
           }
         >
           <div className="overflow-x-auto">

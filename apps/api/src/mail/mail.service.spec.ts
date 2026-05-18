@@ -62,6 +62,31 @@ describe('MailService', () => {
     (nodemailer.createTransport as jest.Mock).mockReturnValue({ sendMail });
   });
 
+  it('sends verification email with React Email HTML and plain-text fallback', async () => {
+    sendMail.mockResolvedValueOnce(undefined);
+    const service = new MailService(
+      configService as never,
+      receiptPdfService as never,
+      receiptAssetsService as never,
+    );
+
+    await service.sendVerificationEmail('user@example.com', 'verify-token');
+
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    const sent = getLastSendMailOptions(sendMail);
+    expect(sent.to).toBe('user@example.com');
+    expect(sent.subject).toContain('Xác thực email');
+    expect(sent.text).toContain('user@example.com');
+    expect(sent.text).toContain(
+      'http://localhost:3000/verify-email?token=verify-token',
+    );
+    expect(sent.html).toContain('Xác thực email tài khoản');
+    expect(sent.html).toContain('user@example.com');
+    expect(sent.html).toContain(
+      'http://localhost:3000/verify-email?token=verify-token',
+    );
+  });
+
   it('reports SMTP authentication failures as service unavailable', async () => {
     sendMail.mockRejectedValueOnce(
       Object.assign(new Error('Invalid login'), {

@@ -29,6 +29,12 @@ const mockJWT = {
   }),
 };
 
+const mockOAuth2Client = {
+  setCredentials: jest.fn(),
+  getAccessToken: jest.fn().mockResolvedValue({ token: 'mock-access-token' }),
+  request: jest.fn(),
+};
+
 const mockServiceAccountKey = Buffer.from(
   JSON.stringify({
     type: 'service_account',
@@ -52,6 +58,7 @@ jest.mock('googleapis', () => ({
 
 jest.mock('google-auth-library', () => ({
   JWT: jest.fn(() => mockJWT),
+  OAuth2Client: jest.fn(() => mockOAuth2Client),
 }));
 
 const { GoogleCalendarService } = require('./google-calendar.service') as {
@@ -89,6 +96,10 @@ describe('GoogleCalendarService', () => {
       accessToken: 'mock-access-token',
       tokenType: 'Bearer',
     });
+    mockOAuth2Client.getAccessToken.mockResolvedValue({
+      token: 'mock-access-token',
+    });
+    mockOAuth2Client.request.mockResolvedValue({ data: {} });
 
     (service as unknown as { calendar: typeof mockCalendar }).calendar =
       mockCalendar;
@@ -138,7 +149,7 @@ describe('GoogleCalendarService', () => {
           conferenceDataVersion: 1,
           requestBody: expect.objectContaining({
             recurrence: ['RRULE:FREQ=WEEKLY;BYDAY=TU'],
-            attendees: [{ email: 'teacher@example.com', role: 'CO_HOST' }],
+            attendees: [{ email: 'teacher@example.com' }],
           }),
         }),
       );
@@ -210,6 +221,186 @@ describe('GoogleCalendarService', () => {
       expect(mockJWT.authorize).toHaveBeenCalledTimes(1);
       expect(mockGoogle.calendar).toHaveBeenCalledTimes(1);
       expect(mockCalendar.events.insert).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('generateTutorMeetLink', () => {
+    beforeEach(() => {
+      (
+        service as unknown as { oauth2Client: typeof mockOAuth2Client }
+      ).oauth2Client = mockOAuth2Client;
+    });
+
+    it('creates a setup event and grants the staff member Meet co-host role', async () => {
+      mockCalendar.events.insert.mockResolvedValue({
+        data: {
+          id: 'setup-event-123',
+          conferenceData: {
+            entryPoints: [
+              {
+                entryPointType: 'video',
+                uri: 'https://meet.google.com/abc-defg-hij',
+              },
+            ],
+          },
+        },
+      });
+      mockOAuth2Client.request.mockResolvedValue({ data: {} });
+
+      const result = await service.generateTutorMeetLink({
+        staffId: 'staff-123',
+        staffName: 'Tutor One',
+        staffEmail: 'Tutor@One.Example',
+      });
+
+      expect(result).toBe('https://meet.google.com/abc-defg-hij');
+      expect(mockCalendar.events.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          calendarId: 'test-calendar@group.calendar.google.com',
+          conferenceDataVersion: 1,
+          requestBody: expect.objectContaining({
+            attendees: [{ email: 'Tutor@One.Example' }],
+          }),
+        }),
+      );
+      expect(mockOAuth2Client.request).toHaveBeenCalledWith({
+        url: 'https://meet.googleapis.com/v2beta/spaces/abc-defg-hij/members?fields=name,email,role,user',
+        method: 'POST',
+        data: {
+          email: 'tutor@one.example',
+          role: 'COHOST',
+        },
+      });
+    });
+
+    it('sets newly generated staff Meet spaces to open access', async () => {
+      mockCalendar.events.insert.mockResolvedValue({
+        data: {
+          id: 'setup-event-123',
+          conferenceData: {
+            entryPoints: [
+              {
+                entryPointType: 'video',
+                uri: 'https://meet.google.com/abc-defg-hij',
+              },
+            ],
+          },
+        },
+      });
+      mockOAuth2Client.request
+        .mockResolvedValueOnce({ data: { name: 'spaces/setup-space-123' } })
+        .mockResolvedValueOnce({
+          data: {
+            name: 'spaces/setup-space-123',
+            config: { accessType: 'OPEN' },
+          },
+        })
+        .mockResolvedValueOnce({ data: {} });
+
+      await expect(
+        service.generateTutorMeetLink({
+          staffId: 'staff-123',
+          staffName: 'Tutor One',
+          staffEmail: 'tutor@example.com',
+        }),
+      ).resolves.toBe('https://meet.google.com/abc-defg-hij');
+
+      expect(mockOAuth2Client.request).toHaveBeenNthCalledWith(1, {
+        url: 'https://meet.googleapis.com/v2/spaces/abc-defg-hij?fields=name,config',
+        method: 'GET',
+      });
+      expect(mockOAuth2Client.request).toHaveBeenNthCalledWith(2, {
+        url: 'https://meet.googleapis.com/v2/spaces/setup-space-123?updateMask=config.accessType',
+        method: 'PATCH',
+        data: {
+          config: {
+            accessType: 'OPEN',
+          },
+        },
+      });
+    });
+
+    it('returns the Meet link when setting open access fails', async () => {
+      mockCalendar.events.insert.mockResolvedValue({
+        data: {
+          id: 'setup-event-123',
+          conferenceData: {
+            entryPoints: [
+              {
+                entryPointType: 'video',
+                uri: 'https://meet.google.com/abc-defg-hij',
+              },
+            ],
+          },
+        },
+      });
+      mockOAuth2Client.request
+        .mockResolvedValueOnce({ data: { name: 'spaces/setup-space-123' } })
+        .mockRejectedValueOnce(
+          Object.assign(new Error('Cannot set open access'), {
+            response: { status: 403 },
+          }),
+        )
+        .mockResolvedValueOnce({ data: {} });
+
+      await expect(
+        service.generateTutorMeetLink({
+          staffId: 'staff-123',
+          staffName: 'Tutor One',
+          staffEmail: 'tutor@example.com',
+        }),
+      ).resolves.toBe('https://meet.google.com/abc-defg-hij');
+
+      expect(mockCalendar.events.delete).not.toHaveBeenCalled();
+      expect(mockOAuth2Client.request).toHaveBeenNthCalledWith(2, {
+        url: 'https://meet.googleapis.com/v2/spaces/setup-space-123?updateMask=config.accessType',
+        method: 'PATCH',
+        data: {
+          config: {
+            accessType: 'OPEN',
+          },
+        },
+      });
+    });
+
+    it('returns the Meet link and keeps the setup event when Meet co-host grant fails', async () => {
+      mockCalendar.events.insert.mockResolvedValue({
+        data: {
+          id: 'setup-event-123',
+          conferenceData: {
+            entryPoints: [
+              {
+                entryPointType: 'video',
+                uri: 'https://meet.google.com/abc-defg-hij',
+              },
+            ],
+          },
+        },
+      });
+      mockCalendar.events.delete.mockResolvedValue({});
+      mockOAuth2Client.request.mockRejectedValue(
+        Object.assign(new Error('Missing Meet scope'), {
+          response: { status: 403 },
+        }),
+      );
+
+      await expect(
+        service.generateTutorMeetLink({
+          staffId: 'staff-123',
+          staffName: 'Tutor One',
+          staffEmail: 'tutor@example.com',
+        }),
+      ).resolves.toBe('https://meet.google.com/abc-defg-hij');
+
+      expect(mockCalendar.events.delete).not.toHaveBeenCalled();
+      expect(mockOAuth2Client.request).toHaveBeenCalledWith({
+        url: 'https://meet.googleapis.com/v2beta/spaces/abc-defg-hij/members?fields=name,email,role,user',
+        method: 'POST',
+        data: {
+          email: 'tutor@example.com',
+          role: 'COHOST',
+        },
+      });
     });
   });
 

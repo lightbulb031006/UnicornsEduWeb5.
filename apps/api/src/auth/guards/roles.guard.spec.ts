@@ -245,6 +245,54 @@ describe('RolesGuard', () => {
     );
   });
 
+  it('rejects assistant and accountant when explicit admin-route staff roles are empty', async () => {
+    authIdentityCacheService.getStaffRoles.mockResolvedValue([
+      StaffRole.assistant,
+    ]);
+
+    await expect(
+      guard.canActivate(
+        createContext(
+          {
+            id: 'staff-roster-assistant',
+            email: 'assistant@example.com',
+            accountHandle: 'assistant',
+            roleType: UserRole.staff,
+          },
+          {
+            requiredRoles: [UserRole.admin],
+            allowStaffRolesOnAdminRoutes: [],
+          },
+        ),
+      ),
+    ).rejects.toThrow(
+      new ForbiddenException('Only authorized roles can access this resource'),
+    );
+
+    authIdentityCacheService.getStaffRoles.mockResolvedValue([
+      StaffRole.accountant,
+    ]);
+
+    await expect(
+      guard.canActivate(
+        createContext(
+          {
+            id: 'staff-roster-accountant',
+            email: 'accountant@example.com',
+            accountHandle: 'accountant',
+            roleType: UserRole.staff,
+          },
+          {
+            requiredRoles: [UserRole.admin],
+            allowStaffRolesOnAdminRoutes: [],
+          },
+        ),
+      ),
+    ).rejects.toThrow(
+      new ForbiddenException('Only authorized roles can access this resource'),
+    );
+  });
+
   it('rejects accountant on admin routes without explicit accountant access', async () => {
     authIdentityCacheService.getStaffRoles.mockResolvedValue([
       StaffRole.accountant,

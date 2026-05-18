@@ -20,7 +20,14 @@ import {
   DirectTopUpApprovalEmail,
   type DirectTopUpApprovalEmailProps,
 } from './templates/direct-topup-approval.email';
+import {
+  EmailVerificationEmail,
+  type EmailVerificationEmailProps,
+} from './templates/email-verification.email';
 import { TuitionReceiptEmail } from './templates/tuition-receipt.email';
+
+/** Khớp `AuthService.verifyTokenExpiresIn` (giây) / 3600 */
+const EMAIL_VERIFICATION_EXPIRES_HOURS = 24;
 
 const LOCAL_FRONTEND_URL = 'http://localhost:3000';
 const UNSAFE_PRODUCTION_FRONTEND_HOSTS = new Set([
@@ -143,13 +150,33 @@ export class MailService {
     const frontendUrl =
       this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000';
     const verificationLink = `${frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
+    const props: EmailVerificationEmailProps = {
+      recipientEmail: email,
+      verificationLink,
+      expiresInHours: EMAIL_VERIFICATION_EXPIRES_HOURS,
+    };
+
+    const html = await render(
+      React.createElement(
+        EmailVerificationEmail as React.FC<EmailVerificationEmailProps>,
+        props,
+      ),
+    );
+    const text = [
+      'Xác thực email tài khoản Unicorns Edu',
+      `Email: ${props.recipientEmail}`,
+      `Liên kết xác thực (hiệu lực ${props.expiresInHours} giờ):`,
+      props.verificationLink,
+      '',
+      'Nếu bạn không tạo tài khoản hoặc không yêu cầu email này, hãy bỏ qua.',
+    ].join('\n');
 
     await this.sendMailOrThrow({
       from: this.mailFrom,
       to: email,
-      subject: 'Xác thực email tài khoản',
-      text: `Vui lòng xác thực email của bạn qua liên kết sau: ${verificationLink}`,
-      html: `<p>Vui lòng xác thực email của bạn bằng cách bấm vào liên kết sau:</p><p><a href="${verificationLink}">${verificationLink}</a></p>`,
+      subject: '[Unicorns Edu] Xác thực email tài khoản',
+      text,
+      html,
     });
   }
 
@@ -618,7 +645,9 @@ export class MailService {
   }
 
   private getDirectTopUpApprovalFrontendUrl(): string {
-    const configuredUrl = this.configService.get<string>('FRONTEND_URL')?.trim();
+    const configuredUrl = this.configService
+      .get<string>('FRONTEND_URL')
+      ?.trim();
     const isProduction = process.env.NODE_ENV === 'production';
 
     if (!configuredUrl) {

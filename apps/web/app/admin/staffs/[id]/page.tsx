@@ -1484,6 +1484,7 @@ export default function AdminStaffDetailPage({
           university={staff.university}
           specialization={staff.specialization}
           personalAchievementLink={staff.personalAchievementLink}
+          googleMeetLink={staff.googleMeetLink}
           qrLink={qrLink ?? resolvedQrLink}
           onQrEdit={() => setQrPopupOpen(true)}
           allowQrEdit={!viewingOwnStaffRecordOnStaffShell}

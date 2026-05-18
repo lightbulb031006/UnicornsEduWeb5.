@@ -34,11 +34,17 @@ interface ServiceAccountCredentials {
 export class GoogleCalendarService implements OnModuleInit {
   private readonly logger = new Logger(GoogleCalendarService.name);
   private calendar: calendar_v3.Calendar | null = null;
+  private oauth2Client: OAuth2Client | null = null;
   private config!: GoogleCalendarConfig;
   private initializationPromise: Promise<void> | null = null;
   private readonly DEFAULT_TIME_ZONE = 'Asia/Ho_Chi_Minh';
   private readonly GOOGLE_CALENDAR_SCOPE =
     'https://www.googleapis.com/auth/calendar';
+  private readonly GOOGLE_MEET_SETTINGS_SCOPE =
+    'https://www.googleapis.com/auth/meetings.space.settings';
+  private readonly GOOGLE_MEET_V2_BASE_URL = 'https://meet.googleapis.com/v2';
+  private readonly GOOGLE_MEET_V2_BETA_BASE_URL =
+    'https://meet.googleapis.com/v2beta';
   private readonly STUDENT_EXAM_EVENT_TYPE = 'studentExam';
   private readonly STUDENT_EXAM_TYPE_KEY = 'unicornsType';
   private readonly STUDENT_EXAM_STUDENT_ID_KEY = 'unicornsStudentId';
@@ -128,6 +134,7 @@ export class GoogleCalendarService implements OnModuleInit {
   ): Promise<void> {
     if (forceReinitialize) {
       this.calendar = null;
+      this.oauth2Client = null;
     } else if (this.calendar) {
       return;
     }
@@ -194,6 +201,7 @@ export class GoogleCalendarService implements OnModuleInit {
           version: 'v3',
           auth: oauth2Client,
         });
+        this.oauth2Client = oauth2Client;
 
         this.logger.log(
           `[Calendar Startup] Google Calendar initialized via OAuth2 user credentials`,
@@ -235,6 +243,7 @@ export class GoogleCalendarService implements OnModuleInit {
           version: 'v3',
           auth,
         });
+        this.oauth2Client = null;
 
         this.logger.log(
           `[Calendar Startup] Google Calendar initialized via service account (${credentials.client_email})`,
@@ -261,6 +270,16 @@ export class GoogleCalendarService implements OnModuleInit {
     }
 
     return this.calendar;
+  }
+
+  private requireMeetOAuth2Client(): OAuth2Client {
+    if (!this.oauth2Client) {
+      throw new GoogleCalendarAuthError(
+        `Google Meet co-host grants require OAuth2 user credentials with ${this.GOOGLE_MEET_SETTINGS_SCOPE}. Service account auth cannot grant Meet space member roles.`,
+      );
+    }
+
+    return this.oauth2Client;
   }
 
   private isRetryableAuthError(error: unknown): boolean {
@@ -316,6 +335,179 @@ export class GoogleCalendarService implements OnModuleInit {
 
       return operation();
     }
+  }
+
+  private getGoogleErrorStatus(error: unknown): number | undefined {
+    const err = error as {
+      code?: number | string;
+      response?: { status?: number };
+    };
+    const numericCode =
+      typeof err.code === 'number'
+        ? err.code
+        : typeof err.code === 'string'
+          ? Number.parseInt(err.code, 10)
+          : undefined;
+
+    return err.response?.status ?? numericCode;
+  }
+
+  private getGoogleErrorSummary(error: unknown): string {
+    const err = error as {
+      message?: string;
+      response?: { data?: unknown };
+    };
+    const responseData = err.response?.data;
+
+    if (responseData && typeof responseData === 'object') {
+      const nested = responseData as { error?: { message?: string } };
+      if (nested.error?.message) {
+        return nested.error.message;
+      }
+    }
+
+    return err.message ?? String(error);
+  }
+
+  private isAlreadyExistsError(error: unknown): boolean {
+    return (
+      this.getGoogleErrorStatus(error) === 409 ||
+      this.getGoogleErrorSummary(error).toLowerCase().includes('already exists')
+    );
+  }
+
+  private extractMeetMeetingCode(meetLink: string): string | null {
+    try {
+      const url = new URL(meetLink);
+      if (url.hostname !== 'meet.google.com') {
+        return null;
+      }
+
+      return url.pathname.split('/').find(Boolean) ?? null;
+    } catch {
+      const match = meetLink.match(
+        /meet\.google\.com\/([a-z]+-[a-z]+-[a-z]+)/i,
+      );
+      return match?.[1] ?? null;
+    }
+  }
+
+  private async grantMeetCoHostRole(params: {
+    meetLink: string;
+    staffEmail?: string;
+    staffId: string;
+  }): Promise<void> {
+    const email = params.staffEmail?.trim().toLowerCase();
+    if (!email) {
+      throw new GoogleCalendarInvalidConfigurationError(
+        `Cannot grant Google Meet co-host role for staff ${params.staffId}: staff email is missing.`,
+      );
+    }
+
+    const meetingCode = this.extractMeetMeetingCode(params.meetLink);
+    if (!meetingCode) {
+      throw new GoogleCalendarInvalidConfigurationError(
+        `Cannot grant Google Meet co-host role for staff ${params.staffId}: invalid Meet link ${params.meetLink}.`,
+      );
+    }
+
+    await this.ensureCalendarInitialized();
+    const createMember = async () =>
+      this.requireMeetOAuth2Client().request({
+        url: `${this.GOOGLE_MEET_V2_BETA_BASE_URL}/spaces/${encodeURIComponent(meetingCode)}/members?fields=name,email,role,user`,
+        method: 'POST',
+        data: {
+          email,
+          role: 'COHOST',
+        },
+      });
+
+    try {
+      await createMember();
+    } catch (error) {
+      if (this.isAlreadyExistsError(error)) {
+        this.logger.log(
+          `[TutorMeet] Staff ${params.staffId} (${email}) is already a Meet space member for ${meetingCode}`,
+        );
+        return;
+      }
+
+      if (!this.isRetryableAuthError(error)) {
+        throw new GoogleCalendarApiError(
+          `Failed to grant Google Meet co-host role to ${email} for staff ${params.staffId}: ${this.getGoogleErrorSummary(error)}`,
+          error as Error & { errors?: unknown[] },
+        );
+      }
+
+      this.logger.warn(
+        `[Meet Auth] Granting co-host for staff ${params.staffId} failed because Google token/auth expired or was rejected. Reinitializing client and retrying once.`,
+      );
+
+      await this.ensureCalendarInitialized(true);
+
+      try {
+        await createMember();
+      } catch (retryError) {
+        if (this.isAlreadyExistsError(retryError)) {
+          this.logger.log(
+            `[TutorMeet] Staff ${params.staffId} (${email}) is already a Meet space member for ${meetingCode}`,
+          );
+          return;
+        }
+
+        throw new GoogleCalendarApiError(
+          `Failed to grant Google Meet co-host role to ${email} for staff ${params.staffId}: ${this.getGoogleErrorSummary(retryError)}`,
+          retryError as Error & { errors?: unknown[] },
+        );
+      }
+    }
+
+    this.logger.log(
+      `[TutorMeet] Granted Meet COHOST role to ${email} for staff ${params.staffId}`,
+    );
+  }
+
+  private async setMeetSpaceOpenAccess(params: {
+    meetLink: string;
+    staffId: string;
+  }): Promise<void> {
+    const meetingCode = this.extractMeetMeetingCode(params.meetLink);
+    if (!meetingCode) {
+      throw new GoogleCalendarInvalidConfigurationError(
+        `Cannot set Google Meet access to OPEN for staff ${params.staffId}: invalid Meet link ${params.meetLink}.`,
+      );
+    }
+
+    await this.ensureCalendarInitialized();
+    const oauth2Client = this.requireMeetOAuth2Client();
+    const spaceResponse = await oauth2Client.request<{
+      name?: string;
+      config?: { accessType?: string };
+    }>({
+      url: `${this.GOOGLE_MEET_V2_BASE_URL}/spaces/${encodeURIComponent(meetingCode)}?fields=name,config`,
+      method: 'GET',
+    });
+    const spaceName = spaceResponse.data.name;
+
+    if (!spaceName) {
+      throw new GoogleCalendarApiError(
+        `Google Meet API did not return a space name for staff ${params.staffId}.`,
+      );
+    }
+
+    await oauth2Client.request({
+      url: `${this.GOOGLE_MEET_V2_BASE_URL}/${spaceName}?updateMask=config.accessType`,
+      method: 'PATCH',
+      data: {
+        config: {
+          accessType: 'OPEN',
+        },
+      },
+    });
+
+    this.logger.log(
+      `[TutorMeet] Set Meet accessType=OPEN for staff ${params.staffId}`,
+    );
   }
 
   async deleteCalendarEvent(eventId: string): Promise<void> {
@@ -550,7 +742,6 @@ export class GoogleCalendarService implements OnModuleInit {
       ? [
           {
             email: staffEmail.trim(),
-            role: 'CO_HOST' as const,
           },
         ]
       : [];
@@ -597,6 +788,22 @@ export class GoogleCalendarService implements OnModuleInit {
       );
       throw new Error(
         `Google Calendar did not return a Meet link for tutor ${staffId}. Ensure OAuth2 credentials are configured.`,
+      );
+    }
+
+    try {
+      await this.setMeetSpaceOpenAccess({ meetLink, staffId });
+    } catch (error) {
+      this.logger.warn(
+        `[TutorMeet] Generated Meet link for staff ${staffId}, but setting accessType=OPEN failed: ${this.getGoogleErrorSummary(error)}`,
+      );
+    }
+
+    try {
+      await this.grantMeetCoHostRole({ meetLink, staffEmail, staffId });
+    } catch (error) {
+      this.logger.warn(
+        `[TutorMeet] Generated Meet link for staff ${staffId}, but co-host grant failed and will be retried manually/config-wise: ${this.getGoogleErrorSummary(error)}`,
       );
     }
 
@@ -738,7 +945,6 @@ export class GoogleCalendarService implements OnModuleInit {
       recurrence: [`RRULE:FREQ=WEEKLY;BYDAY=${byday}`],
       attendees: normalizedTeacherEmails.map((email) => ({
         email,
-        role: 'CO_HOST' as const,
       })),
       ...(conferenceDataPayload
         ? { conferenceData: conferenceDataPayload }
@@ -923,7 +1129,6 @@ export class GoogleCalendarService implements OnModuleInit {
       },
       attendees: normalizedTeacherEmails.map((email) => ({
         email,
-        role: 'CO_HOST' as const,
       })),
       ...(conferenceDataPayload
         ? { conferenceData: conferenceDataPayload }

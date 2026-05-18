@@ -599,6 +599,80 @@ export class StaffService {
     }
   }
 
+  private async backfillMeetLinkForStaffAssignments(
+    staffId: string,
+    meetLink: string,
+  ): Promise<void> {
+    const classes = await this.prisma.class.findMany({
+      where: {
+        teachers: {
+          some: {
+            teacherId: staffId,
+          },
+        },
+      },
+      select: {
+        id: true,
+        schedule: true,
+        teachers: {
+          select: {
+            teacherId: true,
+          },
+        },
+      },
+    });
+
+    for (const cls of classes) {
+      if (!Array.isArray(cls.schedule)) {
+        continue;
+      }
+
+      const soleTeacherId =
+        cls.teachers.length === 1 ? cls.teachers[0].teacherId : undefined;
+      let scheduleChanged = false;
+      const nextSchedule = cls.schedule.map((rawEntry) => {
+        if (
+          typeof rawEntry !== 'object' ||
+          rawEntry === null ||
+          Array.isArray(rawEntry)
+        ) {
+          return rawEntry;
+        }
+
+        const entry = rawEntry as Prisma.JsonObject;
+        const entryTeacherId =
+          typeof entry.teacherId === 'string' ? entry.teacherId : undefined;
+        const isResponsibleEntry =
+          entryTeacherId === staffId ||
+          (!entryTeacherId && soleTeacherId === staffId);
+
+        if (!isResponsibleEntry || entry.meetLink === meetLink) {
+          return rawEntry;
+        }
+
+        scheduleChanged = true;
+        return {
+          ...entry,
+          meetLink,
+        };
+      });
+
+      if (!scheduleChanged) {
+        continue;
+      }
+
+      await this.prisma.class.update({
+        where: { id: cls.id },
+        data: { schedule: nextSchedule as Prisma.InputJsonValue },
+      });
+    }
+
+    await this.prisma.makeupScheduleEvent.updateMany({
+      where: { teacherId: staffId },
+      data: { googleMeetLink: meetLink },
+    });
+  }
+
   private validateCccdImageFile(
     file: UploadableFile | undefined,
     fieldLabel: string,
@@ -4701,6 +4775,7 @@ export class StaffService {
       where: { id: staffId },
       data: { googleMeetLink: meetLink },
     });
+    await this.backfillMeetLinkForStaffAssignments(staffId, meetLink);
 
     this.logger.log(
       `[StaffService] Regenerated Meet link for staff ${staffId}`,
@@ -4751,6 +4826,7 @@ export class StaffService {
         where: { id: staffId },
         data: { googleMeetLink: meetLink },
       });
+      await this.backfillMeetLinkForStaffAssignments(staffId, meetLink);
 
       this.logger.log(
         `[StaffService] Auto-created Meet link for staff ${staffId}: ${meetLink}`,

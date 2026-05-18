@@ -23,6 +23,10 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed
 
+- FE `AdminSidebar`: sắp xếp lại menu — Dashboard → Thông báo → User → Nhân sự → Lớp học → Học sinh → Chi phí → Giáo Án → Lịch → (Khấu trừ, Ghi chú môn học, Duyệt nạp ví, Lịch sử).
+
+- BE mail: email xác thực tài khoản (`sendVerificationEmail`) chuyển sang React Email template `email-verification.email.tsx` (header thương hiệu, CTA, fallback link, ghi chú hết hạn 24 giờ); subject `[Unicorns Edu] Xác thực email tài khoản`. Docs: `docs/pages/auth.md`.
+
 - FE `TutorCard` (`/admin/classes/[id]`, `/staff/classes/[id]` qua admin-like detail): **Trợ cấp** + **Vận hành** chỉ hiển thị với `admin`, `assistant`, `accountant`; các role khác giữ layout gia sư như trước (tên + trạng thái).
 
 - FE `/admin/classes/[id]`: nút thêm buổi học chỉ hiện với admin (khớp `POST /sessions`); validate lớp phải có gia sư phụ trách và học sinh `active` trước khi mở popup; sau tạo buổi invalidate lịch sử tháng hiện tại. `AddSessionPopup` gợi ý dropdown gia sư chỉ lấy từ roster lớp.
@@ -43,11 +47,15 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 - **Parent email self-service & hiển thị toàn hệ thống:** Thêm `parent_email` vào `UpdateMyStudentProfileDto` (backend `apps/api/src/dtos/profile.dto.ts` + `UserService.updateMyStudentProfile`) để học sinh tự cập nhật email phụ huynh qua `PATCH /users/me/student` (truyền `null`/chuỗi rỗng để xoá). FE: `ProfileStudentInfoDto`/`UpdateMyStudentProfileDto` (`apps/web/dtos/profile.dto.ts`) bổ sung `parentEmail`/`parent_email`; `/admin/students/[id]` (cũng dùng cho `/staff/students/[id]`) hiển thị dòng **Email nhận biên nhận** trong thẻ "Liên hệ phụ huynh"; `/student` self-service thêm input + dòng đọc cho email phụ huynh và tính `isStudentProfileDirty` theo field mới; `/user-profile` section Học viên thêm `TextField`/`DetailRows` `parent_email` và đưa field vào `studentCompletion`/`allProfileValues`. Docs: `docs/pages/auth.md`, `docs/pages/student.md`.
 
 ### Fixed
+
+- BE Google Meet link cố định cho staff: sau khi admin OAuth tạo Meet setup event, backend gọi Google Meet API `v2/spaces` để set `config.accessType=OPEN` cho link mới, rồi gọi `v2beta/spaces/{space}/members` để cấp role `COHOST` cho email staff; bỏ field `role: "CO_HOST"` khỏi Calendar attendees vì Calendar API không hỗ trợ field này. Nếu set `OPEN` hoặc cấp `COHOST` lỗi, link vẫn được lưu vào `staff_info.google_meet_link`; regenerate/auto-create backfill link vào `Class.schedule` và `makeup_schedule_events` do staff phụ trách, còn calendar feed ưu tiên link cố định của staff thay vì link cũ theo từng buổi. Docs/env cập nhật scope `meetings.space.settings`.
+
 - CD deploy (`scripts/gha-deploy-remote.sh`): `wait_for_http` không còn bắt buộc mọi container có `node`; API/web vẫn dùng `node`, còn nginx image `nginx:1.27-alpine` dùng fallback `wget`/`curl`, tránh lỗi `exec: "node": executable file not found in $PATH` làm job timeout sau khi nginx đã start.
 - CD deploy (`scripts/gha-deploy-remote.sh`): **deploy dừng âm thầm sau migration** — script được nạp qua `cat script | ssh ... bash -s` (đường Tailscale) nên `bash` đọc script từ stdin; `docker compose run` (migration) ở chế độ interactive nuốt hết phần stdin còn lại làm `bash` hết input và kết thúc ngay sau `prisma migrate deploy`, `api`/`web`/`nginx` không bao giờ được recreate → vẫn chạy image cũ. Fix: thêm `-T` + `</dev/null` cho lệnh `compose run` migration và `</dev/null` cho các lệnh `compose exec` (`wait_for_http`, `nginx -t`, `nginx -s reload`).
 - CD deploy (`scripts/gha-deploy-remote.sh`): bỏ cờ `-a` ở các bước prune (`docker system prune -af` → `docker container/image/builder prune -f`) để prune không xoá nhầm image `:latest` vừa pull nhưng chưa có container; thêm `--no-deps` cho mọi lệnh `compose up` (đặc biệt `nginx`) để không force-recreate lại `api`/`web` đã chạy; nâng timeout `wait_for_http` lên `90 × 5s` (~7.5 phút/service, override qua `WAIT_HTTP_RETRIES`) để VPS thiếu disk boot chậm không bị abort giữa chừng làm `web`/`nginx` kẹt ở image cũ; `command_timeout` deploy SSH 30m → 45m. Docs: `docs/Cách làm việc.md`.
 
 ### Changed
+
 - FE card **Lịch dạy bù** (`/admin/classes/[id]`, `/staff/classes/[id]`): danh sách chỉ tải buổi có `date >= hôm nay` (ẩn buổi đã qua); tổng và phân trang khớp filter. Docs: `docs/pages/admin.md`, `docs/pages/staff.md`.
 - CI Docker deploy: build API/Web chuyển sang runner ARM64 native `ubuntu-24.04-arm` với `platforms: linux/arm64` và Dockerfile dùng BuildKit cache mount cho pnpm store, tránh `pnpm install --frozen-lockfile` trên ARM64 qua QEMU chạy quá lâu nhưng vẫn có manifest đúng cho VPS ARM64.
 - SePay QR tĩnh nạp ví học sinh đổi nội dung chuyển khoản sang `NAPVI <student_info.id> <active_class_id...>`; webhook gửi biên lai riêng cho phụ huynh và CSKH, kèm dòng nội dung tiếng Việt trong email để nhận diện học sinh/lớp/số tiền.
@@ -85,9 +93,11 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 - DB `student_wallet_sepay_orders`: lưu metadata người tạo QR (`created_by_user_id`, email, role type, staff roles) để audit các đơn SePay do admin/staff/student tạo.
 
 ### Changed
+
 - FE **Thành tích chuyên môn** (`specialization`): render trực tiếp chuỗi từ DB bằng Markdown (`react-markdown` + `remark-gfm`, `skipHtml`) qua `StaffSpecializationMarkdown`; bỏ nhánh rich text HTML sanitize, bỏ helper tự chèn xuống dòng trước bullet, copy popup chỉ hướng dẫn nhập Markdown, và `/user-profile` dùng textarea nhiều dòng để lưu newline thật vào DB. Docs: `docs/pages/staff.md`, `docs/pages/admin.md`, `docs/pages/auth.md`.
 
 ### Fixed
+
 - CD VPS: deploy script prune Docker unused data trước khi pull, pull/recreate từng service và prune giữa các service để tránh `no space left on device` khi containerd giải nén image mới trên VPS nhỏ.
 - CD VPS: `scripts/gha-deploy-remote.sh` chạy Prisma `migrate deploy` từ API image sau khi pull GHCR và trước khi recreate services, tránh deploy code mới khi schema production chưa có migration mới.
 - BE/FE `GET /staff/:id/income-summary` — `snapshotUnpaidTotal` / `snapshotUnpaidNetTotal` giờ tính **toàn bộ** khoản pending/unpaid hiện tại từ mọi nguồn, không giới hạn tháng hoặc `days` và không gồm cọc; net giáo viên = gross - vận hành hiện hành - thuế trên phần sau vận hành, role khác = gross - thuế. Card **Tổng nhận** dùng `incomeStatsTotalNet` = `monthlyIncomeTotals.total` (net tháng đang chọn), trong đó buổi dạy `unpaid`/`pending` của tháng cũng được tính theo NET hiện hành; **Đã nhận** dùng `monthlyIncomeTotals.paid`, card **Tổng năm** dùng `yearIncomeTotal`, còn mini stat **Chưa nhận** trên `/staff` dùng `snapshotUnpaidNetTotal`. Docs: `docs/pages/admin.md`, `docs/pages/staff.md`, `docs/Database Schema.md`; DTO comments.
@@ -97,6 +107,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 - API local CORS/preflight: bật CORS qua `NestFactory.create(..., { cors })` trong `apps/api/src/main.ts` thay vì `app.enableCors()` sau `create`, để middleware CORS đăng ký trước router Nest và trả `Access-Control-Allow-Origin` cho `OPTIONS` (tránh lỗi preflight khi gọi API cross-origin từ web).
 
 ### Added
+
 - **CI deploy — Tailscale (tuỳ chọn):** job `deploy` trong [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) có thể gọi [`tailscale/github-action@v4`](https://github.com/tailscale/github-action) trước `appleboy/ssh-action` khi bật variable `TAILSCALE_ENABLED=true` (OAuth `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` mặc định, hoặc `TAILSCALE_AUTH_MODE=authkey` + `TAILSCALE_AUTHKEY`). Biến tuỳ chọn `TAILSCALE_TAGS`, `VPS_TAILSCALE_PING`. Hướng dẫn: `docs/Cách làm việc.md`.
 - DB migration: `staff_info` thay unique index `staff_info_user_id_key` bằng phiên bản **covering** `INCLUDE ("id", "roles")` để hỗ trợ index-only scan cho truy vấn theo `user_id` (luồng auth/session).
 - Prisma `StaffInfo`: doc comment + `@@unique([userId], map: "staff_info_user_id_key")` (thay `@unique` trên field) để tên index khớp DB và ghi chú INCLUDE chỉ trong migration.

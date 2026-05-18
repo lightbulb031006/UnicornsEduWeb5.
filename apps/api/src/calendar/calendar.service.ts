@@ -398,6 +398,10 @@ export class CalendarService {
               .filter(Boolean),
           ),
         );
+        const fixedMeetLink =
+          targetTeachers.length === 1
+            ? (targetTeachers[0].teacher.googleMeetLink ?? entry.meetLink)
+            : entry.meetLink;
 
         const occurrenceDates = this.getOccurrencesInRange(
           startDt,
@@ -423,7 +427,7 @@ export class CalendarService {
             endTime,
             allDay: false,
             patternEntryId: entry.id,
-            meetLink: entry.meetLink,
+            meetLink: fixedMeetLink,
           });
         }
       }
@@ -1059,7 +1063,7 @@ export class CalendarService {
           );
 
         entry.googleCalendarEventId = result.eventId;
-        entry.meetLink = result.meetLink;
+        entry.meetLink = meetLinkFromStaff ?? result.meetLink;
       } catch (error) {
         this.logger.error(
           `[Calendar CRUD:sync] Failed to sync recurring event for class ${cls.id}, entry ${entryId}: ${String(error)}`,

@@ -2,6 +2,7 @@ export { default as StaffListTableSkeleton } from "./StaffListTableSkeleton";
 export { default as AddTutorPopup } from "./AddTutorPopup";
 export { default as StaffCard } from "./StaffCard";
 export { default as StaffIdentityOverview } from "./StaffIdentityOverview";
+export { default as StaffMeetActionButton } from "./StaffMeetActionButton";
 export { default as StaffDetailRow } from "./StaffDetailRow";
 export { default as EditStaffPopup } from "./EditStaffPopup";
 export { default as StaffQrCard } from "./StaffQrCard";

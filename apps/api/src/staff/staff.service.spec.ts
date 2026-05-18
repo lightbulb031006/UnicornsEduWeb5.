@@ -44,6 +44,13 @@ describe('StaffService', () => {
       findMany: jest.fn(),
       count: jest.fn(),
     },
+    class: {
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
+    makeupScheduleEvent: {
+      updateMany: jest.fn(),
+    },
     classTeacher: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -86,6 +93,9 @@ describe('StaffService', () => {
   const authIdentityCacheService = {
     invalidateUser: jest.fn(),
   };
+  const googleCalendarService = {
+    generateTutorMeetLink: jest.fn(),
+  };
 
   let service: StaffService;
 
@@ -104,6 +114,12 @@ describe('StaffService', () => {
     mockPrisma.roleTaxDeductionRate.findFirst.mockResolvedValue(null);
     mockPrisma.staffTaxDeductionOverride.findFirst.mockResolvedValue(null);
     mockPrisma.classTeacher.findUnique.mockResolvedValue(null);
+    mockPrisma.class.findMany.mockResolvedValue([]);
+    mockPrisma.class.update.mockResolvedValue({});
+    mockPrisma.makeupScheduleEvent.updateMany.mockResolvedValue({ count: 0 });
+    googleCalendarService.generateTutorMeetLink.mockResolvedValue(
+      'https://meet.google.com/fixed-staff-link',
+    );
     mockPrisma.$queryRaw.mockResolvedValue([]);
     mockPrisma.$transaction.mockImplementation(
       (callback: (db: typeof mockPrisma) => unknown) => callback(mockPrisma),
@@ -111,7 +127,7 @@ describe('StaffService', () => {
     service = new StaffService(
       mockPrisma as never,
       actionHistoryService as never,
-      { generateTutorMeetLink: jest.fn() } as never,
+      googleCalendarService as never,
       authIdentityCacheService as never,
     );
   });
@@ -308,6 +324,81 @@ describe('StaffService', () => {
     ).rejects.toThrow(
       new BadRequestException('Số CCCD đã tồn tại trong hệ thống.'),
     );
+  });
+
+  it('regenerates a fixed Meet link and backfills schedules owned by the staff member', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-1',
+      user: {
+        first_name: 'Tutor',
+        last_name: 'One',
+        email: 'tutor@example.com',
+      },
+    });
+    mockPrisma.staffInfo.update.mockResolvedValue({
+      id: 'staff-1',
+      googleMeetLink: 'https://meet.google.com/fixed-staff-link',
+    });
+    mockPrisma.class.findMany.mockResolvedValue([
+      {
+        id: 'class-1',
+        schedule: [
+          {
+            id: 'slot-1',
+            dayOfWeek: 1,
+            from: '19:00:00',
+            to: '20:30:00',
+            teacherId: 'staff-1',
+            meetLink: 'https://meet.google.com/old-slot-link',
+          },
+          {
+            id: 'slot-2',
+            dayOfWeek: 2,
+            from: '19:00:00',
+            to: '20:30:00',
+            teacherId: 'staff-2',
+            meetLink: 'https://meet.google.com/other-teacher-link',
+          },
+        ],
+        teachers: [{ teacherId: 'staff-1' }, { teacherId: 'staff-2' }],
+      },
+    ]);
+
+    await expect(service.regenerateMeetLink('staff-1')).resolves.toEqual({
+      googleMeetLink: 'https://meet.google.com/fixed-staff-link',
+    });
+
+    expect(mockPrisma.staffInfo.update).toHaveBeenCalledWith({
+      where: { id: 'staff-1' },
+      data: { googleMeetLink: 'https://meet.google.com/fixed-staff-link' },
+    });
+    expect(mockPrisma.class.update).toHaveBeenCalledWith({
+      where: { id: 'class-1' },
+      data: {
+        schedule: [
+          {
+            id: 'slot-1',
+            dayOfWeek: 1,
+            from: '19:00:00',
+            to: '20:30:00',
+            teacherId: 'staff-1',
+            meetLink: 'https://meet.google.com/fixed-staff-link',
+          },
+          {
+            id: 'slot-2',
+            dayOfWeek: 2,
+            from: '19:00:00',
+            to: '20:30:00',
+            teacherId: 'staff-2',
+            meetLink: 'https://meet.google.com/other-teacher-link',
+          },
+        ],
+      },
+    });
+    expect(mockPrisma.makeupScheduleEvent.updateMany).toHaveBeenCalledWith({
+      where: { teacherId: 'staff-1' },
+      data: { googleMeetLink: 'https://meet.google.com/fixed-staff-link' },
+    });
   });
 
   it('keeps bonuses separate from customer care and lesson output role summaries', async () => {

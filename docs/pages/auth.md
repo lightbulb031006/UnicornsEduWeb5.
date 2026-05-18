@@ -95,10 +95,11 @@ export default async function SomePage() {
 - `GET /auth/session` — contract auth nhẹ cho frontend/server (`id`, `email`, `emailVerified`, `canAccessRestrictedRoutes`, `accountHandle`, `roleType`, `requiresPasswordSetup`, `avatarUrl`, `staffRoles`, `hasStaffProfile`, `hasStudentProfile`, `effectiveRoleTypes`, `staffProfileComplete`, `availableWorkspaces`, `defaultWorkspace`, `preferredRedirect`, `access.{admin,staff,student}`); guest trả về object cùng shape với default rỗng. `effectiveRoleTypes` là union của `users.role_type`, linked `staffInfo`, linked `studentInfo`, và full-admin staff role; FE/proxy phải dùng contract này thay vì chỉ so sánh `roleType`.
   - `GET /auth/profile` — backward-compatible alias của session resolver.
   - `GET /auth/me` — thông tin auth hiện tại từ DB theo `access_token`, trả cùng session shape.
-- `POST /auth/resend-verification` (cần session đăng nhập qua `access_token` hoặc `refresh_token`)
+  - `POST /auth/resend-verification` (cần session đăng nhập qua `access_token` hoặc `refresh_token`)
   - body optional: `{ email?: string }`
   - không truyền email: gửi lại email xác minh tới email hiện tại
   - có truyền email: cập nhật email tài khoản hiện tại, reset `emailVerified=false`, rồi gửi mail xác minh tới email mới
+  - email xác minh gửi qua React Email (`apps/api/src/mail/templates/email-verification.email.tsx`): header thương hiệu, nút CTA «Xác thực email», fallback link, ghi chú hết hạn **24 giờ** (khớp JWT verify token), subject `[Unicorns Edu] Xác thực email tài khoản`
   - endpoint này là `@Public()` ở lớp global JWT guard nhưng tự xác thực cookie trong controller; nếu không có session hợp lệ vẫn trả `401`.
   - nếu SMTP chưa cấu hình hoặc provider từ chối đăng nhập SMTP, backend trả `503` với thông báo cấu hình thay vì `500`. Với Gmail, `SMTP_PASS` phải là App Password 16 ký tự, không phải mật khẩu đăng nhập Google thường; backend chấp nhận cả dạng Google hiển thị có khoảng trắng (`abcd efgh ijkl mnop`) và sẽ bỏ khoảng trắng trước khi gửi qua SMTP.
   - `GET /auth/verify?token=...`
