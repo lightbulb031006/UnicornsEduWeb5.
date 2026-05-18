@@ -50,6 +50,7 @@ import {
 } from 'src/storage/supabase-storage';
 import {
   getPreferredUserFullName,
+  getUserFullNameFromParts,
   splitFullName,
 } from 'src/common/user-name.util';
 import {
@@ -117,6 +118,10 @@ const STAFF_NAME_USER_SELECT = {
 type StaffNameUser = Prisma.UserGetPayload<{
   select: typeof STAFF_NAME_USER_SELECT;
 }>;
+
+type StaffNameUserWithAvatar = StaffNameUser & {
+  avatarPath?: string | null;
+};
 
 const STAFF_ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
@@ -456,6 +461,8 @@ type StaffPaymentClient = Prisma.TransactionClient | PrismaService;
 
 const CCCD_STORAGE_BUCKET = 'id-cards';
 const CCCD_SIGNED_URL_TTL_SECONDS = 60 * 60;
+const AVATAR_STORAGE_BUCKET = 'avatars';
+const AVATAR_SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 const STAFF_PAYMENT_SOURCE_ORDER: Record<StaffPaymentSourceType, number> = {
   teacher_session: 10,
@@ -688,6 +695,14 @@ export class StaffService {
     });
   }
 
+  private async createAvatarSignedUrl(path?: string | null) {
+    return createSignedStorageUrl({
+      bucket: AVATAR_STORAGE_BUCKET,
+      path,
+      expiresIn: AVATAR_SIGNED_URL_TTL_SECONDS,
+    });
+  }
+
   async attachCccdImageUrls<
     T extends { cccdFrontPath?: string | null; cccdBackPath?: string | null },
   >(
@@ -785,6 +800,35 @@ export class StaffService {
             fullName,
           }
         : staff.user,
+    };
+  }
+
+  private async attachStaffUserDisplayFields<
+    T extends {
+      user?: (StaffNameUserWithAvatar & Record<string, unknown>) | null;
+    },
+  >(staff: T) {
+    const fullName = this.resolveStaffFullName(staff.user);
+
+    if (!staff.user) {
+      return {
+        ...staff,
+        fullName,
+        user: staff.user,
+      };
+    }
+
+    const { avatarPath, ...safeUser } = staff.user;
+    const avatarUrl = await this.createAvatarSignedUrl(avatarPath);
+
+    return {
+      ...staff,
+      fullName,
+      user: {
+        ...safeUser,
+        fullName,
+        avatarUrl,
+      },
     };
   }
 
@@ -1130,6 +1174,7 @@ export class StaffService {
             last_name: true,
             accountHandle: true,
             email: true,
+            avatarPath: true,
           },
         },
         classTeachers: {
@@ -1141,12 +1186,15 @@ export class StaffService {
       data.map((staff) => staff.id),
     );
 
-    return {
-      data: data.map((staff) => ({
-        ...staff,
-        fullName: this.resolveStaffFullName(staff.user),
+    const rows = await Promise.all(
+      data.map(async (staff) => ({
+        ...(await this.attachStaffUserDisplayFields(staff)),
         unpaidAmountTotal: unpaidTotalsByStaffId.get(staff.id) ?? 0,
       })),
+    );
+
+    return {
+      data: rows,
       meta: {
         total,
         page: safePage,
@@ -1323,8 +1371,8 @@ export class StaffService {
 
   private async getTeacherAllowanceRowsByClassStatusAndTaxBucket(params: {
     teacherId: string;
-    start: Date;
-    end: Date;
+    start?: Date;
+    end?: Date;
     teacherPaymentStatuses?: string[];
   }): Promise<TeacherAllowanceByClassTaxBucketRow[]> {
     return this.prisma.$queryRaw<
@@ -3657,7 +3705,7 @@ export class StaffService {
       sessionYearSummaryRows,
       monthlyClassTaxBucketRows,
       depositSessionRows,
-      recentUnpaidClassTaxBucketRows,
+      unpaidClassTaxBucketRows,
       monthlyBonuses,
       yearBonuses,
       monthlyExtraAllowanceRows,
@@ -3693,8 +3741,6 @@ export class StaffService {
       }),
       this.getTeacherAllowanceRowsByClassStatusAndTaxBucket({
         teacherId: id,
-        start: recentWindow.start,
-        end: recentWindow.end,
         teacherPaymentStatuses: [...RECENT_UNPAID_SESSION_STATUSES],
       }),
       this.prisma.bonus.findMany({
@@ -3871,7 +3917,7 @@ export class StaffService {
       });
     });
 
-    recentUnpaidClassTaxBucketRows.forEach((row) => {
+    unpaidClassTaxBucketRows.forEach((row) => {
       const classId = row.classId?.trim();
       if (!classId) return;
 
@@ -3880,17 +3926,11 @@ export class StaffService {
         className: row.className?.trim() || 'Lớp chưa đặt tên',
         ...makeAmountSummary(),
       };
-      const netAmount = calculateBucketNetAmount({
-        paymentStatus: row.teacherPaymentStatus,
-        grossAmount: row.grossAllowance,
-        operatingAmount: row.operatingAmount,
-        taxRatePercent: row.taxRatePercent,
-        taxableBaseAmount: row.taxableBaseAmount,
-      });
+      const grossAmount = normalizeMoneyAmount(row.grossAllowance);
 
       classSummaryById.set(classId, {
         ...current,
-        unpaid: current.unpaid + netAmount,
+        unpaid: current.unpaid + grossAmount,
       });
     });
 
@@ -4173,6 +4213,7 @@ export class StaffService {
             select: {
               ...STAFF_NAME_USER_SELECT,
               province: true,
+              avatarPath: true,
             },
           },
           classTeachers: {
@@ -4246,8 +4287,11 @@ export class StaffService {
       group by tab.class_id, teacher_payment_status , classes.name
       `;
 
+      const staffWithDisplayFields =
+        await this.attachStaffUserDisplayFields(staff);
+
       return {
-        ...this.attachDerivedStaffFullName(staff),
+        ...staffWithDisplayFields,
         customerCareManagedBy: staff.customerCareManagedBy
           ? {
               id: staff.customerCareManagedBy.id,
@@ -4758,11 +4802,7 @@ export class StaffService {
       throw new NotFoundException('Staff not found');
     }
 
-    const staffName =
-      [staff.user?.first_name, staff.user?.last_name]
-        .filter(Boolean)
-        .join(' ')
-        .trim() || staffId;
+    const staffName = getUserFullNameFromParts(staff.user) || staffId;
     const staffEmail = staff.user?.email ?? undefined;
 
     const meetLink = await this.googleCalendarService.generateTutorMeetLink({
@@ -4809,11 +4849,7 @@ export class StaffService {
     }
 
     try {
-      const staffName =
-        [staff.user?.first_name, staff.user?.last_name]
-          .filter(Boolean)
-          .join(' ')
-          .trim() || staffId;
+      const staffName = getUserFullNameFromParts(staff.user) || staffId;
       const staffEmail = staff.user?.email ?? undefined;
 
       const meetLink = await this.googleCalendarService.generateTutorMeetLink({

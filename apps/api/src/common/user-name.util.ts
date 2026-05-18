@@ -20,7 +20,7 @@ export function getUserFullNameFromParts(user?: UserNameParts | null) {
 
   const firstName = normalizeOptionalText(user.first_name);
   const lastName = normalizeOptionalText(user.last_name);
-  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  const fullName = [lastName, firstName].filter(Boolean).join(' ').trim();
 
   return fullName || null;
 }
@@ -48,10 +48,12 @@ export function splitFullName(fullName: string) {
     };
   }
 
-  const [first_name, ...rest] = normalized.split(' ');
+  const parts = normalized.split(' ');
+  const first_name = parts[parts.length - 1];
+  const lastNameParts = parts.slice(0, -1);
 
   return {
     first_name,
-    last_name: rest.length > 0 ? rest.join(' ') : null,
+    last_name: lastNameParts.length > 0 ? lastNameParts.join(' ') : null,
   };
 }

@@ -12,7 +12,7 @@ export function resolveCanonicalUserName(
 ): string {
   const first = source?.first_name?.trim() ?? "";
   const last = source?.last_name?.trim() ?? "";
-  const canonical = `${first} ${last}`.trim();
+  const canonical = [last, first].filter(Boolean).join(" ").trim();
 
   if (canonical) {
     return canonical;
@@ -47,7 +47,7 @@ export function splitCanonicalUserName(fullName: string): {
   }
 
   return {
-    first_name: parts.slice(0, -1).join(" "),
-    last_name: parts[parts.length - 1],
+    first_name: parts[parts.length - 1],
+    last_name: parts.slice(0, -1).join(" "),
   };
 }

@@ -9,6 +9,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import CccdImageUploadFields from "@/components/staff/CccdImageUploadFields";
+import { DateInput } from "@/components/ui/DateInput";
 import type {
   StaffAssignableUser,
   StaffDetail,
@@ -463,8 +464,7 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
 
                       <label className="flex flex-col gap-1 text-sm text-text-secondary">
                         <span>Ngày cấp CCCD</span>
-                        <input
-                          type="date"
+                        <DateInput
                           value={cccdIssuedDateInput}
                           onChange={(event) => setCccdIssuedDateInput(event.target.value)}
                           disabled={!selectedUser?.isEligible}
@@ -485,8 +485,7 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
 
                       <label className="flex flex-col gap-1 text-sm text-text-secondary">
                         <span>Ngày sinh</span>
-                        <input
-                          type="date"
+                        <DateInput
                           value={birthDateInput}
                           onChange={(event) => setBirthDateInput(event.target.value)}
                           disabled={!selectedUser?.isEligible}

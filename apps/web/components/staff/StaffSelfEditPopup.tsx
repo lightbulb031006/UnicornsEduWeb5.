@@ -4,6 +4,7 @@ import { useState, type SyntheticEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import CccdImageUploadFields from "@/components/staff/CccdImageUploadFields";
+import { DateInput } from "@/components/ui/DateInput";
 import type { FullProfileDto } from "@/dtos/profile.dto";
 import {
   resolveCanonicalUserName,
@@ -220,15 +221,13 @@ export default function StaffSelfEditPopup({
 
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Ngày cấp CCCD</span>
-                <input
+                <DateInput
                   name="cccdIssuedDate"
-                  type="date"
                   value={cccdIssuedDateInput}
                   onChange={(event) => setCccdIssuedDateInput(event.target.value)}
-                  onClick={(event) => event.currentTarget.showPicker?.()}
                   autoComplete="off"
                   disabled={isSaving}
-                  className="min-h-11 cursor-pointer rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
 
@@ -247,15 +246,13 @@ export default function StaffSelfEditPopup({
 
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Ngày sinh</span>
-                <input
+                <DateInput
                   name="birthDate"
-                  type="date"
                   value={birthDateInput}
                   onChange={(event) => setBirthDateInput(event.target.value)}
-                  onClick={(event) => event.currentTarget.showPicker?.()}
                   autoComplete="bday"
                   disabled={isSaving}
-                  className="min-h-11 cursor-pointer rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
 

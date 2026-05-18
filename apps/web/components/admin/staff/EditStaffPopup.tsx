@@ -3,6 +3,7 @@
 import { useState, type SyntheticEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import CccdImageUploadFields from "@/components/staff/CccdImageUploadFields";
+import { DateInput } from "@/components/ui/DateInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import type { StaffDetail } from "@/dtos/staff.dto";
 import * as staffApi from "@/lib/apis/staff.api";
@@ -216,12 +217,10 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
 
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Ngày cấp CCCD</span>
-                <input
-                  type="date"
+                <DateInput
                   value={cccdIssuedDateInput}
                   onChange={(e) => setCccdIssuedDateInput(e.target.value)}
-                  onClick={(e) => e.currentTarget.showPicker?.()}
-                  className="cursor-pointer rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
 
@@ -237,12 +236,10 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
 
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Ngày sinh</span>
-                <input
-                  type="date"
+                <DateInput
                   value={birthDateInput}
                   onChange={(e) => setBirthDateInput(e.target.value)}
-                  onClick={(e) => e.currentTarget.showPicker?.()}
-                  className="cursor-pointer rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
 

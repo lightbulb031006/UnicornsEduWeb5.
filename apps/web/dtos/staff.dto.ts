@@ -24,6 +24,7 @@ export interface StaffListItem {
         fullName?: string | null;
         first_name?: string | null;
         last_name?: string | null;
+        avatarUrl?: string | null;
     } | null;
     classTeachers?: Array<{
         operatingDeductionRatePercent?: number | string | null;
@@ -92,6 +93,7 @@ export interface StaffDetail {
         fullName?: string | null;
         first_name?: string | null;
         last_name?: string | null;
+        avatarUrl?: string | null;
     } | null;
     classTeachers?: Array<{
         operatingDeductionRatePercent?: number | string | null;
@@ -181,6 +183,7 @@ export interface StaffIncomeSummary {
     yearTotalDeductionTotal?: number;
     depositYearTotal: number;
     depositYearByClass: StaffIncomeDepositClassSummary[];
+    /** Card "Lớp phụ trách": `unpaid` là gross allowance, chưa trừ vận hành/thuế. */
     classMonthlySummaries: StaffIncomeClassSummary[];
     /** Thưởng tháng đang xem: sau thuế (không KH VH); gross/tax xem `monthlyGrossTotals` / `monthlyTaxTotals`. */
     bonusMonthlyTotals: StaffIncomeAmountSummary;

@@ -330,7 +330,7 @@ export class RegulationService {
       return null;
     }
 
-    const displayName = [author.first_name, author.last_name]
+    const displayName = [author.last_name, author.first_name]
       .filter(Boolean)
       .join(' ')
       .trim();

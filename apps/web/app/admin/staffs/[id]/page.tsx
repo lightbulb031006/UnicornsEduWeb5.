@@ -45,6 +45,9 @@ import SessionHistoryTable from "@/components/admin/session/SessionHistoryTable"
 import MonthNav from "@/components/admin/MonthNav";
 import { SessionItem } from "@/dtos/session.dto";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
+import UserAvatar from "@/components/ui/UserAvatar";
+import { pickAvatarUrl } from "@/lib/avatar";
+import { useAuth } from "@/context/AuthContext";
 
 function formatDate(iso?: string | null): string {
   if (!iso) return "—";
@@ -161,8 +164,6 @@ type TaxBulkDraftItem = {
 };
 
 const DEFAULT_ROLE_WORK_TYPE = "Giáo viên";
-const RECENT_UNPAID_DAYS = 14;
-
 const DEFAULT_BONUS_FORM: BonusFormState = {
   workTypeOption: DEFAULT_ROLE_WORK_TYPE,
   amount: "",
@@ -233,7 +234,11 @@ function parseRatePercentOrThrow(rawValue: string) {
   }
 
   const numericValue = Number(normalized);
-  if (!Number.isFinite(numericValue) || numericValue < 0 || numericValue > 100) {
+  if (
+    !Number.isFinite(numericValue) ||
+    numericValue < 0 ||
+    numericValue > 100
+  ) {
     throw new Error("Tỷ lệ % phải nằm trong khoảng 0-100.");
   }
 
@@ -246,6 +251,7 @@ export default function AdminStaffDetailPage({
   const params = useParams();
   const id = propStaffId ?? (typeof params?.id === "string" ? params.id : "");
   const { back, push } = useRouter();
+  const { user: authUser } = useAuth();
   const pathname = usePathname();
   const routeBase = resolveAdminLikeRouteBase(pathname);
   const [today] = useState(() => getTodayDateString());
@@ -288,7 +294,7 @@ export default function AdminStaffDetailPage({
   const viewingOwnStaffRecordOnStaffShell =
     routeBase === "/staff" && Boolean(ownStaffId) && ownStaffId === id;
   const canViewBeforeDeduction = isAdmin || isAccountant;
-  const canCreateBonus = !isAccountant;
+  const canCreateBonus = isAdmin || isAssistant || isAccountant;
   const canDeleteBonus = !isAccountant;
   const canEditTaxSettings = isAdmin || isAssistant || isAccountant;
   const canPayAll = isAdmin || isAssistant || isAccountant;
@@ -333,19 +339,11 @@ export default function AdminStaffDetailPage({
     isError: isIncomeSummaryError,
     isLoading: isIncomeSummaryLoading,
   } = useQuery<StaffIncomeSummary>({
-    queryKey: [
-      "staff",
-      "income-summary",
-      id,
-      selectedYear,
-      selectedMonthValue,
-      RECENT_UNPAID_DAYS,
-    ],
+    queryKey: ["staff", "income-summary", id, selectedYear, selectedMonthValue],
     queryFn: () =>
       staffApi.getStaffIncomeSummary(id, {
         month: selectedMonthValue,
         year: selectedYear,
-        days: RECENT_UNPAID_DAYS,
       }),
     enabled: !!id,
     placeholderData: keepPreviousData,
@@ -396,7 +394,13 @@ export default function AdminStaffDetailPage({
     isLoading: isPaymentPreviewLoading,
     isError: isPaymentPreviewError,
   } = useQuery<StaffPaymentPreview>({
-    queryKey: ["staff", "payment-preview", id, selectedYear, selectedMonthValue],
+    queryKey: [
+      "staff",
+      "payment-preview",
+      id,
+      selectedYear,
+      selectedMonthValue,
+    ],
     queryFn: () =>
       staffApi.getStaffPaymentPreview(id, {
         month: selectedMonthValue,
@@ -433,6 +437,27 @@ export default function AdminStaffDetailPage({
     queryClient.invalidateQueries({ queryKey: ["staff", "detail", id] });
     queryClient.invalidateQueries({ queryKey: ["staff", "list"] });
   }, [queryClient, id]);
+
+  const updateQrLinkMutation = useMutation({
+    mutationFn: (link: string) =>
+      staffApi.updateStaff({
+        id,
+        bank_qr_link: link,
+      }),
+    onSuccess: async (updatedStaff) => {
+      const nextLink = updatedStaff.bankQrLink?.trim() || null;
+      setQrLink(nextLink);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["staff", "detail", id] }),
+        queryClient.invalidateQueries({ queryKey: ["staff", "list"] }),
+      ]);
+    },
+    onError: (err: unknown) => {
+      toast.error(
+        getApiErrorMessage(err, "Không thể cập nhật link QR thanh toán."),
+      );
+    },
+  });
 
   const getTeachersForClass = useCallback(async (classId: string) => {
     const detail = await classApi.getClassById(classId);
@@ -506,6 +531,7 @@ export default function AdminStaffDetailPage({
     const link =
       (staff as { qrPaymentLink?: string } | undefined)?.qrPaymentLink ||
       (staff as { qr_payment_link?: string } | undefined)?.qr_payment_link ||
+      (staff as { bankQrLink?: string } | undefined)?.bankQrLink ||
       (staff as { bankQRLink?: string } | undefined)?.bankQRLink ||
       (staff as { bank_qr_link?: string } | undefined)?.bank_qr_link;
     const normalized = link?.trim();
@@ -586,14 +612,10 @@ export default function AdminStaffDetailPage({
 
       const results = await Promise.all(
         toPatch.map((row) =>
-          staffApi.patchStaffClassTeacherOperatingDeduction(
-            id,
-            row.classId,
-            {
-              operating_deduction_rate_percent:
-                row.operating_deduction_rate_percent,
-            },
-          ),
+          staffApi.patchStaffClassTeacherOperatingDeduction(id, row.classId, {
+            operating_deduction_rate_percent:
+              row.operating_deduction_rate_percent,
+          }),
         ),
       );
       return results.at(-1);
@@ -668,8 +690,7 @@ export default function AdminStaffDetailPage({
 
     const monthlyGross =
       incomeSummary.monthlyGrossTotals ?? EMPTY_AMOUNT_SUMMARY;
-    const monthlyTax =
-      incomeSummary.monthlyTaxTotals ?? EMPTY_AMOUNT_SUMMARY;
+    const monthlyTax = incomeSummary.monthlyTaxTotals ?? EMPTY_AMOUNT_SUMMARY;
     const monthlyOperatingDeductionTotals =
       incomeSummary.monthlyOperatingDeductionTotals;
     const monthlyTotalDeductionTotals =
@@ -796,7 +817,9 @@ export default function AdminStaffDetailPage({
     overrideRates.map((item) => [item.roleType, item]),
   );
   const staffRolesWithTax: StaffRoleTaxItem[] = staffRoles
-    .filter((role): role is StaffRoleType => role in ROLE_LABELS && role !== "admin")
+    .filter(
+      (role): role is StaffRoleType => role in ROLE_LABELS && role !== "admin",
+    )
     .map((role) => {
       const overrideRate = overrideMap.get(role);
       const roleDefault = roleDefaultMap.get(role);
@@ -826,7 +849,7 @@ export default function AdminStaffDetailPage({
         source: item.source,
         overrideId: item.overrideId,
         ratePercentInput: String(item.ratePercent),
-        effectiveFrom: item.overrideId ? item.effectiveFrom ?? today : today,
+        effectiveFrom: item.overrideId ? (item.effectiveFrom ?? today) : today,
       };
     });
     setTaxBulkDrafts(nextDrafts);
@@ -834,9 +857,7 @@ export default function AdminStaffDetailPage({
   };
 
   const closeTaxBulkEditor = () => {
-    if (
-      createStaffTaxOverrideMutation.isPending
-    ) {
+    if (createStaffTaxOverrideMutation.isPending) {
       return;
     }
     setTaxBulkDrafts({});
@@ -1237,7 +1258,7 @@ export default function AdminStaffDetailPage({
 
     if (bonusFormMode === "create") {
       if (!canCreateBonus) {
-        toast.error("Role kế toán không có quyền thêm thưởng mới.");
+        toast.error("Bạn không có quyền thêm thưởng mới.");
         return;
       }
 
@@ -1368,6 +1389,16 @@ export default function AdminStaffDetailPage({
     );
   }
 
+  const staffDisplayName = staff.fullName?.trim() || "Nhân sự";
+  const staffAvatarFallback = (staffDisplayName || staff.user?.email || "?")
+    .charAt(0)
+    .toUpperCase();
+  const staffAvatarUrl = pickAvatarUrl(
+    staff.user?.avatarUrl,
+    staff.id === ownStaffId ? fullProfile?.avatarUrl : null,
+    staff.user?.id === authUser.id ? authUser.avatarUrl : null,
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-bg-primary p-4 pb-8 sm:p-6">
       <button
@@ -1395,14 +1426,12 @@ export default function AdminStaffDetailPage({
       <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-1 items-center gap-4">
           <div className="relative flex shrink-0">
-            <div
-              className="flex size-14 items-center justify-center overflow-hidden rounded-full bg-bg-tertiary ring-2 ring-border-default text-xl font-semibold text-text-primary sm:size-16 sm:text-2xl"
-              aria-hidden
-            >
-              {(staff.fullName?.trim() || staff.user?.email || "?")
-                .charAt(0)
-                .toUpperCase()}
-            </div>
+            <UserAvatar
+              src={staffAvatarUrl}
+              fallback={staffAvatarFallback}
+              alt={`Avatar ${staffDisplayName}`}
+              className="size-14 bg-bg-tertiary text-xl font-semibold text-text-primary ring-2 ring-border-default sm:size-16 sm:text-2xl"
+            />
             <span
               className={`absolute bottom-0 right-0 block size-3 rounded-full border-2 border-bg-surface ${staff.status === "active" ? "bg-success" : "bg-error"}`}
               title={STATUS_LABELS[staff.status]}
@@ -1412,7 +1441,7 @@ export default function AdminStaffDetailPage({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="min-w-0 truncate text-lg font-semibold text-text-primary sm:text-xl">
-                {staff.fullName?.trim() || "Nhân sự"}
+                {staffDisplayName}
               </h1>
               {!viewingOwnStaffRecordOnStaffShell ? (
                 <button
@@ -1512,23 +1541,41 @@ export default function AdminStaffDetailPage({
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Tổng nhận</p>
-              <p className="mt-1 tabular-nums text-lg font-semibold text-primary">{formatCurrency(incomeStatsTotalNet)}</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Tổng nhận
+              </p>
+              <p className="mt-1 tabular-nums text-lg font-semibold text-primary">
+                {formatCurrency(incomeStatsTotalNet)}
+              </p>
             </article>
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Chưa nhận</p>
-              <p className="mt-1 tabular-nums text-lg font-semibold text-error">{formatCurrency(snapshotUnpaidNetTotal)}</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Chưa nhận
+              </p>
+              <p className="mt-1 tabular-nums text-lg font-semibold text-error">
+                {formatCurrency(snapshotUnpaidNetTotal)}
+              </p>
             </article>
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Đã nhận</p>
-              <p className="mt-1 tabular-nums text-lg font-semibold text-success">{formatCurrency(monthlyIncomeTotals.paid)}</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Đã nhận
+              </p>
+              <p className="mt-1 tabular-nums text-lg font-semibold text-success">
+                {formatCurrency(monthlyIncomeTotals.paid)}
+              </p>
             </article>
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Tổng năm</p>
-              <p className="mt-1 tabular-nums text-lg font-semibold text-warning">{formatCurrency(yearIncomeTotal)}</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Tổng năm
+              </p>
+              <p className="mt-1 tabular-nums text-lg font-semibold text-warning">
+                {formatCurrency(yearIncomeTotal)}
+              </p>
             </article>
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Ghi cọc</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Ghi cọc
+              </p>
               {depositYearTotal > 0 ? (
                 <button
                   type="button"
@@ -1543,7 +1590,9 @@ export default function AdminStaffDetailPage({
                   {formatCurrency(depositYearTotal)}
                 </button>
               ) : (
-                <p className="mt-1 tabular-nums text-lg font-semibold text-text-muted">0</p>
+                <p className="mt-1 tabular-nums text-lg font-semibold text-text-muted">
+                  0
+                </p>
               )}
             </article>
           </div>
@@ -1615,8 +1664,9 @@ export default function AdminStaffDetailPage({
                         const hasClassTeacherRow = staff?.classTeachers?.some(
                           (ct) => ct.class?.id === item.classId,
                         );
-                        const opValue =
-                          operatingPercentByClassId.get(item.classId);
+                        const opValue = operatingPercentByClassId.get(
+                          item.classId,
+                        );
                         return (
                           <div
                             key={item.classId}
@@ -1758,8 +1808,9 @@ export default function AdminStaffDetailPage({
                               staff?.classTeachers?.some(
                                 (ct) => ct.class?.id === item.classId,
                               );
-                            const opValue =
-                              operatingPercentByClassId.get(item.classId);
+                            const opValue = operatingPercentByClassId.get(
+                              item.classId,
+                            );
                             return (
                               <tr
                                 key={item.classId}
@@ -1894,7 +1945,11 @@ export default function AdminStaffDetailPage({
               unpaid={bonusTotals.unpaid}
               onAddBonus={canCreateBonus ? openAddBonusPopup : undefined}
               onEditBonus={(bonus) => openEditBonusPopup(bonus.id)}
-              onDeleteBonus={canDeleteBonus ? (bid) => deleteBonusMutation.mutate(bid) : undefined}
+              onDeleteBonus={
+                canDeleteBonus
+                  ? (bid) => deleteBonusMutation.mutate(bid)
+                  : undefined
+              }
               canEdit
               allowCreate={canCreateBonus}
               allowDelete={canDeleteBonus}
@@ -1954,18 +2009,16 @@ export default function AdminStaffDetailPage({
                         tabIndex={isInteractive ? 0 : -1}
                         aria-disabled={!isInteractive}
                         onClick={
-                          isInteractive
-                            ? () => push(detailHref)
-                            : undefined
+                          isInteractive ? () => push(detailHref) : undefined
                         }
                         onKeyDown={
                           isInteractive
                             ? (e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                push(detailHref);
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  push(detailHref);
+                                }
                               }
-                            }
                             : undefined
                         }
                         className={`rounded-lg border border-border-default bg-bg-secondary px-4 py-3 ${isInteractive ? "cursor-pointer transition-colors hover:bg-bg-elevated focus:outline-none focus:ring-2 focus:ring-primary" : ""}`}
@@ -2044,18 +2097,16 @@ export default function AdminStaffDetailPage({
                             role={isInteractive ? "button" : undefined}
                             tabIndex={isInteractive ? 0 : undefined}
                             onClick={
-                              isInteractive
-                                ? () => push(detailHref)
-                                : undefined
+                              isInteractive ? () => push(detailHref) : undefined
                             }
                             onKeyDown={
                               isInteractive
                                 ? (e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
-                                    push(detailHref);
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      push(detailHref);
+                                    }
                                   }
-                                }
                                 : undefined
                             }
                             className={`border-b border-border-default bg-bg-surface transition-colors duration-200 hover:bg-bg-secondary ${isInteractive ? "cursor-pointer" : ""}`}
@@ -2134,7 +2185,9 @@ export default function AdminStaffDetailPage({
                       key={item.role}
                       className="rounded-lg border border-border-default bg-bg-secondary px-4 py-3"
                     >
-                      <p className="font-medium text-text-primary">{item.label}</p>
+                      <p className="font-medium text-text-primary">
+                        {item.label}
+                      </p>
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-text-secondary">
                         <span>
                           Thuế hiện hành:{" "}
@@ -2149,7 +2202,10 @@ export default function AdminStaffDetailPage({
                                 String(item.ratePercent)
                               }
                               onChange={(event) =>
-                                updateTaxDraftRate(item.role, event.target.value)
+                                updateTaxDraftRate(
+                                  item.role,
+                                  event.target.value,
+                                )
                               }
                               className="h-9 w-28 rounded-md border border-border-default bg-bg-surface px-2 text-right font-semibold text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                             />
@@ -2166,7 +2222,9 @@ export default function AdminStaffDetailPage({
                           </span>
                         </span>
                         <span className="inline-flex rounded-full bg-bg-tertiary px-2 py-0.5 text-xs text-text-muted">
-                          {item.source === "override" ? "Override theo nhân sự" : "Theo mặc định role"}
+                          {item.source === "override"
+                            ? "Override theo nhân sự"
+                            : "Theo mặc định role"}
                         </span>
                       </div>
                     </article>
@@ -2176,14 +2234,18 @@ export default function AdminStaffDetailPage({
                   <table className="w-full min-w-[560px] border-collapse text-left text-sm">
                     <thead>
                       <tr className="border-b border-border-default bg-bg-secondary">
-                        <th className="px-4 py-3 font-medium text-text-primary">Role</th>
+                        <th className="px-4 py-3 font-medium text-text-primary">
+                          Role
+                        </th>
                         <th className="px-4 py-3 font-medium text-text-primary tabular-nums">
                           Thuế hiện hành
                         </th>
                         <th className="px-4 py-3 font-medium text-text-primary">
                           Hiệu lực
                         </th>
-                        <th className="px-4 py-3 font-medium text-text-primary">Nguồn cấu hình</th>
+                        <th className="px-4 py-3 font-medium text-text-primary">
+                          Nguồn cấu hình
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2192,7 +2254,9 @@ export default function AdminStaffDetailPage({
                           key={item.role}
                           className="border-b border-border-default bg-bg-surface"
                         >
-                          <td className="px-4 py-3 text-text-primary">{item.label}</td>
+                          <td className="px-4 py-3 text-text-primary">
+                            {item.label}
+                          </td>
                           <td className="px-4 py-3 tabular-nums font-semibold text-primary">
                             {isTaxEditMode ? (
                               <input
@@ -2205,7 +2269,10 @@ export default function AdminStaffDetailPage({
                                   String(item.ratePercent)
                                 }
                                 onChange={(event) =>
-                                  updateTaxDraftRate(item.role, event.target.value)
+                                  updateTaxDraftRate(
+                                    item.role,
+                                    event.target.value,
+                                  )
                                 }
                                 className="h-9 w-28 rounded-md border border-border-default bg-bg-surface px-2 text-right font-semibold text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                               />
@@ -2227,11 +2294,11 @@ export default function AdminStaffDetailPage({
                   </table>
                 </div>
                 <p className="mt-3 text-xs text-text-muted">
-                  Cấu hình thuế được lấy theo tháng đang xem ({selectedMonthLabel})
-                  với mốc tra cứu hiện tại là {asOfDate} (cuối kỳ, riêng tháng
-                  hiện tại dùng ngày hôm nay). Ở chế độ chỉnh sửa, bạn có thể
-                  cập nhật nhiều role cùng lúc; role chưa có override riêng sẽ
-                  được tạo override cho nhân sự khi lưu.
+                  Cấu hình thuế được lấy theo tháng đang xem (
+                  {selectedMonthLabel}) với mốc tra cứu hiện tại là {asOfDate}{" "}
+                  (cuối kỳ, riêng tháng hiện tại dùng ngày hôm nay). Ở chế độ
+                  chỉnh sửa, bạn có thể cập nhật nhiều role cùng lúc; role chưa
+                  có override riêng sẽ được tạo override cho nhân sự khi lưu.
                 </p>
               </>
             ) : (
@@ -2278,9 +2345,8 @@ export default function AdminStaffDetailPage({
           open={qrPopupOpen}
           onClose={() => setQrPopupOpen(false)}
           currentLink={qrLink ?? resolvedQrLink ?? ""}
-          onSave={(link) => {
-            setQrLink(link || null);
-            setQrPopupOpen(false);
+          onSave={async (link) => {
+            await updateQrLinkMutation.mutateAsync(link);
           }}
         />
       ) : null}
@@ -2423,12 +2489,15 @@ export default function AdminStaffDetailPage({
 
                   <div className="space-y-4">
                     {paymentPreviewSections.map((section) => {
-                      const showSectionOperating = shouldShowPaymentOperatingColumn(
+                      const showSectionOperating =
+                        shouldShowPaymentOperatingColumn(section.role);
+                      const showSectionTax = shouldShowPaymentTaxColumn(
                         section.role,
                       );
-                      const showSectionTax = shouldShowPaymentTaxColumn(section.role);
                       const showSectionMeta =
-                        !!section.role || showSectionOperating || showSectionTax;
+                        !!section.role ||
+                        showSectionOperating ||
+                        showSectionTax;
 
                       return (
                         <section
@@ -2452,7 +2521,8 @@ export default function AdminStaffDetailPage({
                                   <span className="rounded-full bg-bg-secondary px-3 py-1 text-text-secondary">
                                     Thuế hiện hành{" "}
                                     {formatRatePercent(
-                                      section.sources[0]?.items[0]?.taxRatePercent ?? 0,
+                                      section.sources[0]?.items[0]
+                                        ?.taxRatePercent ?? 0,
                                     )}
                                   </span>
                                 ) : null}
@@ -2475,8 +2545,9 @@ export default function AdminStaffDetailPage({
                             {section.sources.map((source) => {
                               const showSourceOperating =
                                 shouldShowPaymentOperatingColumn(section.role);
-                              const showSourceTax =
-                                shouldShowPaymentTaxColumn(section.role);
+                              const showSourceTax = shouldShowPaymentTaxColumn(
+                                section.role,
+                              );
                               const showSourceMeta =
                                 showSourceOperating || showSourceTax;
 
@@ -2492,7 +2563,8 @@ export default function AdminStaffDetailPage({
                                       </h4>
                                       <p className="text-xs text-text-muted">
                                         {source.itemCount} khoản · Trước thuế{" "}
-                                        {formatCurrency(source.grossTotal)} · Sau thuế{" "}
+                                        {formatCurrency(source.grossTotal)} ·
+                                        Sau thuế{" "}
                                         {formatCurrency(source.netTotal)}
                                       </p>
                                     </div>
@@ -2501,12 +2573,15 @@ export default function AdminStaffDetailPage({
                                         {showSourceOperating ? (
                                           <span className="rounded-full bg-warning/10 px-3 py-1 text-warning">
                                             Vận hành{" "}
-                                            {formatCurrency(source.operatingTotal)}
+                                            {formatCurrency(
+                                              source.operatingTotal,
+                                            )}
                                           </span>
                                         ) : null}
                                         {showSourceTax ? (
                                           <span className="rounded-full bg-error/10 px-3 py-1 text-error">
-                                            Thuế {formatCurrency(source.taxTotal)}
+                                            Thuế{" "}
+                                            {formatCurrency(source.taxTotal)}
                                           </span>
                                         ) : null}
                                       </div>
@@ -2540,7 +2615,9 @@ export default function AdminStaffDetailPage({
                                               item.currentStatus,
                                             )}`}
                                           >
-                                            {getPaymentStatusLabel(item.currentStatus)}
+                                            {getPaymentStatusLabel(
+                                              item.currentStatus,
+                                            )}
                                           </span>
                                         </div>
                                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
@@ -2566,7 +2643,9 @@ export default function AdminStaffDetailPage({
                                                 Vận hành
                                               </p>
                                               <p className="mt-1 font-semibold text-warning">
-                                                {formatCurrency(item.operatingAmount)}
+                                                {formatCurrency(
+                                                  item.operatingAmount,
+                                                )}
                                               </p>
                                             </div>
                                           ) : null}
@@ -2626,7 +2705,9 @@ export default function AdminStaffDetailPage({
                                             className="border-b border-border-default bg-bg-surface"
                                           >
                                             <td className="px-4 py-3 text-text-primary">
-                                              <div className="font-medium">{item.label}</div>
+                                              <div className="font-medium">
+                                                {item.label}
+                                              </div>
                                             </td>
                                             <td className="px-4 py-3 text-text-secondary">
                                               {item.secondaryLabel || "—"}
@@ -2640,7 +2721,9 @@ export default function AdminStaffDetailPage({
                                                   item.currentStatus,
                                                 )}`}
                                               >
-                                                {getPaymentStatusLabel(item.currentStatus)}
+                                                {getPaymentStatusLabel(
+                                                  item.currentStatus,
+                                                )}
                                               </span>
                                             </td>
                                             <td className="px-4 py-3 tabular-nums font-semibold text-primary">
@@ -2648,7 +2731,9 @@ export default function AdminStaffDetailPage({
                                             </td>
                                             {showSourceOperating ? (
                                               <td className="px-4 py-3 tabular-nums font-semibold text-warning">
-                                                {formatCurrency(item.operatingAmount)}
+                                                {formatCurrency(
+                                                  item.operatingAmount,
+                                                )}
                                               </td>
                                             ) : null}
                                             {showSourceTax ? (
@@ -2797,10 +2882,11 @@ export default function AdminStaffDetailPage({
                               type="button"
                               role="option"
                               aria-selected={isSelected}
-                              className={`flex w-full items-center justify-between rounded px-2 py-2 text-left text-sm transition-colors duration-150 ${isSelected
-                                ? "bg-primary/10 font-medium text-text-primary"
-                                : "text-text-secondary hover:bg-bg-secondary hover:text-text-primary"
-                                }`}
+                              className={`flex w-full items-center justify-between rounded px-2 py-2 text-left text-sm transition-colors duration-150 ${
+                                isSelected
+                                  ? "bg-primary/10 font-medium text-text-primary"
+                                  : "text-text-secondary hover:bg-bg-secondary hover:text-text-primary"
+                              }`}
                               onClick={() => {
                                 setBonusForm((prev) => ({
                                   ...prev,
@@ -2907,10 +2993,11 @@ export default function AdminStaffDetailPage({
                             type="button"
                             role="option"
                             aria-selected={isSelected}
-                            className={`flex w-full items-center justify-between rounded px-2 py-2 text-left text-sm transition-colors duration-150 ${isSelected
-                              ? "bg-primary/10 font-medium text-text-primary"
-                              : "text-text-secondary hover:bg-bg-secondary hover:text-text-primary"
-                              }`}
+                            className={`flex w-full items-center justify-between rounded px-2 py-2 text-left text-sm transition-colors duration-150 ${
+                              isSelected
+                                ? "bg-primary/10 font-medium text-text-primary"
+                                : "text-text-secondary hover:bg-bg-secondary hover:text-text-primary"
+                            }`}
                             onClick={() => {
                               setBonusForm((prev) => ({
                                 ...prev,
@@ -3001,7 +3088,9 @@ export default function AdminStaffDetailPage({
                       id="deposit-list-title"
                       className="truncate text-lg font-semibold text-text-primary"
                     >
-                      {canPayAll ? "Thanh toán cọc theo lớp" : "Buổi cọc theo lớp"}
+                      {canPayAll
+                        ? "Thanh toán cọc theo lớp"
+                        : "Buổi cọc theo lớp"}
                     </h2>
                     <p className="mt-1 text-sm text-text-muted">
                       {canPayAll
@@ -3061,7 +3150,9 @@ export default function AdminStaffDetailPage({
                             className="rounded-xl border border-error/30 bg-error/10 px-4 py-4 text-sm text-error"
                             role="alert"
                           >
-                            Không tải được preview thanh toán cọc. Danh sách bên dưới vẫn hiển thị theo tổng hợp hiện có, nhưng bạn cần tải lại popup để thanh toán.
+                            Không tải được preview thanh toán cọc. Danh sách bên
+                            dưới vẫn hiển thị theo tổng hợp hiện có, nhưng bạn
+                            cần tải lại popup để thanh toán.
                           </div>
                         ) : null}
 
@@ -3081,7 +3172,9 @@ export default function AdminStaffDetailPage({
                                   Giá Trị Cọc
                                 </p>
                                 <p className="mt-2 text-xl font-semibold text-warning">
-                                  {formatCurrency(depositPreviewSummary.preTaxTotal)}
+                                  {formatCurrency(
+                                    depositPreviewSummary.preTaxTotal,
+                                  )}
                                 </p>
                               </article>
                               <article className="rounded-xl border border-border-default bg-primary/8 px-4 py-3">
@@ -3089,7 +3182,9 @@ export default function AdminStaffDetailPage({
                                   Thực Nhận
                                 </p>
                                 <p className="mt-2 text-xl font-semibold text-success">
-                                  {formatCurrency(depositPreviewSummary.netTotal)}
+                                  {formatCurrency(
+                                    depositPreviewSummary.netTotal,
+                                  )}
                                 </p>
                               </article>
                             </div>
@@ -3100,7 +3195,9 @@ export default function AdminStaffDetailPage({
                                   Tổng cọc năm {selectedYear}
                                 </p>
                                 <p className="mt-0.5 text-xs text-text-muted">
-                                  Chọn theo từng buổi hoặc chọn cả lớp. Mọi buổi cọc được thanh toán sẽ được chốt về trạng thái không vận hành, không thuế.
+                                  Chọn theo từng buổi hoặc chọn cả lớp. Mọi buổi
+                                  cọc được thanh toán sẽ được chốt về trạng thái
+                                  không vận hành, không thuế.
                                 </p>
                               </div>
                               <button
@@ -3119,8 +3216,8 @@ export default function AdminStaffDetailPage({
                                 const groupSessionIds = group.sessions.map(
                                   (session) => session.id,
                                 );
-                                const selectedCount = groupSessionIds.filter((id) =>
-                                  selectedDepositSessionIdSet.has(id),
+                                const selectedCount = groupSessionIds.filter(
+                                  (id) => selectedDepositSessionIdSet.has(id),
                                 ).length;
                                 const allGroupSelected =
                                   groupSessionIds.length > 0 &&
@@ -3149,8 +3246,8 @@ export default function AdminStaffDetailPage({
                                             {group.className}
                                           </p>
                                           <p className="mt-0.5 text-xs text-text-muted">
-                                            {group.sessions.length} buổi · Đã chọn{" "}
-                                            {selectedCount}
+                                            {group.sessions.length} buổi · Đã
+                                            chọn {selectedCount}
                                           </p>
                                         </div>
                                       </label>
@@ -3184,18 +3281,17 @@ export default function AdminStaffDetailPage({
                                         return (
                                           <label
                                             key={session.id}
-                                            className={`flex cursor-pointer gap-3 px-4 py-3 transition-colors ${isSelected
-                                              ? "bg-primary/5"
-                                              : "hover:bg-bg-secondary/35"
-                                              }`}
+                                            className={`flex cursor-pointer gap-3 px-4 py-3 transition-colors ${
+                                              isSelected
+                                                ? "bg-primary/5"
+                                                : "hover:bg-bg-secondary/35"
+                                            }`}
                                           >
                                             <input
                                               type="checkbox"
                                               checked={isSelected}
                                               onChange={() =>
-                                                toggleDepositSession(
-                                                  session.id,
-                                                )
+                                                toggleDepositSession(session.id)
                                               }
                                               className="mt-1 size-4 shrink-0 rounded border-border-default text-primary focus:ring-border-focus"
                                               aria-label={`Chọn buổi cọc ngày ${formatDate(session.date)}`}
@@ -3262,11 +3358,14 @@ export default function AdminStaffDetailPage({
                           </div>
                         ) : (
                           <div className="rounded-xl border border-border-default bg-bg-secondary/40 px-4 py-5 text-sm text-text-secondary">
-                            Danh sách buổi cọc đã có nhưng preview thanh toán hiện chưa trả dữ liệu. Vui lòng đóng popup và mở lại để tải lại phần chốt cọc.
+                            Danh sách buổi cọc đã có nhưng preview thanh toán
+                            hiện chưa trả dữ liệu. Vui lòng đóng popup và mở lại
+                            để tải lại phần chốt cọc.
                           </div>
                         )}
 
-                        {isDepositPaymentPreviewError && depositByClass.length > 0 ? (
+                        {isDepositPaymentPreviewError &&
+                        depositByClass.length > 0 ? (
                           <div className="space-y-4">
                             {depositByClass.map((group) => (
                               <section
@@ -3307,7 +3406,7 @@ export default function AdminStaffDetailPage({
                                           <span className="font-medium">
                                             {String(
                                               session.teacherPaymentStatus ??
-                                              "deposit",
+                                                "deposit",
                                             )}
                                           </span>
                                         </p>
@@ -3377,7 +3476,7 @@ export default function AdminStaffDetailPage({
                                     <span className="font-medium">
                                       {String(
                                         session.teacherPaymentStatus ??
-                                        "deposit",
+                                          "deposit",
                                       )}
                                     </span>
                                   </p>
@@ -3402,10 +3501,10 @@ export default function AdminStaffDetailPage({
                       <p className="text-sm text-text-muted">
                         {selectedDepositSummary.itemCount > 0
                           ? `Đã chọn ${selectedDepositSummary.itemCount} buổi · Giá trị cọc ${formatCurrency(
-                            selectedDepositSummary.preTaxTotal,
-                          )} · Thực nhận ${formatCurrency(
-                            selectedDepositSummary.netTotal,
-                          )}`
+                              selectedDepositSummary.preTaxTotal,
+                            )} · Thực nhận ${formatCurrency(
+                              selectedDepositSummary.netTotal,
+                            )}`
                           : "Chọn ít nhất một buổi cọc để thanh toán."}
                       </p>
                       <div className="flex flex-col-reverse gap-2 sm:flex-row">

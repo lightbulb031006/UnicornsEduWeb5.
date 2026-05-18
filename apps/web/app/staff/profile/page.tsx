@@ -21,10 +21,7 @@ import SessionHistoryTable from "@/components/admin/session/SessionHistoryTable"
 import StaffSelfEditPopup from "@/components/staff/StaffSelfEditPopup";
 import { BonusListItem } from "@/dtos/bonus.dto";
 import { resolveCanonicalUserName } from "@/dtos/user-name.dto";
-import {
-  SessionItem,
-  SessionUpdatePayload,
-} from "@/dtos/session.dto";
+import { SessionItem, SessionUpdatePayload } from "@/dtos/session.dto";
 import { StaffIncomeSummary, StaffStatus } from "@/dtos/staff.dto";
 import {
   createMyStaffBonus,
@@ -38,6 +35,9 @@ import {
 import { formatCurrency } from "@/lib/class.helpers";
 import * as staffOpsApi from "@/lib/apis/staff-ops.api";
 import { ROLE_LABELS } from "@/lib/staff.constants";
+import { pickAvatarUrl } from "@/lib/avatar";
+import UserAvatar from "@/components/ui/UserAvatar";
+import { useAuth } from "@/context/AuthContext";
 
 function formatDate(iso?: string | null): string {
   if (!iso) return "—";
@@ -80,7 +80,6 @@ const EMPTY_AMOUNT_SUMMARY = {
   unpaid: 0,
 };
 
-const RECENT_UNPAID_DAYS = 14;
 const STAFF_ROLE_WORK_TYPE_OPTIONS = Array.from(
   new Set(Object.values(ROLE_LABELS)),
 );
@@ -159,6 +158,7 @@ function toStaffUpdateSessionPayload(payload: SessionUpdatePayload) {
 export default function StaffSelfDetailPage() {
   const { back, push } = useRouter();
   const queryClient = useQueryClient();
+  const { user: authUser } = useAuth();
   const [editPopupOpen, setEditPopupOpen] = useState(false);
   const [addBonusPopupOpen, setAddBonusPopupOpen] = useState(false);
   const [depositPopupOpen, setDepositPopupOpen] = useState(false);
@@ -237,13 +237,11 @@ export default function StaffSelfDetailPage() {
       "income-summary",
       selectedYear,
       selectedMonthValue,
-      RECENT_UNPAID_DAYS,
     ],
     queryFn: () =>
       getMyStaffIncomeSummary({
         month: selectedMonthValue,
         year: selectedYear,
-        days: RECENT_UNPAID_DAYS,
       }),
     enabled: !!linkedStaffId,
     placeholderData: keepPreviousData,
@@ -289,8 +287,8 @@ export default function StaffSelfDetailPage() {
     },
     onError: (error: unknown) => {
       const message =
-        (error as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ??
+        (error as { response?: { data?: { message?: string } } })?.response
+          ?.data?.message ??
         (error as Error)?.message ??
         "Không thể thêm thưởng.";
       toast.error(message);
@@ -321,8 +319,8 @@ export default function StaffSelfDetailPage() {
     },
     onError: (error: unknown) => {
       const message =
-        (error as { response?: { data?: { message?: string } } })?.response?.data
-          ?.message ??
+        (error as { response?: { data?: { message?: string } } })?.response
+          ?.data?.message ??
         (error as Error)?.message ??
         "Không thể điều chỉnh thưởng.";
       toast.error(message);
@@ -633,9 +631,11 @@ export default function StaffSelfDetailPage() {
     incomeSummary?.monthlyTaxTotals ?? EMPTY_AMOUNT_SUMMARY;
   const monthlyOperatingDeductionTotals =
     incomeSummary?.monthlyOperatingDeductionTotals;
-  const monthlyTotalDeductionTotals = incomeSummary?.monthlyTotalDeductionTotals;
+  const monthlyTotalDeductionTotals =
+    incomeSummary?.monthlyTotalDeductionTotals;
   const yearTaxTotal = incomeSummary?.yearTaxTotal ?? 0;
-  const yearOperatingDeductionTotal = incomeSummary?.yearOperatingDeductionTotal;
+  const yearOperatingDeductionTotal =
+    incomeSummary?.yearOperatingDeductionTotal;
   const yearTotalDeductionTotal = incomeSummary?.yearTotalDeductionTotal;
   const depositYearTotal = incomeSummary?.depositYearTotal ?? 0;
   const depositByClass = incomeSummary?.depositYearByClass ?? [];
@@ -708,9 +708,12 @@ export default function StaffSelfDetailPage() {
 
     return cards.filter((card) => card.value > 0);
   })();
-  const avatarLabel = (staffDisplayName || "?")
-    .charAt(0)
-    .toUpperCase();
+  const avatarLabel = (staffDisplayName || "?").charAt(0).toUpperCase();
+  const staffAvatarUrl = pickAvatarUrl(
+    profile.avatarUrl,
+    staff.user?.avatarUrl,
+    profile.id === authUser.id ? authUser.avatarUrl : null,
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-bg-primary p-4 pb-8 sm:p-6">
@@ -739,15 +742,16 @@ export default function StaffSelfDetailPage() {
       <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-1 items-center gap-4">
           <div className="relative flex shrink-0">
-            <div
-              className="flex size-14 items-center justify-center overflow-hidden rounded-full bg-bg-tertiary text-xl font-semibold text-text-primary ring-2 ring-border-default sm:size-16 sm:text-2xl"
-              aria-hidden
-            >
-              {avatarLabel}
-            </div>
+            <UserAvatar
+              src={staffAvatarUrl}
+              fallback={avatarLabel}
+              alt={`Avatar ${staffDisplayName}`}
+              className="size-14 bg-bg-tertiary text-xl font-semibold text-text-primary ring-2 ring-border-default sm:size-16 sm:text-2xl"
+            />
             <span
-              className={`absolute bottom-0 right-0 block size-3 rounded-full border-2 border-bg-surface ${staff.status === "active" ? "bg-success" : "bg-error"
-                }`}
+              className={`absolute bottom-0 right-0 block size-3 rounded-full border-2 border-bg-surface ${
+                staff.status === "active" ? "bg-success" : "bg-error"
+              }`}
               title={STATUS_LABELS[staff.status]}
               aria-hidden
             />
@@ -815,23 +819,41 @@ export default function StaffSelfDetailPage() {
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Tổng nhận</p>
-              <p className="mt-1 tabular-nums text-lg font-semibold text-primary">{formatCurrency(incomeStatsTotalNet)}</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Tổng nhận
+              </p>
+              <p className="mt-1 tabular-nums text-lg font-semibold text-primary">
+                {formatCurrency(incomeStatsTotalNet)}
+              </p>
             </article>
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Chưa nhận</p>
-              <p className="mt-1 tabular-nums text-lg font-semibold text-error">{formatCurrency(snapshotUnpaidNetTotal)}</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Chưa nhận
+              </p>
+              <p className="mt-1 tabular-nums text-lg font-semibold text-error">
+                {formatCurrency(snapshotUnpaidNetTotal)}
+              </p>
             </article>
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Đã nhận</p>
-              <p className="mt-1 tabular-nums text-lg font-semibold text-success">{formatCurrency(monthlyIncomeTotals.paid)}</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Đã nhận
+              </p>
+              <p className="mt-1 tabular-nums text-lg font-semibold text-success">
+                {formatCurrency(monthlyIncomeTotals.paid)}
+              </p>
             </article>
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Tổng năm</p>
-              <p className="mt-1 tabular-nums text-lg font-semibold text-warning">{formatCurrency(yearIncomeTotal)}</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Tổng năm
+              </p>
+              <p className="mt-1 tabular-nums text-lg font-semibold text-warning">
+                {formatCurrency(yearIncomeTotal)}
+              </p>
             </article>
             <article className="rounded-xl border border-border-default bg-bg-secondary/45 px-4 py-3">
-              <p className="text-xs uppercase tracking-wide text-text-muted">Ghi cọc</p>
+              <p className="text-xs uppercase tracking-wide text-text-muted">
+                Ghi cọc
+              </p>
               {depositYearTotal > 0 ? (
                 <button
                   type="button"
@@ -842,13 +864,17 @@ export default function StaffSelfDetailPage() {
                   {formatCurrency(depositYearTotal)}
                 </button>
               ) : (
-                <p className="mt-1 tabular-nums text-lg font-semibold text-text-muted">0</p>
+                <p className="mt-1 tabular-nums text-lg font-semibold text-text-muted">
+                  0
+                </p>
               )}
             </article>
           </div>
           {canViewBeforeDeduction && beforeDeductionCards.length > 0 ? (
             <div className="mt-3 rounded-xl border border-border-default bg-bg-tertiary/70 px-4 py-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Trước khấu trừ</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-text-muted">
+                Trước khấu trừ
+              </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {beforeDeductionCards.map((card) => (
                   <div
@@ -894,27 +920,28 @@ export default function StaffSelfDetailPage() {
                         onClick={
                           isInteractive
                             ? () =>
-                              push(
-                                `/staff/classes/${encodeURIComponent(item.classId)}`,
-                              )
+                                push(
+                                  `/staff/classes/${encodeURIComponent(item.classId)}`,
+                                )
                             : undefined
                         }
                         onKeyDown={
                           isInteractive
                             ? (e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                push(
-                                  `/staff/classes/${encodeURIComponent(item.classId)}`,
-                                );
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  push(
+                                    `/staff/classes/${encodeURIComponent(item.classId)}`,
+                                  );
+                                }
                               }
-                            }
                             : undefined
                         }
-                        className={`rounded-lg border border-border-default bg-bg-secondary px-4 py-3 ${isInteractive
-                          ? "cursor-pointer transition-colors hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                          : ""
-                          }`}
+                        className={`rounded-lg border border-border-default bg-bg-secondary px-4 py-3 ${
+                          isInteractive
+                            ? "cursor-pointer transition-colors hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                            : ""
+                        }`}
                       >
                         <p className="font-medium text-text-primary">
                           {item.className}
@@ -984,25 +1011,28 @@ export default function StaffSelfDetailPage() {
                             onClick={
                               isInteractive
                                 ? () =>
-                                  push(
-                                    `/staff/classes/${encodeURIComponent(item.classId)}`,
-                                  )
+                                    push(
+                                      `/staff/classes/${encodeURIComponent(item.classId)}`,
+                                    )
                                 : undefined
                             }
                             onKeyDown={
                               isInteractive
                                 ? (e) => {
-                                  if (e.key === "Enter" || e.key === " ") {
-                                    e.preventDefault();
-                                    push(
-                                      `/staff/classes/${encodeURIComponent(item.classId)}`,
-                                    );
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      push(
+                                        `/staff/classes/${encodeURIComponent(item.classId)}`,
+                                      );
+                                    }
                                   }
-                                }
                                 : undefined
                             }
-                            className={`border-b border-border-default bg-bg-surface transition-colors duration-200 ${isInteractive ? "cursor-pointer hover:bg-bg-secondary" : ""
-                              }`}
+                            className={`border-b border-border-default bg-bg-surface transition-colors duration-200 ${
+                              isInteractive
+                                ? "cursor-pointer hover:bg-bg-secondary"
+                                : ""
+                            }`}
                           >
                             <td className="px-4 py-3 text-text-primary">
                               {item.className}
@@ -1045,7 +1075,6 @@ export default function StaffSelfDetailPage() {
                 Không tải được dữ liệu thưởng.
               </p>
             ) : null}
-
           </div>
         </div>
 
@@ -1080,10 +1109,11 @@ export default function StaffSelfDetailPage() {
                   {otherRoleSummaries.map((item) => {
                     const detailHref = getOtherRoleDetailHref(item.role);
                     const isInteractive = detailHref !== null;
-                    const cardClassName = `block rounded-lg border border-border-default bg-bg-secondary px-4 py-3 transition-colors ${isInteractive
-                      ? "hover:bg-bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                      : ""
-                      }`;
+                    const cardClassName = `block rounded-lg border border-border-default bg-bg-secondary px-4 py-3 transition-colors ${
+                      isInteractive
+                        ? "hover:bg-bg-elevated focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                        : ""
+                    }`;
                     const cardContent = (
                       <>
                         <p className="font-medium text-text-primary">
@@ -1125,10 +1155,7 @@ export default function StaffSelfDetailPage() {
                     }
 
                     return (
-                      <div
-                        key={item.role}
-                        className={cardClassName}
-                      >
+                      <div key={item.role} className={cardClassName}>
                         {cardContent}
                       </div>
                     );
@@ -1177,12 +1204,16 @@ export default function StaffSelfDetailPage() {
                         return (
                           <tr
                             key={item.role}
-                            className={`border-b border-border-default bg-bg-surface transition-colors duration-200 hover:bg-bg-secondary ${isInteractive ? "cursor-pointer" : ""
-                              }`}
+                            className={`border-b border-border-default bg-bg-surface transition-colors duration-200 hover:bg-bg-secondary ${
+                              isInteractive ? "cursor-pointer" : ""
+                            }`}
                           >
                             <td className="px-4 py-3 text-text-primary">
                               {isInteractive ? (
-                                <Link href={detailHref} className={cellLinkClass}>
+                                <Link
+                                  href={detailHref}
+                                  className={cellLinkClass}
+                                >
                                   {item.label}
                                 </Link>
                               ) : (
@@ -1191,7 +1222,10 @@ export default function StaffSelfDetailPage() {
                             </td>
                             <td className="px-4 py-3 tabular-nums font-semibold text-primary">
                               {isInteractive ? (
-                                <Link href={detailHref} className={cellLinkClass}>
+                                <Link
+                                  href={detailHref}
+                                  className={cellLinkClass}
+                                >
                                   {formatCurrency(item.total)}
                                 </Link>
                               ) : (
@@ -1200,7 +1234,10 @@ export default function StaffSelfDetailPage() {
                             </td>
                             <td className="px-4 py-3 tabular-nums font-semibold text-error">
                               {isInteractive ? (
-                                <Link href={detailHref} className={cellLinkClass}>
+                                <Link
+                                  href={detailHref}
+                                  className={cellLinkClass}
+                                >
                                   {formatCurrency(item.unpaid)}
                                 </Link>
                               ) : (
@@ -1209,7 +1246,10 @@ export default function StaffSelfDetailPage() {
                             </td>
                             <td className="px-4 py-3 tabular-nums font-semibold text-success">
                               {isInteractive ? (
-                                <Link href={detailHref} className={cellLinkClass}>
+                                <Link
+                                  href={detailHref}
+                                  className={cellLinkClass}
+                                >
                                   {formatCurrency(item.paid)}
                                 </Link>
                               ) : (
@@ -1232,7 +1272,8 @@ export default function StaffSelfDetailPage() {
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-2">
                 <div className="rounded-full bg-bg-secondary px-3 py-1 text-xs text-text-muted sm:bg-transparent sm:px-0 sm:py-0 sm:text-sm">
-                  Đang xem {selectedMonthLabel} · {sessionsInCurrentMonth.length} buổi
+                  Đang xem {selectedMonthLabel} ·{" "}
+                  {sessionsInCurrentMonth.length} buổi
                 </div>
               </div>
             </div>
@@ -1287,9 +1328,7 @@ export default function StaffSelfDetailPage() {
               id="add-bonus-title"
               className="text-lg font-semibold text-text-primary"
             >
-              {bonusFormMode === "create"
-                ? "Thêm thưởng"
-                : "Điều chỉnh thưởng"}
+              {bonusFormMode === "create" ? "Thêm thưởng" : "Điều chỉnh thưởng"}
             </h2>
             <p className="mt-1 text-sm text-text-muted">
               {bonusFormMode === "create"
@@ -1354,10 +1393,11 @@ export default function StaffSelfDetailPage() {
                               type="button"
                               role="option"
                               aria-selected={isSelected}
-                              className={`flex w-full items-center justify-between rounded px-2 py-2 text-left text-sm transition-colors duration-150 ${isSelected
-                                ? "bg-primary/10 font-medium text-text-primary"
-                                : "text-text-secondary hover:bg-bg-secondary hover:text-text-primary"
-                                }`}
+                              className={`flex w-full items-center justify-between rounded px-2 py-2 text-left text-sm transition-colors duration-150 ${
+                                isSelected
+                                  ? "bg-primary/10 font-medium text-text-primary"
+                                  : "text-text-secondary hover:bg-bg-secondary hover:text-text-primary"
+                              }`}
                               onClick={() => {
                                 setBonusForm((prev) => ({
                                   ...prev,
@@ -1577,13 +1617,16 @@ export default function StaffSelfDetailPage() {
                                     Trạng thái:{" "}
                                     <span className="font-medium">
                                       {String(
-                                        session.teacherPaymentStatus ?? "deposit",
+                                        session.teacherPaymentStatus ??
+                                          "deposit",
                                       )}
                                     </span>
                                   </p>
                                 </div>
                                 <p className="shrink-0 text-sm font-semibold tabular-nums text-text-primary">
-                                  {formatCurrency(session.teacherAllowanceTotal)}
+                                  {formatCurrency(
+                                    session.teacherAllowanceTotal,
+                                  )}
                                 </p>
                               </div>
                             ))}

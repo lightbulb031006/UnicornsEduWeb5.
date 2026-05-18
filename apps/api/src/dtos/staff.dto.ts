@@ -220,8 +220,8 @@ export interface StaffIncomeAmountSummaryDto {
 }
 
 /**
- * Tổng hợp theo lớp (giáo viên): `total` / `paid` / `unpaid` là **thực nhận** sau
- * khấu trừ vận hành theo lớp và thuế (cùng rule snapshot trên `sessions`).
+ * Tổng hợp theo lớp (giáo viên) cho card "Lớp phụ trách".
+ * `paid` là thực nhận sau khấu trừ; `unpaid` là gross allowance, chưa trừ vận hành/thuế.
  */
 export interface StaffIncomeClassSummaryDto extends StaffIncomeAmountSummaryDto {
   classId: string;

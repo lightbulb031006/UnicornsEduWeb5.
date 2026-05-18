@@ -7,10 +7,22 @@ jest.mock('../../generated/client', () => ({
     join: () => ({}),
   },
 }));
+jest.mock('src/storage/supabase-storage', () => ({
+  createSignedStorageUrl: jest.fn(
+    async (options: { path?: string | null }) =>
+      options.path ? `signed:${options.path}` : null,
+  ),
+  getSupabaseAdminClient: jest.fn(),
+  validateImageFile: jest.fn(),
+}));
 
 import { BadRequestException } from '@nestjs/common';
 import { PaymentStatus, StaffRole, UserRole } from '../../generated/enums';
+import { createSignedStorageUrl } from 'src/storage/supabase-storage';
 import { StaffService } from './staff.service';
+
+const mockCreateSignedStorageUrl =
+  createSignedStorageUrl as jest.MockedFunction<typeof createSignedStorageUrl>;
 
 type StaffServiceTestAccess = {
   getTeacherAllowanceSourceRowsByStatusAndTaxBucket: (
@@ -101,6 +113,10 @@ describe('StaffService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCreateSignedStorageUrl.mockImplementation(
+      async (options: { path?: string | null }) =>
+        options.path ? `signed:${options.path}` : null,
+    );
     mockPrisma.extraAllowance.findMany.mockResolvedValue([]);
     mockPrisma.bonus.findMany.mockResolvedValue([]);
     mockPrisma.session.findMany.mockResolvedValue([]);
@@ -1071,7 +1087,7 @@ describe('StaffService', () => {
           operatingAmount: 0,
         },
       ]);
-    jest
+    const classStatusRowsSpy = jest
       .spyOn(service as any, 'getTeacherAllowanceRowsByClassStatusAndTaxBucket')
       .mockResolvedValueOnce([
         {
@@ -1197,9 +1213,13 @@ describe('StaffService', () => {
         className: 'Toán 10A',
         total: 90000,
         paid: 90000,
-        unpaid: 45000,
+        unpaid: 50000,
       },
     ]);
+    expect(classStatusRowsSpy).toHaveBeenNthCalledWith(2, {
+      teacherId: 'staff-1',
+      teacherPaymentStatuses: ['unpaid', 'pending'],
+    });
     expect(result.snapshotUnpaidTotal).toBe(50000);
     expect(result.snapshotUnpaidNetTotal).toBe(50000);
     expect(result.yearPaidNetTotal).toBe(90000);
@@ -1364,6 +1384,65 @@ describe('StaffService', () => {
     expect(result.monthlyGrossTotals.total).toBe(150000);
     expect(result.monthlyOperatingDeductionTotals.total).toBe(15000);
     expect(result.monthlyTaxTotals.total).toBe(13500);
+  });
+
+  it('shows class unpaid sessions as gross allowance before operating and tax deductions', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-1',
+      roles: [StaffRole.teacher],
+      classTeachers: [
+        {
+          class: {
+            id: 'class-1',
+            name: 'Toán 10A',
+          },
+        },
+      ],
+    });
+    mockPrisma.bonus.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mockPrisma.extraAllowance.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    jest
+      .spyOn(
+        service as any,
+        'getTeacherAllowanceSourceRowsByStatusAndTaxBucket',
+      )
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    jest
+      .spyOn(service as any, 'getTeacherAllowanceRowsByClassStatusAndTaxBucket')
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          classId: 'class-1',
+          className: 'Toán 10A',
+          teacherPaymentStatus: 'unpaid',
+          taxRatePercent: 10,
+          grossAllowance: 50000,
+          operatingAmount: 10000,
+          taxableBaseAmount: 40000,
+        },
+      ]);
+    jest.spyOn(service as any, 'getDepositSessionRows').mockResolvedValue([]);
+
+    const result = await service.getIncomeSummary('staff-1', {
+      month: '03',
+      year: '2026',
+      days: 14,
+    });
+
+    expect(result.classMonthlySummaries).toEqual([
+      {
+        classId: 'class-1',
+        className: 'Toán 10A',
+        total: 0,
+        paid: 0,
+        unpaid: 50000,
+      },
+    ]);
   });
 
   it('counts all unpaid teacher sessions in the current unpaid snapshot net', async () => {
@@ -1863,7 +1942,12 @@ describe('StaffService', () => {
         status: 'active',
         roles: [StaffRole.teacher, StaffRole.customer_care],
         user: {
+          first_name: 'Teacher',
+          last_name: 'A',
+          accountHandle: 'teacher-a',
+          email: 'teacher@example.com',
           province: 'Hanoi',
+          avatarPath: 'users/user-1/avatar',
         },
         classTeachers: [],
       },
@@ -1890,6 +1974,7 @@ describe('StaffService', () => {
               last_name: true,
               accountHandle: true,
               email: true,
+              avatarPath: true,
             },
           },
           classTeachers: {
@@ -1901,8 +1986,61 @@ describe('StaffService', () => {
     expect(result.data).toEqual([
       expect.objectContaining({
         id: 'staff-1',
+        user: expect.objectContaining({
+          avatarUrl: 'signed:users/user-1/avatar',
+        }),
         unpaidAmountTotal: 345000,
       }),
     ]);
+    expect(result.data[0].user).not.toHaveProperty('avatarPath');
+  });
+
+  it('attaches signed avatar URL to staff detail user without exposing storage path', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-1',
+      fullName: 'Teacher A',
+      status: 'active',
+      roles: [StaffRole.teacher],
+      user: {
+        first_name: 'Teacher',
+        last_name: 'A',
+        accountHandle: 'teacher-a',
+        email: 'teacher@example.com',
+        province: 'Hanoi',
+        avatarPath: 'users/user-1/avatar',
+      },
+      classTeachers: [],
+      monthlyStats: [],
+      customerCareManagedBy: null,
+      cccdFrontPath: null,
+      cccdBackPath: null,
+    });
+    mockPrisma.$queryRaw.mockResolvedValueOnce([]);
+
+    const result = await service.getStaffById('staff-1');
+
+    expect(mockPrisma.staffInfo.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          user: expect.objectContaining({
+            select: expect.objectContaining({
+              avatarPath: true,
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(result.user).toEqual(
+      expect.objectContaining({
+        fullName: 'Teacher A',
+        avatarUrl: 'signed:users/user-1/avatar',
+      }),
+    );
+    expect(result.user).not.toHaveProperty('avatarPath');
+    expect(mockCreateSignedStorageUrl).toHaveBeenCalledWith({
+      bucket: 'avatars',
+      path: 'users/user-1/avatar',
+      expiresIn: 3600,
+    });
   });
 });
