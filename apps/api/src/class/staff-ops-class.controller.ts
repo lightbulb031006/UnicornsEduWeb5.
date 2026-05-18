@@ -30,6 +30,10 @@ import {
   UpdateClassScheduleDto,
 } from 'src/dtos/class.dto';
 import {
+  CreateClassSurveyDto,
+  UpdateClassSurveyDto,
+} from 'src/dtos/class-survey.dto';
+import {
   ClassScheduleFilterDto,
   CreateClassScopedMakeupScheduleEventDto,
   MakeupScheduleEventDto,
@@ -39,6 +43,7 @@ import { PaginationQueryDto } from 'src/dtos/pagination.dto';
 import { CalendarService } from 'src/calendar/calendar.service';
 import { StaffOperationsAccessService } from 'src/staff-ops/staff-operations-access.service';
 import { ClassService } from './class.service';
+import { ClassSurveyService } from './class-survey.service';
 
 const ELEVATED_CLASS_ACCESS_ROLES: readonly StaffRole[] = [
   StaffRole.admin,
@@ -60,6 +65,7 @@ function isTeacherScopedActor(roles: StaffRole[]) {
 export class StaffOpsClassController {
   constructor(
     private readonly classService: ClassService,
+    private readonly classSurveyService: ClassSurveyService,
     private readonly calendarService: CalendarService,
     private readonly staffOperationsAccess: StaffOperationsAccessService,
   ) {}
@@ -123,6 +129,31 @@ export class StaffOpsClassController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
     return this.classService.getClassByIdForStaff(user.id, user.roleType, id);
+  }
+
+  @Get(':id/surveys')
+  @ApiOperation({
+    summary: 'List class surveys for staff operations',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiQuery({ name: 'month', required: true, description: 'Tháng (01-12)' })
+  @ApiQuery({ name: 'year', required: true, description: 'Năm (YYYY)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Class survey reports in selected month.',
+  })
+  async getClassSurveys(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query('month') month: string,
+    @Query('year') year: string,
+  ) {
+    return this.classSurveyService.getClassSurveysForStaff(
+      user.id,
+      user.roleType,
+      id,
+      { month, year },
+    );
   }
 
   @Get(':id/makeup-events')
@@ -215,6 +246,33 @@ export class StaffOpsClassController {
     return this.calendarService.createMakeupScheduleEventForClass(id, dto);
   }
 
+  @Post(':id/surveys')
+  @ApiOperation({
+    summary: 'Create class survey for staff operations',
+    description:
+      'Teacher-scoped staff can only create a survey assigned to themselves.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiBody({ type: CreateClassSurveyDto })
+  @ApiResponse({ status: 201, description: 'Class survey created.' })
+  async createClassSurvey(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: CreateClassSurveyDto,
+  ) {
+    return this.classSurveyService.createClassSurveyForStaff(
+      user.id,
+      user.roleType,
+      id,
+      dto,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+  }
+
   @Patch(':id/schedule')
   @ApiOperation({
     summary: 'Update class schedule for staff operations',
@@ -263,6 +321,34 @@ export class StaffOpsClassController {
     );
   }
 
+  @Patch(':id/surveys/:surveyId')
+  @ApiOperation({
+    summary: 'Update class survey for staff operations',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiParam({ name: 'surveyId', description: 'Survey id' })
+  @ApiBody({ type: UpdateClassSurveyDto })
+  @ApiResponse({ status: 200, description: 'Class survey updated.' })
+  async updateClassSurvey(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('surveyId', new ParseUUIDPipe()) surveyId: string,
+    @Body() dto: UpdateClassSurveyDto,
+  ) {
+    return this.classSurveyService.updateClassSurveyForStaff(
+      user.id,
+      user.roleType,
+      id,
+      surveyId,
+      dto,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+  }
+
   @Delete(':id/makeup-events/:eventId')
   @ApiOperation({
     summary: 'Delete class makeup event for staff operations',
@@ -278,5 +364,30 @@ export class StaffOpsClassController {
     await this.assertCanManageMakeupEvent(user);
 
     return this.calendarService.deleteMakeupScheduleEventForClass(id, eventId);
+  }
+
+  @Delete(':id/surveys/:surveyId')
+  @ApiOperation({
+    summary: 'Delete class survey for staff operations',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiParam({ name: 'surveyId', description: 'Survey id' })
+  @ApiResponse({ status: 200, description: 'Class survey deleted.' })
+  async deleteClassSurvey(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('surveyId', new ParseUUIDPipe()) surveyId: string,
+  ) {
+    return this.classSurveyService.deleteClassSurveyForStaff(
+      user.id,
+      user.roleType,
+      id,
+      surveyId,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
   }
 }

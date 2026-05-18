@@ -6,6 +6,7 @@ import {
   useReducedMotion,
   type Transition,
 } from "framer-motion";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useState, useMemo, useCallback } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,6 +21,7 @@ import {
   EditClassSchedulePopup,
   EditClassStudentsPopup,
   EditClassTeachersPopup,
+  ClassSurveyPanel,
   MakeupScheduleCard,
   ScheduleTimeCard,
   SessionHistoryTableSkeleton,
@@ -30,6 +32,10 @@ import SessionHistoryTable from "@/components/admin/session/SessionHistoryTable"
 import MonthNav from "@/components/admin/MonthNav";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
 import { ClassStatus, ClassType, ClassDetail, ClassStudent } from "@/dtos/class.dto";
+import type {
+  CreateClassSurveyPayload,
+  UpdateClassSurveyPayload,
+} from "@/dtos/class-survey.dto";
 import { SessionItem } from "@/dtos/session.dto";
 import {
   buildAdminLikePath,
@@ -37,14 +43,6 @@ import {
 } from "@/lib/admin-shell-paths";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
 import { cn } from "@/lib/utils";
-
-/** Mock surveys – nhiều tháng để test chuyển tháng */
-const MOCK_SURVEYS = [
-  { id: "sv1", date: "2025-02-15", studentName: "Nguyễn Văn A", rating: 5, note: "Buổi học tốt" },
-  { id: "sv2", date: "2025-03-01", studentName: "Nguyễn Văn A", rating: 5, note: "Buổi học tốt" },
-  { id: "sv3", date: "2025-03-05", studentName: "Trần Thị B", rating: 4, note: "Nội dung rõ ràng" },
-  { id: "sv4", date: "2025-04-02", studentName: "Lê Văn C", rating: 5, note: "Rất hài lòng" },
-];
 
 const STATUS_LABELS: Record<ClassStatus, string> = {
   running: "Đang chạy",
@@ -112,6 +110,7 @@ export default function AdminClassDetailPage() {
   });
   const [monthPopupOpen, setMonthPopupOpen] = useState(false);
   const [addSessionPopupOpen, setAddSessionPopupOpen] = useState(false);
+  const [addSurveyPopupOpen, setAddSurveyPopupOpen] = useState(false);
   const { data: fullProfile } = useQuery({
     queryKey: ["auth", "full-profile"],
     queryFn: getFullProfile,
@@ -129,13 +128,10 @@ export default function AdminClassDetailPage() {
     adminAccess.isAdmin || adminAccess.isAssistant || adminAccess.isAccountant;
   /** POST /sessions is admin-only; keep the CTA aligned with backend. */
   const canCreateSession = isAdmin;
+  const canManageSurveys = adminAccess.isAdmin || adminAccess.isAssistant;
   const canManageClassStudents = isAdmin;
   const canOpenStudentDetails = true;
   const canManageMakeupSchedule = adminAccess.isAdmin || adminAccess.isAssistant;
-
-  const surveysInMonth = useMemo(() => {
-    return MOCK_SURVEYS.filter((s) => s.date.startsWith(selectedMonth));
-  }, [selectedMonth]);
 
   const [selectedYear, selectedMonthValue] = selectedMonth.split("-");
   const indicatorTransition = prefersReducedMotion
@@ -167,6 +163,10 @@ export default function AdminClassDetailPage() {
   });
 
   const queryClient = useQueryClient();
+  const surveysQueryKey = useMemo(
+    () => ["class", "surveys", id, selectedYear, selectedMonthValue] as const,
+    [id, selectedMonthValue, selectedYear],
+  );
   const {
     data: sessionsInMonth = [],
     isLoading: isSessionsLoading,
@@ -182,12 +182,51 @@ export default function AdminClassDetailPage() {
     enabled: !!id,
     placeholderData: keepPreviousData,
   });
+  const {
+    data: surveysInMonth = [],
+    isLoading: isSurveysLoading,
+    isFetching: isSurveysFetching,
+    isError: isSurveysError,
+  } = useQuery({
+    queryKey: surveysQueryKey,
+    queryFn: () =>
+      classApi.getClassSurveys(id, {
+        month: selectedMonthValue,
+        year: selectedYear,
+      }),
+    enabled: !!id,
+    placeholderData: keepPreviousData,
+  });
 
   const handleSessionUpdated = useCallback(() => {
     queryClient.invalidateQueries({
       queryKey: ["sessions", "class", id, selectedYear, selectedMonthValue],
     });
   }, [queryClient, id, selectedYear, selectedMonthValue]);
+
+  const handleCreateSurvey = useCallback(
+    async (payload: CreateClassSurveyPayload) => {
+      await classApi.createClassSurvey(id, payload);
+      await queryClient.invalidateQueries({ queryKey: surveysQueryKey });
+    },
+    [id, queryClient, surveysQueryKey],
+  );
+
+  const handleUpdateSurvey = useCallback(
+    async (surveyId: string, payload: UpdateClassSurveyPayload) => {
+      await classApi.updateClassSurvey(id, surveyId, payload);
+      await queryClient.invalidateQueries({ queryKey: surveysQueryKey });
+    },
+    [id, queryClient, surveysQueryKey],
+  );
+
+  const handleDeleteSurvey = useCallback(
+    async (surveyId: string) => {
+      await classApi.deleteClassSurvey(id, surveyId);
+      await queryClient.invalidateQueries({ queryKey: surveysQueryKey });
+    },
+    [id, queryClient, surveysQueryKey],
+  );
 
   const scheduleItems = (classDetail?.schedule ?? []).filter(
     (item) => item?.from && item?.to,
@@ -859,7 +898,7 @@ export default function AdminClassDetailPage() {
                     : `Tổng khảo sát: ${surveysInMonth.length}`
                 }
                 actionButton={
-                  canCreateSession ? (
+                  (activeTab === "sessions" ? canCreateSession : canManageSurveys) ? (
                     <button
                       type="button"
                       onClick={() => {
@@ -867,15 +906,13 @@ export default function AdminClassDetailPage() {
                           handleOpenAddSessionPopup();
                           return;
                         }
-                        toast.info("Chức năng thêm khảo sát đang phát triển.");
+                        setAddSurveyPopupOpen(true);
                       }}
                       aria-label={activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
                       title={activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
                       className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
                     >
-                      <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
+                      <PlusIcon className="size-4" aria-hidden />
                       <span className="sr-only">
                         {activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
                       </span>
@@ -886,12 +923,21 @@ export default function AdminClassDetailPage() {
             </div>
           </div>
           <QueryRefreshStrip
-            active={isSessionsFetching && !isSessionsLoading}
-            label="Đang tải lại lịch sử buổi học..."
+            active={
+              activeTab === "sessions"
+                ? isSessionsFetching && !isSessionsLoading
+                : isSurveysFetching && !isSurveysLoading
+            }
+            label={
+              activeTab === "sessions"
+                ? "Đang tải lại lịch sử buổi học…"
+                : "Đang tải lại khảo sát…"
+            }
             className="mb-3"
           />
 
-          {canCreateSession &&
+          {activeTab === "sessions" &&
+          canCreateSession &&
           (popupTeachers.length === 0 || activeClassStudents.length === 0) ? (
             <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
               {popupTeachers.length === 0
@@ -943,86 +989,20 @@ export default function AdminClassDetailPage() {
               className="min-w-0"
               {...panelMotionProps}
             >
-            <div className="overflow-x-auto">
-              {/* Mobile: khảo sát dạng thẻ */}
-              <div className="md:hidden">
-                {surveysInMonth.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-text-muted">
-                    Không có khảo sát trong tháng này.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {surveysInMonth.map((sv) => (
-                      <article
-                        key={sv.id}
-                        className="rounded-lg border border-border-default bg-bg-surface p-3 shadow-sm"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-xs font-medium uppercase tracking-wide text-text-muted">
-                              Ngày
-                            </p>
-                            <p className="text-sm font-semibold text-text-primary">{sv.date}</p>
-                            <p className="mt-2 text-xs font-medium uppercase tracking-wide text-text-muted">
-                              Học viên
-                            </p>
-                            <p className="text-sm text-text-primary">{sv.studentName}</p>
-                          </div>
-                          <div className="flex flex-col items-end gap-1">
-                            <span className="rounded-full bg-warning/15 px-2.5 py-0.5 text-xs font-medium text-warning">
-                              {sv.rating}/5
-                            </span>
-                          </div>
-                        </div>
-                        {sv.note && (
-                          <p className="mt-3 text-sm text-text-secondary">{sv.note}</p>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Desktop / tablet: bảng khảo sát */}
-              {surveysInMonth.length === 0 ? (
-                <p className="hidden py-6 text-center text-sm text-text-muted md:block">
-                  Không có khảo sát trong tháng này.
-                </p>
-              ) : (
-                <table className="hidden w-full min-w-[400px] border-collapse overflow-hidden rounded-xl text-left text-sm md:table">
-                  <caption className="sr-only">Khảo sát</caption>
-                  <thead>
-                    <tr className="border-b border-border-default bg-bg-secondary">
-                      <th scope="col" className="px-4 py-3 font-medium text-text-primary">
-                        Ngày
-                      </th>
-                      <th scope="col" className="px-4 py-3 font-medium text-text-primary">
-                        Học viên
-                      </th>
-                      <th scope="col" className="px-4 py-3 font-medium text-text-primary tabular-nums">
-                        Đánh giá
-                      </th>
-                      <th scope="col" className="px-4 py-3 font-medium text-text-primary">
-                        Ghi chú
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {surveysInMonth.map((sv) => (
-                      <tr
-                        key={sv.id}
-                        className="border-b border-border-default bg-bg-surface transition-colors duration-200 hover:bg-bg-secondary"
-                      >
-                        <td className="px-4 py-3 text-text-primary">{sv.date}</td>
-                        <td className="px-4 py-3 text-text-primary">{sv.studentName}</td>
-                        <td className="px-4 py-3 tabular-nums text-text-primary">{sv.rating}/5</td>
-                        <td className="px-4 py-3 text-text-secondary">{sv.note}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+              <ClassSurveyPanel
+                surveys={surveysInMonth}
+                teachers={popupTeachers}
+                loading={isSurveysLoading}
+                fetching={isSurveysFetching}
+                error={isSurveysError}
+                canManage={canManageSurveys}
+                createOpen={addSurveyPopupOpen}
+                onCreateOpenChange={setAddSurveyPopupOpen}
+                defaultTeacherId={currentClassTeacherId}
+                onCreate={handleCreateSurvey}
+                onUpdate={handleUpdateSurvey}
+                onDelete={handleDeleteSurvey}
+              />
             </motion.section>
           )}
           </AnimatePresence>

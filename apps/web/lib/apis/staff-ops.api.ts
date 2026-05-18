@@ -4,6 +4,12 @@ import type {
   ClassScopedMakeupScheduleEventUpdatePayload,
   MakeupScheduleEventRecord,
 } from "@/dtos/class-schedule.dto";
+import type {
+  ClassSurveyMonthYearParams,
+  ClassSurveyRecord,
+  CreateClassSurveyPayload,
+  UpdateClassSurveyPayload,
+} from "@/dtos/class-survey.dto";
 import type { SessionItem } from "@/dtos/session.dto";
 import type {
   StaffOpsCreateClassPayload,
@@ -16,6 +22,7 @@ import {
   normalizeMakeupScheduleEvent,
   normalizeMakeupScheduleFeedResponse,
 } from "./class-schedule.api";
+import { normalizeClassSurvey } from "./class.api";
 import { api } from "../client";
 
 export async function getClasses(params: {
@@ -50,6 +57,51 @@ export async function getClassById(id: string): Promise<ClassDetail> {
   const safeId = encodeURIComponent(id);
   const response = await api.get(`/staff-ops/classes/${safeId}`);
   return response.data as ClassDetail;
+}
+
+export async function getClassSurveys(
+  classId: string,
+  params: ClassSurveyMonthYearParams,
+): Promise<ClassSurveyRecord[]> {
+  const safeId = encodeURIComponent(classId);
+  const response = await api.get(`/staff-ops/classes/${safeId}/surveys`, {
+    params,
+  });
+  return Array.isArray(response.data)
+    ? response.data.map((item) => normalizeClassSurvey(item))
+    : [];
+}
+
+export async function createClassSurvey(
+  classId: string,
+  data: CreateClassSurveyPayload,
+): Promise<ClassSurveyRecord> {
+  const safeId = encodeURIComponent(classId);
+  const response = await api.post(`/staff-ops/classes/${safeId}/surveys`, data);
+  return normalizeClassSurvey(response.data);
+}
+
+export async function updateClassSurvey(
+  classId: string,
+  surveyId: string,
+  data: UpdateClassSurveyPayload,
+): Promise<ClassSurveyRecord> {
+  const safeClassId = encodeURIComponent(classId);
+  const safeSurveyId = encodeURIComponent(surveyId);
+  const response = await api.patch(
+    `/staff-ops/classes/${safeClassId}/surveys/${safeSurveyId}`,
+    data,
+  );
+  return normalizeClassSurvey(response.data);
+}
+
+export async function deleteClassSurvey(
+  classId: string,
+  surveyId: string,
+): Promise<void> {
+  const safeClassId = encodeURIComponent(classId);
+  const safeSurveyId = encodeURIComponent(surveyId);
+  await api.delete(`/staff-ops/classes/${safeClassId}/surveys/${safeSurveyId}`);
 }
 
 export async function createClass(

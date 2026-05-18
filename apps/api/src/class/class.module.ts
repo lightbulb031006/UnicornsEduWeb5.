@@ -5,6 +5,7 @@ import { CalendarModule } from 'src/calendar/calendar.module';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { StaffOperationsModule } from 'src/staff-ops/staff-operations.module';
 import { ClassController } from './class.controller';
+import { ClassSurveyService } from './class-survey.service';
 import { ClassService } from './class.service';
 import { StaffOpsClassController } from './staff-ops-class.controller';
 
@@ -17,7 +18,7 @@ import { StaffOpsClassController } from './staff-ops-class.controller';
     CalendarModule,
   ],
   controllers: [ClassController, StaffOpsClassController],
-  providers: [ClassService],
-  exports: [ClassService],
+  providers: [ClassService, ClassSurveyService],
+  exports: [ClassService, ClassSurveyService],
 })
 export class ClassModule {}

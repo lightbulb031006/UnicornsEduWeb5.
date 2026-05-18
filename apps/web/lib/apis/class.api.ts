@@ -20,6 +20,12 @@ import type {
   ClassScopedMakeupScheduleEventUpdatePayload,
   MakeupScheduleEventRecord,
 } from "@/dtos/class-schedule.dto";
+import type {
+  ClassSurveyMonthYearParams,
+  ClassSurveyRecord,
+  CreateClassSurveyPayload,
+  UpdateClassSurveyPayload,
+} from "@/dtos/class-survey.dto";
 import { normalizeMakeupScheduleEvent, normalizeMakeupScheduleFeedResponse } from "./class-schedule.api";
 import { api } from "../client";
 
@@ -103,6 +109,31 @@ function normalizeTeachersPayload<T extends { teachers?: ClassTeacherPayload[] }
   };
 }
 
+export function normalizeClassSurvey(survey: unknown): ClassSurveyRecord {
+  const source = (survey ?? {}) as Record<string, unknown>;
+  const rawReportDate = source.reportDate ?? source.report_date;
+
+  return {
+    id: String(source.id ?? ""),
+    classId: source.classId == null ? null : String(source.classId),
+    testNumber: Number(source.testNumber ?? source.test_number ?? 0),
+    teacherId: source.teacherId == null ? null : String(source.teacherId),
+    reportDate:
+      typeof rawReportDate === "string" ? rawReportDate.slice(0, 10) : "",
+    content: typeof source.content === "string" ? source.content : "",
+    createdAt:
+      typeof source.createdAt === "string"
+        ? source.createdAt
+        : typeof source.created_at === "string"
+          ? source.created_at
+          : null,
+    teacher:
+      source.teacher && typeof source.teacher === "object"
+        ? (source.teacher as ClassSurveyRecord["teacher"])
+        : null,
+  };
+}
+
 export async function getClasses(params: {
   page: number;
   limit: number;
@@ -137,6 +168,49 @@ export async function getClassById(id: string): Promise<ClassDetail> {
   const safeId = encodeURIComponent(id);
   const response = await api.get(`/class/${safeId}`);
   return normalizeClassRecord(response.data as ClassDetail);
+}
+
+export async function getClassSurveys(
+  classId: string,
+  params: ClassSurveyMonthYearParams,
+): Promise<ClassSurveyRecord[]> {
+  const safeId = encodeURIComponent(classId);
+  const response = await api.get(`/class/${safeId}/surveys`, { params });
+  return Array.isArray(response.data)
+    ? response.data.map((item) => normalizeClassSurvey(item))
+    : [];
+}
+
+export async function createClassSurvey(
+  classId: string,
+  data: CreateClassSurveyPayload,
+): Promise<ClassSurveyRecord> {
+  const safeId = encodeURIComponent(classId);
+  const response = await api.post(`/class/${safeId}/surveys`, data);
+  return normalizeClassSurvey(response.data);
+}
+
+export async function updateClassSurvey(
+  classId: string,
+  surveyId: string,
+  data: UpdateClassSurveyPayload,
+): Promise<ClassSurveyRecord> {
+  const safeClassId = encodeURIComponent(classId);
+  const safeSurveyId = encodeURIComponent(surveyId);
+  const response = await api.patch(
+    `/class/${safeClassId}/surveys/${safeSurveyId}`,
+    data,
+  );
+  return normalizeClassSurvey(response.data);
+}
+
+export async function deleteClassSurvey(
+  classId: string,
+  surveyId: string,
+): Promise<void> {
+  const safeClassId = encodeURIComponent(classId);
+  const safeSurveyId = encodeURIComponent(surveyId);
+  await api.delete(`/class/${safeClassId}/surveys/${safeSurveyId}`);
 }
 
 export async function createClass(data: CreateClassPayload): Promise<ClassDetail> {

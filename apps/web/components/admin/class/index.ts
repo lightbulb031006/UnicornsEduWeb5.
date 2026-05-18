@@ -10,5 +10,6 @@ export { default as EditClassStudentsPopup } from "./EditClassStudentsPopup";
 export { default as TutorCard } from "./TutorCard";
 export { default as ScheduleTimeCard } from "./ScheduleTimeCard";
 export { default as MakeupScheduleCard } from "./MakeupScheduleCard";
+export { default as ClassSurveyPanel } from "./ClassSurveyPanel";
 export { default as SessionHistoryTable } from "../session/SessionHistoryTable";
 export { default as SessionHistoryTableSkeleton } from "../session/SessionHistoryTableSkeleton";

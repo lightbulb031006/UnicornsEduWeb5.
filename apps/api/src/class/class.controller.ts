@@ -35,6 +35,10 @@ import {
   UpdateClassTeachersDto,
 } from 'src/dtos/class.dto';
 import {
+  CreateClassSurveyDto,
+  UpdateClassSurveyDto,
+} from 'src/dtos/class-survey.dto';
+import {
   ClassScheduleFilterDto,
   CreateClassScopedMakeupScheduleEventDto,
   MakeupScheduleEventDto,
@@ -42,6 +46,7 @@ import {
 } from 'src/dtos/class-schedule.dto';
 import { CalendarService } from 'src/calendar/calendar.service';
 import { ClassService } from './class.service';
+import { ClassSurveyService } from './class-survey.service';
 
 @Controller('class')
 @ApiTags('class')
@@ -51,6 +56,7 @@ import { ClassService } from './class.service';
 export class ClassController {
   constructor(
     private readonly classService: ClassService,
+    private readonly classSurveyService: ClassSurveyService,
     private readonly calendarService: CalendarService,
   ) {}
 
@@ -120,6 +126,23 @@ export class ClassController {
   @ApiResponse({ status: 404, description: 'Class not found.' })
   async getStudentsByClassId(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.classService.getStudentsByClassId(id);
+  }
+
+  @Get(':id/surveys')
+  @ApiOperation({
+    summary: 'List class surveys',
+    description: 'Get class survey reports in the selected month.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiQuery({ name: 'month', required: true, description: 'Tháng (01-12)' })
+  @ApiQuery({ name: 'year', required: true, description: 'Năm (YYYY)' })
+  @ApiResponse({ status: 200, description: 'List of class surveys.' })
+  async getClassSurveys(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query('month') month: string,
+    @Query('year') year: string,
+  ) {
+    return this.classSurveyService.getClassSurveys(id, { month, year });
   }
 
   @Patch(':id/basic-info')
@@ -281,6 +304,30 @@ export class ClassController {
     });
   }
 
+  @Post(':id/surveys')
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Create class survey',
+    description:
+      'Create one class survey report. Responsible teacher must belong to the class.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiBody({ type: CreateClassSurveyDto })
+  @ApiResponse({ status: 201, description: 'Class survey created.' })
+  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({ status: 404, description: 'Class not found.' })
+  async createClassSurvey(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: CreateClassSurveyDto,
+  ) {
+    return this.classSurveyService.createClassSurvey(id, dto, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
   @Post(':id/makeup-events')
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
@@ -325,6 +372,32 @@ export class ClassController {
     @Body() data: UpdateClassDto,
   ) {
     return this.classService.updateClass(data, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Patch(':id/surveys/:surveyId')
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Update class survey',
+    description:
+      'Update one class survey report. Responsible teacher must belong to the class.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiParam({ name: 'surveyId', description: 'Survey id' })
+  @ApiBody({ type: UpdateClassSurveyDto })
+  @ApiResponse({ status: 200, description: 'Class survey updated.' })
+  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({ status: 404, description: 'Class survey not found.' })
+  async updateClassSurvey(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('surveyId', new ParseUUIDPipe()) surveyId: string,
+    @Body() dto: UpdateClassSurveyDto,
+  ) {
+    return this.classSurveyService.updateClassSurvey(id, surveyId, dto, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,
@@ -377,6 +450,28 @@ export class ClassController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
     return this.classService.deleteClass(id, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Delete(':id/surveys/:surveyId')
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Delete class survey',
+    description: 'Delete one class survey report.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiParam({ name: 'surveyId', description: 'Survey id' })
+  @ApiResponse({ status: 200, description: 'Class survey deleted.' })
+  @ApiResponse({ status: 404, description: 'Class survey not found.' })
+  async deleteClassSurvey(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('surveyId', new ParseUUIDPipe()) surveyId: string,
+  ) {
+    return this.classSurveyService.deleteClassSurvey(id, surveyId, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,

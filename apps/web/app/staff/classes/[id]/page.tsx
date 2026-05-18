@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { useCallback, useMemo, useState } from "react";
 import {
   keepPreviousData,
@@ -10,6 +11,7 @@ import {
 } from "@tanstack/react-query";
 import {
   ClassCard,
+  ClassSurveyPanel,
   EditClassSchedulePopup,
   MakeupScheduleCard,
   ScheduleTimeCard,
@@ -27,6 +29,10 @@ import type {
   ClassStatus,
   ClassType,
 } from "@/dtos/class.dto";
+import type {
+  CreateClassSurveyPayload,
+  UpdateClassSurveyPayload,
+} from "@/dtos/class-survey.dto";
 import type { SessionCreatePayload, SessionItem, SessionUpdatePayload } from "@/dtos/session.dto";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import * as staffOpsApi from "@/lib/apis/staff-ops.api";
@@ -44,6 +50,8 @@ const TYPE_LABELS: Record<ClassType, string> = {
   advance: "Advance",
   hardcore: "Hardcore",
 };
+
+type TabId = "sessions" | "surveys";
 
 function isClassStudentActive(status?: string | null): boolean {
   return (status ?? "").toLowerCase() === "active";
@@ -63,6 +71,8 @@ const staffOpsKeys = {
   classDetail: (classId: string) => ["staff-ops", "class", "detail", classId] as const,
   classSessions: (classId: string, year: string, month: string) =>
     ["staff-ops", "sessions", "class", classId, year, month] as const,
+  classSurveys: (classId: string, year: string, month: string) =>
+    ["staff-ops", "surveys", "class", classId, year, month] as const,
   updateSchedule: (classId: string) => ["staff-ops", "class", "schedule", "update", classId] as const,
   createSession: (classId: string) => ["staff-ops", "sessions", "create", classId] as const,
   updateSession: (classId: string) => ["staff-ops", "sessions", "update", classId] as const,
@@ -105,14 +115,20 @@ export default function StaffClassDetailPage() {
   const id = typeof params?.id === "string" ? params.id : "";
 
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthValue);
+  const [activeTab, setActiveTab] = useState<TabId>("sessions");
   const [schedulePopupOpen, setSchedulePopupOpen] = useState(false);
   const [addSessionPopupOpen, setAddSessionPopupOpen] = useState(false);
+  const [addSurveyPopupOpen, setAddSurveyPopupOpen] = useState(false);
   const [monthPopupOpen, setMonthPopupOpen] = useState(false);
 
   const [selectedYear, selectedMonthValue] = selectedMonth.split("-");
   const classDetailQueryKey = useMemo(() => staffOpsKeys.classDetail(id), [id]);
   const sessionsQueryKey = useMemo(
     () => staffOpsKeys.classSessions(id, selectedYear, selectedMonthValue),
+    [id, selectedMonthValue, selectedYear],
+  );
+  const surveysQueryKey = useMemo(
+    () => staffOpsKeys.classSurveys(id, selectedYear, selectedMonthValue),
     [id, selectedMonthValue, selectedYear],
   );
 
@@ -170,6 +186,22 @@ export default function StaffClassDetailPage() {
     placeholderData: keepPreviousData,
     retry: false,
   });
+  const {
+    data: surveys = [],
+    isLoading: isSurveysLoading,
+    isFetching: isSurveysFetching,
+    isError: isSurveysError,
+  } = useQuery({
+    queryKey: surveysQueryKey,
+    queryFn: () =>
+      staffOpsApi.getClassSurveys(id, {
+        month: selectedMonthValue,
+        year: selectedYear,
+      }),
+    enabled: !!id && canAccessClassWorkspace,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
 
   const scheduleItems = Array.isArray(classDetail?.schedule)
     ? classDetail.schedule.filter((item) => item?.from && item?.to)
@@ -211,7 +243,6 @@ export default function StaffClassDetailPage() {
   const canManageSchedule = isTeacherWorkspaceActor;
   const canManageSessions = isTeacherWorkspaceActor;
   const teacherScopedSessionLabel = usesTeacherScope ? "Buổi bạn dạy trong tháng" : "Buổi trong tháng";
-  const teacherScopedHistoryTitle = usesTeacherScope ? "Lịch sử buổi học bạn dạy" : "Lịch sử buổi học";
   const teacherScopedHistorySummary = usesTeacherScope ? "Tổng số buổi bạn dạy" : "Tổng số buổi";
   const teacherScopedEmptyText = usesTeacherScope
     ? "Bạn chưa dạy buổi nào trong tháng này."
@@ -220,6 +251,7 @@ export default function StaffClassDetailPage() {
     canManageSessions &&
     activeClassStudents.length > 0 &&
     (hasTeacherSelfServiceAccess ? true : teacherCount === 1);
+  const canManageSurveys = canManageSessions && popupTeachers.length > 0;
   const defaultTeacherId = hasTeacherSelfServiceAccess
     ? actorStaffId
     : teacherCount === 1
@@ -317,6 +349,31 @@ export default function StaffClassDetailPage() {
       updateSessionMutation.mutateAsync({ sessionId, payload }),
     [updateSessionMutation],
   );
+
+  const handleCreateSurvey = useCallback(
+    async (payload: CreateClassSurveyPayload) => {
+      await staffOpsApi.createClassSurvey(id, payload);
+      await queryClient.invalidateQueries({ queryKey: surveysQueryKey });
+    },
+    [id, queryClient, surveysQueryKey],
+  );
+
+  const handleUpdateSurvey = useCallback(
+    async (surveyId: string, payload: UpdateClassSurveyPayload) => {
+      await staffOpsApi.updateClassSurvey(id, surveyId, payload);
+      await queryClient.invalidateQueries({ queryKey: surveysQueryKey });
+    },
+    [id, queryClient, surveysQueryKey],
+  );
+
+  const handleDeleteSurvey = useCallback(
+    async (surveyId: string) => {
+      await staffOpsApi.deleteClassSurvey(id, surveyId);
+      await queryClient.invalidateQueries({ queryKey: surveysQueryKey });
+    },
+    [id, queryClient, surveysQueryKey],
+  );
+
   const backLabel = "Quay lại";
   const handleBack = () => {
     back();
@@ -757,28 +814,70 @@ export default function StaffClassDetailPage() {
           deleteFn={staffOpsApi.deleteClassMakeupEvent}
         />
 
-        <ClassCard title={teacherScopedHistoryTitle} className="w-full">
+        <ClassCard
+          title={usesTeacherScope ? "Lịch sử & Khảo sát của bạn" : "Lịch sử & Khảo sát"}
+          className="w-full"
+        >
           <div className="mb-3 flex flex-col gap-3">
+            <div
+              className="inline-flex w-fit items-center border-b border-border-default"
+              role="tablist"
+              aria-label="Buổi học hoặc khảo sát"
+            >
+              {[
+                { id: "sessions" as const, label: "Buổi học" },
+                { id: "surveys" as const, label: "Khảo sát" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  id={`staff-class-detail-tab-${tab.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab.id}
+                  aria-controls={`staff-class-detail-panel-${tab.id}`}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={cn(
+                    "relative -mb-px px-3 py-1.5 text-xs font-semibold transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:text-sm",
+                    activeTab === tab.id
+                      ? "border-b-2 border-primary text-primary"
+                      : "text-text-muted hover:text-text-primary",
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
             <div className="rounded-lg border border-border-default bg-bg-secondary/55 px-2.5 py-1.5">
               <MonthNav
                 value={selectedMonth}
                 onChange={setSelectedMonth}
                 monthPopupOpen={monthPopupOpen}
                 setMonthPopupOpen={setMonthPopupOpen}
-                countLabel={`${teacherScopedHistorySummary}: ${sessions.length}`}
+                countLabel={
+                  activeTab === "sessions"
+                    ? `${teacherScopedHistorySummary}: ${sessions.length}`
+                    : `Tổng khảo sát: ${surveys.length}`
+                }
                 actionButton={
-                  canCreateSession ? (
+                  (activeTab === "sessions" ? canCreateSession : canManageSurveys) ? (
                     <button
                       type="button"
-                      onClick={() => setAddSessionPopupOpen(true)}
-                      aria-label="Thêm buổi học"
-                      title="Thêm buổi học"
+                      onClick={() => {
+                        if (activeTab === "sessions") {
+                          setAddSessionPopupOpen(true);
+                          return;
+                        }
+                        setAddSurveyPopupOpen(true);
+                      }}
+                      aria-label={activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
+                      title={activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
                       className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
                     >
-                      <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      <span className="sr-only">Thêm buổi học</span>
+                      <PlusIcon className="size-4" aria-hidden />
+                      <span className="sr-only">
+                        {activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
+                      </span>
                     </button>
                   ) : null
                 }
@@ -786,12 +885,20 @@ export default function StaffClassDetailPage() {
             </div>
           </div>
           <QueryRefreshStrip
-            active={isSessionsFetching && !isSessionsLoading}
-            label="Đang tải lại lịch sử buổi học..."
+            active={
+              activeTab === "sessions"
+                ? isSessionsFetching && !isSessionsLoading
+                : isSurveysFetching && !isSurveysLoading
+            }
+            label={
+              activeTab === "sessions"
+                ? "Đang tải lại lịch sử buổi học…"
+                : "Đang tải lại khảo sát…"
+            }
             className="mb-3"
           />
 
-          {!canCreateSession && canManageSessions ? (
+          {activeTab === "sessions" && !canCreateSession && canManageSessions ? (
             <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
               {classStudents.length === 0
                 ? "Lớp chưa có học sinh nên chưa thể tạo buổi học."
@@ -801,33 +908,62 @@ export default function StaffClassDetailPage() {
             </div>
           ) : null}
 
-          {isSessionsLoading ? (
-            <SessionHistoryTableSkeleton rows={5} entityMode="teacher" variant="classDetail" showActionsColumn={canManageSessions} />
+          {activeTab === "sessions" ? (
+            <section
+              id="staff-class-detail-panel-sessions"
+              role="tabpanel"
+              aria-labelledby="staff-class-detail-tab-sessions"
+            >
+              {isSessionsLoading ? (
+                <SessionHistoryTableSkeleton rows={5} entityMode="teacher" variant="classDetail" showActionsColumn={canManageSessions} />
+              ) : (
+                <div className={cn("transition-opacity", isSessionsFetching && "opacity-70")}>
+                  <SessionHistoryTable
+                    sessions={sessions}
+                    entityMode="teacher"
+                    variant="classDetail"
+                    statusMode="payment"
+                    emptyText={teacherScopedEmptyText}
+                    editorLayout="wide"
+                    showActionsColumn={canManageSessions}
+                    teachers={popupTeachers}
+                    getClassStudents={getClassStudentsForEditor}
+                    getClassDetailForEdit={getClassDetailForEdit}
+                    allowTeacherSelection={false}
+                    allowFinancialEdits={false}
+                    allowCoefficientEdit
+                    allowPaymentStatusEdit={false}
+                    allowDeleteSession={false}
+                    updateSessionFn={handleUpdateSession}
+                  />
+                </div>
+              )}
+              {isSessionsError ? (
+                <p className="mt-3 text-sm text-error">Không tải được lịch sử buổi học.</p>
+              ) : null}
+            </section>
           ) : (
-            <div className={cn("transition-opacity", isSessionsFetching && "opacity-70")}>
-              <SessionHistoryTable
-                sessions={sessions}
-                entityMode="teacher"
-                variant="classDetail"
-                statusMode="payment"
-                emptyText={teacherScopedEmptyText}
-                editorLayout="wide"
-                showActionsColumn={canManageSessions}
+            <section
+              id="staff-class-detail-panel-surveys"
+              role="tabpanel"
+              aria-labelledby="staff-class-detail-tab-surveys"
+            >
+              <ClassSurveyPanel
+                surveys={surveys}
                 teachers={popupTeachers}
-                getClassStudents={getClassStudentsForEditor}
-                getClassDetailForEdit={getClassDetailForEdit}
-                allowTeacherSelection={false}
-                allowFinancialEdits={false}
-                allowCoefficientEdit
-                allowPaymentStatusEdit={false}
-                allowDeleteSession={false}
-                updateSessionFn={handleUpdateSession}
+                loading={isSurveysLoading}
+                fetching={isSurveysFetching}
+                error={isSurveysError}
+                canManage={canManageSurveys}
+                createOpen={addSurveyPopupOpen}
+                onCreateOpenChange={setAddSurveyPopupOpen}
+                defaultTeacherId={defaultTeacherId}
+                onCreate={handleCreateSurvey}
+                onUpdate={handleUpdateSurvey}
+                onDelete={handleDeleteSurvey}
               />
-            </div>
+            </section>
           )}
-          {isSessionsError ? (
-            <p className="mt-3 text-sm text-error">Không tải được lịch sử buổi học.</p>
-          ) : null}
         </ClassCard>
       </div>
     </div>
