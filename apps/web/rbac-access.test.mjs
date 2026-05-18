@@ -68,6 +68,23 @@ test("post-login redirect sends accountant to staff shell", () => {
   );
 });
 
+test("post-login redirect sends verified staff without data consent to consent page", () => {
+  assert.equal(
+    authRedirect.resolvePostLoginRedirect({
+      id: "staff-user",
+      accountHandle: "staff-user",
+      roleType: "staff",
+      requiresPasswordSetup: false,
+      canAccessRestrictedRoutes: true,
+      requiresStaffDataConsent: true,
+      staffRoles: ["teacher"],
+      hasStaffProfile: true,
+      hasStudentProfile: false,
+    }),
+    "/staff/data-consent",
+  );
+});
+
 test("post-login redirect ignores admin next paths for non-admin staff", () => {
   assert.equal(
     authRedirect.resolvePostLoginRedirect(
@@ -143,6 +160,26 @@ test("post-login redirect sends primary admin to admin shell", () => {
   );
 });
 
+test("post-login redirect lets primary admin keep staff workspace next path", () => {
+  const session = {
+    id: "admin-user",
+    accountHandle: "admin",
+    roleType: "admin",
+    requiresPasswordSetup: false,
+    canAccessRestrictedRoutes: true,
+    staffRoles: [],
+    hasStaffProfile: false,
+    hasStudentProfile: false,
+    effectiveRoleTypes: ["admin"],
+    access: { admin: { canAccess: true, tier: "full" } },
+  };
+
+  assert.equal(
+    authRedirect.resolvePostLoginRedirect(session, "/staff/classes"),
+    "/staff/classes",
+  );
+});
+
 test("linked staff roles unlock staff shell even when primary role is student", () => {
   assert.equal(
     staffShellAccess.resolveStaffShellRouteAccess(
@@ -157,6 +194,26 @@ test("linked staff roles unlock staff shell even when primary role is student", 
         hasStudentProfile: true,
       },
       "/staff/technical-detail",
+    ).isAllowed,
+    true,
+  );
+});
+
+test("staff data consent route is accessible while consent is required", () => {
+  assert.equal(
+    staffShellAccess.resolveStaffShellRouteAccess(
+      {
+        id: "staff-user",
+        accountHandle: "staff-user",
+        roleType: "staff",
+        requiresPasswordSetup: false,
+        canAccessRestrictedRoutes: true,
+        requiresStaffDataConsent: true,
+        staffRoles: ["teacher"],
+        hasStaffProfile: true,
+        hasStudentProfile: false,
+      },
+      "/staff/data-consent",
     ).isAllowed,
     true,
   );
@@ -178,6 +235,39 @@ test("linked staff teacher unlocks class detail when primary role is student", (
       "/staff/classes/class-1",
     ).isAllowed,
     true,
+  );
+});
+
+test("primary admin bypasses staff shell profile requirement", () => {
+  const session = {
+    id: "admin-user",
+    accountHandle: "admin",
+    roleType: "admin",
+    requiresPasswordSetup: false,
+    canAccessRestrictedRoutes: true,
+    staffRoles: [],
+    hasStaffProfile: false,
+    hasStudentProfile: false,
+    effectiveRoleTypes: ["admin"],
+    access: { admin: { canAccess: true, tier: "full" } },
+  };
+
+  assert.equal(
+    staffShellAccess.resolveStaffShellRouteAccess(
+      session,
+      "/staff/classes/class-1",
+    ).isAllowed,
+    true,
+  );
+  assert.equal(
+    staffShellAccess.resolveStaffShellRouteAccess(session, "/staff/users")
+      .isAllowed,
+    true,
+  );
+  assert.equal(
+    staffShellAccess.resolveStaffShellRouteAccess(session, "/staff/profile")
+      .redirectHref,
+    null,
   );
 });
 

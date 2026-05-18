@@ -10,6 +10,8 @@ export interface CachedAuthIdentity {
   id: string;
   email: string;
   emailVerified?: boolean;
+  dataProcessingConsentAcceptedAt?: Date | null;
+  dataProcessingConsentVersion?: string | null;
   accountHandle: string;
   roleType: UserRole;
   status: string;

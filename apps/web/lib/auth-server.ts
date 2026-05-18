@@ -1,8 +1,7 @@
 import { createGuestUser, Role, UserInfoDto } from "@/dtos/Auth.dto";
 import { cookies } from "next/headers";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
+const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
 const AUTH_SESSION_CACHE_MODE: RequestCache = "no-store";
 
 function buildCookieHeader(entries: Array<{ name: string; value: string }>) {
@@ -10,7 +9,8 @@ function buildCookieHeader(entries: Array<{ name: string; value: string }>) {
 }
 
 function normalizeRole(value: unknown): Role | null {
-  return typeof value === "string" && Object.values(Role).includes(value as Role)
+  return typeof value === "string" &&
+    Object.values(Role).includes(value as Role)
     ? (value as Role)
     : null;
 }
@@ -43,7 +43,9 @@ const fetchAuthSession = async (requestCookieHeader: string) => {
 export async function getUser(cookieHeader?: string): Promise<UserInfoDto> {
   const requestCookieHeader =
     cookieHeader ??
-    buildCookieHeader((await cookies()).getAll().map(({ name, value }) => ({ name, value })));
+    buildCookieHeader(
+      (await cookies()).getAll().map(({ name, value }) => ({ name, value })),
+    );
 
   if (!requestCookieHeader.includes("refresh_token=")) {
     return createGuestUser();
@@ -60,6 +62,9 @@ export async function getUser(cookieHeader?: string): Promise<UserInfoDto> {
       id?: string;
       email?: string;
       emailVerified?: boolean;
+      dataConsentAcceptedAt?: string | null;
+      dataConsentVersion?: string | null;
+      requiresStaffDataConsent?: boolean;
       canAccessRestrictedRoutes?: boolean;
       accountHandle?: string;
       roleType?: string;
@@ -82,6 +87,9 @@ export async function getUser(cookieHeader?: string): Promise<UserInfoDto> {
       id: data.id ?? "",
       email: data.email ?? "",
       emailVerified: Boolean(data.emailVerified),
+      dataConsentAcceptedAt: data.dataConsentAcceptedAt ?? null,
+      dataConsentVersion: data.dataConsentVersion ?? null,
+      requiresStaffDataConsent: Boolean(data.requiresStaffDataConsent),
       canAccessRestrictedRoutes:
         typeof data.canAccessRestrictedRoutes === "boolean"
           ? data.canAccessRestrictedRoutes
@@ -96,7 +104,9 @@ export async function getUser(cookieHeader?: string): Promise<UserInfoDto> {
       staffRoles: Array.isArray(data.staffRoles) ? data.staffRoles : [],
       hasStaffProfile: Boolean(data.hasStaffProfile),
       hasStudentProfile: Boolean(data.hasStudentProfile),
-      effectiveRoleTypes: normalizeRoleList(data.effectiveRoleTypes, [roleType]),
+      effectiveRoleTypes: normalizeRoleList(data.effectiveRoleTypes, [
+        roleType,
+      ]),
       staffProfileComplete: Boolean(data.staffProfileComplete),
       availableWorkspaces: Array.isArray(data.availableWorkspaces)
         ? data.availableWorkspaces

@@ -12,6 +12,7 @@ const ROLE_REDIRECT: Record<string, string> = {
   student: "/student",
   guest: "/",
 };
+const STAFF_DATA_CONSENT_PATH = "/staff/data-consent";
 
 type SearchParamsLike = {
   get(name: string): string | null;
@@ -48,6 +49,13 @@ function isPrimaryAdmin(session: UserInfoDto) {
   return session.roleType === Role.admin;
 }
 
+function requiresStaffDataConsent(session: UserInfoDto) {
+  return Boolean(
+    session.requiresStaffDataConsent &&
+    (session.access?.staff?.canAccess ?? session.hasStaffProfile),
+  );
+}
+
 function canAccessRequestedPath(session: UserInfoDto, nextPath: string) {
   const pathname = getPathname(nextPath);
 
@@ -80,16 +88,17 @@ export function resolvePostLoginRedirect(
     return "/";
   }
 
+  if (requiresStaffDataConsent(session)) {
+    return STAFF_DATA_CONSENT_PATH;
+  }
+
   const safeNextPath = readSafeNextPath(requestedNextPath ?? null);
   if (safeNextPath && canAccessRequestedPath(session, safeNextPath)) {
     return safeNextPath;
   }
 
   const preferredRedirect = readSafeNextPath(session.preferredRedirect ?? null);
-  if (
-    preferredRedirect &&
-    canAccessRequestedPath(session, preferredRedirect)
-  ) {
+  if (preferredRedirect && canAccessRequestedPath(session, preferredRedirect)) {
     return preferredRedirect;
   }
 
@@ -103,7 +112,10 @@ export function resolvePostLoginRedirect(
       : "/user-profile";
   }
 
-  const staffShellAccess = resolveStaffShellRouteAccess(session, ROLE_REDIRECT.staff);
+  const staffShellAccess = resolveStaffShellRouteAccess(
+    session,
+    ROLE_REDIRECT.staff,
+  );
   if (staffShellAccess.isAllowed) {
     return ROLE_REDIRECT.staff;
   }

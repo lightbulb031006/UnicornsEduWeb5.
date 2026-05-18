@@ -9,9 +9,24 @@ jest.mock('bcrypt', () => ({
 import * as bcrypt from 'bcrypt';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { StaffRole, UserRole } from '../../generated/enums';
-import { AuthService } from './auth.service';
+import { AuthService, STAFF_DATA_CONSENT_VERSION } from './auth.service';
 
 describe('AuthService', () => {
+  type ConsentUpdateArgs = {
+    where: { id: string };
+    data: {
+      dataProcessingConsentAcceptedAt: Date;
+      dataProcessingConsentVersion: string;
+    };
+    select: {
+      id: boolean;
+      email: boolean;
+      roleType: boolean;
+      dataProcessingConsentAcceptedAt: boolean;
+      dataProcessingConsentVersion: boolean;
+    };
+  };
+
   const mockPrisma = {
     user: {
       findUnique: jest.fn(),
@@ -226,11 +241,7 @@ describe('AuthService', () => {
       service.createPendingUserWithVerificationEmail(
         {
           email: 'staff@example.com',
-          phone: '0901234567',
           password: 'secret',
-          first_name: 'Staff',
-          last_name: 'Candidate',
-          province: 'Da Nang',
           accountHandle: 'staff-candidate',
         },
         {
@@ -341,6 +352,9 @@ describe('AuthService', () => {
       id: 'user-1',
       email: 'google-user@example.com',
       emailVerified: false,
+      dataConsentAcceptedAt: null,
+      dataConsentVersion: null,
+      requiresStaffDataConsent: false,
       canAccessRestrictedRoutes: false,
       accountHandle: 'google-user',
       roleType: UserRole.guest,
@@ -390,6 +404,9 @@ describe('AuthService', () => {
       id: 'admin-1',
       email: 'admin@example.com',
       emailVerified: false,
+      dataConsentAcceptedAt: null,
+      dataConsentVersion: null,
+      requiresStaffDataConsent: false,
       canAccessRestrictedRoutes: true,
       accountHandle: 'admin',
       roleType: UserRole.admin,
@@ -437,6 +454,9 @@ describe('AuthService', () => {
       id: 'staff-admin-1',
       email: 'staff-admin@example.com',
       emailVerified: false,
+      dataConsentAcceptedAt: null,
+      dataConsentVersion: null,
+      requiresStaffDataConsent: false,
       canAccessRestrictedRoutes: true,
       accountHandle: 'staff-admin',
       roleType: UserRole.staff,
@@ -456,6 +476,80 @@ describe('AuthService', () => {
         student: { canAccess: false },
       },
     });
+  });
+
+  it('requires data consent for verified staff without the current consent version', async () => {
+    authIdentityCacheService.getAuthIdentity.mockResolvedValue({
+      id: 'staff-1',
+      email: 'staff@example.com',
+      emailVerified: true,
+      dataProcessingConsentAcceptedAt: null,
+      dataProcessingConsentVersion: null,
+      accountHandle: 'staff',
+      roleType: UserRole.staff,
+      status: 'active',
+      requiresPasswordSetup: false,
+    });
+    authAccessService.resolveForIdentity.mockResolvedValue(
+      buildAuthAccess({
+        effectiveRoleTypes: [UserRole.staff],
+        staffRoles: [StaffRole.teacher],
+        hasStaffProfile: true,
+        availableWorkspaces: ['staff'],
+        defaultWorkspace: 'staff',
+        preferredRedirect: '/staff',
+      }),
+    );
+
+    await expect(service.getAuthProfile('staff-1')).resolves.toEqual(
+      expect.objectContaining({
+        id: 'staff-1',
+        emailVerified: true,
+        dataConsentAcceptedAt: null,
+        dataConsentVersion: null,
+        requiresStaffDataConsent: true,
+      }),
+    );
+  });
+
+  it('accepts the current staff data consent version', async () => {
+    const acceptedAt = new Date('2026-05-19T00:00:00.000Z');
+    mockPrisma.user.update.mockResolvedValue({
+      id: 'staff-1',
+      dataProcessingConsentAcceptedAt: acceptedAt,
+      dataProcessingConsentVersion: STAFF_DATA_CONSENT_VERSION,
+    });
+
+    await expect(service.acceptDataConsent('staff-1')).resolves.toEqual({
+      message: 'Đã ghi nhận đồng ý điều khoản xử lý dữ liệu cá nhân.',
+      dataConsentAcceptedAt: acceptedAt,
+      dataConsentVersion: STAFF_DATA_CONSENT_VERSION,
+    });
+
+    const updateMock = mockPrisma.user.update as jest.MockedFunction<
+      (args: ConsentUpdateArgs) => unknown
+    >;
+    const updateArgs = updateMock.mock.calls.at(-1)?.[0];
+    expect(updateArgs).toBeDefined();
+    expect(updateArgs?.data.dataProcessingConsentAcceptedAt).toBeInstanceOf(
+      Date,
+    );
+    expect(updateArgs).toMatchObject({
+      where: { id: 'staff-1' },
+      data: {
+        dataProcessingConsentVersion: STAFF_DATA_CONSENT_VERSION,
+      },
+      select: {
+        id: true,
+        email: true,
+        roleType: true,
+        dataProcessingConsentAcceptedAt: true,
+        dataProcessingConsentVersion: true,
+      },
+    });
+    expect(authIdentityCacheService.invalidateUser).toHaveBeenCalledWith(
+      'staff-1',
+    );
   });
 
   it('sets the first password for an OAuth user and records action history', async () => {

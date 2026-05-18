@@ -27,6 +27,7 @@ type JwtSignOptions = Parameters<JwtService['signAsync']>[1];
 type UserAuditClient = Prisma.TransactionClient | PrismaService;
 const AVATAR_STORAGE_BUCKET = 'avatars';
 const AVATAR_SIGNED_URL_TTL_SECONDS = 60 * 60;
+export const STAFF_DATA_CONSENT_VERSION = '2026-05-19';
 
 export interface TokenPair {
   accessToken: string;
@@ -44,6 +45,14 @@ interface ProvisionUserOptions {
   updateDescription?: string;
   successMessage?: string;
 }
+
+type ProvisionUserInput = Pick<
+  CreateUserDto,
+  'email' | 'password' | 'accountHandle'
+> &
+  Partial<
+    Pick<CreateUserDto, 'phone' | 'province' | 'first_name' | 'last_name'>
+  >;
 
 @Injectable()
 export class AuthService {
@@ -129,7 +138,7 @@ export class AuthService {
     });
   }
 
-  private async findExistingUserForProvisioning(data: CreateUserDto) {
+  private async findExistingUserForProvisioning(data: ProvisionUserInput) {
     const [existingHandleUser, existingEmailUser] = await Promise.all([
       this.prisma.user.findUnique({
         where: { accountHandle: data.accountHandle },
@@ -247,11 +256,21 @@ export class AuthService {
       this.createAvatarSignedUrl(user.avatarPath),
       this.authAccessService.resolveForIdentity(user, request),
     ]);
+    const dataConsentAcceptedAt = user.dataProcessingConsentAcceptedAt ?? null;
+    const dataConsentVersion = user.dataProcessingConsentVersion ?? null;
+    const requiresStaffDataConsent =
+      authAccess.hasStaffProfile &&
+      Boolean(user.emailVerified) &&
+      (dataConsentAcceptedAt === null ||
+        dataConsentVersion !== STAFF_DATA_CONSENT_VERSION);
 
     return {
       id: user.id,
       email: user.email,
       emailVerified: Boolean(user.emailVerified),
+      dataConsentAcceptedAt,
+      dataConsentVersion,
+      requiresStaffDataConsent,
       canAccessRestrictedRoutes:
         authAccess.access.admin.tier === 'full' || Boolean(user.emailVerified),
       accountHandle: user.accountHandle,
@@ -267,6 +286,53 @@ export class AuthService {
       defaultWorkspace: authAccess.defaultWorkspace,
       preferredRedirect: authAccess.preferredRedirect,
       access: authAccess.access,
+    };
+  }
+
+  async acceptDataConsent(userId: string): Promise<{
+    message: string;
+    dataConsentAcceptedAt: Date | null;
+    dataConsentVersion: string | null;
+  }> {
+    const acceptedAt = new Date();
+    const updatedUser = await this.prisma.$transaction(async (tx) => {
+      const beforeValue = await this.getUserAuditSnapshot(tx, userId);
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          dataProcessingConsentAcceptedAt: acceptedAt,
+          dataProcessingConsentVersion: STAFF_DATA_CONSENT_VERSION,
+        },
+        select: {
+          id: true,
+          email: true,
+          roleType: true,
+          dataProcessingConsentAcceptedAt: true,
+          dataProcessingConsentVersion: true,
+        },
+      });
+      const afterValue = await this.getUserAuditSnapshot(tx, updated.id);
+
+      if (beforeValue && afterValue) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: this.buildUserActor(updated),
+          entityType: 'user',
+          entityId: updated.id,
+          description: 'Đồng ý điều khoản xử lý dữ liệu cá nhân',
+          beforeValue,
+          afterValue,
+        });
+      }
+
+      return updated;
+    });
+
+    this.invalidateAuthIdentityCache(userId);
+
+    return {
+      message: 'Đã ghi nhận đồng ý điều khoản xử lý dữ liệu cá nhân.',
+      dataConsentAcceptedAt: updatedUser.dataProcessingConsentAcceptedAt,
+      dataConsentVersion: updatedUser.dataProcessingConsentVersion,
     };
   }
 
@@ -363,7 +429,7 @@ export class AuthService {
   }
 
   async createPendingUserWithVerificationEmail(
-    data: CreateUserDto,
+    data: ProvisionUserInput,
     options: ProvisionUserOptions = {},
   ): Promise<{ message: string }> {
     const existingUser = await this.findExistingUserForProvisioning(data);

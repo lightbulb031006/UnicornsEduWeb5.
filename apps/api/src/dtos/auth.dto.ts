@@ -9,6 +9,9 @@ export interface AuthProfileDto {
   id: string;
   email: string;
   emailVerified: boolean;
+  dataConsentAcceptedAt: Date | null;
+  dataConsentVersion: string | null;
+  requiresStaffDataConsent: boolean;
   canAccessRestrictedRoutes: boolean;
   accountHandle: string;
   roleType: UserRole;

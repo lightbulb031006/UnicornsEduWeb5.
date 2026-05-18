@@ -12,6 +12,7 @@ describe('AuthController', () => {
     login: jest.fn(),
     getSessionProfile: jest.fn(),
     resendVerificationEmail: jest.fn(),
+    acceptDataConsent: jest.fn(),
     revokeRefreshTokenBySession: jest.fn(),
     accessTokenExpiresIn: 900,
     refreshTokenDefaultExpiresIn: 604_800,
@@ -29,6 +30,15 @@ describe('AuthController', () => {
     cookie: jest.Mock;
     clearCookie: jest.Mock;
   };
+
+  function getControllerHandler(name: keyof AuthController): object {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      AuthController.prototype,
+      name,
+    );
+
+    return descriptor?.value as object;
+  }
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -209,11 +219,55 @@ describe('AuthController', () => {
     );
   });
 
+  it('accepts data consent using refresh session when access token is absent', async () => {
+    authService.getSessionProfile.mockResolvedValue({
+      id: 'user-1',
+      email: 'staff@example.com',
+    });
+    authService.acceptDataConsent.mockResolvedValue({
+      message: 'Đã ghi nhận đồng ý điều khoản xử lý dữ liệu cá nhân.',
+      dataConsentAcceptedAt: new Date('2026-05-19T00:00:00.000Z'),
+      dataConsentVersion: '2026-05-19',
+    });
+
+    await expect(
+      controller.acceptDataConsent({
+        cookies: {
+          refresh_token: 'refresh-token',
+        },
+      } as never),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        message: 'Đã ghi nhận đồng ý điều khoản xử lý dữ liệu cá nhân.',
+        dataConsentVersion: '2026-05-19',
+      }),
+    );
+
+    expect(authService.getSessionProfile).toHaveBeenCalledWith(
+      'refresh-token',
+      expect.objectContaining({
+        cookies: {
+          refresh_token: 'refresh-token',
+        },
+      }),
+    );
+    expect(authService.acceptDataConsent).toHaveBeenCalledWith('user-1');
+  });
+
   it('allows resend verification to reach controller without the global JWT guard', () => {
     expect(
       Reflect.getMetadata(
         IS_PUBLIC_KEY,
-        AuthController.prototype.resendVerification,
+        getControllerHandler('resendVerification'),
+      ),
+    ).toBe(true);
+  });
+
+  it('allows data consent acceptance to reach controller without the global JWT guard', () => {
+    expect(
+      Reflect.getMetadata(
+        IS_PUBLIC_KEY,
+        getControllerHandler('acceptDataConsent'),
       ),
     ).toBe(true);
   });

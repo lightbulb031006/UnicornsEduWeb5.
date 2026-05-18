@@ -83,6 +83,9 @@ export class AuthController {
       id: '',
       email: '',
       emailVerified: false,
+      dataConsentAcceptedAt: null,
+      dataConsentVersion: null,
+      requiresStaffDataConsent: false,
       canAccessRestrictedRoutes: false,
       accountHandle: '',
       roleType: UserRole.guest,
@@ -324,6 +327,26 @@ export class AuthController {
     } catch {
       return this.getGuestProfile();
     }
+  }
+
+  @Public()
+  @Post('data-consent/accept')
+  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth('access_token')
+  @ApiCookieAuth('refresh_token')
+  @ApiOperation({
+    summary: 'Accept data processing consent',
+    description:
+      'Records the current personal data collection and processing consent version for the authenticated user.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Data consent has been recorded for the current user.',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  async acceptDataConsent(@Req() req: RequestWithResolvedAuthContext) {
+    const userId = await this.getAuthenticatedUserIdFromCookies(req);
+    return this.authService.acceptDataConsent(userId);
   }
 
   @Post('change-password')
