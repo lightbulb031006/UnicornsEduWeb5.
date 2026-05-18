@@ -276,7 +276,7 @@ function MakeupEditorDialog({
                 }
                 disabled={isSubmitting}
                 rows={3}
-                placeholder="Nội dung ngắn cho buổi bù..."
+                placeholder="Học bù ngày...."
                 className="mt-1 w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-border-focus/30"
               />
             </div>
