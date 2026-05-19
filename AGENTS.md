@@ -39,6 +39,12 @@ When code changes affect behavior, **update the matching docs in the same task**
 
 If you change project workflow/conventions for agents (commands, required checks, FE/BE constraints, docs process), **update this file (`AGENTS.md`) in the same task** so instructions match reality.
 
+## Agent skills
+
+- **Issue tracker**: use local markdown issues under `.scratch/` unless the user explicitly asks to publish to GitHub. See `docs/agents/issue-tracker.md`.
+- **Triage labels**: use the canonical triage labels documented in `docs/agents/triage-labels.md` (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`).
+- **Domain docs**: treat this as a single-context monorepo and use the docs listed in Source of truth first. See `docs/agents/domain.md`.
+
 ## Frontend rules (`apps/web`) (mandatory)
 
 - **Backend communication**: use **TanStack Query** (`useQuery` / `useMutation`) for all server state.
