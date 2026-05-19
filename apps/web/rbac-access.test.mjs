@@ -68,7 +68,7 @@ test("post-login redirect sends accountant to staff shell", () => {
   );
 });
 
-test("post-login redirect sends verified staff without data consent to consent page", () => {
+test("post-login redirect no longer sends missing data consent to standalone consent page", () => {
   assert.equal(
     authRedirect.resolvePostLoginRedirect({
       id: "staff-user",
@@ -81,7 +81,7 @@ test("post-login redirect sends verified staff without data consent to consent p
       hasStaffProfile: true,
       hasStudentProfile: false,
     }),
-    "/staff/data-consent",
+    "/staff",
   );
 });
 
@@ -153,7 +153,10 @@ test("post-login redirect sends primary admin to admin shell", () => {
     hasStudentProfile: false,
   };
 
-  assert.equal(authRedirect.resolvePostLoginRedirect(session), "/admin/dashboard");
+  assert.equal(
+    authRedirect.resolvePostLoginRedirect(session),
+    "/admin/dashboard",
+  );
   assert.equal(
     authRedirect.resolvePostLoginRedirect(session, "/admin/users"),
     "/admin/users",
@@ -199,7 +202,7 @@ test("linked staff roles unlock staff shell even when primary role is student", 
   );
 });
 
-test("staff data consent route is accessible while consent is required", () => {
+test("staff data consent route is no longer a staff workspace route", () => {
   assert.equal(
     staffShellAccess.resolveStaffShellRouteAccess(
       {
@@ -215,7 +218,7 @@ test("staff data consent route is accessible while consent is required", () => {
       },
       "/staff/data-consent",
     ).isAllowed,
-    true,
+    false,
   );
 });
 
@@ -284,7 +287,10 @@ test("linked staff admin gets full admin shell even when primary role is student
   });
 
   assert.equal(access.isAdmin, true);
-  assert.equal(adminShellAccess.canAccessAdminShellRoute(access, "/admin/users"), true);
+  assert.equal(
+    adminShellAccess.canAccessAdminShellRoute(access, "/admin/users"),
+    true,
+  );
 });
 
 test("linked staff admin gets full staff shell routes even when primary role is student", () => {
@@ -302,10 +308,8 @@ test("linked staff admin gets full staff shell routes even when primary role is 
   };
 
   assert.equal(
-    staffShellAccess.resolveStaffShellRouteAccess(
-      session,
-      "/staff/calendar",
-    ).isAllowed,
+    staffShellAccess.resolveStaffShellRouteAccess(session, "/staff/calendar")
+      .isAllowed,
     true,
   );
   assert.equal(

@@ -26,10 +26,6 @@ export default function AdminAccessGate({
 
   const access = resolveAdminShellAccess(user);
   const restrictedByEmailVerification = isRestrictedByEmailVerification(user);
-  const restrictedByDataConsent = Boolean(
-    user.requiresStaffDataConsent &&
-    (user.access?.staff?.canAccess ?? user.hasStaffProfile),
-  );
   const strictAdminRoute = isStrictAdminRoute(pathname);
   const isAllowed = canAccessAdminShellRoute(access, pathname);
   const fallbackHref = resolveAdminShellFallbackHref(access, pathname);
@@ -41,11 +37,6 @@ export default function AdminAccessGate({
       return;
     }
 
-    if (isAuthReady && restrictedByDataConsent) {
-      replace(`/staff/data-consent?from=${encodeURIComponent(pathname)}`);
-      return;
-    }
-
     if (isAuthReady && !isAllowed) {
       replace(fallbackHref);
     }
@@ -53,8 +44,6 @@ export default function AdminAccessGate({
     fallbackHref,
     isAllowed,
     isAuthReady,
-    pathname,
-    restrictedByDataConsent,
     restrictedByEmailVerification,
     replace,
   ]);
@@ -78,10 +67,6 @@ export default function AdminAccessGate({
   }
 
   if (restrictedByEmailVerification) {
-    return null;
-  }
-
-  if (restrictedByDataConsent) {
     return null;
   }
 

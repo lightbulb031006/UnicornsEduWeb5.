@@ -19,11 +19,6 @@ export default function StaffAccessGate({
   const { replace } = useRouter();
   const { user, isAuthReady } = useAuth();
   const restrictedByEmailVerification = isRestrictedByEmailVerification(user);
-  const isDataConsentRoute = pathname === "/staff/data-consent";
-  const restrictedByDataConsent = Boolean(
-    user.requiresStaffDataConsent &&
-    (user.access?.staff?.canAccess ?? user.hasStaffProfile),
-  );
 
   const routeAccess = resolveStaffShellRouteAccess(user, pathname);
   const { isAllowed, flags } = routeAccess;
@@ -162,27 +157,14 @@ export default function StaffAccessGate({
       return;
     }
 
-    if (isAuthReady && restrictedByDataConsent && !isDataConsentRoute) {
-      replace(`/staff/data-consent?from=${encodeURIComponent(pathname)}`);
-      return;
-    }
-
-    if (isAuthReady && !restrictedByDataConsent && isDataConsentRoute) {
-      replace("/staff");
-      return;
-    }
-
     if (isAuthReady && !isAllowed && redirectHref) {
       replace(redirectHref);
     }
   }, [
-    isDataConsentRoute,
     isAllowed,
     isAuthReady,
     redirectHref,
-    restrictedByDataConsent,
     restrictedByEmailVerification,
-    pathname,
     replace,
   ]);
 
@@ -205,10 +187,6 @@ export default function StaffAccessGate({
   }
 
   if (restrictedByEmailVerification) {
-    return null;
-  }
-
-  if (restrictedByDataConsent && !isDataConsentRoute) {
     return null;
   }
 

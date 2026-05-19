@@ -1,5 +1,5 @@
-import type { StaffStatus } from './staff.dto';
-import type { StudentStatus, StudentGender } from './student.dto';
+import type { StaffStatus } from "./staff.dto";
+import type { StudentStatus, StudentGender } from "./student.dto";
 
 /** Staff record as returned in full profile (camelCase from API). */
 export interface ProfileStaffInfoDto {
@@ -60,6 +60,9 @@ export interface ProfileUserDto {
   province?: string | null;
   emailVerified?: boolean;
   phoneVerified?: boolean;
+  dataConsentAcceptedAt?: string | null;
+  dataConsentVersion?: string | null;
+  requiresStaffDataConsent?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -79,6 +82,9 @@ export interface FullProfileDto {
   province?: string | null;
   emailVerified?: boolean;
   phoneVerified?: boolean;
+  dataConsentAcceptedAt?: string | null;
+  dataConsentVersion?: string | null;
+  requiresStaffDataConsent?: boolean;
   createdAt?: string;
   updatedAt?: string;
   staffInfo?: ProfileStaffInfoDto | null;

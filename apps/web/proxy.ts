@@ -10,7 +10,6 @@ import { resolveStaffShellRouteAccess } from "./lib/staff-shell-access";
 import { Role } from "./dtos/Auth.dto";
 
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
-const STAFF_DATA_CONSENT_PATH = "/staff/data-consent";
 
 type FullProfileGuardPayload = {
   first_name?: string | null;
@@ -18,6 +17,9 @@ type FullProfileGuardPayload = {
   email?: string | null;
   phone?: string | null;
   province?: string | null;
+  dataConsentAcceptedAt?: string | null;
+  dataConsentVersion?: string | null;
+  requiresStaffDataConsent?: boolean;
   staffInfo?: {
     cccdNumber?: string | null;
     cccdIssuedDate?: string | null;
@@ -52,6 +54,9 @@ function isStaffProfileComplete(profile: FullProfileGuardPayload): boolean {
     hasText(profile.email) &&
     hasText(profile.phone) &&
     hasText(profile.province) &&
+    hasText(profile.dataConsentAcceptedAt) &&
+    hasText(profile.dataConsentVersion) &&
+    profile.requiresStaffDataConsent !== true &&
     isValidCccd(staffInfo.cccdNumber) &&
     hasText(staffInfo.cccdIssuedDate) &&
     hasText(staffInfo.cccdIssuedPlace) &&
@@ -136,22 +141,27 @@ export async function proxy(req: NextRequest) {
   }
 
   const isStaffRoute = pathname === "/staff" || pathname.startsWith("/staff/");
-  const isStaffDataConsentRoute = pathname === STAFF_DATA_CONSENT_PATH;
   const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
-  const requiresStaffDataConsent = Boolean(
-    user.requiresStaffDataConsent &&
-    (user.access?.staff?.canAccess ?? user.hasStaffProfile),
-  );
 
   if (isAdminRoute) {
-    if (requiresStaffDataConsent) {
-      const redirectUrl = new URL(STAFF_DATA_CONSENT_PATH, req.url);
-      redirectUrl.searchParams.set("from", `${pathname}${req.nextUrl.search}`);
-      return NextResponse.redirect(redirectUrl);
-    }
-
     const adminShellAccess = resolveAdminShellAccess(user);
     if (canAccessAdminShellRoute(adminShellAccess, pathname)) {
+      if (canAccessStaffShell(user) && !canBypassStaffProfileGuard(user)) {
+        if (user.staffProfileComplete === true) {
+          return NextResponse.next();
+        }
+
+        const cookieHeader = req.headers.get("cookie") ?? "";
+        const profile = await fetchFullProfile(cookieHeader);
+
+        if (!profile || !isStaffProfileComplete(profile)) {
+          const redirectUrl = new URL("/user-profile", req.url);
+          redirectUrl.searchParams.set("profile_required", "1");
+          redirectUrl.searchParams.set("from", pathname);
+          return NextResponse.redirect(redirectUrl);
+        }
+      }
+
       return NextResponse.next();
     }
 
@@ -191,20 +201,6 @@ export async function proxy(req: NextRequest) {
     canAccessStaffShell(user) &&
     !canBypassStaffProfileGuard(user)
   ) {
-    if (requiresStaffDataConsent) {
-      if (isStaffDataConsentRoute) {
-        return NextResponse.next();
-      }
-
-      const redirectUrl = new URL(STAFF_DATA_CONSENT_PATH, req.url);
-      redirectUrl.searchParams.set("from", `${pathname}${req.nextUrl.search}`);
-      return NextResponse.redirect(redirectUrl);
-    }
-
-    if (isStaffDataConsentRoute) {
-      return NextResponse.redirect(new URL("/staff", req.url));
-    }
-
     if (user.staffProfileComplete === true) {
       return NextResponse.next();
     }

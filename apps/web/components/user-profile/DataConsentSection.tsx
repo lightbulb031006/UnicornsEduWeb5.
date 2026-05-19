@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import type { UserInfoDto } from "@/dtos/Auth.dto";
+import type { FullProfileDto } from "@/dtos/profile.dto";
 import * as authApi from "@/lib/apis/auth.api";
-import { readSafeNextPath } from "@/lib/auth-redirect";
 
 const CONSENT_MARKDOWN = `# ĐIỀU KHOẢN ĐỒNG Ý TẠO TÀI KHOẢN, THU THẬP VÀ XỬ LÝ DỮ LIỆU CÁ NHÂN
 
@@ -162,39 +161,44 @@ UNICORNS EDU có quyền sửa đổi điều khoản này nhằm phù hợp v�
 - [ ] Tôi cam kết toàn bộ thông tin cung cấp là chính xác, trung thực và hợp pháp.
 `;
 
-function resolveReturnPath(rawFrom: string | null) {
-  const safeFrom = readSafeNextPath(rawFrom);
-  if (
-    safeFrom &&
-    (safeFrom.startsWith("/staff") || safeFrom.startsWith("/admin")) &&
-    !safeFrom.startsWith("/staff/data-consent")
-  ) {
-    return safeFrom;
-  }
+type DataConsentSectionProps = {
+  profile: FullProfileDto;
+  onAccepted?: (payload: {
+    dataConsentAcceptedAt: string | null;
+    dataConsentVersion: string | null;
+  }) => void;
+};
 
-  return "/staff";
+function formatConsentDate(value?: string | null) {
+  if (!value) return "chưa có thời điểm xác nhận";
+  try {
+    return new Intl.DateTimeFormat("vi-VN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return "chưa có thời điểm xác nhận";
+  }
 }
 
-export default function StaffDataConsentPage() {
+export default function DataConsentSection({
+  profile,
+  onAccepted,
+}: DataConsentSectionProps) {
   const [hasReadTerms, setHasReadTerms] = useState(false);
   const [hasConfirmedAccuracy, setHasConfirmedAccuracy] = useState(false);
-  const { user, setUser, isAuthReady } = useAuth();
+  const [showFullTerms, setShowFullTerms] = useState(false);
+  const { user, setUser } = useAuth();
   const queryClient = useQueryClient();
-  const { replace } = useRouter();
-  const searchParams = useSearchParams();
-  const returnPath = useMemo(
-    () => resolveReturnPath(searchParams.get("from")),
-    [searchParams],
+  const consentAccepted = Boolean(
+    profile.dataConsentAcceptedAt && profile.requiresStaffDataConsent !== true,
   );
-  const canSubmit = hasReadTerms && hasConfirmedAccuracy;
-
-  useEffect(() => {
-    if (!isAuthReady || user.requiresStaffDataConsent) {
-      return;
-    }
-
-    replace(returnPath);
-  }, [isAuthReady, replace, returnPath, user.requiresStaffDataConsent]);
+  const checkedReadTerms = consentAccepted || hasReadTerms;
+  const checkedAccuracy = consentAccepted || hasConfirmedAccuracy;
+  const canSubmit = checkedReadTerms && checkedAccuracy && !consentAccepted;
 
   const acceptMutation = useMutation({
     mutationFn: authApi.acceptDataConsent,
@@ -214,8 +218,15 @@ export default function StaffDataConsentPage() {
 
       setUser(nextUser);
       queryClient.setQueryData(["auth", "session"], nextUser);
+      onAccepted?.({
+        dataConsentAcceptedAt: payload.dataConsentAcceptedAt,
+        dataConsentVersion: payload.dataConsentVersion,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["profile", "full"] }),
+        queryClient.invalidateQueries({ queryKey: ["auth", "full-profile"] }),
+      ]);
       toast.success("Đã ghi nhận đồng ý điều khoản.");
-      replace(returnPath);
     },
     onError: () => {
       toast.error("Không ghi nhận được xác nhận. Vui lòng thử lại.");
@@ -223,30 +234,40 @@ export default function StaffDataConsentPage() {
   });
 
   return (
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-4 pb-8">
-      <div className="rounded-lg border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
-          Xác nhận bắt buộc
+    <div className="space-y-5">
+      <div className="rounded-lg border border-border-default bg-bg-secondary/50 px-4 py-3 text-sm text-text-secondary">
+        <p className="font-medium text-text-primary">
+          {consentAccepted
+            ? "Đã xác nhận điều khoản xử lý dữ liệu cá nhân."
+            : "Cần xác nhận điều khoản xử lý dữ liệu cá nhân để hoàn tất hồ sơ nhân sự."}
         </p>
-        <h1 className="mt-2 text-xl font-semibold text-text-primary sm:text-2xl">
-          Điều khoản thu thập và xử lý dữ liệu cá nhân
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
-          Staff cần đọc và xác nhận điều khoản này trước khi tiếp tục thao tác
-          trên workspace.
+        <p className="mt-1 text-xs leading-5 text-text-muted">
+          {consentAccepted
+            ? `Phiên bản ${profile.dataConsentVersion ?? "hiện hành"} · ${formatConsentDate(profile.dataConsentAcceptedAt)}`
+            : "Bạn có thể mở toàn bộ điều khoản để đọc kỹ, hoặc tick nhanh 2 xác nhận nếu đã nắm nội dung."}
         </p>
       </div>
 
-      <div className="max-h-[62vh] overflow-y-auto rounded-lg border border-border-default bg-bg-surface px-4 py-5 shadow-sm sm:px-6">
-        <div className="prose prose-sm max-w-none break-words text-text-primary [&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold [&_hr]:my-5 [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-5">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
-            {CONSENT_MARKDOWN}
-          </ReactMarkdown>
+      <button
+        type="button"
+        onClick={() => setShowFullTerms((value) => !value)}
+        className="text-sm font-medium text-primary transition-colors hover:text-primary-hover"
+      >
+        {showFullTerms ? "Ẩn điều khoản đầy đủ" : "Xem điều khoản đầy đủ"}
+      </button>
+
+      {showFullTerms ? (
+        <div className="max-h-[52vh] overflow-y-auto rounded-lg border border-border-default bg-bg-surface px-4 py-5 shadow-sm sm:px-6">
+          <div className="prose prose-sm max-w-none break-words text-text-primary [&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-5 [&_h2]:text-lg [&_h2]:font-semibold [&_hr]:my-5 [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-5">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+              {CONSENT_MARKDOWN}
+            </ReactMarkdown>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <form
-        className="rounded-lg border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5"
+        className="space-y-4"
         onSubmit={(event) => {
           event.preventDefault();
           if (canSubmit) {
@@ -254,50 +275,50 @@ export default function StaffDataConsentPage() {
           }
         }}
       >
-        <div className="space-y-3">
-          <label className="flex cursor-pointer gap-3 text-sm leading-6 text-text-primary">
-            <input
-              type="checkbox"
-              checked={hasReadTerms}
-              onChange={(event) => setHasReadTerms(event.target.checked)}
-              className="mt-1 size-4 rounded border-border-default text-primary focus:ring-border-focus"
-            />
-            <span>
-              Tôi xác nhận đã đọc, hiểu và đồng ý với toàn bộ điều khoản thu
-              thập và xử lý dữ liệu cá nhân của UNICORNS EDU.
-            </span>
-          </label>
-          <label className="flex cursor-pointer gap-3 text-sm leading-6 text-text-primary">
-            <input
-              type="checkbox"
-              checked={hasConfirmedAccuracy}
-              onChange={(event) =>
-                setHasConfirmedAccuracy(event.target.checked)
-              }
-              className="mt-1 size-4 rounded border-border-default text-primary focus:ring-border-focus"
-            />
-            <span>
-              Tôi cam kết toàn bộ thông tin cung cấp là chính xác, trung thực và
-              hợp pháp.
-            </span>
-          </label>
-        </div>
+        <label className="flex items-start gap-3 text-sm leading-6 text-text-primary">
+          <input
+            type="checkbox"
+            checked={checkedReadTerms}
+            disabled={consentAccepted || acceptMutation.isPending}
+            onChange={(event) => setHasReadTerms(event.target.checked)}
+            className="mt-1 size-4 rounded border-border-default text-primary focus:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          <span>
+            Tôi xác nhận đã đọc, hiểu và đồng ý với toàn bộ điều khoản thu thập
+            và xử lý dữ liệu cá nhân của UNICORNS EDU.
+          </span>
+        </label>
+        <label className="flex items-start gap-3 text-sm leading-6 text-text-primary">
+          <input
+            type="checkbox"
+            checked={checkedAccuracy}
+            disabled={consentAccepted || acceptMutation.isPending}
+            onChange={(event) => setHasConfirmedAccuracy(event.target.checked)}
+            className="mt-1 size-4 rounded border-border-default text-primary focus:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          <span>
+            Tôi cam kết toàn bộ thông tin cung cấp là chính xác, trung thực và
+            hợp pháp.
+          </span>
+        </label>
 
-        <div className="mt-4 flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs leading-5 text-text-muted">
-            Phiên bản điều khoản: 2026-05-19.
+            Phiên bản điều khoản hiện hành sẽ được lưu cùng thời điểm xác nhận.
           </p>
           <button
             type="submit"
             disabled={!canSubmit || acceptMutation.isPending}
-            className="inline-flex min-h-10 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex min-h-10 items-center justify-center rounded-full bg-primary px-5 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {acceptMutation.isPending
-              ? "Đang ghi nhận..."
-              : "Đồng ý và tiếp tục"}
+            {consentAccepted
+              ? "Đã xác nhận"
+              : acceptMutation.isPending
+                ? "Đang ghi nhận..."
+                : "Xác nhận điều khoản"}
           </button>
         </div>
       </form>
-    </section>
+    </div>
   );
 }

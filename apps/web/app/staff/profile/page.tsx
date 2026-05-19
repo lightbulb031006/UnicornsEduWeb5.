@@ -52,6 +52,14 @@ function formatDate(iso?: string | null): string {
   }
 }
 
+function RetiredTeachingLabel() {
+  return (
+    <span className="mt-1 inline-flex w-fit rounded-full border border-warning/25 bg-warning/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning">
+      NGHỈ DẠY
+    </span>
+  );
+}
+
 const STATUS_LABELS: Record<StaffStatus, string> = {
   active: "Hoạt động",
   inactive: "Ngừng",
@@ -910,13 +918,15 @@ export default function StaffSelfDetailPage() {
               <>
                 <div className="space-y-3 md:hidden">
                   {classMonthlySummaries.map((item) => {
-                    const isInteractive = canAccessClassWorkspace;
+                    const isRetiredTeaching =
+                      item.isCurrentTeacherAssignment === false;
+                    const isInteractive =
+                      canAccessClassWorkspace && !isRetiredTeaching;
                     return (
                       <div
                         key={item.classId}
-                        role="button"
-                        tabIndex={isInteractive ? 0 : -1}
-                        aria-disabled={!isInteractive}
+                        role={isInteractive ? "button" : undefined}
+                        tabIndex={isInteractive ? 0 : undefined}
                         onClick={
                           isInteractive
                             ? () =>
@@ -946,6 +956,7 @@ export default function StaffSelfDetailPage() {
                         <p className="font-medium text-text-primary">
                           {item.className}
                         </p>
+                        {isRetiredTeaching ? <RetiredTeachingLabel /> : null}
                         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-secondary">
                           <span>
                             Tổng:{" "}
@@ -1002,7 +1013,10 @@ export default function StaffSelfDetailPage() {
                     </thead>
                     <tbody>
                       {classMonthlySummaries.map((item) => {
-                        const isInteractive = canAccessClassWorkspace;
+                        const isRetiredTeaching =
+                          item.isCurrentTeacherAssignment === false;
+                        const isInteractive =
+                          canAccessClassWorkspace && !isRetiredTeaching;
                         return (
                           <tr
                             key={item.classId}
@@ -1035,7 +1049,12 @@ export default function StaffSelfDetailPage() {
                             }`}
                           >
                             <td className="px-4 py-3 text-text-primary">
-                              {item.className}
+                              <div className="flex flex-col items-start">
+                                <span>{item.className}</span>
+                                {isRetiredTeaching ? (
+                                  <RetiredTeachingLabel />
+                                ) : null}
+                              </div>
                             </td>
                             <td className="px-4 py-3 tabular-nums font-semibold text-primary">
                               {formatCurrency(item.total)}

@@ -6,6 +6,15 @@ import { StaffRole, UserRole } from '../../generated/enums';
 import { AuthAccessService } from './auth-access.service';
 
 describe('AuthAccessService', () => {
+  const currentConsent = {
+    dataProcessingConsentAcceptedAt: new Date('2026-05-19T00:00:00.000Z'),
+    dataProcessingConsentVersion: '2026-05-19',
+  };
+  const missingConsent = {
+    dataProcessingConsentAcceptedAt: null,
+    dataProcessingConsentVersion: null,
+  };
+
   const prisma = {
     user: {
       findUnique: jest.fn(),
@@ -28,6 +37,7 @@ describe('AuthAccessService', () => {
 
   it('unions primary, linked staff, linked student, and full admin access', async () => {
     prisma.user.findUnique.mockResolvedValue({
+      ...currentConsent,
       staffInfo: {
         id: 'staff-1',
         cccdNumber: '012345678901',
@@ -80,6 +90,7 @@ describe('AuthAccessService', () => {
 
   it('uses staff as the login landing workspace for non-admin staff roles', async () => {
     prisma.user.findUnique.mockResolvedValue({
+      ...currentConsent,
       staffInfo: {
         id: 'staff-2',
         cccdNumber: '012345678901',
@@ -194,5 +205,48 @@ describe('AuthAccessService', () => {
       },
     });
     expect(authIdentityCacheService.getStaffRoles).not.toHaveBeenCalled();
+  });
+
+  it('requires the current data consent version before a staff profile is complete', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      ...missingConsent,
+      staffInfo: {
+        id: 'staff-3',
+        cccdNumber: '012345678901',
+        cccdIssuedDate: new Date('2026-01-01T00:00:00.000Z'),
+        cccdIssuedPlace: 'Ha Noi',
+        birthDate: new Date('2000-01-01T00:00:00.000Z'),
+        university: 'UE University',
+        highSchool: 'UE High',
+        specialization: 'Math',
+        bankAccount: '123456789',
+        bankQrLink: 'qr-link',
+        cccdFrontPath: 'front.png',
+        cccdBackPath: 'back.png',
+      },
+      studentInfo: null,
+    });
+    authIdentityCacheService.getStaffRoles.mockResolvedValue([
+      StaffRole.teacher,
+    ]);
+
+    await expect(
+      service.resolveForIdentity({
+        id: 'user-3',
+        email: 'teacher@example.com',
+        accountHandle: 'teacher',
+        roleType: UserRole.staff,
+        status: 'active',
+        emailVerified: true,
+        avatarPath: null,
+        requiresPasswordSetup: false,
+      }),
+    ).resolves.toMatchObject({
+      hasStaffProfile: true,
+      staffProfileComplete: false,
+      access: {
+        staff: { canAccess: true, profileComplete: false },
+      },
+    });
   });
 });

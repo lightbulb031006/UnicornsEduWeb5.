@@ -6,6 +6,7 @@ import type {
   CachedAuthIdentity,
   RequestWithResolvedAuthContext,
 } from './auth-request-context';
+import { STAFF_DATA_CONSENT_VERSION } from './constants';
 
 export type AuthWorkspace = 'admin' | 'staff' | 'student';
 export type AdminAccessTier =
@@ -54,6 +55,11 @@ type StaffProfileForAccess = {
   cccdBackPath: string | null;
 };
 
+type StaffConsentForAccess = {
+  dataProcessingConsentAcceptedAt: Date | string | null;
+  dataProcessingConsentVersion: string | null;
+};
+
 function appendUniqueRole(roles: UserRole[], role: UserRole) {
   if (!roles.includes(role)) {
     roles.push(role);
@@ -89,6 +95,13 @@ function isStaffProfileComplete(staff: StaffProfileForAccess | null) {
     hasText(staff.bankQrLink) &&
     hasText(staff.cccdFrontPath) &&
     hasText(staff.cccdBackPath)
+  );
+}
+
+function hasCurrentStaffDataConsent(consent: StaffConsentForAccess) {
+  return (
+    hasText(consent.dataProcessingConsentAcceptedAt) &&
+    consent.dataProcessingConsentVersion === STAFF_DATA_CONSENT_VERSION
   );
 }
 
@@ -204,6 +217,8 @@ export class AuthAccessService {
     const profileLinks = await this.prisma.user.findUnique({
       where: { id: user.id },
       select: {
+        dataProcessingConsentAcceptedAt: true,
+        dataProcessingConsentVersion: true,
         staffInfo: {
           select: {
             id: true,
@@ -269,9 +284,14 @@ export class AuthAccessService {
       hasStaffProfile,
       hasStudentProfile,
     );
-    const staffProfileComplete = isStaffProfileComplete(
-      profileLinks?.staffInfo ?? null,
-    );
+    const staffProfileComplete =
+      isStaffProfileComplete(profileLinks?.staffInfo ?? null) &&
+      hasCurrentStaffDataConsent({
+        dataProcessingConsentAcceptedAt:
+          profileLinks?.dataProcessingConsentAcceptedAt ?? null,
+        dataProcessingConsentVersion:
+          profileLinks?.dataProcessingConsentVersion ?? null,
+      });
 
     const access: ResolvedAuthAccess = {
       effectiveRoleTypes,

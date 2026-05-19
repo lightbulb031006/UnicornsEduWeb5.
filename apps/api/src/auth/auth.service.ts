@@ -22,12 +22,13 @@ import { MailService } from '../mail/mail.service';
 import { AuthProfileDto, LoginResponseDto } from 'src/dtos/auth.dto';
 import type { RequestWithResolvedAuthContext } from './auth-request-context';
 import { createSignedStorageUrl } from 'src/storage/supabase-storage';
+import { STAFF_DATA_CONSENT_VERSION } from './constants';
 
 type JwtSignOptions = Parameters<JwtService['signAsync']>[1];
 type UserAuditClient = Prisma.TransactionClient | PrismaService;
 const AVATAR_STORAGE_BUCKET = 'avatars';
 const AVATAR_SIGNED_URL_TTL_SECONDS = 60 * 60;
-export const STAFF_DATA_CONSENT_VERSION = '2026-05-19';
+export { STAFF_DATA_CONSENT_VERSION } from './constants';
 
 export interface TokenPair {
   accessToken: string;

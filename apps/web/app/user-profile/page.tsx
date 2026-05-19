@@ -13,10 +13,9 @@ import EmailVerificationInline from "@/components/user-profile/EmailVerification
 import UserAvatar from "@/components/ui/UserAvatar";
 import CccdImageUploadFields from "@/components/staff/CccdImageUploadFields";
 import StaffSpecializationMarkdown from "@/components/staff/StaffSpecializationMarkdown";
+import DataConsentSection from "@/components/user-profile/DataConsentSection";
 import { useAuth } from "@/context/AuthContext";
-import {
-  resolveEmailVerified,
-} from "@/mocks/user-profile-verification.mock";
+import { resolveEmailVerified } from "@/mocks/user-profile-verification.mock";
 import * as authApi from "@/lib/apis/auth.api";
 import type {
   FullProfileDto,
@@ -65,8 +64,7 @@ type FieldProps = {
 
 const inputClassName =
   "w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2.5 text-sm text-text-primary transition-colors placeholder:text-text-muted focus:border-border-focus focus:outline-none focus:ring-2 focus:ring-border-focus/20";
-const labelClassName =
-  "mb-1.5 block text-xs font-medium text-text-muted";
+const labelClassName = "mb-1.5 block text-xs font-medium text-text-muted";
 const surfaceCardClassName =
   "rounded-xl border border-border-default bg-bg-surface shadow-sm";
 const ghostButtonClassName =
@@ -100,16 +98,14 @@ function displayName(profile: FullProfileDto): string {
 }
 
 function getInitials(profile: FullProfileDto): string {
-  const source = displayName(profile)
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2);
+  const source = displayName(profile).split(/\s+/).filter(Boolean).slice(0, 2);
   if (!source.length) return "UE";
   return source.map((part) => part.charAt(0).toUpperCase()).join("");
 }
 
 function isFilled(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value);
   if (typeof value === "string") return value.trim().length > 0;
   return value !== null && value !== undefined;
@@ -141,7 +137,7 @@ function getRoleLabel(role: string | null | undefined): string {
     student: "Học viên",
     guest: "Khách",
   };
-  return role ? roleMap[role] ?? humanizeToken(role) : "Chưa xác định";
+  return role ? (roleMap[role] ?? humanizeToken(role)) : "Chưa xác định";
 }
 
 function getGenderLabel(gender: string | null | undefined): string {
@@ -169,7 +165,10 @@ function getToneColor(tone: Tone): string {
   }
 }
 
-function getFieldValue(form: HTMLFormElement, name: string): string | undefined {
+function getFieldValue(
+  form: HTMLFormElement,
+  name: string,
+): string | undefined {
   const field = form.elements.namedItem(name);
   if (!field) return undefined;
 
@@ -190,13 +189,7 @@ function getFieldValue(form: HTMLFormElement, name: string): string | undefined 
   return undefined;
 }
 
-function Tag({
-  label,
-  tone = "neutral",
-}: {
-  label: string;
-  tone?: Tone;
-}) {
+function Tag({ label, tone = "neutral" }: { label: string; tone?: Tone }) {
   return (
     <span className="inline-flex items-center gap-2 rounded-full border border-border-default bg-bg-surface px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-text-secondary shadow-sm">
       <span
@@ -220,13 +213,20 @@ function ProfileSectionNav({
     >
       {items.map((item, i) => (
         <span key={item.id} className="inline-flex items-center gap-1">
-          {i > 0 ? <span aria-hidden className="text-border-default">·</span> : null}
+          {i > 0 ? (
+            <span aria-hidden className="text-border-default">
+              ·
+            </span>
+          ) : null}
           <Link
             href={item.href}
             className="font-medium text-text-secondary transition-colors hover:text-text-primary"
           >
             {item.label}
-            <span className="tabular-nums text-text-muted"> ({item.completion.percentage}%)</span>
+            <span className="tabular-nums text-text-muted">
+              {" "}
+              ({item.completion.percentage}%)
+            </span>
           </Link>
         </span>
       ))}
@@ -259,7 +259,9 @@ function DetailRows({ items }: { items: DetailItem[] }) {
           <dd className="min-w-0 text-sm font-normal leading-relaxed text-text-primary">
             {item.value}
             {item.hint ? (
-              <p className="mt-1 text-xs leading-relaxed text-text-secondary">{item.hint}</p>
+              <p className="mt-1 text-xs leading-relaxed text-text-secondary">
+                {item.hint}
+              </p>
             ) : null}
           </dd>
         </div>
@@ -342,8 +344,8 @@ function TextAreaField({
       />
       <p className="mt-1.5 text-xs text-text-muted">
         Mỗi dòng sẽ được lưu trực tiếp vào hồ sơ. Dùng{" "}
-        <code className="rounded bg-bg-tertiary px-1">- </code>
-        ở đầu dòng để tạo danh sách Markdown.
+        <code className="rounded bg-bg-tertiary px-1">- </code>ở đầu dòng để tạo
+        danh sách Markdown.
       </p>
     </div>
   );
@@ -390,7 +392,11 @@ function FormActions({
 }) {
   return (
     <div className="flex flex-wrap gap-2 border-t border-border-default pt-4">
-      <button type="submit" disabled={pending} className={primaryButtonClassName}>
+      <button
+        type="submit"
+        disabled={pending}
+        className={primaryButtonClassName}
+      >
         {pending ? "Đang lưu…" : "Lưu thay đổi"}
       </button>
       <button type="button" onClick={onCancel} className={ghostButtonClassName}>
@@ -425,11 +431,16 @@ function ProfileSection({
             {title}
           </h2>
           <p className="mt-0.5 text-xs text-text-muted">
-            {description} · {completion.filled}/{completion.total} trường ({completion.percentage}%)
+            {description} · {completion.filled}/{completion.total} trường (
+            {completion.percentage}%)
           </p>
         </div>
         {!isEditing && onEdit ? (
-          <button type="button" onClick={onEdit} className={ghostButtonClassName}>
+          <button
+            type="button"
+            onClick={onEdit}
+            className={ghostButtonClassName}
+          >
             Chỉnh sửa
           </button>
         ) : null}
@@ -460,7 +471,10 @@ function LoadingSkeleton() {
                 "profile-field-skeleton-address",
                 "profile-field-skeleton-role",
               ].map((skeletonKey) => (
-                <div key={skeletonKey} className="h-10 animate-pulse rounded bg-bg-tertiary/70" />
+                <div
+                  key={skeletonKey}
+                  className="h-10 animate-pulse rounded bg-bg-tertiary/70"
+                />
               ))}
             </div>
           </div>
@@ -583,7 +597,8 @@ export default function UserProfilePage() {
     queryKey: ["profile", "full"],
     queryFn: authApi.getFullProfile,
     retry: (failureCount, err) => {
-      const status = (err as { response?: { status?: number } })?.response?.status;
+      const status = (err as { response?: { status?: number } })?.response
+        ?.status;
       if (status === 401) return false;
       return failureCount < 2;
     },
@@ -601,17 +616,23 @@ export default function UserProfilePage() {
     }
 
     setUser({
+      ...user,
       id: data.id,
       accountHandle: data.accountHandle,
       roleType: normalizeRoleType(data.roleType, user.roleType),
       requiresPasswordSetup: user.requiresPasswordSetup,
       avatarUrl: data.avatarUrl ?? null,
+      dataConsentAcceptedAt: data.dataConsentAcceptedAt ?? null,
+      dataConsentVersion: data.dataConsentVersion ?? null,
+      requiresStaffDataConsent: Boolean(data.requiresStaffDataConsent),
       staffRoles: data.staffInfo?.roles ?? [],
       hasStaffProfile: Boolean(data.staffInfo?.id),
       hasStudentProfile: Boolean(data.studentInfo?.id),
     });
 
-    void queryClient.invalidateQueries({ queryKey: ["staff", "self", "detail"] });
+    void queryClient.invalidateQueries({
+      queryKey: ["staff", "self", "detail"],
+    });
     if (data.staffInfo?.id) {
       void queryClient.invalidateQueries({
         queryKey: ["staff", "detail", data.staffInfo.id],
@@ -702,11 +723,16 @@ export default function UserProfilePage() {
   const requestVerifyEmailMutation = useMutation({
     mutationFn: () => authApi.resendVerificationEmail(),
     onSuccess: (data) => {
-      toast.success(data?.message ?? "Đã gửi email xác minh. Vui lòng kiểm tra hộp thư.");
+      toast.success(
+        data?.message ?? "Đã gửi email xác minh. Vui lòng kiểm tra hộp thư.",
+      );
     },
     onError: (err: unknown) => {
       const ax = err as { response?: { data?: { message?: string } } };
-      toast.error(ax.response?.data?.message ?? "Không gửi được yêu cầu xác minh. Thử lại sau.");
+      toast.error(
+        ax.response?.data?.message ??
+          "Không gửi được yêu cầu xác minh. Thử lại sau.",
+      );
     },
   });
 
@@ -802,7 +828,8 @@ export default function UserProfilePage() {
   }
 
   if (isError || !profile) {
-    const status = (error as { response?: { status?: number } })?.response?.status;
+    const status = (error as { response?: { status?: number } })?.response
+      ?.status;
     return <ErrorState status={status} />;
   }
 
@@ -813,6 +840,15 @@ export default function UserProfilePage() {
   const hasStoredAvatar = Boolean(storedAvatarPath || profile.avatarUrl);
   const avatarBusy =
     uploadAvatarMutation.isPending || deleteAvatarMutation.isPending;
+  const staffDataConsentComplete =
+    !profile.staffInfo ||
+    Boolean(
+      profile.dataConsentAcceptedAt &&
+      profile.requiresStaffDataConsent !== true,
+    );
+  const dataConsentCompletion = profile.staffInfo
+    ? getCompletionStats([staffDataConsentComplete])
+    : null;
 
   const accountCompletion = getCompletionStats([
     storedAvatarPath ?? profile.avatarUrl,
@@ -826,35 +862,36 @@ export default function UserProfilePage() {
 
   const staffCompletion = profile.staffInfo
     ? getCompletionStats([
-      displayName(profile),
-      profile.staffInfo.birthDate,
-      profile.staffInfo.university,
-      profile.staffInfo.highSchool,
-      profile.staffInfo.specialization,
-      profile.staffInfo.bankAccount,
-      profile.staffInfo.bankQrLink,
-      profile.staffInfo.cccdNumber,
-      profile.staffInfo.cccdIssuedDate,
-      profile.staffInfo.cccdIssuedPlace,
-      profile.staffInfo.cccdFrontPath ?? profile.staffInfo.cccdFrontUrl,
-      profile.staffInfo.cccdBackPath ?? profile.staffInfo.cccdBackUrl,
-    ])
+        displayName(profile),
+        profile.staffInfo.birthDate,
+        profile.staffInfo.university,
+        profile.staffInfo.highSchool,
+        profile.staffInfo.specialization,
+        profile.staffInfo.bankAccount,
+        profile.staffInfo.bankQrLink,
+        profile.staffInfo.cccdNumber,
+        profile.staffInfo.cccdIssuedDate,
+        profile.staffInfo.cccdIssuedPlace,
+        profile.staffInfo.cccdFrontPath ?? profile.staffInfo.cccdFrontUrl,
+        profile.staffInfo.cccdBackPath ?? profile.staffInfo.cccdBackUrl,
+        staffDataConsentComplete,
+      ])
     : null;
 
   const studentCompletion = profile.studentInfo
     ? getCompletionStats([
-      profile.studentInfo.fullName,
-      profile.studentInfo.email,
-      profile.studentInfo.school,
-      profile.studentInfo.province,
-      profile.studentInfo.birthYear,
-      profile.studentInfo.parentName,
-      profile.studentInfo.parentPhone,
-      profile.studentInfo.parentEmail,
-      profile.studentInfo.gender,
-      profile.studentInfo.goal,
-      profile.studentInfo.status,
-    ])
+        profile.studentInfo.fullName,
+        profile.studentInfo.email,
+        profile.studentInfo.school,
+        profile.studentInfo.province,
+        profile.studentInfo.birthYear,
+        profile.studentInfo.parentName,
+        profile.studentInfo.parentPhone,
+        profile.studentInfo.parentEmail,
+        profile.studentInfo.gender,
+        profile.studentInfo.goal,
+        profile.studentInfo.status,
+      ])
     : null;
 
   const allProfileValues: Array<unknown> = [
@@ -880,7 +917,8 @@ export default function UserProfilePage() {
       profile.staffInfo.cccdIssuedDate,
       profile.staffInfo.cccdIssuedPlace,
       profile.staffInfo.cccdFrontPath ?? profile.staffInfo.cccdFrontUrl,
-      profile.staffInfo.cccdBackPath ?? profile.staffInfo.cccdBackUrl
+      profile.staffInfo.cccdBackPath ?? profile.staffInfo.cccdBackUrl,
+      staffDataConsentComplete,
     );
   }
 
@@ -896,7 +934,7 @@ export default function UserProfilePage() {
       profile.studentInfo.parentEmail,
       profile.studentInfo.gender,
       profile.studentInfo.goal,
-      profile.studentInfo.status
+      profile.studentInfo.status,
     );
   }
 
@@ -911,25 +949,32 @@ export default function UserProfilePage() {
     },
     ...(profile.staffInfo
       ? [
-        {
-          id: "profile-staff",
-          label: "Nhân sự",
-          description: "Hồ sơ học vấn, chuyên môn và thông tin thanh toán.",
-          completion: staffCompletion!,
-          tone: "success" as const,
-        },
-      ]
+          {
+            id: "profile-staff",
+            label: "Nhân sự",
+            description: "Hồ sơ học vấn, chuyên môn và thông tin thanh toán.",
+            completion: staffCompletion!,
+            tone: "success" as const,
+          },
+          {
+            id: "profile-data-consent",
+            label: "Dữ liệu",
+            description: "Xác nhận thu thập và xử lý dữ liệu cá nhân.",
+            completion: dataConsentCompletion!,
+            tone: "warning" as const,
+          },
+        ]
       : []),
     ...(profile.studentInfo
       ? [
-        {
-          id: "profile-student",
-          label: "Học viên",
-          description: "Thông tin học tập, phụ huynh và mục tiêu cá nhân.",
-          completion: studentCompletion!,
-          tone: "warning" as const,
-        },
-      ]
+          {
+            id: "profile-student",
+            label: "Học viên",
+            description: "Thông tin học tập, phụ huynh và mục tiêu cá nhân.",
+            completion: studentCompletion!,
+            tone: "warning" as const,
+          },
+        ]
       : []),
   ];
 
@@ -937,7 +982,8 @@ export default function UserProfilePage() {
     !hasStoredAvatar && {
       label: "Thêm avatar cá nhân",
       href: "#profile-account",
-      detail: "Avatar sẽ xuất hiện ở trang hồ sơ, navbar và menu điều hướng theo vai trò.",
+      detail:
+        "Avatar sẽ xuất hiện ở trang hồ sơ, navbar và menu điều hướng theo vai trò.",
     },
     !profile.phone && {
       label: "Bổ sung số điện thoại",
@@ -949,16 +995,18 @@ export default function UserProfilePage() {
       href: "#profile-account",
       detail: "Hữu ích cho phân nhóm lớp, khu vực học và báo cáo vận hành.",
     },
-    profile.staffInfo && !profile.staffInfo.bankAccount && {
-      label: "Thêm tài khoản ngân hàng",
-      href: "#profile-staff",
-      detail: "Cần thiết để hoàn thiện luồng thanh toán cho nhân sự.",
-    },
-    profile.staffInfo && !profile.staffInfo.cccdNumber && {
-      label: "Điền số CCCD",
-      href: "#profile-staff",
-      detail: "Thông tin định danh là bắt buộc để hoàn tất hồ sơ nhân sự.",
-    },
+    profile.staffInfo &&
+      !profile.staffInfo.bankAccount && {
+        label: "Thêm tài khoản ngân hàng",
+        href: "#profile-staff",
+        detail: "Cần thiết để hoàn thiện luồng thanh toán cho nhân sự.",
+      },
+    profile.staffInfo &&
+      !profile.staffInfo.cccdNumber && {
+        label: "Điền số CCCD",
+        href: "#profile-staff",
+        detail: "Thông tin định danh là bắt buộc để hoàn tất hồ sơ nhân sự.",
+      },
     profile.staffInfo &&
       !(profile.staffInfo.cccdFrontPath ?? profile.staffInfo.cccdFrontUrl) && {
         label: "Tải ảnh CCCD mặt trước",
@@ -971,21 +1019,33 @@ export default function UserProfilePage() {
         href: "#profile-staff",
         detail: "Ảnh CCCD mặt sau dùng cho bước xác minh hồ sơ nhân sự.",
       },
-    profile.staffInfo && !profile.staffInfo.specialization && {
-      label: "Điền chuyên ngành",
-      href: "#profile-staff",
-      detail: "Làm rõ năng lực chuyên môn và thuận tiện khi phân công công việc.",
-    },
-    profile.studentInfo && !profile.studentInfo.goal && {
-      label: "Xác định mục tiêu học tập",
-      href: "#profile-student",
-      detail: "Giúp giáo viên và phụ huynh theo dõi tiến độ theo đúng kỳ vọng.",
-    },
-    profile.studentInfo && !profile.studentInfo.parentPhone && {
-      label: "Bổ sung liên hệ phụ huynh",
-      href: "#profile-student",
-      detail: "Quan trọng cho nhắc lịch, phản hồi và xử lý các tình huống khẩn.",
-    },
+    profile.staffInfo &&
+      !profile.staffInfo.specialization && {
+        label: "Điền chuyên ngành",
+        href: "#profile-staff",
+        detail:
+          "Làm rõ năng lực chuyên môn và thuận tiện khi phân công công việc.",
+      },
+    profile.staffInfo &&
+      !staffDataConsentComplete && {
+        label: "Xác nhận điều khoản dữ liệu cá nhân",
+        href: "#profile-data-consent",
+        detail: "Đây là trường bắt buộc để hoàn tất hồ sơ nhân sự.",
+      },
+    profile.studentInfo &&
+      !profile.studentInfo.goal && {
+        label: "Xác định mục tiêu học tập",
+        href: "#profile-student",
+        detail:
+          "Giúp giáo viên và phụ huynh theo dõi tiến độ theo đúng kỳ vọng.",
+      },
+    profile.studentInfo &&
+      !profile.studentInfo.parentPhone && {
+        label: "Bổ sung liên hệ phụ huynh",
+        href: "#profile-student",
+        detail:
+          "Quan trọng cho nhắc lịch, phản hồi và xử lý các tình huống khẩn.",
+      },
   ].filter(Boolean) as Array<{ label: string; href: string; detail: string }>;
 
   const profileSubtitle = profile.studentInfo
@@ -1040,117 +1100,120 @@ export default function UserProfilePage() {
 
   const staffDetails: DetailItem[] | null = profile.staffInfo
     ? [
-      {
-        label: "Họ tên tài khoản",
-        value: displayName(profile),
-        hint: "Tên chính thức của nhân sự được đồng bộ từ hồ sơ tài khoản.",
-      },
-      { label: "Số CCCD", value: profile.staffInfo.cccdNumber ?? "—" },
-      {
-        label: "Ngày cấp CCCD",
-        value: formatDate(profile.staffInfo.cccdIssuedDate),
-      },
-      {
-        label: "Nơi cấp CCCD",
-        value: profile.staffInfo.cccdIssuedPlace ?? "—",
-      },
-      { label: "Ngày sinh", value: formatDate(profile.staffInfo.birthDate) },
-      { label: "Trường đại học", value: profile.staffInfo.university ?? "—" },
-      { label: "Trường THPT", value: profile.staffInfo.highSchool ?? "—" },
-      {
-        label: "Chuyên ngành",
-        value: profile.staffInfo.specialization?.trim() ? (
-          <StaffSpecializationMarkdown
-            text={profile.staffInfo.specialization}
-            emptyFallback="—"
-          />
-        ) : (
-          "—"
-        ),
-        fullWidth: true,
-      },
-      { label: "Số tài khoản", value: profile.staffInfo.bankAccount ?? "—" },
-      {
-        label: "Link QR ngân hàng",
-        value: profile.staffInfo.bankQrLink ?? "—",
-        fullWidth: true,
-      },
-      {
-        label: "Minh chứng thành tích",
-        value: staffAchievementLink ? (
-          <a
-            href={staffAchievementLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-medium text-primary underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
-            title={staffAchievementLink}
-          >
-            Xem liên kết
-          </a>
-        ) : (
-          "—"
-        ),
-        fullWidth: true,
-        hint: "URL http(s) tới tài liệu minh chứng (ví dụ Google Drive).",
-      },
-      {
-        label: "Trạng thái",
-        value: humanizeToken(profile.staffInfo.status) ?? "—",
-      },
-      {
-        label: "Vai trò đảm nhiệm",
-        value: profile.staffInfo.roles?.length
-          ? profile.staffInfo.roles.map(humanizeToken).join(", ")
-          : "—",
-        fullWidth: true,
-      },
-    ]
+        {
+          label: "Họ tên tài khoản",
+          value: displayName(profile),
+          hint: "Tên chính thức của nhân sự được đồng bộ từ hồ sơ tài khoản.",
+        },
+        { label: "Số CCCD", value: profile.staffInfo.cccdNumber ?? "—" },
+        {
+          label: "Ngày cấp CCCD",
+          value: formatDate(profile.staffInfo.cccdIssuedDate),
+        },
+        {
+          label: "Nơi cấp CCCD",
+          value: profile.staffInfo.cccdIssuedPlace ?? "—",
+        },
+        { label: "Ngày sinh", value: formatDate(profile.staffInfo.birthDate) },
+        { label: "Trường đại học", value: profile.staffInfo.university ?? "—" },
+        { label: "Trường THPT", value: profile.staffInfo.highSchool ?? "—" },
+        {
+          label: "Chuyên ngành",
+          value: profile.staffInfo.specialization?.trim() ? (
+            <StaffSpecializationMarkdown
+              text={profile.staffInfo.specialization}
+              emptyFallback="—"
+            />
+          ) : (
+            "—"
+          ),
+          fullWidth: true,
+        },
+        { label: "Số tài khoản", value: profile.staffInfo.bankAccount ?? "—" },
+        {
+          label: "Link QR ngân hàng",
+          value: profile.staffInfo.bankQrLink ?? "—",
+          fullWidth: true,
+        },
+        {
+          label: "Minh chứng thành tích",
+          value: staffAchievementLink ? (
+            <a
+              href={staffAchievementLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-primary underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
+              title={staffAchievementLink}
+            >
+              Xem liên kết
+            </a>
+          ) : (
+            "—"
+          ),
+          fullWidth: true,
+          hint: "URL http(s) tới tài liệu minh chứng (ví dụ Google Drive).",
+        },
+        {
+          label: "Trạng thái",
+          value: humanizeToken(profile.staffInfo.status) ?? "—",
+        },
+        {
+          label: "Vai trò đảm nhiệm",
+          value: profile.staffInfo.roles?.length
+            ? profile.staffInfo.roles.map(humanizeToken).join(", ")
+            : "—",
+          fullWidth: true,
+        },
+      ]
     : null;
 
   const studentDetails: DetailItem[] | null = profile.studentInfo
     ? [
-      { label: "Họ tên", value: profile.studentInfo.fullName ?? "—" },
-      {
-        label: "Email",
-        value: (
-          <EmailVerificationInline
-            email={profile.studentInfo.email ?? ""}
-            verified={studentEmailVerifiedDisplay}
-            notApplicableMessage={studentEmailNotApplicableMessage}
-            onRequestVerify={() => requestVerifyEmailMutation.mutate()}
-            verifyPending={requestVerifyEmailMutation.isPending}
-          />
-        ),
-      },
-      { label: "Trường", value: profile.studentInfo.school ?? "—" },
-      {
-        label: "Tỉnh / Thành phố",
-        value: profile.studentInfo.province ?? "—",
-      },
-      { label: "Năm sinh", value: profile.studentInfo.birthYear ?? "—" },
-      {
-        label: "Phụ huynh",
-        value: profile.studentInfo.parentName ?? "—",
-        hint: profile.studentInfo.parentPhone
-          ? `Liên hệ: ${profile.studentInfo.parentPhone}`
-          : "Chưa có số điện thoại phụ huynh.",
-      },
-      {
-        label: "Email phụ huynh",
-        value: profile.studentInfo.parentEmail ?? "—",
-        hint: "Email phụ huynh nhận biên lai nạp ví SePay.",
-      },
-      { label: "Giới tính", value: getGenderLabel(profile.studentInfo.gender) },
-      {
-        label: "Trạng thái",
-        value: humanizeToken(profile.studentInfo.status),
-      },
-      {
-        label: "Mục tiêu học tập",
-        value: profile.studentInfo.goal ?? "—",
-        fullWidth: true,
-      },
-    ]
+        { label: "Họ tên", value: profile.studentInfo.fullName ?? "—" },
+        {
+          label: "Email",
+          value: (
+            <EmailVerificationInline
+              email={profile.studentInfo.email ?? ""}
+              verified={studentEmailVerifiedDisplay}
+              notApplicableMessage={studentEmailNotApplicableMessage}
+              onRequestVerify={() => requestVerifyEmailMutation.mutate()}
+              verifyPending={requestVerifyEmailMutation.isPending}
+            />
+          ),
+        },
+        { label: "Trường", value: profile.studentInfo.school ?? "—" },
+        {
+          label: "Tỉnh / Thành phố",
+          value: profile.studentInfo.province ?? "—",
+        },
+        { label: "Năm sinh", value: profile.studentInfo.birthYear ?? "—" },
+        {
+          label: "Phụ huynh",
+          value: profile.studentInfo.parentName ?? "—",
+          hint: profile.studentInfo.parentPhone
+            ? `Liên hệ: ${profile.studentInfo.parentPhone}`
+            : "Chưa có số điện thoại phụ huynh.",
+        },
+        {
+          label: "Email phụ huynh",
+          value: profile.studentInfo.parentEmail ?? "—",
+          hint: "Email phụ huynh nhận biên lai nạp ví SePay.",
+        },
+        {
+          label: "Giới tính",
+          value: getGenderLabel(profile.studentInfo.gender),
+        },
+        {
+          label: "Trạng thái",
+          value: humanizeToken(profile.studentInfo.status),
+        },
+        {
+          label: "Mục tiêu học tập",
+          value: profile.studentInfo.goal ?? "—",
+          fullWidth: true,
+        },
+      ]
     : null;
 
   return (
@@ -1185,7 +1248,10 @@ export default function UserProfilePage() {
             <ul className="mt-2 space-y-2 text-text-secondary">
               {missingItems.map((item) => (
                 <li key={item.label}>
-                  <Link href={item.href} className="font-medium text-text-primary hover:underline">
+                  <Link
+                    href={item.href}
+                    className="font-medium text-text-primary hover:underline"
+                  >
                     {item.label}
                   </Link>
                   <span className="text-text-muted">, {item.detail}</span>
@@ -1220,7 +1286,10 @@ export default function UserProfilePage() {
             </p>
 
             <div className="mt-6 flex w-full max-w-[260px] flex-col gap-3">
-              <Link href="/auth/forgot-password" className={secondaryPillClassName}>
+              <Link
+                href="/auth/forgot-password"
+                className={secondaryPillClassName}
+              >
                 Đặt lại mật khẩu
               </Link>
 
@@ -1245,7 +1314,9 @@ export default function UserProfilePage() {
                         disabled={avatarBusy}
                         className={primaryButtonClassName}
                       >
-                        {uploadAvatarMutation.isPending ? "Đang tải…" : "Lưu ảnh"}
+                        {uploadAvatarMutation.isPending
+                          ? "Đang tải…"
+                          : "Lưu ảnh"}
                       </button>
                       <button
                         type="button"
@@ -1268,7 +1339,9 @@ export default function UserProfilePage() {
                   ) : null}
                 </div>
                 {avatarFile ? (
-                  <p className="mt-1 truncate text-xs text-text-muted">{avatarFile.name}</p>
+                  <p className="mt-1 truncate text-xs text-text-muted">
+                    {avatarFile.name}
+                  </p>
                 ) : (
                   <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
                     JPEG, PNG, WebP · tối đa 5MB
@@ -1370,8 +1443,8 @@ export default function UserProfilePage() {
                         <span className="font-medium text-text-primary">
                           Thông tin chung
                         </span>
-                        . Nếu cần đổi tên hiển thị, hãy cập nhật `Tên` và `Họ
-                        và tên đệm` ở phần đó.
+                        . Nếu cần đổi tên hiển thị, hãy cập nhật `Tên` và `Họ và
+                        tên đệm` ở phần đó.
                       </div>
                       <div className="grid gap-4 sm:grid-cols-2">
                         <TextField
@@ -1429,7 +1502,9 @@ export default function UserProfilePage() {
                             id="staff-specialization"
                             name="specialization"
                             label="Chuyên ngành"
-                            defaultValue={profile.staffInfo.specialization ?? ""}
+                            defaultValue={
+                              profile.staffInfo.specialization ?? ""
+                            }
                             placeholder={
                               "Thành tích cá nhân:\n- Giải Nhì HSG Quốc gia môn Tin học\n- Huy chương Bạc Olympic..."
                             }
@@ -1467,7 +1542,7 @@ export default function UserProfilePage() {
                             thành tích. Để trống để xóa liên kết.
                           </p>
                         </div>
-                        </div>
+                      </div>
 
                       <FormActions
                         pending={updateStaffMutation.isPending}
@@ -1518,108 +1593,128 @@ export default function UserProfilePage() {
                     <DetailRows items={staffDetails ?? []} />
                   )}
                 </ProfileSection>
+                <hr className="border-border-default" />
+                <ProfileSection
+                  id="profile-data-consent"
+                  title="Dữ liệu cá nhân"
+                  description="Điều khoản thu thập và xử lý dữ liệu"
+                  completion={dataConsentCompletion!}
+                  isEditing={false}
+                >
+                  <DataConsentSection
+                    profile={profile}
+                    onAccepted={(payload) =>
+                      syncFullProfile({
+                        ...profile,
+                        dataConsentAcceptedAt: payload.dataConsentAcceptedAt,
+                        dataConsentVersion: payload.dataConsentVersion,
+                        requiresStaffDataConsent: false,
+                      })
+                    }
+                  />
+                </ProfileSection>
               </>
             ) : null}
 
             {profile.studentInfo ? (
               <>
                 <hr className="border-border-default" />
-              <ProfileSection
-                id="profile-student"
-                title="Học viên"
-                description="Trường lớp, phụ huynh, mục tiêu"
-                completion={studentCompletion!}
-                isEditing={editStudent}
-                onEdit={() => setEditStudent(true)}
-              >
-                {editStudent ? (
-                  <form onSubmit={handleSubmitStudent} className="space-y-6">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <TextField
-                        id="student-full_name"
-                        name="full_name"
-                        label="Họ tên đầy đủ"
-                        defaultValue={profile.studentInfo.fullName ?? ""}
-                      />
-                      <TextField
-                        id="student-email"
-                        name="email"
-                        label="Email"
-                        type="email"
-                        defaultValue={profile.studentInfo.email ?? ""}
-                      />
-                      <TextField
-                        id="student-school"
-                        name="school"
-                        label="Trường"
-                        defaultValue={profile.studentInfo.school ?? ""}
-                      />
-                      <TextField
-                        id="student-province"
-                        name="province"
-                        label="Tỉnh / Thành phố"
-                        defaultValue={profile.studentInfo.province ?? ""}
-                      />
-                      <TextField
-                        id="student-birth_year"
-                        name="birth_year"
-                        label="Năm sinh"
-                        type="number"
-                        min={1900}
-                        max={new Date().getFullYear()}
-                        defaultValue={profile.studentInfo.birthYear ?? ""}
-                      />
-                      <SelectField
-                        id="student-gender"
-                        name="gender"
-                        label="Giới tính"
-                        defaultValue={profile.studentInfo.gender ?? "male"}
-                        options={[
-                          { value: "male", label: "Nam" },
-                          { value: "female", label: "Nữ" },
-                        ]}
-                      />
-                      <TextField
-                        id="student-parent_name"
-                        name="parent_name"
-                        label="Tên phụ huynh"
-                        defaultValue={profile.studentInfo.parentName ?? ""}
-                      />
-                      <TextField
-                        id="student-parent_phone"
-                        name="parent_phone"
-                        label="SĐT phụ huynh"
-                        type="tel"
-                        defaultValue={profile.studentInfo.parentPhone ?? ""}
-                      />
-                      <TextField
-                        id="student-parent_email"
-                        name="parent_email"
-                        label="Email phụ huynh"
-                        type="email"
-                        defaultValue={profile.studentInfo.parentEmail ?? ""}
-                        placeholder="parent@example.com"
-                      />
-                      <div className="sm:col-span-2">
+                <ProfileSection
+                  id="profile-student"
+                  title="Học viên"
+                  description="Trường lớp, phụ huynh, mục tiêu"
+                  completion={studentCompletion!}
+                  isEditing={editStudent}
+                  onEdit={() => setEditStudent(true)}
+                >
+                  {editStudent ? (
+                    <form onSubmit={handleSubmitStudent} className="space-y-6">
+                      <div className="grid gap-4 sm:grid-cols-2">
                         <TextField
-                          id="student-goal"
-                          name="goal"
-                          label="Mục tiêu học tập"
-                          defaultValue={profile.studentInfo.goal ?? ""}
-                          placeholder="Ví dụ: 7.5 IELTS hoặc đỗ chuyên Tin"
+                          id="student-full_name"
+                          name="full_name"
+                          label="Họ tên đầy đủ"
+                          defaultValue={profile.studentInfo.fullName ?? ""}
                         />
+                        <TextField
+                          id="student-email"
+                          name="email"
+                          label="Email"
+                          type="email"
+                          defaultValue={profile.studentInfo.email ?? ""}
+                        />
+                        <TextField
+                          id="student-school"
+                          name="school"
+                          label="Trường"
+                          defaultValue={profile.studentInfo.school ?? ""}
+                        />
+                        <TextField
+                          id="student-province"
+                          name="province"
+                          label="Tỉnh / Thành phố"
+                          defaultValue={profile.studentInfo.province ?? ""}
+                        />
+                        <TextField
+                          id="student-birth_year"
+                          name="birth_year"
+                          label="Năm sinh"
+                          type="number"
+                          min={1900}
+                          max={new Date().getFullYear()}
+                          defaultValue={profile.studentInfo.birthYear ?? ""}
+                        />
+                        <SelectField
+                          id="student-gender"
+                          name="gender"
+                          label="Giới tính"
+                          defaultValue={profile.studentInfo.gender ?? "male"}
+                          options={[
+                            { value: "male", label: "Nam" },
+                            { value: "female", label: "Nữ" },
+                          ]}
+                        />
+                        <TextField
+                          id="student-parent_name"
+                          name="parent_name"
+                          label="Tên phụ huynh"
+                          defaultValue={profile.studentInfo.parentName ?? ""}
+                        />
+                        <TextField
+                          id="student-parent_phone"
+                          name="parent_phone"
+                          label="SĐT phụ huynh"
+                          type="tel"
+                          defaultValue={profile.studentInfo.parentPhone ?? ""}
+                        />
+                        <TextField
+                          id="student-parent_email"
+                          name="parent_email"
+                          label="Email phụ huynh"
+                          type="email"
+                          defaultValue={profile.studentInfo.parentEmail ?? ""}
+                          placeholder="parent@example.com"
+                        />
+                        <div className="sm:col-span-2">
+                          <TextField
+                            id="student-goal"
+                            name="goal"
+                            label="Mục tiêu học tập"
+                            defaultValue={profile.studentInfo.goal ?? ""}
+                            placeholder="Ví dụ: 7.5 IELTS hoặc đỗ chuyên Tin"
+                          />
+                        </div>
                       </div>
-                    </div>
 
-                    <FormActions
-                      pending={updateStudentMutation.isPending}
-                      onCancel={() => setEditStudent(false)}
-                    />
-                  </form>
-                ) : (
-                  <DetailRows items={studentDetails ?? []} />
-                )}
-              </ProfileSection>
+                      <FormActions
+                        pending={updateStudentMutation.isPending}
+                        onCancel={() => setEditStudent(false)}
+                      />
+                    </form>
+                  ) : (
+                    <DetailRows items={studentDetails ?? []} />
+                  )}
+                </ProfileSection>
               </>
             ) : null}
           </div>

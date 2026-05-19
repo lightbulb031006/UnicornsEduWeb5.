@@ -8,7 +8,6 @@ export type StaffShellRouteFlags = {
   isDashboardRoute: boolean;
   isAssistantDashboardRoute: boolean;
   isProfileRoute: boolean;
-  isDataConsentRoute: boolean;
   isAssistantUsersRoute: boolean;
   isAssistantStaffsRoute: boolean;
   isStaffClassesRoute: boolean;
@@ -131,7 +130,6 @@ function resolveStaffShellRouteFlags(pathname: string): StaffShellRouteFlags {
   const isDashboardRoute = pathname === "/staff";
   const isAssistantDashboardRoute = pathname === "/staff/dashboard";
   const isProfileRoute = pathname === "/staff/profile";
-  const isDataConsentRoute = pathname === "/staff/data-consent";
   const isAssistantUsersRoute = pathname.startsWith("/staff/users");
   const isAssistantStaffsRoute = pathname.startsWith("/staff/staffs");
   const isStaffClassesRoute = pathname.startsWith("/staff/classes");
@@ -186,7 +184,6 @@ function resolveStaffShellRouteFlags(pathname: string): StaffShellRouteFlags {
     isDashboardRoute,
     isAssistantDashboardRoute,
     isProfileRoute,
-    isDataConsentRoute,
     isAssistantUsersRoute,
     isAssistantStaffsRoute,
     isStaffClassesRoute,
@@ -242,17 +239,17 @@ export function resolveStaffShellRouteAccess(
   const hasStaffWorkspaceAccess =
     hasStaffProfile || canBypassStaffProfileRequirement;
 
-  const isAllowed = flags.isDataConsentRoute
-    ? hasStaffProfile && isStaffOrAdmin
-    : flags.isDashboardRoute ||
-        flags.isProfileRoute ||
-        flags.isNotesSubjectRoute ||
-        flags.isStaffNotificationRoute
+  const isAllowed =
+    flags.isDashboardRoute ||
+    flags.isProfileRoute ||
+    flags.isNotesSubjectRoute ||
+    flags.isStaffNotificationRoute
       ? hasStaffWorkspaceAccess && isStaffOrAdmin
       : hasStaffWorkspaceAccess && isStaffOrAdmin && isAdmin
         ? true
         : flags.isStaffCalendarRoute
-          ? hasStaffWorkspaceAccess && (isAdmin || isAssistantStaff || isTeacher)
+          ? hasStaffWorkspaceAccess &&
+            (isAdmin || isAssistantStaff || isTeacher)
           : flags.isStaffClassesRoute
             ? isAssistantStaff ||
               (hasStaffWorkspaceAccess && isStaffOrAdmin && isAccountant) ||
@@ -275,49 +272,51 @@ export function resolveStaffShellRouteAccess(
                     ? hasStaffWorkspaceAccess &&
                       isStaffOrAdmin &&
                       lessonWorkspace.canAccessWorkspace
-                  : flags.isAssistantStaffsRoute
-                    ? isAssistantStaff ||
-                      (hasStaffWorkspaceAccess && isStaffOrAdmin && isAccountant)
-                    : flags.isAssistantAdminLikeRoute
-                      ? isAssistantStaff
-                      : flags.isCustomerCareSelfRoute
-                        ? flags.isCustomerCareAdminRoute
-                          ? isAssistantStaff
-                          : hasStaffWorkspaceAccess &&
-                            isStaffOrAdmin &&
-                            isCustomerCare
-                        : flags.isAssistantSelfRoute
-                          ? hasStaffWorkspaceAccess &&
-                            isStaffOrAdmin &&
-                            (isAssistant || isAssistantStaff)
-                          : flags.isAccountantSelfRoute
+                    : flags.isAssistantStaffsRoute
+                      ? isAssistantStaff ||
+                        (hasStaffWorkspaceAccess &&
+                          isStaffOrAdmin &&
+                          isAccountant)
+                      : flags.isAssistantAdminLikeRoute
+                        ? isAssistantStaff
+                        : flags.isCustomerCareSelfRoute
+                          ? flags.isCustomerCareAdminRoute
+                            ? isAssistantStaff
+                            : hasStaffWorkspaceAccess &&
+                              isStaffOrAdmin &&
+                              isCustomerCare
+                          : flags.isAssistantSelfRoute
                             ? hasStaffWorkspaceAccess &&
                               isStaffOrAdmin &&
-                              (isAccountant || isAssistantStaff)
-                            : flags.isCommunicationSelfRoute
+                              (isAssistant || isAssistantStaff)
+                            : flags.isAccountantSelfRoute
                               ? hasStaffWorkspaceAccess &&
                                 isStaffOrAdmin &&
-                                (isCommunication || isAssistantStaff)
-                              : flags.isTechnicalSelfRoute
+                                (isAccountant || isAssistantStaff)
+                              : flags.isCommunicationSelfRoute
                                 ? hasStaffWorkspaceAccess &&
                                   isStaffOrAdmin &&
-                                  (isTechnical || isAssistantStaff)
-                                : flags.isLessonPlanLegacyRoute
+                                  (isCommunication || isAssistantStaff)
+                                : flags.isTechnicalSelfRoute
                                   ? hasStaffWorkspaceAccess &&
                                     isStaffOrAdmin &&
-                                    lessonWorkspace.canAccessWorkspace
-                                  : flags.isStaffLessonPlansTaskDetailRoute
+                                    (isTechnical || isAssistantStaff)
+                                  : flags.isLessonPlanLegacyRoute
                                     ? hasStaffWorkspaceAccess &&
                                       isStaffOrAdmin &&
-                                      lessonWorkspace.canAccessTaskDetail
-                                    : flags.isLessonPlanManageDetailsRoute
+                                      lessonWorkspace.canAccessWorkspace
+                                    : flags.isStaffLessonPlansTaskDetailRoute
                                       ? hasStaffWorkspaceAccess &&
                                         isStaffOrAdmin &&
-                                        lessonWorkspace.canAccessManageDetails
-                                      : flags.isLessonPlanSelfRoute
+                                        lessonWorkspace.canAccessTaskDetail
+                                      : flags.isLessonPlanManageDetailsRoute
                                         ? hasStaffWorkspaceAccess &&
                                           isStaffOrAdmin &&
-                                          (flags.isLessonPlanAdminDetailRoute
+                                          lessonWorkspace.canAccessManageDetails
+                                        : flags.isLessonPlanSelfRoute
+                                          ? hasStaffWorkspaceAccess &&
+                                            isStaffOrAdmin &&
+                                            (flags.isLessonPlanAdminDetailRoute
                                               ? isAssistantStaff
                                               : isLessonPlanner ||
                                                 isAssistantStaff)
