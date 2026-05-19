@@ -224,22 +224,15 @@ function reconcileScheduleRangesWithTeachers(
 ) {
   const validTeacherIds = new Set(teacherIds);
   const fallbackTeacherId = teacherIds.length === 1 ? teacherIds[0] : "";
-  let changed = false;
+  const nextRanges = scheduleRanges.filter(
+    (range) => !range.teacherId || validTeacherIds.has(range.teacherId),
+  );
 
-  const nextRanges = scheduleRanges.map((range) => {
-    if (range.teacherId && validTeacherIds.has(range.teacherId)) {
-      return range;
-    }
+  if (nextRanges.length > 0) {
+    return nextRanges;
+  }
 
-    if (range.teacherId === fallbackTeacherId) {
-      return range;
-    }
-
-    changed = true;
-    return { ...range, teacherId: fallbackTeacherId };
-  });
-
-  return changed ? nextRanges : scheduleRanges;
+  return [createScheduleRange(undefined, fallbackTeacherId)];
 }
 
 function buildSchedulePayload(

@@ -290,6 +290,75 @@ describe('ClassService', () => {
         },
       });
     });
+
+    it('removes fixed schedule slots owned by teachers removed from the class and syncs Google Calendar', async () => {
+      const oldSchedule = [
+        {
+          id: 'slot-removed',
+          dayOfWeek: 1,
+          from: '19:00:00',
+          to: '20:30:00',
+          teacherId: 'teacher-removed',
+          googleCalendarEventId: 'google-removed',
+          meetLink: 'https://meet.google.com/removed',
+        },
+        {
+          id: 'slot-kept',
+          dayOfWeek: 3,
+          from: '18:00:00',
+          to: '19:30:00',
+          teacherId: 'teacher-kept',
+          googleCalendarEventId: 'google-kept',
+          meetLink: 'https://meet.google.com/kept',
+        },
+      ];
+      mockPrisma.class.findUnique.mockResolvedValue({
+        id: 'class-1',
+        name: 'Math 10A',
+        schedule: oldSchedule,
+        allowancePerSessionPerStudent: 120000,
+      });
+      mockTx.classTeacher.findMany.mockResolvedValue([
+        {
+          teacherId: 'teacher-removed',
+          operatingDeductionRatePercent: 0,
+        },
+        {
+          teacherId: 'teacher-kept',
+          operatingDeductionRatePercent: 5,
+        },
+      ]);
+
+      await service.updateClassTeachers('class-1', {
+        teachers: [
+          {
+            teacher_id: 'teacher-kept',
+            operating_deduction_rate_percent: 5,
+          },
+        ],
+      });
+
+      expect(mockTx.class.update).toHaveBeenCalledWith({
+        where: { id: 'class-1' },
+        data: {
+          schedule: [
+            {
+              id: 'slot-kept',
+              dayOfWeek: 3,
+              from: '18:00:00',
+              to: '19:30:00',
+              teacherId: 'teacher-kept',
+              googleCalendarEventId: 'google-kept',
+              meetLink: 'https://meet.google.com/kept',
+            },
+          ],
+        },
+      });
+      expect(mockCalendarService.syncScheduleWithCalendar).toHaveBeenCalledWith(
+        'class-1',
+        oldSchedule,
+      );
+    });
   });
 
   describe('updateClassSchedule', () => {

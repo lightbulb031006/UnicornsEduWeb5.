@@ -253,6 +253,7 @@ export class ClassService {
       dayOfWeek?: number;
       from?: string;
       to?: string;
+      end?: string;
       teacherId?: string;
       googleCalendarEventId?: string;
       meetLink?: string;
@@ -264,7 +265,7 @@ export class ClassService {
         ? { dayOfWeek: entry.dayOfWeek }
         : {}),
       ...(entry.from ? { from: entry.from } : {}),
-      ...(entry.to ? { to: entry.to } : {}),
+      ...(entry.to || entry.end ? { to: entry.to ?? entry.end } : {}),
       ...(entry.teacherId ? { teacherId: entry.teacherId } : {}),
       ...(entry.googleCalendarEventId
         ? { googleCalendarEventId: entry.googleCalendarEventId }
@@ -300,6 +301,34 @@ export class ClassService {
         meetLink: existingEntry?.meetLink,
       };
     });
+  }
+
+  private removeScheduleEntriesForTeachers(
+    schedule: Prisma.JsonValue | null | undefined,
+    removedTeacherIds: Set<string>,
+  ): {
+    oldSchedule: StoredClassScheduleEntry[];
+    nextSchedule: StoredClassScheduleEntry[];
+    removedScheduleEntries: number;
+  } {
+    const oldSchedule = this.getStoredClassScheduleEntries(schedule);
+    if (removedTeacherIds.size === 0) {
+      return {
+        oldSchedule,
+        nextSchedule: oldSchedule,
+        removedScheduleEntries: 0,
+      };
+    }
+
+    const nextSchedule = oldSchedule.filter(
+      (entry) => !entry.teacherId || !removedTeacherIds.has(entry.teacherId),
+    );
+
+    return {
+      oldSchedule,
+      nextSchedule,
+      removedScheduleEntries: oldSchedule.length - nextSchedule.length,
+    };
   }
 
   private ensureScheduleEntryIds(
@@ -910,7 +939,7 @@ export class ClassService {
   async updateClass(data: UpdateClassDto, auditActor?: ActionHistoryActor) {
     const existingClass = await this.prisma.class.findUnique({
       where: { id: data.id },
-      select: { id: true },
+      select: { id: true, schedule: true },
     });
 
     if (!existingClass) {
@@ -923,7 +952,7 @@ export class ClassService {
       );
     }
 
-    return await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, data.id)
         : null;
@@ -931,6 +960,10 @@ export class ClassService {
         data.teachers !== undefined || data.teacher_ids !== undefined
           ? this.getTeacherPayload(data)
           : null;
+      let prunedSchedule: Prisma.InputJsonValue | undefined;
+      let removedScheduleEntries = 0;
+      let oldSchedule: StoredClassScheduleEntry[] = [];
+      let removedTeacherIds: string[] = [];
 
       if (teacherPayload !== null) {
         const existingTeachers = await tx.classTeacher.findMany({
@@ -946,6 +979,26 @@ export class ClassService {
             normalizeRatePercent(teacher.operatingDeductionRatePercent),
           ]),
         );
+        const nextTeacherIds = new Set(
+          teacherPayload.map((teacher) => teacher.teacherId),
+        );
+        const removedTeacherIdSet = new Set(
+          existingTeachers
+            .map((teacher) => teacher.teacherId)
+            .filter((teacherId) => !nextTeacherIds.has(teacherId)),
+        );
+        const scheduleRemoval = this.removeScheduleEntriesForTeachers(
+          existingClass.schedule,
+          removedTeacherIdSet,
+        );
+        oldSchedule = scheduleRemoval.oldSchedule;
+        removedScheduleEntries = scheduleRemoval.removedScheduleEntries;
+        removedTeacherIds = Array.from(removedTeacherIdSet);
+        if (removedScheduleEntries > 0) {
+          prunedSchedule = this.serializeStoredClassScheduleEntries(
+            scheduleRemoval.nextSchedule,
+          );
+        }
 
         await tx.classTeacher.deleteMany({
           where: { classId: data.id },
@@ -1057,7 +1110,7 @@ export class ClassService {
             data.max_allowance_per_session,
           ),
           scaleAmount: data.scale_amount,
-          schedule: data.schedule as Prisma.InputJsonValue | undefined,
+          schedule: prunedSchedule,
           studentTuitionPerSession: data.student_tuition_per_session,
           tuitionPackageTotal: data.tuition_package_total,
           tuitionPackageSession: data.tuition_package_session,
@@ -1099,12 +1152,29 @@ export class ClassService {
       }
 
       return {
-        ...updatedClass,
-        teachers: classRecord.map((record) =>
-          this.mapTeacherAssignment(record),
-        ),
+        response: {
+          ...updatedClass,
+          teachers: classRecord.map((record) =>
+            this.mapTeacherAssignment(record),
+          ),
+        },
+        removedScheduleEntries,
+        oldSchedule,
+        removedTeacherIds,
       };
     });
+
+    if (result.removedScheduleEntries > 0) {
+      this.logger.log(
+        `[ClassService] Removed fixed schedule slots for removed teachers in class ${data.id}: removedScheduleEntries=${result.removedScheduleEntries}, removedTeacherIds=${result.removedTeacherIds.join(',')}`,
+      );
+      await this.calendarService.syncScheduleWithCalendar(
+        data.id,
+        result.oldSchedule,
+      );
+    }
+
+    return result.response;
   }
 
   async updateClassBasicInfo(
@@ -1189,7 +1259,7 @@ export class ClassService {
   ) {
     const existing = await this.prisma.class.findUnique({
       where: { id },
-      select: { id: true, allowancePerSessionPerStudent: true },
+      select: { id: true, allowancePerSessionPerStudent: true, schedule: true },
     });
     if (!existing) {
       throw new NotFoundException('Class not found');
@@ -1206,7 +1276,7 @@ export class ClassService {
       ),
     }));
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, id)
         : null;
@@ -1222,6 +1292,14 @@ export class ClassService {
           teacher.teacherId,
           normalizeRatePercent(teacher.operatingDeductionRatePercent),
         ]),
+      );
+      const nextTeacherIds = new Set(
+        teacherPayload.map((teacher) => teacher.teacherId),
+      );
+      const removedTeacherIds = new Set(
+        existingTeachers
+          .map((teacher) => teacher.teacherId)
+          .filter((teacherId) => !nextTeacherIds.has(teacherId)),
       );
       await tx.classTeacher.deleteMany({
         where: { classId: id },
@@ -1253,6 +1331,21 @@ export class ClassService {
         );
       }
 
+      const { oldSchedule, nextSchedule, removedScheduleEntries } =
+        this.removeScheduleEntriesForTeachers(
+          existing.schedule,
+          removedTeacherIds,
+        );
+
+      if (removedScheduleEntries > 0) {
+        await tx.class.update({
+          where: { id },
+          data: {
+            schedule: this.serializeStoredClassScheduleEntries(nextSchedule),
+          },
+        });
+      }
+
       const afterValue = await this.getClassAuditSnapshot(tx, id);
       if (!afterValue) {
         throw new NotFoundException('Class not found');
@@ -1269,8 +1362,25 @@ export class ClassService {
         });
       }
 
-      return afterValue;
+      return {
+        afterValue,
+        removedScheduleEntries,
+        oldSchedule,
+        removedTeacherIds: Array.from(removedTeacherIds),
+      };
     });
+
+    if (result.removedScheduleEntries > 0) {
+      this.logger.log(
+        `[ClassService] Removed fixed schedule slots for removed teachers in class ${id}: removedScheduleEntries=${result.removedScheduleEntries}, removedTeacherIds=${result.removedTeacherIds.join(',')}`,
+      );
+      await this.calendarService.syncScheduleWithCalendar(
+        id,
+        result.oldSchedule,
+      );
+    }
+
+    return result.afterValue;
   }
 
   async updateClassSchedule(
