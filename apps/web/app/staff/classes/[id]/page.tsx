@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { PlusIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useCallback, useMemo, useState } from "react";
 import {
   keepPreviousData,
@@ -9,6 +9,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   ClassCard,
   ClassSurveyPanel,
@@ -33,10 +34,12 @@ import type {
   CreateClassSurveyPayload,
   UpdateClassSurveyPayload,
 } from "@/dtos/class-survey.dto";
+import type { ClassScheduleGoogleCalendarResyncSummary } from "@/dtos/class-schedule.dto";
 import type { SessionCreatePayload, SessionItem, SessionUpdatePayload } from "@/dtos/session.dto";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import * as staffOpsApi from "@/lib/apis/staff-ops.api";
 import { formatCurrency } from "@/lib/class.helpers";
+import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import { cn } from "@/lib/utils";
 
 const STATUS_LABELS: Record<ClassStatus, string> = {
@@ -66,6 +69,27 @@ function getTeacherRole(profile?: Awaited<ReturnType<typeof getFullProfile>> | n
   return (profile?.staffInfo?.roles ?? []).includes("teacher");
 }
 
+function getScheduleResyncToastMessage(
+  summary: ClassScheduleGoogleCalendarResyncSummary,
+): string {
+  if (summary.quotaLimited) {
+    return "Google Calendar đang giới hạn lượt ghi; đã dừng đồng bộ phần còn lại.";
+  }
+
+  const syncedCount =
+    summary.createdRecurringEvents + summary.updatedRecurringEvents;
+
+  if (summary.failedRecurringEvents > 0) {
+    return `Đã đồng bộ một phần: ${syncedCount} sự kiện, ${summary.failedRecurringEvents} lỗi.`;
+  }
+
+  if (summary.warnings.length > 0) {
+    return `Đã đồng bộ Google Calendar, có ${summary.warnings.length} cảnh báo.`;
+  }
+
+  return "Đã đồng bộ Google Calendar.";
+}
+
 const staffOpsKeys = {
   classList: () => ["staff-ops", "class", "list"] as const,
   classDetail: (classId: string) => ["staff-ops", "class", "detail", classId] as const,
@@ -74,6 +98,7 @@ const staffOpsKeys = {
   classSurveys: (classId: string, year: string, month: string) =>
     ["staff-ops", "surveys", "class", classId, year, month] as const,
   updateSchedule: (classId: string) => ["staff-ops", "class", "schedule", "update", classId] as const,
+  resyncSchedule: (classId: string) => ["staff-ops", "class", "schedule", "resync", classId] as const,
   createSession: (classId: string) => ["staff-ops", "sessions", "create", classId] as const,
   updateSession: (classId: string) => ["staff-ops", "sessions", "update", classId] as const,
 };
@@ -265,6 +290,11 @@ export default function StaffClassDetailPage() {
   const canManageMakeupSchedule = isAdmin;
   const canCreateMakeupSchedule =
     (isAdmin && teacherCount > 0) || (hasTeacherSelfServiceAccess && teacherAssignedToClass);
+  const canResyncSchedule =
+    isAdmin ||
+    (hasTeacherSelfServiceAccess &&
+      scheduleItems.some((item) => item.teacherId === actorStaffId));
+  const canResyncMakeupSchedule = isAdmin || hasTeacherSelfServiceAccess;
   const makeupTeacherMode = hasTeacherSelfServiceAccess ? "readOnly" : "select";
   const defaultMakeupTeacherId = hasTeacherSelfServiceAccess
     ? actorStaffId
@@ -313,6 +343,23 @@ export default function StaffClassDetailPage() {
     mutationFn: (payload: { schedule: ClassScheduleItem[] }) =>
       staffOpsApi.updateClassSchedule(id, payload),
     onSuccess: invalidateClassOpsQueries,
+  });
+
+  const resyncScheduleMutation = useMutation({
+    mutationKey: staffOpsKeys.resyncSchedule(id),
+    mutationFn: () => staffOpsApi.resyncClassScheduleGoogleCalendar(id),
+    onSuccess: async (result) => {
+      await Promise.all([
+        invalidateClassOpsQueries(),
+        invalidateCalendarScopedQueries(queryClient),
+      ]);
+      toast.success(getScheduleResyncToastMessage(result.data));
+    },
+    onError: (mutationError: Error) => {
+      toast.error(
+        mutationError.message || "Không đồng bộ được Google Calendar.",
+      );
+    },
   });
 
   const createSessionMutation = useMutation({
@@ -657,14 +704,35 @@ export default function StaffClassDetailPage() {
             className="flex-1"
             title="Khung giờ học"
             action={
-              canManageSchedule ? (
-                <button
-                  type="button"
-                  onClick={() => setSchedulePopupOpen(true)}
-                  className="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
-                >
-                  Chỉnh sửa
-                </button>
+              canManageSchedule || canResyncSchedule ? (
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                  {canResyncSchedule ? (
+                    <button
+                      type="button"
+                      onClick={() => resyncScheduleMutation.mutate()}
+                      disabled={resyncScheduleMutation.isPending}
+                      title="Đồng bộ Google Calendar"
+                      className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
+                    >
+                      <ArrowPathIcon
+                        className={`size-3.5 ${
+                          resyncScheduleMutation.isPending ? "animate-spin" : ""
+                        }`}
+                        aria-hidden
+                      />
+                      Đồng bộ Google
+                    </button>
+                  ) : null}
+                  {canManageSchedule ? (
+                    <button
+                      type="button"
+                      onClick={() => setSchedulePopupOpen(true)}
+                      className="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
+                    >
+                      Chỉnh sửa
+                    </button>
+                  ) : null}
+                </div>
               ) : null
             }
           >
@@ -806,12 +874,17 @@ export default function StaffClassDetailPage() {
           canCreate={canCreateMakeupSchedule}
           canEdit={canManageMakeupSchedule}
           canDelete={canManageMakeupSchedule}
+          canResync={canResyncMakeupSchedule}
+          canResyncEvent={(event) =>
+            isAdmin || (Boolean(actorStaffId) && event.teacherId === actorStaffId)
+          }
           disabledCreateMessage={makeupScheduleDisabledMessage}
           queryKeyPrefix={["staff-ops", "class", "detail", id]}
           listFn={staffOpsApi.getClassMakeupEvents}
           createFn={staffOpsApi.createClassMakeupEvent}
           updateFn={staffOpsApi.updateClassMakeupEvent}
           deleteFn={staffOpsApi.deleteClassMakeupEvent}
+          resyncFn={staffOpsApi.resyncClassMakeupGoogleCalendar}
         />
 
         <ClassCard

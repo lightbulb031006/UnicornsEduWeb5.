@@ -6,10 +6,15 @@ import {
   useReducedMotion,
   type Transition,
 } from "framer-motion";
-import { PlusIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useState, useMemo, useCallback } from "react";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import * as classApi from "@/lib/apis/class.api";
@@ -42,7 +47,9 @@ import {
   resolveAdminLikeRouteBase,
 } from "@/lib/admin-shell-paths";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
+import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import { cn } from "@/lib/utils";
+import type { ClassScheduleGoogleCalendarResyncSummary } from "@/dtos/class-schedule.dto";
 
 const STATUS_LABELS: Record<ClassStatus, string> = {
   running: "Đang chạy",
@@ -90,6 +97,27 @@ function getStudentEffectiveTuitionPerSession(student: ClassStudent): number {
 
 function isClassStudentActive(student: ClassStudent): boolean {
   return (student.status ?? "").toLowerCase() === "active";
+}
+
+function getScheduleResyncToastMessage(
+  summary: ClassScheduleGoogleCalendarResyncSummary,
+): string {
+  if (summary.quotaLimited) {
+    return "Google Calendar đang giới hạn lượt ghi; đã dừng đồng bộ phần còn lại.";
+  }
+
+  const syncedCount =
+    summary.createdRecurringEvents + summary.updatedRecurringEvents;
+
+  if (summary.failedRecurringEvents > 0) {
+    return `Đã đồng bộ một phần: ${syncedCount} sự kiện, ${summary.failedRecurringEvents} lỗi.`;
+  }
+
+  if (summary.warnings.length > 0) {
+    return `Đã đồng bộ Google Calendar, có ${summary.warnings.length} cảnh báo.`;
+  }
+
+  return "Đã đồng bộ Google Calendar.";
 }
 
 export default function AdminClassDetailPage() {
@@ -304,6 +332,22 @@ export default function AdminClassDetailPage() {
 
     setAddSessionPopupOpen(true);
   }, [activeClassStudents.length, isAdmin, popupTeachers.length]);
+
+  const resyncScheduleMutation = useMutation({
+    mutationFn: () => classApi.resyncClassScheduleGoogleCalendar(id),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["class", "detail", id] }),
+        invalidateCalendarScopedQueries(queryClient),
+      ]);
+      toast.success(getScheduleResyncToastMessage(result.data));
+    },
+    onError: (mutationError: Error) => {
+      toast.error(
+        mutationError.message || "Không đồng bộ được Google Calendar.",
+      );
+    },
+  });
 
   if (isLoading) {
     return (
@@ -546,13 +590,30 @@ export default function AdminClassDetailPage() {
             className="flex-1"
             title="Khung giờ học"
             action={
-              <button
-                type="button"
-                onClick={() => setSchedulePopupOpen(true)}
-                className="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
-              >
-                Chỉnh sửa
-              </button>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => resyncScheduleMutation.mutate()}
+                  disabled={resyncScheduleMutation.isPending}
+                  title="Đồng bộ Google Calendar"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
+                >
+                  <ArrowPathIcon
+                    className={`size-3.5 ${
+                      resyncScheduleMutation.isPending ? "animate-spin" : ""
+                    }`}
+                    aria-hidden
+                  />
+                  Đồng bộ Google
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSchedulePopupOpen(true)}
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
+                >
+                  Chỉnh sửa
+                </button>
+              </div>
             }
           >
             {scheduleItems.length > 0 ? (
@@ -822,12 +883,14 @@ export default function AdminClassDetailPage() {
           canCreate={canCreateMakeupSchedule}
           canEdit={canManageMakeupSchedule}
           canDelete={canManageMakeupSchedule}
+          canResync={isAdmin}
           disabledCreateMessage={makeupScheduleDisabledMessage}
           queryKeyPrefix={["class", "detail", id]}
           listFn={classApi.getClassMakeupEvents}
           createFn={classApi.createClassMakeupEvent}
           updateFn={classApi.updateClassMakeupEvent}
           deleteFn={classApi.deleteClassMakeupEvent}
+          resyncFn={classApi.resyncClassMakeupGoogleCalendar}
         />
 
         {/* Row 3: Lịch sử buổi học và khảo sát – 2 tab */}

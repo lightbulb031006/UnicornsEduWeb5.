@@ -16,8 +16,11 @@ import {
   UpdateClassTeachersPayload,
 } from '@/dtos/class.dto';
 import type {
+  ClassScheduleGoogleCalendarResyncSummary,
   ClassScopedMakeupScheduleEventPayload,
   ClassScopedMakeupScheduleEventUpdatePayload,
+  GoogleCalendarResyncResponse,
+  MakeupGoogleCalendarResyncSummary,
   MakeupScheduleEventRecord,
 } from "@/dtos/class-schedule.dto";
 import type {
@@ -259,6 +262,18 @@ export async function updateClassSchedule(
   return response.data;
 }
 
+export async function resyncClassScheduleGoogleCalendar(
+  id: string,
+): Promise<
+  GoogleCalendarResyncResponse<ClassScheduleGoogleCalendarResyncSummary>
+> {
+  const safeId = encodeURIComponent(id);
+  const response = await api.post<
+    GoogleCalendarResyncResponse<ClassScheduleGoogleCalendarResyncSummary>
+  >(`/class/${safeId}/schedule/google-calendar/resync`);
+  return response.data;
+}
+
 export async function updateClassStudents(
   id: string,
   data: UpdateClassStudentsPayload,
@@ -313,4 +328,16 @@ export async function deleteClassMakeupEvent(
   const safeClassId = encodeURIComponent(classId);
   const safeEventId = encodeURIComponent(eventId);
   await api.delete(`/class/${safeClassId}/makeup-events/${safeEventId}`);
+}
+
+export async function resyncClassMakeupGoogleCalendar(
+  classId: string,
+  eventId: string,
+): Promise<GoogleCalendarResyncResponse<MakeupGoogleCalendarResyncSummary>> {
+  const safeClassId = encodeURIComponent(classId);
+  const safeEventId = encodeURIComponent(eventId);
+  const response = await api.post<
+    GoogleCalendarResyncResponse<MakeupGoogleCalendarResyncSummary>
+  >(`/class/${safeClassId}/makeup-events/${safeEventId}/google-calendar/resync`);
+  return response.data;
 }

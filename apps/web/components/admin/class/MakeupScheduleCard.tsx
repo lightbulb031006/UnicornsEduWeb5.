@@ -2,9 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
 import type {
   ClassScopedMakeupScheduleEventPayload,
+  GoogleCalendarResyncResponse,
+  MakeupGoogleCalendarResyncSummary,
   MakeupScheduleEventRecord,
 } from "@/dtos/class-schedule.dto";
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
@@ -28,6 +31,8 @@ type MakeupScheduleCardProps = {
   canCreate?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
+  canResync?: boolean;
+  canResyncEvent?: (event: MakeupScheduleEventRecord) => boolean;
   disabledCreateMessage?: string;
   queryKeyPrefix: readonly unknown[];
   listFn: (
@@ -44,6 +49,10 @@ type MakeupScheduleCardProps = {
     payload: Partial<ClassScopedMakeupScheduleEventPayload>,
   ) => Promise<MakeupScheduleEventRecord>;
   deleteFn?: (classId: string, eventId: string) => Promise<void>;
+  resyncFn?: (
+    classId: string,
+    eventId: string,
+  ) => Promise<GoogleCalendarResyncResponse<MakeupGoogleCalendarResyncSummary>>;
 };
 
 type MakeupEditorState = {
@@ -101,6 +110,18 @@ function formatTimeLabel(timeValue?: string): string {
 
 function normalizeTimePayload(value: string): string {
   return value.length === 5 ? `${value}:00` : value;
+}
+
+function getMakeupResyncToastMessage(summary: MakeupGoogleCalendarResyncSummary): string {
+  if (summary.recoveredStaleEvent) {
+    return "Đã tạo lại sự kiện Google Calendar cho buổi bù.";
+  }
+
+  if (summary.warnings.length > 0) {
+    return `Đã đồng bộ Google Calendar, có ${summary.warnings.length} cảnh báo.`;
+  }
+
+  return "Đã đồng bộ Google Calendar.";
 }
 
 function buildInitialEditorState(options: {
@@ -353,12 +374,15 @@ export default function MakeupScheduleCard({
   canCreate = false,
   canEdit = false,
   canDelete = false,
+  canResync = false,
+  canResyncEvent,
   disabledCreateMessage,
   queryKeyPrefix,
   listFn,
   createFn,
   updateFn,
   deleteFn,
+  resyncFn,
 }: MakeupScheduleCardProps) {
   const queryClient = useQueryClient();
   const teacherNameById = useMemo(
@@ -467,8 +491,28 @@ export default function MakeupScheduleCard({
       toast.error(mutationError.message || "Không xóa được buổi bù.");
     },
   });
+  const resyncMutation = useMutation({
+    mutationFn: (eventId: string) => {
+      if (!resyncFn) {
+        throw new Error("Không có quyền đồng bộ Google Calendar.");
+      }
+      return resyncFn(classId, eventId);
+    },
+    onSuccess: async (result) => {
+      await invalidateAfterMutation();
+      toast.success(getMakeupResyncToastMessage(result.data));
+    },
+    onError: (mutationError: Error) => {
+      toast.error(
+        mutationError.message || "Không đồng bộ được Google Calendar.",
+      );
+    },
+  });
   const isSubmitting =
-    createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
+    createMutation.isPending ||
+    updateMutation.isPending ||
+    deleteMutation.isPending ||
+    resyncMutation.isPending;
 
   return (
     <ClassCard
@@ -584,19 +628,46 @@ export default function MakeupScheduleCard({
                     ) : null}
                   </div>
 
-                  {canEdit ? (
+                  {canEdit || canResync ? (
                     <div className="flex shrink-0 items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditorMode("edit");
-                          setEditingEvent(item);
-                          setIsEditorOpen(true);
-                        }}
-                        className="inline-flex items-center justify-center rounded-lg border border-border-default bg-bg-secondary px-3 py-2 text-xs font-semibold text-text-primary transition-colors hover:bg-bg-tertiary focus:outline-none focus:ring-2 focus:ring-border-focus"
-                      >
-                        Chỉnh sửa
-                      </button>
+                      {canResync &&
+                      resyncFn &&
+                      (canResyncEvent ? canResyncEvent(item) : true) ? (
+                        <button
+                          type="button"
+                          onClick={() => resyncMutation.mutate(item.id)}
+                          disabled={
+                            resyncMutation.isPending &&
+                            resyncMutation.variables === item.id
+                          }
+                          title="Đồng bộ Google Calendar"
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-default bg-bg-secondary px-3 py-2 text-xs font-semibold text-text-primary transition-colors hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-border-focus"
+                        >
+                          <ArrowPathIcon
+                            className={`size-3.5 ${
+                              resyncMutation.isPending &&
+                              resyncMutation.variables === item.id
+                                ? "animate-spin"
+                                : ""
+                            }`}
+                            aria-hidden
+                          />
+                          Đồng bộ Google
+                        </button>
+                      ) : null}
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditorMode("edit");
+                            setEditingEvent(item);
+                            setIsEditorOpen(true);
+                          }}
+                          className="inline-flex items-center justify-center rounded-lg border border-border-default bg-bg-secondary px-3 py-2 text-xs font-semibold text-text-primary transition-colors hover:bg-bg-tertiary focus:outline-none focus:ring-2 focus:ring-border-focus"
+                        >
+                          Chỉnh sửa
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

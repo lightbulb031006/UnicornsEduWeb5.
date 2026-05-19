@@ -100,3 +100,42 @@ export interface ClassScopedMakeupScheduleEventPayload {
 
 export type ClassScopedMakeupScheduleEventUpdatePayload =
   Partial<ClassScopedMakeupScheduleEventPayload>;
+
+export interface GoogleCalendarResyncWarning {
+  code: string;
+  message: string;
+  eventId?: string;
+  scheduleEntryId?: string;
+}
+
+export interface ClassScheduleGoogleCalendarResyncSummary {
+  classId: string;
+  scope: "class" | "teacher";
+  teacherId?: string;
+  deletedRecurringEvents: number;
+  createdRecurringEvents: number;
+  updatedRecurringEvents: number;
+  recoveredStaleRecurringEvents: number;
+  failedRecurringEvents: number;
+  skippedScheduleEntries: number;
+  skippedMissingTeacherId: number;
+  skippedUnownedScheduleEntries: number;
+  skippedAmbiguousGoogleEvents: number;
+  quotaLimited: boolean;
+  warnings: GoogleCalendarResyncWarning[];
+}
+
+export interface MakeupGoogleCalendarResyncSummary {
+  classId: string;
+  makeupEventId: string;
+  teacherId: string;
+  googleCalendarEventId?: string | null;
+  googleMeetLink?: string | null;
+  recoveredStaleEvent: boolean;
+  warnings: GoogleCalendarResyncWarning[];
+}
+
+export interface GoogleCalendarResyncResponse<TSummary> {
+  success: boolean;
+  data: TSummary;
+}
