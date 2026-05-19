@@ -7,6 +7,7 @@ import type { SyntheticEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import * as authApi from "@/lib/apis/auth.api";
+import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 
 function ResetPasswordForm() {
   const { push } = useRouter();
@@ -18,13 +19,19 @@ function ResetPasswordForm() {
   const noToken = token.length === 0;
 
   const resetPasswordMutation = useMutation({
-    mutationFn: (body: { token: string; password: string }) => authApi.resetPassword(body),
+    mutationFn: (body: { token: string; password: string }) =>
+      authApi.resetPassword(body),
     onSuccess: () => {
-      toast.success("Đặt lại mật khẩu thành công. Đang chuyển đến trang đăng nhập…");
+      toast.success(
+        "Đặt lại mật khẩu thành công. Đang chuyển đến trang đăng nhập…",
+      );
       setTimeout(() => push("/auth/login"), 2000);
     },
     onError: (err: unknown) => {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Link không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu link mới.";
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data
+          ?.message ??
+        "Link không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu link mới.";
       toast.error(msg);
     },
   });
@@ -47,10 +54,26 @@ function ResetPasswordForm() {
       <div className="min-h-screen flex items-center justify-center bg-bg-primary px-4">
         <div className="w-full max-w-md motion-fade-up">
           <div className="rounded-2xl border border-border-default bg-bg-surface p-8 shadow-lg text-center">
-            <p className="text-text-primary mb-4">Thiếu link đặt lại mật khẩu. Vui lòng dùng link trong email.</p>
-            <Link href="/auth/forgot-password" className="text-primary hover:text-primary-hover font-medium">Gửi lại link</Link>
+            <div className="mb-8 flex justify-center px-1">
+              <BrandLogoLockup
+                variant="auth"
+                className="max-w-full flex-wrap justify-center"
+                priority
+              />
+            </div>
+            <p className="text-text-primary mb-4">
+              Thiếu link đặt lại mật khẩu. Vui lòng dùng link trong email.
+            </p>
+            <Link
+              href="/auth/forgot-password"
+              className="text-primary hover:text-primary-hover font-medium"
+            >
+              Gửi lại link
+            </Link>
             <p className="mt-4">
-              <Link href="/auth/login" className="text-sm text-text-secondary">← Đăng nhập</Link>
+              <Link href="/auth/login" className="text-sm text-text-secondary">
+                ← Đăng nhập
+              </Link>
             </p>
           </div>
         </div>
@@ -62,6 +85,13 @@ function ResetPasswordForm() {
     <div className="min-h-screen flex items-center justify-center bg-bg-primary px-4">
       <div className="w-full max-w-md motion-fade-up">
         <div className="rounded-2xl border border-border-default bg-bg-surface p-8 shadow-lg motion-hover-lift">
+          <div className="mb-8 flex justify-center px-1">
+            <BrandLogoLockup
+              variant="auth"
+              className="max-w-full flex-wrap justify-center"
+              priority
+            />
+          </div>
           <h1 className="text-2xl font-semibold text-text-primary text-center mb-2">
             Đặt lại mật khẩu
           </h1>
@@ -71,7 +101,10 @@ function ResetPasswordForm() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="reset-password" className="block text-sm font-medium text-text-primary mb-1">
+              <label
+                htmlFor="reset-password"
+                className="block text-sm font-medium text-text-primary mb-1"
+              >
                 Mật khẩu mới
               </label>
               <input
@@ -87,7 +120,10 @@ function ResetPasswordForm() {
             </div>
 
             <div>
-              <label htmlFor="reset-confirm" className="block text-sm font-medium text-text-primary mb-1">
+              <label
+                htmlFor="reset-confirm"
+                className="block text-sm font-medium text-text-primary mb-1"
+              >
                 Xác nhận mật khẩu
               </label>
               <input
@@ -107,12 +143,17 @@ function ResetPasswordForm() {
               disabled={resetPasswordMutation.isPending}
               className="w-full rounded-lg bg-primary py-2.5 font-medium text-text-inverse hover:bg-primary-hover active:bg-primary-active focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 disabled:opacity-60 transition-colors duration-200"
             >
-              {resetPasswordMutation.isPending ? "Đang xử lý…" : "Đặt lại mật khẩu"}
+              {resetPasswordMutation.isPending
+                ? "Đang xử lý…"
+                : "Đặt lại mật khẩu"}
             </button>
           </form>
 
           <p className="mt-6 text-center">
-            <Link href="/auth/login" className="text-sm text-primary hover:text-primary-hover font-medium">
+            <Link
+              href="/auth/login"
+              className="text-sm text-primary hover:text-primary-hover font-medium"
+            >
               ← Quay lại đăng nhập
             </Link>
           </p>
@@ -124,11 +165,13 @@ function ResetPasswordForm() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-bg-primary">
-        <p className="text-text-muted">Đang tải…</p>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-bg-primary">
+          <p className="text-text-muted">Đang tải…</p>
+        </div>
+      }
+    >
       <ResetPasswordForm />
     </Suspense>
   );

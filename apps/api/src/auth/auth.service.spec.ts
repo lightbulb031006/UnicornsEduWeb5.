@@ -97,7 +97,8 @@ describe('AuthService', () => {
       access: {
         admin: { canAccess: adminTier !== null, tier: adminTier },
         staff: {
-          canAccess: (overrides.hasStaffProfile ?? false) || adminTier === 'full',
+          canAccess:
+            (overrides.hasStaffProfile ?? false) || adminTier === 'full',
           profileComplete: overrides.staffProfileComplete ?? false,
         },
         student: { canAccess: overrides.hasStudentProfile ?? false },
@@ -120,6 +121,61 @@ describe('AuthService', () => {
       authIdentityCacheService as never,
       authAccessService as never,
     );
+  });
+
+  it('signs forgot-password tokens against the current password version', async () => {
+    mockPrisma.user.findUnique.mockResolvedValueOnce({
+      id: 'user-1',
+      email: 'user@example.com',
+      emailVerified: true,
+      passwordHash: 'old-password-hash',
+    });
+
+    await expect(service.forgotPassword('user@example.com')).resolves.toEqual({
+      message:
+        'If the account exists and is verified, a password reset email will be sent.',
+    });
+
+    const [tokenPayload, tokenOptions] = jwtService.signAsync.mock
+      .calls[0] as unknown as [
+      {
+        email: string;
+        purpose: string;
+        passwordResetVersion?: unknown;
+      },
+      { secret?: string },
+    ];
+    expect(tokenPayload).toMatchObject({
+      email: 'user@example.com',
+      purpose: 'forgot-password',
+    });
+    expect(typeof tokenPayload.passwordResetVersion).toBe('string');
+    expect(tokenOptions).toEqual(
+      expect.objectContaining({
+        secret: 'JWT_FORGOT_PASSWORD_SECRET-value',
+      }),
+    );
+    expect(mailService.sendForgotPasswordEmail).toHaveBeenCalledWith(
+      'user@example.com',
+      'token',
+    );
+  });
+
+  it('rejects reset-password tokens issued before the current password hash', async () => {
+    jwtService.verifyAsync.mockResolvedValueOnce({
+      email: 'user@example.com',
+      purpose: 'forgot-password',
+      passwordResetVersion: 'stale-version',
+    });
+    mockPrisma.user.findUnique.mockResolvedValueOnce({
+      id: 'user-1',
+      passwordHash: 'current-password-hash',
+    });
+
+    await expect(
+      service.resetPassword('reset-token', 'new-secret-123'),
+    ).rejects.toThrow('Invalid or expired reset password token');
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('records action history after registering a new user', async () => {

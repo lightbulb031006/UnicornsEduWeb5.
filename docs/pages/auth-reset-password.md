@@ -8,10 +8,12 @@
 
 - Đọc `token` từ query string.
 - Nếu thiếu token: hiển thị state no-token hiện có (không đổi), gợi ý quay về forgot-password.
+- Cả state thiếu token và form reset hiển thị đầy đủ logo mark + tên **Unicorns Edu**.
 - Validation client-side:
   - Password và confirmPassword phải khớp.
   - Password tối thiểu 6 ký tự.
 - Submit gọi `authApi.resetPassword({ token, password })`.
+- Backend kiểm tra token còn khớp với trạng thái mật khẩu hiện tại; link cũ không dùng lại được sau khi mật khẩu đã được đổi.
 - Thành công: `toast.success(...)`, delay 2s rồi redirect `/auth/login`.
 
 ## Feedback UI

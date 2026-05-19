@@ -77,7 +77,7 @@ export function BrandLogoLockup({
       />
       <span
         className={cn(
-          "min-w-0 font-bold tracking-[-0.02em]",
+          "min-w-0 whitespace-nowrap font-bold tracking-normal",
           v.word,
           wordmarkClassName,
         )}

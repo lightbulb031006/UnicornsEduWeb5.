@@ -8,6 +8,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { createHash } from 'crypto';
 import type { Prisma } from '../../generated/client';
 import { UserRole } from 'generated/enums';
 import {
@@ -38,6 +39,7 @@ export interface TokenPair {
 interface EmailVerifyPayload {
   email: string;
   purpose: 'email-verify' | 'forgot-password';
+  passwordResetVersion?: string;
 }
 
 interface ProvisionUserOptions {
@@ -617,6 +619,7 @@ export class AuthService {
     const forgotPasswordToken = await this.generateEmailVerificationToken(
       user.email,
       'forgot-password',
+      this.getPasswordResetVersion(user.email, user.passwordHash),
     );
     try {
       await this.mailService.sendForgotPasswordEmail(
@@ -679,11 +682,18 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { email: payload.email },
-      select: { id: true },
+      select: { id: true, passwordHash: true },
     });
 
     if (!user) {
       throw new BadRequestException('User not found');
+    }
+
+    if (
+      payload.passwordResetVersion !==
+      this.getPasswordResetVersion(payload.email, user.passwordHash)
+    ) {
+      throw new BadRequestException('Invalid or expired reset password token');
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -834,14 +844,32 @@ export class AuthService {
   private async generateEmailVerificationToken(
     email: string,
     purpose: 'email-verify' | 'forgot-password',
+    passwordResetVersion?: string,
   ): Promise<string> {
-    const payload: EmailVerifyPayload = { email, purpose };
+    const payload: EmailVerifyPayload = {
+      email,
+      purpose,
+      ...(passwordResetVersion ? { passwordResetVersion } : {}),
+    };
     const tokenOptions =
       purpose === 'forgot-password'
         ? this.forgotPasswordTokenOptions
         : this.emailVerifyTokenOptions;
     const token = await this.jwtService.signAsync(payload, tokenOptions);
     return token;
+  }
+
+  private getPasswordResetVersion(
+    email: string,
+    passwordHash: string | null,
+  ): string {
+    return createHash('sha256')
+      .update(this.forgotPasswordSecret)
+      .update(':')
+      .update(email.trim().toLowerCase())
+      .update(':')
+      .update(passwordHash ?? 'no-password')
+      .digest('hex');
   }
 
   private async sendVerificationEmailOrThrow(

@@ -8,15 +8,13 @@ import { toast } from "sonner";
 import { createGuestUser, type UserInfoDto } from "@/dtos/Auth.dto";
 import { useAuth } from "@/context/AuthContext";
 import * as authApi from "@/lib/apis/auth.api";
+import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 import {
   readSafeNextPath,
   resolvePostLoginRedirect,
 } from "@/lib/auth-redirect";
 
-function hasAuthenticatedSession(user: {
-  id: string;
-  accountHandle: string;
-}) {
+function hasAuthenticatedSession(user: { id: string; accountHandle: string }) {
   return Boolean(user.id && user.accountHandle);
 }
 
@@ -73,15 +71,7 @@ function SetupPasswordPageContent() {
         fallbackUser: user,
       });
     }
-  }, [
-    hasSession,
-    isAuthReady,
-    nextPath,
-    queryClient,
-    replace,
-    setUser,
-    user,
-  ]);
+  }, [hasSession, isAuthReady, nextPath, queryClient, replace, setUser, user]);
 
   const setupPasswordMutation = useMutation({
     mutationFn: authApi.setupPassword,
@@ -141,6 +131,13 @@ function SetupPasswordPageContent() {
     <div className="min-h-screen flex items-center justify-center bg-bg-primary px-4">
       <div className="w-full max-w-md motion-fade-up">
         <div className="rounded-2xl border border-border-default bg-bg-surface p-8 shadow-lg motion-hover-lift">
+          <div className="mb-8 flex justify-center px-1">
+            <BrandLogoLockup
+              variant="auth"
+              className="max-w-full flex-wrap justify-center"
+              priority
+            />
+          </div>
           <h1 className="text-2xl font-semibold text-text-primary text-center mb-2">
             Tạo mật khẩu
           </h1>
@@ -210,7 +207,7 @@ function SetupPasswordPageContent() {
                 try {
                   await authApi.logout();
                 } finally {
-                    setUser(createGuestUser());
+                  setUser(createGuestUser());
                   replace("/auth/login");
                 }
               }}

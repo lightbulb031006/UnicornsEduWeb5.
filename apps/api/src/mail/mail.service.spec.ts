@@ -87,6 +87,32 @@ describe('MailService', () => {
     );
   });
 
+  it('sends forgot password email with React Email HTML and plain-text fallback', async () => {
+    sendMail.mockResolvedValueOnce(undefined);
+    const service = new MailService(
+      configService as never,
+      receiptPdfService as never,
+      receiptAssetsService as never,
+    );
+
+    await service.sendForgotPasswordEmail('user@example.com', 'reset-token');
+
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    const sent = getLastSendMailOptions(sendMail);
+    expect(sent.to).toBe('user@example.com');
+    expect(sent.subject).toContain('Đổi mật khẩu');
+    expect(sent.text).toContain('user@example.com');
+    expect(sent.text).toContain(
+      'http://localhost:3000/auth/reset-password?token=reset-token',
+    );
+    expect(sent.html).toContain('Đặt lại mật khẩu');
+    expect(sent.html).toContain('Unicorns Edu');
+    expect(sent.html).toContain('user@example.com');
+    expect(sent.html).toContain(
+      'http://localhost:3000/auth/reset-password?token=reset-token',
+    );
+  });
+
   it('reports SMTP authentication failures as service unavailable', async () => {
     sendMail.mockRejectedValueOnce(
       Object.assign(new Error('Invalid login'), {

@@ -38,6 +38,7 @@
 - Register thành công: toast success, delay 3s rồi redirect `/auth/login`.
 - Reset password thành công: toast success, delay 2s rồi redirect `/auth/login`.
 - Forgot password thành công: luôn trả generic success message, không redirect, không tiết lộ email có tồn tại hay chưa.
+- Forgot/reset/setup password hiển thị đầy đủ logo mark + tên **Unicorns Edu**; email reset password dùng React Email cùng baseline với email xác thực, có CTA, fallback link, và link cũ vô hiệu sau khi mật khẩu đổi.
 - Verify email thành công: `/verify-email?token=...` tự gọi backend `GET /auth/verify`, hiển thị success/error và CTA quay về login.
 - Khi user đang đăng nhập nhưng chưa verify email:
   - chỉ được ở Home (`/`)
@@ -109,6 +110,7 @@ export default async function SomePage() {
     - response luôn generic success; chỉ account tồn tại và đã verify mới được gửi mail reset thật.
     - rate limit: `5` request / `1 giờ` / IP.
   - `POST /auth/reset-password` body: `{ token, password }`
+    - token phải còn hợp lệ và khớp với password hash hiện tại; token cũ bị từ chối sau khi mật khẩu đã đổi.
     - rate limit: `10` request / `1 giờ` / IP.
   - `POST /auth/setup-password` body: `{ password }`
     - chỉ dùng cho user đã đăng nhập nhưng chưa có `passwordHash`

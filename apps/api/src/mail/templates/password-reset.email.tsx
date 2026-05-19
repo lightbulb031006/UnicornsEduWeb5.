@@ -13,9 +13,9 @@ import {
   Text,
 } from '@react-email/components';
 
-export interface EmailVerificationEmailProps {
+export interface PasswordResetEmailProps {
   recipientEmail: string;
-  verificationLink: string;
+  resetLink: string;
   expiresInHours: number;
   logoSrc?: string | null;
 }
@@ -27,17 +27,19 @@ const SLATE100 = '#f1f5f9';
 const SLATE200 = '#e2e8f0';
 const SLATE500 = '#64748b';
 const SLATE700 = '#334155';
+const RED50 = '#fef2f2';
+const RED700 = '#b91c1c';
 
-export function EmailVerificationEmail({
+export function PasswordResetEmail({
   recipientEmail,
-  verificationLink,
+  resetLink,
   expiresInHours,
   logoSrc = null,
-}: EmailVerificationEmailProps) {
+}: PasswordResetEmailProps) {
   return (
     <Html lang="vi">
       <Head />
-      <Preview>Xác thực email tài khoản Unicorns Edu của bạn</Preview>
+      <Preview>Đặt lại mật khẩu Unicorns Edu của bạn</Preview>
       <Body
         style={{
           backgroundColor: SLATE100,
@@ -116,7 +118,7 @@ export function EmailVerificationEmail({
                 fontWeight: 700,
               }}
             >
-              Xác thực email tài khoản
+              Đặt lại mật khẩu
             </Heading>
           </Section>
 
@@ -139,15 +141,14 @@ export function EmailVerificationEmail({
                 lineHeight: 1.6,
               }}
             >
-              Bạn vừa đăng ký hoặc yêu cầu xác minh email cho tài khoản{' '}
+              Unicorns Edu nhận được yêu cầu đổi mật khẩu cho tài khoản{' '}
               <strong style={{ color: BLUE950 }}>{recipientEmail}</strong>. Nhấn
-              nút bên dưới để hoàn tất xác thực và mở đầy đủ các tính năng trên
-              Unicorns Edu.
+              nút bên dưới để tạo mật khẩu mới.
             </Text>
 
             <Section style={{ textAlign: 'center', margin: '28px 0' }}>
               <Button
-                href={verificationLink}
+                href={resetLink}
                 style={{
                   backgroundColor: PRIMARY,
                   borderRadius: '10px',
@@ -159,7 +160,7 @@ export function EmailVerificationEmail({
                   textDecoration: 'none',
                 }}
               >
-                Xác thực email
+                Đổi mật khẩu
               </Button>
             </Section>
 
@@ -172,12 +173,16 @@ export function EmailVerificationEmail({
               }}
             >
               <Text
-                style={{ margin: '0 0 8px', color: SLATE500, fontSize: '12px' }}
+                style={{
+                  margin: '0 0 8px',
+                  color: SLATE500,
+                  fontSize: '12px',
+                }}
               >
                 Nếu nút không hoạt động, sao chép liên kết sau vào trình duyệt:
               </Text>
               <Link
-                href={verificationLink}
+                href={resetLink}
                 style={{
                   color: PRIMARY,
                   fontSize: '13px',
@@ -185,8 +190,30 @@ export function EmailVerificationEmail({
                   wordBreak: 'break-all',
                 }}
               >
-                {verificationLink}
+                {resetLink}
               </Link>
+            </Section>
+
+            <Section
+              style={{
+                backgroundColor: RED50,
+                border: '1px solid #fecaca',
+                borderRadius: '12px',
+                marginTop: '20px',
+                padding: '14px 16px',
+              }}
+            >
+              <Text
+                style={{
+                  margin: 0,
+                  color: RED700,
+                  fontSize: '13px',
+                  lineHeight: 1.6,
+                }}
+              >
+                Nếu bạn không yêu cầu đổi mật khẩu, hãy bỏ qua email này. Tài
+                khoản của bạn sẽ không thay đổi nếu liên kết không được sử dụng.
+              </Text>
             </Section>
 
             <Hr style={{ borderColor: SLATE200, margin: '24px 0' }} />
@@ -199,20 +226,8 @@ export function EmailVerificationEmail({
                 lineHeight: 1.6,
               }}
             >
-              Liên kết có hiệu lực trong <strong>{expiresInHours} giờ</strong>.
-              Sau khi xác thực, bạn có thể đăng nhập và sử dụng hệ thống bình
-              thường.
-            </Text>
-            <Text
-              style={{
-                margin: '12px 0 0',
-                color: SLATE500,
-                fontSize: '13px',
-                lineHeight: 1.6,
-              }}
-            >
-              Nếu bạn không tạo tài khoản hoặc không yêu cầu email này, hãy bỏ
-              qua — không cần thao tác thêm.
+              Liên kết có hiệu lực trong <strong>{expiresInHours} giờ</strong>{' '}
+              và tự vô hiệu sau khi mật khẩu được đổi thành công.
             </Text>
           </Section>
         </Container>
@@ -227,7 +242,7 @@ export function EmailVerificationEmail({
             lineHeight: 1.5,
           }}
         >
-          © Unicorns Edu — Email tự động, vui lòng không trả lời.
+          © Unicorns Edu - Email tự động, vui lòng không trả lời.
         </Text>
       </Body>
     </Html>

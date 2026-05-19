@@ -24,10 +24,15 @@ import {
   EmailVerificationEmail,
   type EmailVerificationEmailProps,
 } from './templates/email-verification.email';
+import {
+  PasswordResetEmail,
+  type PasswordResetEmailProps,
+} from './templates/password-reset.email';
 import { TuitionReceiptEmail } from './templates/tuition-receipt.email';
 
 /** Khớp `AuthService.verifyTokenExpiresIn` (giây) / 3600 */
 const EMAIL_VERIFICATION_EXPIRES_HOURS = 24;
+const FORGOT_PASSWORD_EXPIRES_HOURS = 24 * 7;
 
 const LOCAL_FRONTEND_URL = 'http://localhost:3000';
 const UNSAFE_PRODUCTION_FRONTEND_HOSTS = new Set([
@@ -104,6 +109,7 @@ const RECEIPT_INLINE_IMAGES = [
     cid: 'receipt-stamp@unicorns-edu',
   },
 ] as const;
+const AUTH_BRAND_LOGO_CID = 'auth-brand-logo@unicorns-edu';
 
 type ReceiptImageSourceProps = Pick<
   TuitionReceiptEmailProps,
@@ -150,10 +156,12 @@ export class MailService {
     const frontendUrl =
       this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000';
     const verificationLink = `${frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
+    const inlineLogo = this.buildAuthBrandLogoInlineImage();
     const props: EmailVerificationEmailProps = {
       recipientEmail: email,
       verificationLink,
       expiresInHours: EMAIL_VERIFICATION_EXPIRES_HOURS,
+      logoSrc: inlineLogo.logoSrc,
     };
 
     const html = await render(
@@ -177,6 +185,9 @@ export class MailService {
       subject: '[Unicorns Edu] Xác thực email tài khoản',
       text,
       html,
+      ...(inlineLogo.attachments.length
+        ? { attachments: inlineLogo.attachments }
+        : {}),
     });
   }
 
@@ -189,13 +200,38 @@ export class MailService {
     const frontendUrl =
       this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3000';
     const forgotPasswordLink = `${frontendUrl}/auth/reset-password?token=${encodeURIComponent(token)}`;
+    const inlineLogo = this.buildAuthBrandLogoInlineImage();
+    const props: PasswordResetEmailProps = {
+      recipientEmail: email,
+      resetLink: forgotPasswordLink,
+      expiresInHours: FORGOT_PASSWORD_EXPIRES_HOURS,
+      logoSrc: inlineLogo.logoSrc,
+    };
+
+    const html = await render(
+      React.createElement(
+        PasswordResetEmail as React.FC<PasswordResetEmailProps>,
+        props,
+      ),
+    );
+    const text = [
+      'Đổi mật khẩu tài khoản Unicorns Edu',
+      `Email: ${props.recipientEmail}`,
+      `Liên kết đổi mật khẩu (hiệu lực ${props.expiresInHours} giờ):`,
+      props.resetLink,
+      '',
+      'Nếu bạn không yêu cầu đổi mật khẩu, hãy bỏ qua email này.',
+    ].join('\n');
 
     await this.sendMailOrThrow({
       from: this.mailFrom,
       to: email,
-      subject: 'Khôi phục mật khẩu',
-      text: `Vui lòng khôi phục mật khẩu của bạn qua liên kết sau: ${forgotPasswordLink}`,
-      html: `<p>Vui lòng khôi phục mật khẩu của bạn bằng cách bấm vào liên kết sau:</p><p><a href="${forgotPasswordLink}">Link</a></p>`,
+      subject: '[Unicorns Edu] Đổi mật khẩu tài khoản',
+      text,
+      html,
+      ...(inlineLogo.attachments.length
+        ? { attachments: inlineLogo.attachments }
+        : {}),
     });
   }
 
@@ -569,6 +605,29 @@ export class MailService {
     }
 
     return { props, attachments };
+  }
+
+  private buildAuthBrandLogoInlineImage(): {
+    logoSrc: string | null;
+    attachments: NonNullable<SendMailOptions['attachments']>;
+  } {
+    const images = this.receiptAssetsService.getReceiptImageDataUris();
+    const parsed = this.parseReceiptImageDataUri(images?.logoMain);
+    if (!parsed) {
+      return { logoSrc: null, attachments: [] };
+    }
+
+    return {
+      logoSrc: `cid:${AUTH_BRAND_LOGO_CID}`,
+      attachments: [
+        {
+          filename: 'unicorns-edu-logo.png',
+          content: parsed.content,
+          contentType: parsed.contentType,
+          cid: AUTH_BRAND_LOGO_CID,
+        },
+      ],
+    };
   }
 
   private parseReceiptImageDataUri(
