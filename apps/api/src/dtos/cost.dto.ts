@@ -6,6 +6,7 @@ import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsDateString,
   IsEnum,
   IsInt,
   IsOptional,
@@ -30,10 +31,10 @@ export class CreateCostDto {
   @IsInt()
   amount?: number;
 
-  @ApiPropertyOptional({ example: '2026-03-13' })
+  @ApiPropertyOptional({ example: '2026-03-13', format: 'date' })
   @IsOptional()
-  @IsString()
-  date?: string;
+  @IsDateString()
+  date?: string | null;
 
   @ApiPropertyOptional({ enum: PaymentStatus, default: PaymentStatus.pending })
   @IsOptional()

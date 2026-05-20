@@ -124,7 +124,7 @@ export default function StaffAccessGate({
             : isStaffStudentsRoute
               ? "Route `/staff/students` hiện mở danh sách/chi tiết cho `staff.assistant` và `staff.accountant`; riêng `staff.customer_care` chỉ mở trực tiếp trang chi tiết `/staff/students/[id]` và backend sẽ khóa học sinh vào đúng hồ sơ CSKH hiện tại."
               : isStaffCostsRoute
-                ? "Route `/staff/costs` hiện mở cho `staff.assistant` và `staff.accountant`. Kế toán dùng admin-like cost workspace trong staff shell, nhưng các action tạo mới/xóa vẫn bị khóa theo policy accountant."
+                ? "Route `/staff/costs` hiện mở cho `staff.assistant` và `staff.accountant`. Kế toán dùng admin-like cost workspace trong staff shell, bao gồm tạo mới, chỉnh sửa, cập nhật trạng thái và xóa chi phí."
                 : isAssistantStaffsRoute
                   ? "Route `/staff/staffs` hiện mở danh sách/chi tiết cho `staff.assistant` và `staff.accountant` trong staff shell."
                   : isAssistantAdminLikeRoute

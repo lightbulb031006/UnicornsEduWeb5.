@@ -17,6 +17,42 @@ import {
 import { Prisma } from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+const COST_DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function parseCostDateInput(value: string | null | undefined) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue) return null;
+
+  const dateOnlyMatch = COST_DATE_ONLY_PATTERN.exec(trimmedValue);
+  if (dateOnlyMatch) {
+    const [, yearValue, monthValue, dayValue] = dateOnlyMatch;
+    const year = Number(yearValue);
+    const month = Number(monthValue);
+    const day = Number(dayValue);
+    const parsedDate = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      parsedDate.getUTCFullYear() !== year ||
+      parsedDate.getUTCMonth() !== month - 1 ||
+      parsedDate.getUTCDate() !== day
+    ) {
+      throw new BadRequestException('Cost date must be a valid ISO date');
+    }
+
+    return parsedDate;
+  }
+
+  const parsedDate = new Date(trimmedValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    throw new BadRequestException('Cost date must be a valid ISO date');
+  }
+
+  return parsedDate;
+}
+
 @Injectable()
 export class CostService {
   constructor(
@@ -125,7 +161,7 @@ export class CostService {
           month: data.month,
           category: data.category,
           amount: data.amount,
-          date: data.date,
+          date: parseCostDateInput(data.date),
           status: data.status,
         },
       });
@@ -157,11 +193,11 @@ export class CostService {
       throw new NotFoundException('Cost not found');
     }
 
-    const updateData: Partial<Omit<UpdateCostDto, 'id'>> = {};
+    const updateData: Prisma.CostExtendUpdateInput = {};
     if (data.month !== undefined) updateData.month = data.month;
     if (data.category !== undefined) updateData.category = data.category;
     if (data.amount !== undefined) updateData.amount = data.amount;
-    if (data.date !== undefined) updateData.date = data.date;
+    if (data.date !== undefined) updateData.date = parseCostDateInput(data.date);
     if (data.status !== undefined) updateData.status = data.status;
 
     return this.prisma.$transaction(async (tx) => {

@@ -87,7 +87,7 @@ export default function AdminCostsPage() {
   const { isAdmin, isAssistant, isAccountant } =
     resolveAdminShellAccess(fullProfile);
   const canCreateCost = isAdmin || isAssistant || isAccountant;
-  const canDeleteCost = !isAccountant;
+  const canDeleteCost = isAdmin || isAssistant || isAccountant;
 
   useEffect(() => {
     setSearchInput(search);
@@ -522,7 +522,11 @@ export default function AdminCostsPage() {
 
         <div className="min-w-0 flex-1 overflow-auto">
           {isLoading ? (
-            <CostListTableSkeleton rows={6} />
+            <CostListTableSkeleton
+              rows={6}
+              showActions={canDeleteCost}
+              showPagination
+            />
           ) : isError ? (
             <div className="py-16 text-center text-error" role="alert" aria-live="assertive">
               <p className="text-sm">

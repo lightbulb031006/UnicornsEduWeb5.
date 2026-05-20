@@ -186,7 +186,7 @@ export class CostController {
   }
 
   @Delete(':id')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.accountant)
   @ApiOperation({
     summary: 'Delete cost',
     description: 'Delete a cost record by id.',

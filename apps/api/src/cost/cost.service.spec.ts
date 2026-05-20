@@ -117,10 +117,13 @@ describe('CostService', () => {
   });
 
   it('creates a cost without client-provided id and records audit using persisted id', async () => {
+    const costDate = new Date('2026-03-20T00:00:00.000Z');
+
     mockPrisma.costExtend.create.mockResolvedValue({
       id: 'generated-cost-1',
       category: 'Marketing',
       amount: 100000,
+      date: costDate,
     });
 
     await service.createCost(
@@ -143,7 +146,7 @@ describe('CostService', () => {
         month: '2026-03',
         category: 'Marketing',
         amount: 100000,
-        date: '2026-03-20',
+        date: costDate,
         status: PaymentStatus.pending,
       },
     });
@@ -154,6 +157,41 @@ describe('CostService', () => {
         entityId: 'generated-cost-1',
       }),
     );
+  });
+
+  it('normalizes date-only values before updating a cost', async () => {
+    const costDate = new Date('2026-05-20T00:00:00.000Z');
+    mockPrisma.costExtend.findUnique.mockResolvedValue({
+      id: 'cost-1',
+      date: new Date('2026-05-19T00:00:00.000Z'),
+    });
+    mockPrisma.costExtend.update.mockResolvedValue({
+      id: 'cost-1',
+      date: costDate,
+    });
+
+    await service.updateCost({
+      id: 'cost-1',
+      date: '2026-05-20',
+    });
+
+    expect(mockPrisma.costExtend.update).toHaveBeenCalledWith({
+      where: { id: 'cost-1' },
+      data: {
+        date: costDate,
+      },
+    });
+  });
+
+  it('rejects impossible date-only values before calling Prisma', async () => {
+    await expect(
+      service.createCost({
+        category: 'Marketing',
+        date: '2026-02-31',
+      }),
+    ).rejects.toThrow(new BadRequestException('Cost date must be a valid ISO date'));
+
+    expect(mockPrisma.costExtend.create).not.toHaveBeenCalled();
   });
 
   it('rejects update when id is missing', async () => {

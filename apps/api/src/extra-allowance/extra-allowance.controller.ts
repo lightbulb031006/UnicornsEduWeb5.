@@ -135,7 +135,7 @@ export class ExtraAllowanceController {
   }
 
   @Post()
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.accountant)
   @ApiOperation({
     summary: 'Create extra allowance',
     description: 'Create a new extra allowance record.',
@@ -218,7 +218,7 @@ export class ExtraAllowanceController {
   }
 
   @Delete(':id')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.accountant)
   @ApiOperation({
     summary: 'Delete extra allowance',
     description: 'Delete an extra allowance record by id.',

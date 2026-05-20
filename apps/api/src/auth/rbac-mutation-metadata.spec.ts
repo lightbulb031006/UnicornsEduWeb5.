@@ -2,6 +2,7 @@ import { StaffRole } from 'generated/enums';
 import { ALLOW_STAFF_ROLES_ON_ADMIN_KEY } from './decorators/allow-staff-roles-on-admin.decorator';
 import { BonusController } from '../bonus/bonus.controller';
 import { CostController } from '../cost/cost.controller';
+import { ExtraAllowanceController } from '../extra-allowance/extra-allowance.controller';
 import { StaffController } from '../staff/staff.controller';
 import { StudentController } from '../student/student.controller';
 import { UserController } from '../user/user.controller';
@@ -66,11 +67,30 @@ describe('RBAC route metadata', () => {
     ]);
   });
 
+  it('allows assistant and accountant to delete costs', () => {
+    expect(getAllowedStaffRoles(CostController, 'deleteCost')).toEqual([
+      StaffRole.assistant,
+      StaffRole.accountant,
+    ]);
+  });
+
   it('allows staff admin, assistant, and accountant to create bonuses', () => {
     expect(getAllowedStaffRoles(BonusController, 'createBonus')).toEqual([
       StaffRole.admin,
       StaffRole.assistant,
       StaffRole.accountant,
     ]);
+  });
+
+  it('allows assistant and accountant to create extra allowances', () => {
+    expect(
+      getAllowedStaffRoles(ExtraAllowanceController, 'createExtraAllowance'),
+    ).toEqual([StaffRole.assistant, StaffRole.accountant]);
+  });
+
+  it('allows assistant and accountant to delete extra allowances', () => {
+    expect(
+      getAllowedStaffRoles(ExtraAllowanceController, 'deleteExtraAllowance'),
+    ).toEqual([StaffRole.assistant, StaffRole.accountant]);
   });
 });
