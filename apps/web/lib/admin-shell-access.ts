@@ -119,6 +119,10 @@ export function canAccessAdminShellRoute(
   );
 }
 
+export function canManageAdminExtraAllowance(access: AdminShellAccess): boolean {
+  return access.isAdmin || access.isAssistant || access.isAccountant;
+}
+
 export function resolveAdminShellFallbackHref(
   access: AdminShellAccess,
   pathname: string,

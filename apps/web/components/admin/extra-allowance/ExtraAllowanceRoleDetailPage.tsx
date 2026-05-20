@@ -12,11 +12,15 @@ import {
   buildAdminLikePath,
   resolveAdminLikeRouteBase,
 } from "@/lib/admin-shell-paths";
-import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
+import {
+  canManageAdminExtraAllowance,
+  resolveAdminShellAccess,
+} from "@/lib/admin-shell-access";
 import * as staffApi from "@/lib/apis/staff.api";
 import ExtraAllowanceFormPopup, {
   type ExtraAllowanceFormSubmitPayload,
 } from "./ExtraAllowanceFormPopup";
+import ExtraAllowanceListTableSkeleton from "./ExtraAllowanceListTableSkeleton";
 import {
   DEFAULT_BULK_EXTRA_ALLOWANCE_STATUS,
   EXTRA_ALLOWANCE_STATUS_OPTIONS,
@@ -223,6 +227,8 @@ export default function ExtraAllowanceRoleDetailPage({
     new Set(),
   );
   const [createPopupOpen, setCreatePopupOpen] = useState(false);
+  const [allowanceToDelete, setAllowanceToDelete] =
+    useState<ExtraAllowanceListItem | null>(null);
   const [bulkEditPopupOpen, setBulkEditPopupOpen] = useState(false);
   const [bulkStatusDraft, setBulkStatusDraft] =
     useState<ExtraAllowanceStatus>(DEFAULT_BULK_EXTRA_ALLOWANCE_STATUS);
@@ -233,8 +239,10 @@ export default function ExtraAllowanceRoleDetailPage({
     retry: false,
     staleTime: 60_000,
   });
-  const { isAccountant } = resolveAdminShellAccess(fullProfile);
-  const canCreateAllowance = !isAccountant;
+  const adminShellAccess = resolveAdminShellAccess(fullProfile);
+  const canManageAllowance = canManageAdminExtraAllowance(adminShellAccess);
+  const canCreateAllowance = canManageAllowance;
+  const canDeleteAllowance = canManageAllowance;
 
   const {
     data,
@@ -309,8 +317,16 @@ export default function ExtraAllowanceRoleDetailPage({
     };
   }, [roleType, staffDetail]);
   const createPopupInitialData = useMemo<ExtraAllowanceBaseFields | null>(() => {
-    if (!lockedStaffContext) {
+    if (normalizedStaffId && !lockedStaffContext) {
       return null;
+    }
+
+    if (!lockedStaffContext) {
+      return {
+        month: defaultMonthKey,
+        status: "pending",
+        roleType,
+      };
     }
 
     return {
@@ -325,16 +341,17 @@ export default function ExtraAllowanceRoleDetailPage({
         roles: lockedStaffContext.staff.roles,
       },
     };
-  }, [defaultMonthKey, lockedStaffContext, roleType]);
+  }, [defaultMonthKey, lockedStaffContext, normalizedStaffId, roleType]);
   const createMutation = useMutation({
     mutationFn: extraAllowanceApi.createExtraAllowance,
-    onSuccess: async () => {
+    onSuccess: async (createdAllowance) => {
       toast.success("Đã tạo trợ cấp.");
       setCreatePopupOpen(false);
       await queryClient.invalidateQueries({ queryKey: ["extra-allowance"] });
-      if (normalizedStaffId) {
+      const staffIncomeSummaryId = createdAllowance.staffId ?? normalizedStaffId;
+      if (staffIncomeSummaryId) {
         await queryClient.invalidateQueries({
-          queryKey: ["staff", "income-summary", normalizedStaffId],
+          queryKey: ["staff", "income-summary", staffIncomeSummaryId],
         });
       }
     },
@@ -347,6 +364,38 @@ export default function ExtraAllowanceRoleDetailPage({
     : isStaffDetailLoading
       ? "Đang tải nhân sự…"
       : "Thêm trợ cấp";
+
+  const deleteMutation = useMutation({
+    mutationFn: (allowance: ExtraAllowanceListItem) =>
+      extraAllowanceApi.deleteExtraAllowanceById(allowance.id),
+    onSuccess: async (_deletedAllowance, deletedAllowance) => {
+      const willClearSelection =
+        selectedAllowanceIds.has(deletedAllowance.id) && selectedCount === 1;
+      setSelectedAllowanceIds((current) => {
+        if (!current.has(deletedAllowance.id)) {
+          return current;
+        }
+
+        const next = new Set(current);
+        next.delete(deletedAllowance.id);
+        return next;
+      });
+      if (willClearSelection) {
+        setBulkEditPopupOpen(false);
+      }
+      toast.success("Đã xóa khoản trợ cấp.");
+      await queryClient.invalidateQueries({ queryKey: ["extra-allowance"] });
+      const staffIncomeSummaryId = deletedAllowance.staffId ?? normalizedStaffId;
+      if (staffIncomeSummaryId) {
+        await queryClient.invalidateQueries({
+          queryKey: ["staff", "income-summary", staffIncomeSummaryId],
+        });
+      }
+    },
+    onError: (mutationError: unknown) => {
+      toast.error(getErrorMessage(mutationError, "Không thể xóa khoản trợ cấp."));
+    },
+  });
 
   const bulkStatusMutation = useMutation({
     mutationFn: (status: ExtraAllowanceStatus) =>
@@ -431,8 +480,8 @@ export default function ExtraAllowanceRoleDetailPage({
   const openCreatePopup = () => {
     if (
       !canCreateAllowance ||
-      !normalizedStaffId ||
-      !lockedStaffContext ||
+      (normalizedStaffId && !lockedStaffContext) ||
+      !createPopupInitialData ||
       createMutation.isPending
     ) {
       return;
@@ -444,6 +493,18 @@ export default function ExtraAllowanceRoleDetailPage({
   const closeCreatePopup = () => {
     if (createMutation.isPending) return;
     setCreatePopupOpen(false);
+  };
+
+  const openDeleteConfirm = (allowance: ExtraAllowanceListItem) => {
+    if (!canDeleteAllowance || deleteMutation.isPending || bulkStatusMutation.isPending) {
+      return;
+    }
+    setAllowanceToDelete(allowance);
+  };
+
+  const closeDeleteConfirm = () => {
+    if (deleteMutation.isPending) return;
+    setAllowanceToDelete(null);
   };
 
   const closeBulkEditPopup = () => {
@@ -460,7 +521,7 @@ export default function ExtraAllowanceRoleDetailPage({
     payload: ExtraAllowanceFormSubmitPayload,
   ) => {
     if (!canCreateAllowance) {
-      toast.error("Role kế toán không có quyền tạo trợ cấp mới.");
+      toast.error("Bạn không có quyền tạo trợ cấp mới.");
       return;
     }
 
@@ -476,6 +537,51 @@ export default function ExtraAllowanceRoleDetailPage({
     } catch {
       // toast lỗi đã xử lý trong onError
     }
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (!allowanceToDelete || !canDeleteAllowance) return;
+
+    try {
+      await deleteMutation.mutateAsync(allowanceToDelete);
+      setAllowanceToDelete(null);
+    } catch {
+      // toast lỗi đã xử lý trong onError
+    }
+  };
+
+  const renderDeleteAllowanceButton = (allowance: ExtraAllowanceListItem) => {
+    if (!canDeleteAllowance) {
+      return null;
+    }
+
+    const staffName = resolveStaffName(allowance);
+
+    return (
+      <button
+        type="button"
+        onClick={() => openDeleteConfirm(allowance)}
+        disabled={deleteMutation.isPending || bulkStatusMutation.isPending}
+        className="shrink-0 rounded-lg p-1.5 text-text-muted transition-colors hover:bg-error/15 hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
+        aria-label={`Xóa khoản trợ cấp của ${staffName}`}
+        title="Xóa trợ cấp"
+      >
+        <svg
+          className="size-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+          />
+        </svg>
+      </button>
+    );
   };
 
   return (
@@ -517,17 +623,13 @@ export default function ExtraAllowanceRoleDetailPage({
           <section className="rounded-[2rem] border border-border-default bg-bg-surface p-5 shadow-sm lg:p-6">
             <div className="h-6 w-48 animate-pulse rounded-full bg-bg-secondary/70" />
             <div className="mt-3 h-4 w-full max-w-2xl animate-pulse rounded bg-bg-secondary/70" />
-            <div className="mt-5 h-24 animate-pulse rounded-[1.35rem] bg-bg-secondary/70" />
-            <div className="mt-5 space-y-3 lg:hidden">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <div
-                  key={`extra-allowance-card-skeleton-${index}`}
-                  className="h-32 animate-pulse rounded-[1.35rem] border border-border-default bg-bg-secondary/70"
-                />
-              ))}
-            </div>
-            <div className="mt-5 hidden lg:block">
-              <div className="h-72 animate-pulse rounded-[1.35rem] border border-border-default bg-bg-secondary/70" />
+            <div className="mt-5">
+              <ExtraAllowanceListTableSkeleton
+                rows={5}
+                mobileCards={4}
+                variant="roleDetail"
+                showToolbar
+              />
             </div>
           </section>
         </>
@@ -592,13 +694,14 @@ export default function ExtraAllowanceRoleDetailPage({
                 ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {normalizedStaffId && canCreateAllowance ? (
+                {canCreateAllowance ? (
                   <button
                     type="button"
                     onClick={openCreatePopup}
                     disabled={
-                      isStaffDetailLoading ||
-                      !lockedStaffContext ||
+                      (normalizedStaffId
+                        ? isStaffDetailLoading || !lockedStaffContext
+                        : false) ||
                       createMutation.isPending
                     }
                     className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-primary/25 bg-primary/10 px-4 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
@@ -744,7 +847,10 @@ export default function ExtraAllowanceRoleDetailPage({
                                   {formatMonthLabel(allowance.month)}
                                 </p>
                               </div>
-                              <StatusPill status={allowance.status} />
+                              <div className="flex shrink-0 items-center gap-2">
+                                <StatusPill status={allowance.status} />
+                                {renderDeleteAllowanceButton(allowance)}
+                              </div>
                             </div>
 
                             <p className="mt-3 text-2xl font-semibold tabular-nums text-text-primary">
@@ -770,6 +876,7 @@ export default function ExtraAllowanceRoleDetailPage({
                         <col style={{ width: "28%" }} />
                         <col style={{ width: "16%" }} />
                         <col style={{ width: "14%" }} />
+                        {canDeleteAllowance ? <col style={{ width: "72px" }} /> : null}
                       </colgroup>
                       <thead className="bg-bg-secondary">
                         <tr className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
@@ -800,6 +907,11 @@ export default function ExtraAllowanceRoleDetailPage({
                           <th className="px-2.5 py-2.5 text-right" scope="col">
                             Số tiền
                           </th>
+                          {canDeleteAllowance ? (
+                            <th className="px-2.5 py-2.5" scope="col">
+                              <span className="sr-only">Xóa</span>
+                            </th>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -841,6 +953,11 @@ export default function ExtraAllowanceRoleDetailPage({
                               <td className="px-2.5 py-2.5 text-right align-top text-sm font-semibold tabular-nums text-text-primary">
                                 {formatCurrency(allowance.amount)}
                               </td>
+                              {canDeleteAllowance ? (
+                                <td className="px-2.5 py-2.5 text-right align-top">
+                                  {renderDeleteAllowanceButton(allowance)}
+                                </td>
+                              ) : null}
                             </tr>
                           );
                         })}
@@ -857,7 +974,7 @@ export default function ExtraAllowanceRoleDetailPage({
       {bulkEditPopupOpen && selectedCount > 0 ? (
         <>
           <div
-                className="fixed inset-0 z-[60] bg-bg-primary/75 backdrop-blur-[1px]"
+            className="fixed inset-0 z-[60] bg-bg-primary/75 backdrop-blur-[1px]"
             aria-hidden="true"
             onClick={closeBulkEditPopup}
           />
@@ -963,14 +1080,85 @@ export default function ExtraAllowanceRoleDetailPage({
         </>
       ) : null}
 
-      {canCreateAllowance && createPopupOpen && lockedStaffContext && createPopupInitialData ? (
+      {canDeleteAllowance && allowanceToDelete ? (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-bg-primary/75 backdrop-blur-[1px]"
+            aria-hidden="true"
+            onClick={closeDeleteConfirm}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-extra-allowance-title"
+            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border-default bg-bg-surface p-4 shadow-2xl sm:p-5"
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-1 flex size-9 items-center justify-center rounded-full bg-error/10 text-error">
+                <svg
+                  className="size-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 9v4m0 4h.01M5.1 19h13.8a2 2 0 001.79-2.89L13.79 4.79a2 2 0 00-3.58 0L3.31 16.11A2 2 0 005.1 19z"
+                  />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2
+                  id="delete-extra-allowance-title"
+                  className="text-base font-semibold text-text-primary"
+                >
+                  Xóa khoản trợ cấp?
+                </h2>
+                <p className="mt-1 text-sm text-text-secondary">
+                  Bạn có chắc muốn xóa trợ cấp của{" "}
+                  <span className="font-semibold text-text-primary">
+                    {resolveStaffName(allowanceToDelete)}
+                  </span>{" "}
+                  trong tháng {formatMonthLabel(allowanceToDelete.month)}? Hành
+                  động này không thể hoàn tác.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteConfirm}
+                disabled={deleteMutation.isPending}
+                className="min-h-10 flex-1 rounded-md border border-border-default bg-bg-surface px-4 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none sm:px-5"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteConfirmed}
+                disabled={deleteMutation.isPending}
+                className="min-h-10 flex-1 rounded-md border border-error bg-error px-4 py-2.5 text-sm font-medium text-text-inverse shadow-sm transition-colors hover:bg-error/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none sm:px-5"
+              >
+                {deleteMutation.isPending ? "Đang xóa…" : "Xóa khoản trợ cấp"}
+              </button>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {canCreateAllowance && createPopupOpen && createPopupInitialData ? (
         <ExtraAllowanceFormPopup
-          key={`extra-allowance-create-${lockedStaffContext.staff.id}-${roleType}-${createPopupOpen ? "open" : "closed"}`}
+          key={`extra-allowance-create-${lockedStaffContext?.staff.id ?? "role"}-${roleType}-${createPopupOpen ? "open" : "closed"}`}
           open={createPopupOpen}
           mode="create"
           onClose={closeCreatePopup}
           initialData={createPopupInitialData}
           lockedContext={lockedStaffContext}
+          lockedRoleType={roleType}
           onSubmit={handleCreateExtraAllowance}
           isSubmitting={createMutation.isPending}
         />

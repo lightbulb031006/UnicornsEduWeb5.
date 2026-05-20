@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import ExtraAllowanceFormPopup, {
   type ExtraAllowanceFormSubmitPayload,
 } from "@/components/admin/extra-allowance/ExtraAllowanceFormPopup";
+import ExtraAllowanceListTableSkeleton from "@/components/admin/extra-allowance/ExtraAllowanceListTableSkeleton";
 import {
   getExtraAllowanceRoleChipClass,
   getExtraAllowanceRoleLabel,
@@ -398,16 +399,13 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
           <section className="rounded-[2rem] border border-border-default bg-bg-surface p-5 shadow-sm lg:p-6">
             <div className="h-6 w-48 animate-pulse rounded-full bg-bg-secondary/70" />
             <div className="mt-3 h-4 w-full max-w-2xl animate-pulse rounded bg-bg-secondary/70" />
-            <div className="mt-5 space-y-3 lg:hidden">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <div
-                  key={`self-extra-allowance-card-skeleton-${index}`}
-                  className="h-32 animate-pulse rounded-[1.35rem] border border-border-default bg-bg-secondary/70"
-                />
-              ))}
-            </div>
-            <div className="mt-5 hidden lg:block">
-              <div className="h-72 animate-pulse rounded-[1.35rem] border border-border-default bg-bg-secondary/70" />
+            <div className="mt-5">
+              <ExtraAllowanceListTableSkeleton
+                rows={5}
+                mobileCards={4}
+                variant="selfDetail"
+                showToolbar
+              />
             </div>
           </section>
         </>

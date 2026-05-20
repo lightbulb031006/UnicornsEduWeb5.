@@ -18,6 +18,7 @@ import type { StaffOption } from "@/dtos/staff.dto";
 import {
   EXTRA_ALLOWANCE_ROLE_OPTIONS,
   EXTRA_ALLOWANCE_STATUS_OPTIONS,
+  getExtraAllowanceRoleLabel,
   getExtraAllowanceStatusLabel,
 } from "./extraAllowancePresentation";
 
@@ -39,6 +40,7 @@ type Props = {
     staff: StaffOption;
     roleType: ExtraAllowanceRoleType;
   } | null;
+  lockedRoleType?: ExtraAllowanceRoleType | null;
   /** When provided, status stays fixed to this value and cannot be edited. */
   lockedStatus?: ExtraAllowanceStatus | null;
   /** Backward-compatible alias for self-service create. */
@@ -116,12 +118,14 @@ export default function ExtraAllowanceFormPopup({
   onClose,
   initialData,
   lockedContext,
+  lockedRoleType = null,
   lockedStatus = null,
   lockStatusToPending = false,
   onSubmit,
   isSubmitting = false,
 }: Props) {
   const isContextLocked = Boolean(lockedContext);
+  const effectiveLockedRoleType = lockedContext?.roleType ?? lockedRoleType;
   const effectiveLockedStatus = lockedStatus ?? (lockStatusToPending ? "pending" : null);
   const [selectedStaff, setSelectedStaff] = useState<StaffOption | null>(() =>
     lockedContext?.staff ?? getInitialStaff(initialData),
@@ -133,7 +137,7 @@ export default function ExtraAllowanceFormPopup({
     effectiveLockedStatus ?? getInitialStatus(initialData),
   );
   const [roleType, setRoleType] = useState<ExtraAllowanceRoleType>(() =>
-    lockedContext?.roleType ?? getInitialRoleType(initialData),
+    effectiveLockedRoleType ?? getInitialRoleType(initialData),
   );
   const [amountInput, setAmountInput] = useState(() =>
     getInitialAmountInput(initialData),
@@ -259,161 +263,176 @@ export default function ExtraAllowanceFormPopup({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
             {isContextLocked && lockedContext ? (
-              <div className="sm:col-span-2">
-
+              <div className="rounded-xl border border-border-default bg-bg-secondary/45 px-3 py-2.5 sm:col-span-2">
+                <p className="text-xs font-medium text-text-muted">Nhân sự</p>
+                <p className="mt-1 truncate text-sm font-semibold text-text-primary">
+                  {lockedContext.staff.fullName}
+                </p>
+                <p className="mt-1 truncate text-xs text-text-muted">
+                  {formatStaffRoleSummary(lockedContext.staff.roles)}
+                </p>
               </div>
             ) : (
-              <>
-                <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-                  <span>Nhân sự</span>
-                  <div className="space-y-2">
-                    {selectedStaff ? (
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-text-primary">
-                            {selectedStaff.fullName}
-                          </p>
-                          <p className="truncate text-xs text-text-muted">
-                            {formatStaffRoleSummary(selectedStaff.roles)}
-                          </p>
-                        </div>
+              <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                <span>Nhân sự</span>
+                <div className="space-y-2">
+                  {selectedStaff ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-text-primary">
+                          {selectedStaff.fullName}
+                        </p>
+                        <p className="truncate text-xs text-text-muted">
+                          {formatStaffRoleSummary(selectedStaff.roles)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedStaff(null)}
+                        className="inline-flex min-h-10 items-center justify-center rounded-full border border-border-default bg-bg-surface px-3 text-xs font-semibold text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                      >
+                        Đổi nhân sự
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className="relative" ref={staffSearchRef}>
+                    <div
+                      className={`flex min-h-11 items-center rounded-md border bg-bg-surface px-3 ${staffSearchFocused
+                        ? "border-border-focus ring-2 ring-border-focus/30"
+                        : "border-border-default"
+                        }`}
+                    >
+                      <svg
+                        className="size-4 shrink-0 text-text-muted"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        aria-hidden
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="m21 21-4.35-4.35m1.85-5.15a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
+                        />
+                      </svg>
+                      <input
+                        name="extra_allowance_staff_search"
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={staffSearchInput}
+                        onChange={(event) => setStaffSearchInput(event.target.value)}
+                        onFocus={() => setStaffSearchFocused(true)}
+                        aria-haspopup="listbox"
+                        aria-controls={
+                          staffSearchFocused
+                            ? "extra-allowance-staff-options"
+                            : undefined
+                        }
+                        aria-autocomplete="list"
+                        placeholder={
+                          selectedStaff
+                            ? "Tìm nhân sự khác theo họ và tên…"
+                            : "Tìm nhân sự theo họ và tên…"
+                        }
+                        className="min-w-0 flex-1 bg-transparent px-2 py-2.5 text-sm text-text-primary outline-none placeholder:text-text-muted"
+                      />
+                      {staffSearchInput ? (
                         <button
                           type="button"
-                          onClick={() => setSelectedStaff(null)}
-                          className="inline-flex min-h-10 items-center justify-center rounded-full border border-border-default bg-bg-surface px-3 text-xs font-semibold text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                          onClick={() => setStaffSearchInput("")}
+                          className="rounded-full p-1 text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                          aria-label="Xóa từ khóa tìm nhân sự"
                         >
-                          Đổi nhân sự
-                        </button>
-                      </div>
-                    ) : null}
-
-                    <div className="relative" ref={staffSearchRef}>
-                      <div
-                        className={`flex min-h-11 items-center rounded-md border bg-bg-surface px-3 ${staffSearchFocused
-                          ? "border-border-focus ring-2 ring-border-focus/30"
-                          : "border-border-default"
-                          }`}
-                      >
-                        <svg
-                          className="size-4 shrink-0 text-text-muted"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          aria-hidden
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="m21 21-4.35-4.35m1.85-5.15a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
-                          />
-                        </svg>
-                        <input
-                          name="extra_allowance_staff_search"
-                          type="text"
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={staffSearchInput}
-                          onChange={(event) => setStaffSearchInput(event.target.value)}
-                          onFocus={() => setStaffSearchFocused(true)}
-                          aria-haspopup="listbox"
-                          aria-controls={
-                            staffSearchFocused
-                              ? "extra-allowance-staff-options"
-                              : undefined
-                          }
-                          aria-autocomplete="list"
-                          placeholder={
-                            selectedStaff
-                              ? "Tìm nhân sự khác theo họ và tên…"
-                              : "Tìm nhân sự theo họ và tên…"
-                          }
-                          className="min-w-0 flex-1 bg-transparent px-2 py-2.5 text-sm text-text-primary outline-none placeholder:text-text-muted"
-                        />
-                        {staffSearchInput ? (
-                          <button
-                            type="button"
-                            onClick={() => setStaffSearchInput("")}
-                            className="rounded-full p-1 text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                            aria-label="Xóa từ khóa tìm nhân sự"
+                          <svg
+                            className="size-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                            aria-hidden
                           >
-                            <svg
-                              className="size-4"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                              aria-hidden
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M6 18 18 6M6 6l12 12"
-                              />
-                            </svg>
-                          </button>
-                        ) : null}
-                      </div>
-
-                      {staffSearchFocused ? (
-                        <div
-                          id="extra-allowance-staff-options"
-                          role="listbox"
-                          className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-xl border border-border-default bg-bg-surface py-1 shadow-lg"
-                        >
-                          {isStaffOptionsLoading ? (
-                            <p
-                              className="px-3 py-2 text-sm text-text-muted"
-                              aria-live="polite"
-                            >
-                              Đang tìm nhân sự…
-                            </p>
-                          ) : availableStaffOptions.length === 0 ? (
-                            <p className="px-3 py-2 text-sm text-text-muted">
-                              {staffSearchInput.trim()
-                                ? "Không tìm thấy nhân sự phù hợp."
-                                : "Nhập tên để tìm nhân sự."}
-                            </p>
-                          ) : (
-                            availableStaffOptions.map((option) => (
-                              <button
-                                key={option.id}
-                                type="button"
-                                role="option"
-                                aria-selected={selectedStaff?.id === option.id}
-                                onClick={() => {
-                                  setSelectedStaff(option);
-                                  setStaffSearchInput("");
-                                  setStaffSearchFocused(false);
-                                }}
-                                className="flex w-full flex-col items-start gap-1 px-3 py-2 text-left text-sm text-text-primary transition-colors hover:bg-bg-tertiary focus:bg-bg-tertiary focus:outline-none"
-                              >
-                                <span className="font-medium">{option.fullName}</span>
-                                <span className="text-xs text-text-muted">
-                                  {formatStaffRoleSummary(option.roles)}
-                                </span>
-                              </button>
-                            ))
-                          )}
-                        </div>
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M6 18 18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
                       ) : null}
                     </div>
-                  </div>
-                </label>
 
-                <label className="flex flex-col gap-1 text-sm text-text-secondary">
-                  <span>Loại vai trò</span>
-                  <UpgradedSelect
-                    name="extra-allowance-role-type"
-                    value={roleType}
-                    onValueChange={(nextValue) =>
-                      setRoleType(nextValue as ExtraAllowanceRoleType)
-                    }
-                    options={EXTRA_ALLOWANCE_ROLE_OPTIONS}
-                    buttonClassName="min-h-11 rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                  />
-                </label>
-              </>
+                    {staffSearchFocused ? (
+                      <div
+                        id="extra-allowance-staff-options"
+                        role="listbox"
+                        className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-xl border border-border-default bg-bg-surface py-1 shadow-lg"
+                      >
+                        {isStaffOptionsLoading ? (
+                          <p
+                            className="px-3 py-2 text-sm text-text-muted"
+                            aria-live="polite"
+                          >
+                            Đang tìm nhân sự…
+                          </p>
+                        ) : availableStaffOptions.length === 0 ? (
+                          <p className="px-3 py-2 text-sm text-text-muted">
+                            {staffSearchInput.trim()
+                              ? "Không tìm thấy nhân sự phù hợp."
+                              : "Nhập tên để tìm nhân sự."}
+                          </p>
+                        ) : (
+                          availableStaffOptions.map((option) => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              role="option"
+                              aria-selected={selectedStaff?.id === option.id}
+                              onClick={() => {
+                                setSelectedStaff(option);
+                                setStaffSearchInput("");
+                                setStaffSearchFocused(false);
+                              }}
+                              className="flex w-full flex-col items-start gap-1 px-3 py-2 text-left text-sm text-text-primary transition-colors hover:bg-bg-tertiary focus:bg-bg-tertiary focus:outline-none"
+                            >
+                              <span className="font-medium">{option.fullName}</span>
+                              <span className="text-xs text-text-muted">
+                                {formatStaffRoleSummary(option.roles)}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </label>
+            )}
+
+            {effectiveLockedRoleType ? (
+              <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span>Loại vai trò</span>
+                <div className="min-h-11 rounded-md border border-border-default bg-bg-secondary/50 px-3 py-2.5 text-text-primary">
+                  <span className="font-medium">
+                    {getExtraAllowanceRoleLabel(effectiveLockedRoleType)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span>Loại vai trò</span>
+                <UpgradedSelect
+                  name="extra-allowance-role-type"
+                  value={roleType}
+                  onValueChange={(nextValue) =>
+                    setRoleType(nextValue as ExtraAllowanceRoleType)
+                  }
+                  options={EXTRA_ALLOWANCE_ROLE_OPTIONS}
+                  buttonClassName="min-h-11 rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                />
+              </label>
             )}
 
             <label className="flex flex-col gap-1 text-sm text-text-secondary">

@@ -293,6 +293,48 @@ test("linked staff admin gets full admin shell even when primary role is student
   );
 });
 
+test("admin extra allowance management is open to admin, assistant, and accountant", () => {
+  const fullAdmin = adminShellAccess.resolveAdminShellAccess({
+    roleType: "admin",
+  });
+  const assistant = adminShellAccess.resolveAdminShellAccess({
+    roleType: "staff",
+    staffRoles: ["assistant"],
+    hasStaffProfile: true,
+  });
+  const accountant = adminShellAccess.resolveAdminShellAccess({
+    roleType: "staff",
+    staffRoles: ["accountant"],
+    hasStaffProfile: true,
+  });
+
+  assert.equal(
+    adminShellAccess.canManageAdminExtraAllowance(fullAdmin),
+    true,
+  );
+  assert.equal(
+    adminShellAccess.canManageAdminExtraAllowance(assistant),
+    true,
+  );
+  assert.equal(
+    adminShellAccess.canManageAdminExtraAllowance(accountant),
+    true,
+  );
+});
+
+test("admin extra allowance management remains closed to unrelated staff roles", () => {
+  const communication = adminShellAccess.resolveAdminShellAccess({
+    roleType: "staff",
+    staffRoles: ["communication"],
+    hasStaffProfile: true,
+  });
+
+  assert.equal(
+    adminShellAccess.canManageAdminExtraAllowance(communication),
+    false,
+  );
+});
+
 test("linked staff admin gets full staff shell routes even when primary role is student", () => {
   const session = {
     id: "student-staff-admin",
