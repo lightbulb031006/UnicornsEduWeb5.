@@ -94,7 +94,7 @@ export default function LessonWorkNewLessonPanel({
   });
 
   return (
-    <div className="overflow-hidden rounded-[1.5rem] border border-border-default bg-bg-surface shadow-sm">
+    <div className="overflow-hidden rounded-[1.25rem] border border-border-default/60 bg-bg-secondary/40 shadow-none">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -136,7 +136,7 @@ export default function LessonWorkNewLessonPanel({
       </button>
 
       {open ? (
-        <div className="border-t border-border-default px-4 pb-5 pt-4 sm:px-5 sm:pb-6">
+        <div className="border-t border-border-default/60 px-4 pb-5 pt-4 sm:px-5 sm:pb-6">
           <div className="space-y-4">
             {description ? (
               <div className="rounded-[1.25rem] border border-border-default bg-bg-secondary/35 px-4 py-3 text-sm leading-6 text-text-secondary">

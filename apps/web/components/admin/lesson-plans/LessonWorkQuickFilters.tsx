@@ -96,11 +96,11 @@ export default function LessonWorkQuickFilters({
   };
 
   return (
-    <div className="overflow-visible rounded-[1.25rem] border border-border-default bg-bg-surface shadow-sm">
+    <div className="overflow-visible rounded-xl border border-border-default/50 bg-bg-secondary/40 hover:bg-bg-secondary/60 shadow-none transition-colors duration-150">
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
-        className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-text-primary transition-colors hover:bg-bg-secondary/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:px-5"
+        className="flex min-h-12 w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium text-text-primary transition-colors rounded-t-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:px-5"
         aria-expanded={open}
       >
         <span className="truncate">Bộ lọc nhanh</span>
@@ -132,7 +132,7 @@ export default function LessonWorkQuickFilters({
       </button>
 
       {open ? (
-        <div className="space-y-4 border-t border-border-default px-4 py-4 sm:px-5">
+        <div className="space-y-4 border-t border-border-default/50 px-4 py-4 sm:px-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="flex flex-col gap-1.5 text-sm text-text-secondary">
               <span>Tìm kiếm</span>

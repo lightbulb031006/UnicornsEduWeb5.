@@ -521,7 +521,7 @@ export default function LessonExercisesTab({
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:gap-6">
         <aside className="shrink-0 xl:w-52">
           <nav
-            className="rounded-[1.45rem] border border-border-default bg-[linear-gradient(180deg,color-mix(in_srgb,var(--ue-bg-secondary)_92%,transparent),color-mix(in_srgb,var(--ue-bg-surface)_98%,transparent))] p-2.5 shadow-sm"
+            className="rounded-xl border border-border-default/60 bg-bg-secondary/40 p-3 shadow-none"
             aria-label="Lọc theo level"
           >
             <div className="px-2 pb-2">
@@ -556,7 +556,7 @@ export default function LessonExercisesTab({
             </ul>
           </nav>
         </aside>
-
+ 
         <div className="min-w-0 flex-1 space-y-4">
           <LessonWorkQuickFilters
             key={filterDraftKey}
@@ -569,9 +569,9 @@ export default function LessonExercisesTab({
             showStaffFilter={canManageOutputs}
             footerNote={null}
           />
-
-          <div className="rounded-xl border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5">
-            <div className="flex flex-col gap-3 border-b border-border-default pb-4 sm:flex-row sm:items-center sm:justify-between">
+ 
+          <div className="space-y-6">
+            <div className="flex flex-col gap-3 border-b border-border-default/60 pb-4 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="text-lg font-semibold text-text-primary sm:text-xl">
                 Giáo Án ({total})
               </h3>

@@ -425,8 +425,9 @@ export default function AdminLessonPlansWorkspace({
   const canDelete = workspacePolicy === "admin";
   const visibleTabs = POLICY_VISIBLE_TABS[workspacePolicy];
   const resolvedActiveTab = visibleTabs.includes(activeTab) ? activeTab : visibleTabs[0];
+  const [activeTabState, setActiveTabState] = useState<LessonTabId>(resolvedActiveTab);
   const workspaceCopy = WORKSPACE_POLICY_COPY[workspacePolicy];
-  const shouldLoadOverview = resolvedActiveTab === "overview";
+  const shouldLoadOverview = activeTabState === "overview";
   const resolvedWorkAccessMode =
     workAccessMode ??
     (participantMode
@@ -582,10 +583,14 @@ export default function AdminLessonPlansWorkspace({
     syncTabToUrl(resolvedActiveTab);
   }, [activeTab, resolvedActiveTab, syncTabToUrl]);
 
+  useEffect(() => {
+    setActiveTabState(resolvedActiveTab);
+  }, [resolvedActiveTab]);
+
   const setListPage = (key: "resourcePage" | "taskPage", page: number) => {
     const params = new URLSearchParams(searchParams?.toString() ?? "");
     params.set(key, String(Math.max(1, page)));
-    params.set("tab", resolvedActiveTab);
+    params.set("tab", activeTabState);
     const nextQuery = params.toString();
     replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
       scroll: false,
@@ -594,7 +599,7 @@ export default function AdminLessonPlansWorkspace({
 
   const buildTaskDetailHref = (taskId: string) => {
     const params = new URLSearchParams();
-    params.set("tab", resolvedActiveTab);
+    params.set("tab", activeTabState);
     params.set("resourcePage", String(resourcePage));
     params.set("taskPage", String(taskPage));
     return `${taskDetailBasePath}/${encodeURIComponent(taskId)}?${params.toString()}`;
@@ -702,50 +707,31 @@ export default function AdminLessonPlansWorkspace({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-bg-primary p-3 pb-8 sm:p-6">
       <div className="flex min-w-0 flex-1 flex-col rounded-xl border border-border-default bg-bg-surface p-3 shadow-sm sm:rounded-lg sm:p-5">
-        {/* Header gộp: tiêu đề + thanh tab trong cùng một cụm */}
-        <section className="relative mb-5 overflow-visible rounded-2xl border border-border-default bg-gradient-to-br from-bg-secondary via-bg-surface to-bg-secondary/70 p-3 sm:p-4">
-          <div
-            className="pointer-events-none absolute -right-10 -top-10 size-32 rounded-full bg-primary/10 blur-2xl"
-            aria-hidden
-          />
-          <div
-            className="pointer-events-none absolute -bottom-10 left-10 size-28 rounded-full bg-warning/10 blur-2xl"
-            aria-hidden
-          />
-
-          <div className="relative min-w-0 pb-2 sm:pb-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-base font-medium tracking-tight text-text-primary sm:text-lg">
-                    Giáo Án
-                  </h1>
-                  <span className="inline-flex min-h-8 items-center rounded-full border border-border-default/80 bg-bg-surface/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-secondary">
-                    {workspaceCopy.badge}
-                  </span>
-                </div>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-text-secondary">
-                  {workspaceCopy.description}
-                </p>
+        {/* Header gộp: tiêu đề + thanh tab trong cùng một cụm phẳng tối giản */}
+        <header className="relative mb-6 min-w-0">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="text-xl font-bold tracking-tight text-text-primary sm:text-2xl">
+                  Giáo Án
+                </h1>
+                <span className="inline-flex items-center rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                  {workspaceCopy.badge}
+                </span>
               </div>
-              <div className="rounded-[1.2rem] border border-border-default/80 bg-bg-surface/85 px-4 py-3 text-sm text-text-secondary shadow-sm backdrop-blur-sm">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
-                  Tab khả dụng
-                </p>
-                <p className="mt-1 font-medium text-text-primary">
-                  {visibleTabs.map((tabId) => TAB_LABELS[tabId]).join(" • ")}
-                </p>
-              </div>
+              <p className="mt-1.5 max-w-3xl text-sm text-text-muted leading-relaxed">
+                {workspaceCopy.description}
+              </p>
             </div>
           </div>
 
           <div
-            className="flex w-full min-w-0 rounded-full bg-bg-secondary p-1 sm:p-1.5"
+            className="mt-6 flex w-full min-w-0 gap-6 border-b border-border-default/80"
             role="tablist"
             aria-label="Tổng quan, Công việc hoặc Giáo án"
           >
             {(Object.keys(TAB_LABELS) as LessonTabId[]).filter((t) => visibleTabs.includes(t)).map((tabId) => {
-              const isActive = resolvedActiveTab === tabId;
+              const isActive = activeTabState === tabId;
               return (
                 <button
                   key={tabId}
@@ -754,30 +740,34 @@ export default function AdminLessonPlansWorkspace({
                   role="tab"
                   aria-selected={isActive}
                   aria-controls={`lesson-panel-${tabId}`}
-                  onClick={() => syncTabToUrl(tabId)}
-                  className={`relative min-h-12 flex-1 min-w-0 touch-manipulation overflow-hidden rounded-full px-3 py-2.5 text-sm font-semibold transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:min-h-14 sm:px-6 sm:py-3 sm:text-base ${isActive
+                  onClick={async () => {
+                    setActiveTabState(tabId);
+                    await Promise.resolve();
+                    syncTabToUrl(tabId);
+                  }}
+                  className={`relative pb-3 text-sm font-semibold transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:text-base ${isActive
                     ? "text-primary"
                     : "text-text-muted hover:text-text-primary"
                     }`}
                 >
+                  <span className="relative z-10">{TAB_LABELS[tabId]}</span>
                   {isActive ? (
                     <motion.span
-                      layoutId="lesson-plans-tab-pill"
+                      layoutId="lesson-plans-tab-underline"
                       aria-hidden
-                      className="absolute inset-0 rounded-full bg-bg-surface shadow-sm"
+                      className="absolute bottom-0 left-0 right-0 h-[2px] rounded-full bg-primary"
                       transition={indicatorTransition}
                     />
                   ) : null}
-                  <span className="relative z-10">{TAB_LABELS[tabId]}</span>
                 </button>
               );
             })}
           </div>
-        </section>
+        </header>
 
         <div className="min-w-0 flex-1">
           <AnimatePresence mode="wait" initial={false}>
-            {resolvedActiveTab === "overview" ? (
+            {activeTabState === "overview" ? (
             <motion.section
               key="overview"
               id="lesson-panel-overview"
@@ -809,7 +799,7 @@ export default function AdminLessonPlansWorkspace({
               ) : (
                 <>
                   <section
-                    className="rounded-[1.75rem] border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5"
+                    className="py-1"
                     aria-busy={isResourceListPending}
                   >
                     <div className="flex flex-col gap-4 border-b border-border-default pb-4 sm:flex-row sm:items-end sm:justify-between">
@@ -1199,8 +1189,10 @@ export default function AdminLessonPlansWorkspace({
                     </div>
                   </section>
 
+                  <hr className="border-border-default/60 my-6" />
+
                   <section
-                    className="rounded-[1.75rem] border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5"
+                    className="py-1"
                     aria-busy={isTaskListPending}
                   >
                     <div className="flex flex-col gap-4 border-b border-border-default pb-4 sm:flex-row sm:items-end sm:justify-between">
@@ -1554,7 +1546,7 @@ export default function AdminLessonPlansWorkspace({
                 </>
               )}
             </motion.section>
-          ) : resolvedActiveTab === "work" ? (
+          ) : activeTabState === "work" ? (
             <motion.div key="work" className="min-w-0" {...panelMotionProps}>
               <LessonWorkTab
                 basePagePath={basePath}

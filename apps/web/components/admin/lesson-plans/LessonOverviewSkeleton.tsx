@@ -12,7 +12,7 @@ function SkeletonBlock({ className }: { className: string }) {
 export default function LessonOverviewSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="space-y-4 rounded-[1.75rem] border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5">
+      <div className="space-y-4 py-1">
         <SkeletonBlock className="h-8 w-56" />
         <div className="space-y-3">
           <SkeletonBlock className="h-28" />
@@ -21,7 +21,9 @@ export default function LessonOverviewSkeleton() {
         </div>
       </div>
 
-      <div className="space-y-4 rounded-[1.75rem] border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5">
+      <hr className="border-border-default/60 my-6" />
+
+      <div className="space-y-4 py-1">
         <SkeletonBlock className="h-8 w-52" />
         <div className="space-y-3">
           <SkeletonBlock className="h-24" />

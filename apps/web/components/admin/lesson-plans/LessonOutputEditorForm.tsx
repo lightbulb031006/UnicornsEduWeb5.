@@ -442,6 +442,22 @@ export default function LessonOutputEditorForm({
       return;
     }
 
+    const enrichedTags = Array.from(new Set([
+      ...selectedTags,
+      ...(tagChecker ? ["Checker"] : []),
+      ...(tagCode ? ["Code"] : []),
+    ]));
+
+    if (enrichedTags.length === 0) {
+      toast.error("Vui lòng chọn ít nhất một tag.");
+      return;
+    }
+
+    if (!link.trim()) {
+      toast.error("Link output là bắt buộc.");
+      return;
+    }
+
     if (
       !validateOptionalUrl(originalLink, "Link gốc") ||
       !validateOptionalUrl(link, "Link output")
@@ -458,12 +474,6 @@ export default function LessonOutputEditorForm({
     const resolvedTaskId = allowTasklessOutput
       ? lessonTaskId.trim() || null
       : lessonTaskId.trim();
-
-    const enrichedTags = Array.from(new Set([
-      ...selectedTags,
-      ...(tagChecker ? ["Checker"] : []),
-      ...(tagCode ? ["Code"] : []),
-    ]));
 
     const payload: CreateLessonOutputPayload = {
       lessonTaskId: resolvedTaskId,
@@ -565,7 +575,9 @@ export default function LessonOutputEditorForm({
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5">
-                <span className="text-sm text-text-secondary">Tag</span>
+                <span className="text-sm text-text-secondary">
+                  Tag <span className="text-error">*</span>
+                </span>
                 <LessonTagPicker
                   value={selectedTags}
                   onChange={setSelectedTags}
@@ -672,7 +684,9 @@ export default function LessonOutputEditorForm({
             </label>
 
             <label className="flex flex-col gap-1.5">
-              <span className="text-sm text-text-secondary">Link</span>
+              <span className="text-sm text-text-secondary">
+                Link output <span className="text-error">*</span>
+              </span>
               <input
                 type="url"
                 value={link}
@@ -680,6 +694,7 @@ export default function LessonOutputEditorForm({
                 className={fieldInputClass()}
                 placeholder="https://..."
                 autoComplete="off"
+                required
               />
             </label>
           </div>
@@ -913,18 +928,23 @@ export default function LessonOutputEditorForm({
             </label>
 
             <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-              <span>Link output</span>
+              <span>
+                Link output <span className="text-error">*</span>
+              </span>
               <input
                 type="url"
                 value={link}
                 onChange={(event) => setLink(event.target.value)}
                 placeholder="https://..."
                 className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                required
               />
             </label>
 
             <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-              <span>Tags</span>
+              <span>
+                Tags <span className="text-error">*</span>
+              </span>
               <LessonTagPicker
                 value={selectedTags}
                 onChange={setSelectedTags}

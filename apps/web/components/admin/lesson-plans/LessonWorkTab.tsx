@@ -718,8 +718,8 @@ export default function LessonWorkTab({
         />
       ) : null}
 
-      <section className="overflow-hidden rounded-[1.25rem] border border-border-default bg-bg-surface shadow-sm">
-        <div className="border-b border-border-default px-4 py-3.5 sm:px-5 sm:py-4">
+      <section className="space-y-6">
+        <div className="border-b border-border-default/60 pb-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-2">
               <h3 className="text-base font-semibold text-text-primary sm:text-lg">
@@ -760,7 +760,7 @@ export default function LessonWorkTab({
           </div>
         </div>
 
-        <div className="px-4 py-3.5 sm:px-5 sm:py-4">
+        <div className="space-y-4">
           {canBulkEditPaymentStatus && selectedCount > 0 ? (
               <section className="relative mb-4 overflow-hidden rounded-[1.2rem] border border-border-default bg-bg-surface p-3 shadow-sm">
               <div className="pointer-events-none absolute -right-10 top-0 size-24 rounded-full bg-success/10 blur-3xl" aria-hidden />
