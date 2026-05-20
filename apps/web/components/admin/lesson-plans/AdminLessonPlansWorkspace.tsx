@@ -24,7 +24,9 @@ import type {
 import * as lessonApi from "@/lib/apis/lesson.api";
 import type { StaffLessonEndpointAccessMode } from "@/lib/staff-lesson-workspace";
 import LessonDeleteConfirmPopup from "./LessonDeleteConfirmPopup";
-import LessonOverviewSkeleton from "./LessonOverviewSkeleton";
+import LessonOverviewSkeleton, {
+  LessonOverviewTableSkeleton,
+} from "./LessonOverviewSkeleton";
 import LessonResourceFormPopup from "./LessonResourceFormPopup";
 import LessonTaskFormPopup from "./LessonTaskFormPopup";
 import LessonExercisesTab from "./LessonExercisesTab";
@@ -238,111 +240,13 @@ function TablePagination({
 }
 
 function ListTableSkeleton({
-  rows = 3,
+  rows = 6,
   variant,
 }: {
   rows?: number;
   variant: "resource" | "task";
 }) {
-  return (
-    <>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:hidden">
-        {Array.from({ length: rows }).map((_, index) => (
-          <div
-            key={`mobile-${variant}-${index}`}
-            className="rounded-[1.35rem] border border-border-default bg-bg-surface p-4"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1 space-y-2">
-                <div className="h-3 w-20 animate-pulse rounded-full bg-bg-tertiary/80" />
-                <div className="h-5 w-4/5 animate-pulse rounded-full bg-bg-tertiary" />
-                <div className="h-4 w-28 animate-pulse rounded-full bg-bg-tertiary/65" />
-              </div>
-              <div className="flex gap-2">
-                <div className="size-10 animate-pulse rounded-xl bg-bg-tertiary/80" />
-                <div className="size-10 animate-pulse rounded-xl bg-bg-tertiary/65" />
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-3">
-              <div className="rounded-2xl border border-border-default/70 bg-bg-secondary/35 p-3">
-                <div className="h-3 w-16 animate-pulse rounded-full bg-bg-tertiary/75" />
-                <div className="mt-3 h-4 w-full animate-pulse rounded-full bg-bg-tertiary/70" />
-                <div className="mt-2 h-4 w-3/4 animate-pulse rounded-full bg-bg-tertiary/55" />
-              </div>
-              <div className="rounded-2xl border border-border-default/70 bg-bg-secondary/35 p-3">
-                <div className="h-3 w-20 animate-pulse rounded-full bg-bg-tertiary/75" />
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <div className="h-7 w-16 animate-pulse rounded-full bg-bg-tertiary/80" />
-                  <div className="h-7 w-20 animate-pulse rounded-full bg-bg-tertiary/65" />
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="hidden overflow-hidden rounded-[1.4rem] border border-border-default xl:block">
-        <div className="border-b border-border-default bg-bg-secondary px-4 py-3">
-          <div className="grid grid-cols-4 gap-3">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <div
-                key={`header-${variant}-${index}`}
-                className="h-4 animate-pulse rounded-full bg-bg-tertiary"
-              />
-            ))}
-          </div>
-        </div>
-
-        <div className="divide-y divide-border-default">
-          {Array.from({ length: rows }).map((_, index) => (
-            <div
-              key={`${variant}-row-${index}`}
-              className="grid gap-4 bg-bg-surface px-4 py-4 lg:grid-cols-12"
-            >
-              <div
-                className={
-                  variant === "resource" ? "lg:col-span-3" : "lg:col-span-4"
-                }
-              >
-                <div className="h-4 w-2/3 animate-pulse rounded-full bg-bg-tertiary" />
-              </div>
-
-              {variant === "resource" ? (
-                <>
-                  <div className="space-y-2 lg:col-span-5">
-                    <div className="h-3 w-full animate-pulse rounded-full bg-bg-tertiary/80" />
-                    <div className="h-3 w-4/5 animate-pulse rounded-full bg-bg-tertiary/65" />
-                  </div>
-                  <div className="flex flex-wrap gap-2 lg:col-span-2">
-                    <div className="h-7 w-16 animate-pulse rounded-full bg-bg-tertiary/80" />
-                    <div className="h-7 w-20 animate-pulse rounded-full bg-bg-tertiary/65" />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-2 lg:col-span-3">
-                    <div className="h-7 w-24 animate-pulse rounded-full bg-bg-tertiary/80" />
-                    <div className="h-7 w-20 animate-pulse rounded-full bg-bg-tertiary/65" />
-                  </div>
-
-                  <div className="space-y-3 lg:col-span-3">
-                    <div className="h-3 w-4/5 animate-pulse rounded-full bg-bg-tertiary/80" />
-                    <div className="h-3 w-3/5 animate-pulse rounded-full bg-bg-tertiary/65" />
-                  </div>
-                </>
-              )}
-
-              <div className="flex items-start justify-end gap-2 lg:col-span-2">
-                <div className="size-8 animate-pulse rounded-lg bg-bg-tertiary/70" />
-                <div className="size-8 animate-pulse rounded-lg bg-bg-tertiary/55" />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  );
+  return <LessonOverviewTableSkeleton rows={rows} variant={variant} />;
 }
 
 export type WorkspacePolicy = "admin" | "lesson_plan_head" | "lesson_plan" | "accountant";

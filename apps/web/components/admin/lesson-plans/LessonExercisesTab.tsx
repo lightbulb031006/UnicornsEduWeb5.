@@ -10,6 +10,7 @@ import LessonWorkQuickFilters, {
   type LessonWorkFilterDraft,
 } from "./LessonWorkQuickFilters";
 import LessonOutputQuickPopup from "./LessonOutputQuickPopup";
+import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
 
 const EX_PAGE_SIZE = 15;
 
@@ -245,33 +246,83 @@ export default function LessonExercisesTab({
   manageDetailsPath = "/admin/lesson-manage-details",
   participantMode = false,
 }: LessonExercisesTabProps) {
-  const { push, replace } = useRouter();
+  const { push } = useRouter();
   const searchParams = useSearchParams();
   const getSearchParam = searchParams.get.bind(searchParams);
   const queryClient = useQueryClient();
   const canManageOutputs = !participantMode;
-  const exPage = normalizePositiveInt(getSearchParam("exPage"));
-  const exLevel = normalizeExLevel(getSearchParam("exLevel"));
+  const [localPage, setLocalPage] = useState<number>(() => normalizePositiveInt(getSearchParam("exPage")));
+  const [localLevel, setLocalLevel] = useState<"all" | "0" | "1" | "2" | "3" | "4" | "5">(() => normalizeExLevel(getSearchParam("exLevel")));
+  const [localSearch, setLocalSearch] = useState<string>(() => getSearchParam("exSearch") ?? "");
+  const [localTag, setLocalTag] = useState<string>(() => getSearchParam("exTag") ?? "");
+  const [localOutputStatus, setLocalOutputStatus] = useState<string>(() => getSearchParam("exOutputStatus") ?? "all");
+  const [localStaffId, setLocalStaffId] = useState<string>(() => getSearchParam("exStaffId") ?? "");
+  const [localDateFrom, setLocalDateFrom] = useState<string>(() => getSearchParam("exDateFrom") ?? "");
+  const [localDateTo, setLocalDateTo] = useState<string>(() => getSearchParam("exDateTo") ?? "");
 
-  const exSearch = getSearchParam("exSearch") ?? "";
-  const exTag = getSearchParam("exTag") ?? "";
-  const exOutputStatus = getSearchParam("exOutputStatus") ?? "all";
-  const exStaffId = getSearchParam("exStaffId") ?? "";
-  const exDateFrom = getSearchParam("exDateFrom") ?? "";
-  const exDateTo = getSearchParam("exDateTo") ?? "";
+  // Render-time state synchronization when URL search parameters change externally
+  const [prevParams, setPrevParams] = useState(() => ({
+    exPage: getSearchParam("exPage"),
+    exLevel: getSearchParam("exLevel"),
+    exSearch: getSearchParam("exSearch"),
+    exTag: getSearchParam("exTag"),
+    exOutputStatus: getSearchParam("exOutputStatus"),
+    exStaffId: getSearchParam("exStaffId"),
+    exDateFrom: getSearchParam("exDateFrom"),
+    exDateTo: getSearchParam("exDateTo"),
+  }));
+
+  const currentExPage = getSearchParam("exPage");
+  const currentExLevel = getSearchParam("exLevel");
+  const currentExSearch = getSearchParam("exSearch");
+  const currentExTag = getSearchParam("exTag");
+  const currentExOutputStatus = getSearchParam("exOutputStatus");
+  const currentExStaffId = getSearchParam("exStaffId");
+  const currentExDateFrom = getSearchParam("exDateFrom");
+  const currentExDateTo = getSearchParam("exDateTo");
+
+  if (
+    currentExPage !== prevParams.exPage ||
+    currentExLevel !== prevParams.exLevel ||
+    currentExSearch !== prevParams.exSearch ||
+    currentExTag !== prevParams.exTag ||
+    currentExOutputStatus !== prevParams.exOutputStatus ||
+    currentExStaffId !== prevParams.exStaffId ||
+    currentExDateFrom !== prevParams.exDateFrom ||
+    currentExDateTo !== prevParams.exDateTo
+  ) {
+    setPrevParams({
+      exPage: currentExPage,
+      exLevel: currentExLevel,
+      exSearch: currentExSearch,
+      exTag: currentExTag,
+      exOutputStatus: currentExOutputStatus,
+      exStaffId: currentExStaffId,
+      exDateFrom: currentExDateFrom,
+      exDateTo: currentExDateTo,
+    });
+    setLocalPage(normalizePositiveInt(currentExPage));
+    setLocalLevel(normalizeExLevel(currentExLevel));
+    setLocalSearch(currentExSearch ?? "");
+    setLocalTag(currentExTag ?? "");
+    setLocalOutputStatus(currentExOutputStatus ?? "all");
+    setLocalStaffId(currentExStaffId ?? "");
+    setLocalDateFrom(currentExDateFrom ?? "");
+    setLocalDateTo(currentExDateTo ?? "");
+  }
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null);
   const appliedDraft = useMemo<LessonWorkFilterDraft>(
     () => ({
-      search: exSearch,
-      tag: exTag,
-      outputStatus: exOutputStatus || "all",
-      staffId: exStaffId,
-      dateFrom: exDateFrom,
-      dateTo: exDateTo,
+      search: localSearch,
+      tag: localTag,
+      outputStatus: localOutputStatus || "all",
+      staffId: localStaffId,
+      dateFrom: localDateFrom,
+      dateTo: localDateTo,
     }),
-    [exDateFrom, exDateTo, exOutputStatus, exSearch, exStaffId, exTag],
+    [localDateFrom, localDateTo, localOutputStatus, localSearch, localStaffId, localTag],
   );
   const filterDraftKey = useMemo(
     () => JSON.stringify(appliedDraft),
@@ -291,7 +342,70 @@ export default function LessonExercisesTab({
 
   const syncExParams = useCallback(
     (patch: Record<string, string | number | null | undefined>) => {
-      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      // 1. Update local React states
+      if ("exPage" in patch) {
+        setLocalPage(
+          normalizePositiveInt(
+            patch.exPage !== null && patch.exPage !== undefined
+              ? String(patch.exPage)
+              : null,
+          ),
+        );
+      }
+      if ("exLevel" in patch) {
+        setLocalLevel(
+          normalizeExLevel(
+            patch.exLevel !== null && patch.exLevel !== undefined
+              ? String(patch.exLevel)
+              : null,
+          ),
+        );
+      }
+      if ("exSearch" in patch) {
+        setLocalSearch(
+          patch.exSearch !== null && patch.exSearch !== undefined
+            ? String(patch.exSearch)
+            : "",
+        );
+      }
+      if ("exTag" in patch) {
+        setLocalTag(
+          patch.exTag !== null && patch.exTag !== undefined
+            ? String(patch.exTag)
+            : "",
+        );
+      }
+      if ("exOutputStatus" in patch) {
+        setLocalOutputStatus(
+          patch.exOutputStatus !== null && patch.exOutputStatus !== undefined
+            ? String(patch.exOutputStatus)
+            : "all",
+        );
+      }
+      if ("exStaffId" in patch) {
+        setLocalStaffId(
+          patch.exStaffId !== null && patch.exStaffId !== undefined
+            ? String(patch.exStaffId)
+            : "",
+        );
+      }
+      if ("exDateFrom" in patch) {
+        setLocalDateFrom(
+          patch.exDateFrom !== null && patch.exDateFrom !== undefined
+            ? String(patch.exDateFrom)
+            : "",
+        );
+      }
+      if ("exDateTo" in patch) {
+        setLocalDateTo(
+          patch.exDateTo !== null && patch.exDateTo !== undefined
+            ? String(patch.exDateTo)
+            : "",
+        );
+      }
+
+      // 2. Sync URL search params shallowly
+      const params = new URLSearchParams(window.location.search);
       params.set("tab", "exercises");
       for (const [key, value] of Object.entries(patch)) {
         if (value === null || value === undefined || value === "") {
@@ -300,11 +414,10 @@ export default function LessonExercisesTab({
           params.set(key, String(value));
         }
       }
-      replace(`${currentPagePath}?${params.toString()}`, {
-        scroll: false,
-      });
+      const newUrl = `${currentPagePath}?${params.toString()}`;
+      window.history.replaceState(null, "", newUrl);
     },
-    [currentPagePath, replace, searchParams],
+    [currentPagePath],
   );
 
   const applyFilters = useCallback((draft: LessonWorkFilterDraft) => {
@@ -369,25 +482,25 @@ export default function LessonExercisesTab({
       [
         "lesson",
         "exercises",
-        exPage,
-        exLevel,
-        exSearch,
-        exTag,
-        exOutputStatus,
-        canManageOutputs ? exStaffId : "",
-        exDateFrom,
-        exDateTo,
+        localPage,
+        localLevel,
+        localSearch,
+        localTag,
+        localOutputStatus,
+        canManageOutputs ? localStaffId : "",
+        localDateFrom,
+        localDateTo,
       ] as const,
     [
-      exPage,
-      exLevel,
-      exSearch,
-      exTag,
-      exOutputStatus,
+      localPage,
+      localLevel,
+      localSearch,
+      localTag,
+      localOutputStatus,
       canManageOutputs,
-      exStaffId,
-      exDateFrom,
-      exDateTo,
+      localStaffId,
+      localDateFrom,
+      localDateTo,
     ],
   );
 
@@ -396,18 +509,18 @@ export default function LessonExercisesTab({
       queryKey,
       queryFn: () =>
         lessonApi.getLessonWork({
-          page: exPage,
+          page: localPage,
           limit: EX_PAGE_SIZE,
-          search: exSearch || undefined,
-          tag: exTag || undefined,
+          search: localSearch || undefined,
+          tag: localTag || undefined,
           outputStatus:
-            exOutputStatus && exOutputStatus !== "all"
-              ? exOutputStatus
+            localOutputStatus && localOutputStatus !== "all"
+              ? localOutputStatus
               : undefined,
-          staffId: canManageOutputs ? exStaffId || undefined : undefined,
-          dateFrom: exDateFrom || undefined,
-          dateTo: exDateTo || undefined,
-          level: exLevel === "all" ? undefined : exLevel,
+          staffId: canManageOutputs ? localStaffId || undefined : undefined,
+          dateFrom: localDateFrom || undefined,
+          dateTo: localDateTo || undefined,
+          level: localLevel === "all" ? undefined : localLevel,
         }),
       placeholderData: (previousData) => previousData,
     });
@@ -536,8 +649,8 @@ export default function LessonExercisesTab({
               {LEVEL_OPTIONS.map((opt) => {
                 const active =
                   opt.key === "all"
-                    ? exLevel === "all"
-                    : exLevel === opt.key;
+                    ? localLevel === "all"
+                    : localLevel === opt.key;
                 return (
                   <li key={opt.key} className="xl:w-full">
                     <button
@@ -558,6 +671,11 @@ export default function LessonExercisesTab({
         </aside>
  
         <div className="min-w-0 flex-1 space-y-4">
+          <QueryRefreshStrip
+            active={isFetching}
+            label="Đang lọc danh sách giáo án..."
+          />
+
           <LessonWorkQuickFilters
             key={filterDraftKey}
             open={filterOpen}
@@ -892,7 +1010,7 @@ export default function LessonExercisesTab({
                   totalPages={data.outputsMeta.totalPages}
                   total={data.outputsMeta.total}
                   isPending={
-                    isFetching && data.outputsMeta.page !== exPage
+                    isFetching && data.outputsMeta.page !== localPage
                   }
                   onPageChange={handlePageChange}
                 />

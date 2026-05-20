@@ -2,11 +2,12 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { AdminLessonPlansWorkspace } from "@/components/admin/lesson-plans";
+import { LessonWorkspaceLoadingSkeleton } from "@/components/admin/lesson-plans/LessonOverviewSkeleton";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import { resolveStaffLessonWorkspace } from "@/lib/staff-lesson-workspace";
 
 export default function StaffLessonPlansPage() {
-  const { data: profile } = useQuery({
+  const { data: profile, isLoading: isProfileLoading } = useQuery({
     queryKey: ["auth", "full-profile"],
     queryFn: getFullProfile,
     retry: false,
@@ -18,6 +19,10 @@ export default function StaffLessonPlansPage() {
     workAccessMode,
     createOutputAccessMode,
   } = resolveStaffLessonWorkspace(profile);
+
+  if (isProfileLoading && !profile) {
+    return <LessonWorkspaceLoadingSkeleton />;
+  }
 
   if (!workspacePolicy) {
     return null;

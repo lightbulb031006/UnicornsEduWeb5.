@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import LessonOutputFormPopup from "@/components/admin/lesson-plans/LessonOutputFormPopup";
 import LessonOutputQuickPopup from "@/components/admin/lesson-plans/LessonOutputQuickPopup";
 import LessonResourceFormPopup from "@/components/admin/lesson-plans/LessonResourceFormPopup";
+import { LessonTaskDetailSkeleton } from "@/components/admin/lesson-plans/LessonOverviewSkeleton";
 import LessonTaskFormPopup from "@/components/admin/lesson-plans/LessonTaskFormPopup";
 import {
   formatLessonDateOnly,
@@ -398,22 +399,7 @@ export function LessonTaskDetailPage({
         </div>
 
         {isLoading ? (
-          <>
-            <section className="rounded-[2rem] border border-border-default bg-bg-surface p-5 shadow-sm sm:p-6">
-              <div className="h-4 w-32 animate-pulse rounded-full bg-bg-tertiary" />
-              <div className="mt-4 h-10 w-2/3 animate-pulse rounded-2xl bg-bg-tertiary" />
-              <div className="mt-4 h-4 w-full animate-pulse rounded-full bg-bg-tertiary" />
-              <div className="mt-2 h-4 w-5/6 animate-pulse rounded-full bg-bg-tertiary" />
-            </section>
-            <div className="grid gap-3 md:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="h-28 animate-pulse rounded-[1.4rem] border border-border-default bg-bg-surface"
-                />
-              ))}
-            </div>
-          </>
+          <LessonTaskDetailSkeleton canManageTask={canManageTask} />
         ) : isError || !task ? (
           <section className="rounded-[1.75rem] border border-border-default bg-bg-surface p-5 shadow-sm sm:p-6">
             <div className="rounded-[1.5rem] border border-dashed border-border-default bg-bg-secondary/40 px-5 py-12 text-center">
@@ -508,10 +494,11 @@ export function LessonTaskDetailPage({
                   <div className="mt-4 space-y-3">
                     {task.outputs.length > 0 ? (
                       task.outputs.map((output) => (
-                        <div
+                        <button
                           key={output.id}
+                          type="button"
                           onClick={() => openOutputDetail(output.id)}
-                          className="group flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-border-default bg-bg-secondary/35 p-4 transition-all hover:bg-bg-secondary/65"
+                          className="group flex w-full cursor-pointer items-start justify-between gap-4 rounded-xl border border-border-default bg-bg-secondary/35 p-4 text-left transition-colors hover:bg-bg-secondary/65 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                         >
                           <div className="min-w-0 flex-1">
                             <h4 className="truncate text-sm font-semibold text-text-primary group-hover:text-primary transition-colors">
@@ -535,7 +522,7 @@ export function LessonTaskDetailPage({
                               Chi tiết →
                             </span>
                           </div>
-                        </div>
+                        </button>
                       ))
                     ) : (
                       <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary/20 py-8 text-center text-sm text-text-muted">
