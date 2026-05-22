@@ -12,7 +12,6 @@ import {
   Put,
   Query,
   UploadedFile,
-  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -26,7 +25,6 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import {
-  FileFieldsInterceptor,
   FileInterceptor,
 } from '@nestjs/platform-express';
 import { BonusService } from 'src/bonus/bonus.service';
@@ -854,78 +852,6 @@ export class UserProfileController {
       roleType: user.roleType,
     });
   }
-
-  @Post('staff/cccd-images')
-  @HttpCode(HttpStatus.OK)
-  @UseInterceptors(
-    FileFieldsInterceptor(
-      [
-        { name: 'front_image', maxCount: 1 },
-        { name: 'back_image', maxCount: 1 },
-      ],
-      {
-        limits: {
-          fileSize: DEFAULT_MAX_IMAGE_BYTES,
-        },
-        fileFilter: buildImageUploadFileFilter({
-          defaultFieldLabel: 'Ảnh CCCD',
-          labelsByFieldName: {
-            front_image: 'Ảnh mặt trước CCCD',
-            back_image: 'Ảnh mặt sau CCCD',
-          },
-        }),
-      },
-    ),
-  )
-  @ApiOperation({
-    summary: 'Upload my staff CCCD images',
-    description:
-      'Upload front/back CCCD images for current authenticated staff profile.',
-  })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        front_image: {
-          type: 'string',
-          format: 'binary',
-        },
-        back_image: {
-          type: 'string',
-          format: 'binary',
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'CCCD images uploaded successfully.',
-  })
-  @ApiResponse({ status: 400, description: 'User has no staff record.' })
-  @ApiResponse({ status: 401, description: 'Unauthorized.' })
-  async uploadMyStaffCccdImages(
-    @CurrentUser() user: JwtPayload,
-    @UploadedFiles()
-    files: {
-      front_image?: Array<{ buffer: Buffer; mimetype: string; size: number }>;
-      back_image?: Array<{ buffer: Buffer; mimetype: string; size: number }>;
-    },
-  ) {
-    return this.staffService.uploadCccdImagesByUserId(
-      user.id,
-      {
-        frontImage: files.front_image?.[0],
-        backImage: files.back_image?.[0],
-      },
-      {
-        userId: user.id,
-        userEmail: user.email,
-        roleType: user.roleType,
-      },
-    );
-  }
-
   @Patch('student')
   @ApiOperation({
     summary: 'Update my student profile',

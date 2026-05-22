@@ -80,6 +80,21 @@ export class UpdateMyStaffProfileDto {
   @Matches(/^\d{12}$/, { message: 'Số CCCD phải gồm đúng 12 chữ số.' })
   cccd_number?: string;
 
+  @ApiPropertyOptional({ example: 'Kinh' })
+  @IsOptional()
+  @IsString()
+  ethnicity?: string;
+
+  @ApiPropertyOptional({ enum: Gender, example: Gender.male })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
+
+  @ApiPropertyOptional({ example: '123 Nguyễn Trãi, Quận 1, TP.HCM' })
+  @IsOptional()
+  @IsString()
+  current_address?: string;
+
   @ApiPropertyOptional({ example: '2022-01-15' })
   @IsOptional()
   @IsDateString()

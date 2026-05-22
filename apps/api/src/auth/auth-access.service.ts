@@ -53,6 +53,9 @@ type StaffProfileForAccess = {
   id: string;
   status: StaffStatus;
   cccdNumber: string | null;
+  ethnicity: string | null;
+  gender: string | null;
+  currentAddress: string | null;
   cccdIssuedDate: Date | string | null;
   cccdIssuedPlace: string | null;
   birthDate: Date | string | null;
@@ -61,8 +64,6 @@ type StaffProfileForAccess = {
   specialization: string | null;
   bankAccount: string | null;
   bankQrLink: string | null;
-  cccdFrontPath: string | null;
-  cccdBackPath: string | null;
 };
 
 type StudentProfileForAccess = {
@@ -100,6 +101,9 @@ function isStaffProfileComplete(staff: StaffProfileForAccess | null) {
 
   return (
     isValidCccd(staff.cccdNumber) &&
+    hasText(staff.ethnicity) &&
+    hasText(staff.gender) &&
+    hasText(staff.currentAddress) &&
     hasText(staff.cccdIssuedDate) &&
     hasText(staff.cccdIssuedPlace) &&
     hasText(staff.birthDate) &&
@@ -107,9 +111,7 @@ function isStaffProfileComplete(staff: StaffProfileForAccess | null) {
     hasText(staff.highSchool) &&
     hasText(staff.specialization) &&
     hasText(staff.bankAccount) &&
-    hasText(staff.bankQrLink) &&
-    hasText(staff.cccdFrontPath) &&
-    hasText(staff.cccdBackPath)
+    hasText(staff.bankQrLink)
   );
 }
 
@@ -239,6 +241,9 @@ export class AuthAccessService {
             id: true,
             status: true,
             cccdNumber: true,
+            ethnicity: true,
+            gender: true,
+            currentAddress: true,
             cccdIssuedDate: true,
             cccdIssuedPlace: true,
             birthDate: true,
@@ -247,8 +252,6 @@ export class AuthAccessService {
             specialization: true,
             bankAccount: true,
             bankQrLink: true,
-            cccdFrontPath: true,
-            cccdBackPath: true,
           },
         },
         studentInfo: { select: { id: true, status: true } },

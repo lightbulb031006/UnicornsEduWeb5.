@@ -349,8 +349,6 @@ describe('StaffService', () => {
       userId: 'new-user',
       roles: [StaffRole.teacher],
       status: 'active',
-      cccdFrontPath: null,
-      cccdBackPath: null,
       user: {
         id: 'new-user',
         email: 'new@example.com',
@@ -2140,8 +2138,6 @@ describe('StaffService', () => {
       classTeachers: [],
       monthlyStats: [],
       customerCareManagedBy: null,
-      cccdFrontPath: null,
-      cccdBackPath: null,
     });
     mockPrisma.$queryRaw.mockResolvedValueOnce([]);
 

@@ -26,7 +26,6 @@ import {
   UpdateUserDto,
 } from 'src/dtos/user.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { StaffService } from 'src/staff/staff.service';
 import {
   createSignedStorageUrl,
   getSupabaseAdminClient,
@@ -56,7 +55,6 @@ export class UserService {
     private readonly prisma: PrismaService,
     private readonly actionHistoryService: ActionHistoryService,
     private readonly authService: AuthService,
-    private readonly staffService: StaffService,
   ) {}
 
   private buildAvatarStoragePath(userId: string) {
@@ -82,30 +80,22 @@ export class UserService {
       last_name?: string | null;
       accountHandle?: string | null;
       email?: string | null;
-      staffInfo?: {
-        cccdFrontPath?: string | null;
-        cccdBackPath?: string | null;
-      } | null;
+      staffInfo?: Record<string, unknown> | null;
     },
   >(profile: T) {
     const fullName = getPreferredUserFullName(profile) ?? null;
-    const [avatarUrl, staffInfo] = await Promise.all([
-      this.createAvatarSignedUrl(profile.avatarPath),
-      profile.staffInfo
-        ? this.staffService.attachCccdImageUrls(profile.staffInfo)
-        : Promise.resolve(profile.staffInfo),
-    ]);
+    const avatarUrl = await this.createAvatarSignedUrl(profile.avatarPath);
 
     return {
       ...profile,
       fullName,
       avatarUrl,
-      staffInfo: staffInfo
+      staffInfo: profile.staffInfo
         ? {
-            ...staffInfo,
+            ...profile.staffInfo,
             fullName: fullName ?? '',
           }
-        : staffInfo,
+        : profile.staffInfo,
     };
   }
 
@@ -1038,6 +1028,10 @@ export class UserService {
     const userNameData = this.normalizeSelfStaffNameInput(dto);
     const data: Record<string, unknown> = {};
     if (dto.cccd_number !== undefined) data.cccdNumber = dto.cccd_number;
+    if (dto.ethnicity !== undefined) data.ethnicity = dto.ethnicity;
+    if (dto.gender !== undefined) data.gender = dto.gender;
+    if (dto.current_address !== undefined)
+      data.currentAddress = dto.current_address;
     if (dto.cccd_issued_date !== undefined) {
       const cccdIssuedDate = new Date(dto.cccd_issued_date);
       data.cccdIssuedDate = Number.isNaN(cccdIssuedDate.getTime())

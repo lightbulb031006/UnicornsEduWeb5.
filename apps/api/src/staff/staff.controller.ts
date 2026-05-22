@@ -10,8 +10,6 @@ import {
   Patch,
   Post,
   Query,
-  UploadedFiles,
-  UseInterceptors,
 } from '@nestjs/common';
 import {
   ParseStaffIdPipe,
@@ -20,14 +18,12 @@ import {
 import {
   ApiBody,
   ApiCookieAuth,
-  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { StaffRole, UserRole } from 'generated/enums';
 import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
@@ -54,11 +50,7 @@ import {
   UpdateStaffStatusDto,
   PatchStaffClassTeacherOperatingDeductionDto,
 } from 'src/dtos/staff.dto';
-import {
-  buildImageUploadFileFilter,
-  DEFAULT_MAX_IMAGE_BYTES,
-  normalizeHttpHttpsUrl,
-} from 'src/storage/supabase-storage';
+import { normalizeHttpHttpsUrl } from 'src/storage/supabase-storage';
 import { StaffService } from './staff.service';
 
 @Controller('staff')
@@ -634,77 +626,5 @@ export class StaffController {
       userEmail: user.email,
       roleType: user.roleType,
     });
-  }
-
-  @Post(':userId/cccd-images')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
-  @HttpCode(HttpStatus.OK)
-  @UseInterceptors(
-    FileFieldsInterceptor(
-      [
-        { name: 'front_image', maxCount: 1 },
-        { name: 'back_image', maxCount: 1 },
-      ],
-      {
-        limits: {
-          fileSize: DEFAULT_MAX_IMAGE_BYTES,
-        },
-        fileFilter: buildImageUploadFileFilter({
-          defaultFieldLabel: 'Ảnh CCCD',
-          labelsByFieldName: {
-            front_image: 'Ảnh mặt trước CCCD',
-            back_image: 'Ảnh mặt sau CCCD',
-          },
-        }),
-      },
-    ),
-  )
-  @ApiOperation({
-    summary: 'Upload CCCD images for staff user',
-    description:
-      'Upload front/back CCCD images for a staff profile by linked user id.',
-  })
-  @ApiParam({ name: 'userId', description: 'Linked user id of staff profile' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        front_image: {
-          type: 'string',
-          format: 'binary',
-        },
-        back_image: {
-          type: 'string',
-          format: 'binary',
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'CCCD images uploaded successfully.',
-  })
-  async uploadStaffCccdImages(
-    @CurrentUser() user: JwtPayload,
-    @Param('userId', new ParseUUIDPipe()) userId: string,
-    @UploadedFiles()
-    files: {
-      front_image?: Array<{ buffer: Buffer; mimetype: string; size: number }>;
-      back_image?: Array<{ buffer: Buffer; mimetype: string; size: number }>;
-    },
-  ) {
-    return this.staffService.uploadCccdImagesByUserId(
-      userId,
-      {
-        frontImage: files.front_image?.[0],
-        backImage: files.back_image?.[0],
-      },
-      {
-        userId: user.id,
-        userEmail: user.email,
-        roleType: user.roleType,
-      },
-    );
   }
 }

@@ -45,10 +45,6 @@ describe('UserService', () => {
     invalidateAuthIdentityCache: jest.fn(),
   };
 
-  const staffService = {
-    attachCccdImageUrls: jest.fn((value: unknown) => value),
-  };
-
   let service: UserService;
 
   beforeEach(() => {
@@ -60,7 +56,6 @@ describe('UserService', () => {
       mockPrisma as never,
       actionHistoryService as never,
       authService as never,
-      staffService as never,
     );
   });
 
@@ -422,12 +417,13 @@ describe('UserService', () => {
     );
 
     expect(mockPrisma.studentInfo.create).toHaveBeenCalledWith({
-      data: {
+      data: expect.objectContaining({
+        id: expect.stringMatching(/^UNIST-/),
         fullName: 'User New',
         email: 'new-user@example.com',
         province: 'Hanoi',
         userId: 'user-1',
-      },
+      }),
     });
     expect(actionHistoryService.recordCreate).toHaveBeenCalledWith(
       mockPrisma,
