@@ -29,6 +29,9 @@ const SECTION_HEADING =
 export type StaffIdentityOverviewProps = {
   birthDateLabel: string;
   province: React.ReactNode;
+  ethnicity?: string | null;
+  gender?: string | null;
+  currentAddress?: string | null;
   university?: string | null;
   specialization?: string | null;
   personalAchievementLink?: string | null;
@@ -39,9 +42,18 @@ export type StaffIdentityOverviewProps = {
   allowQrEdit?: boolean;
 };
 
+function getGenderLabel(gender?: string | null): string {
+  if (gender === "female") return "Nữ";
+  if (gender === "male") return "Nam";
+  return "—";
+}
+
 export default function StaffIdentityOverview({
   birthDateLabel,
   province,
+  ethnicity,
+  gender,
+  currentAddress,
   university,
   specialization,
   personalAchievementLink,
@@ -84,7 +96,19 @@ export default function StaffIdentityOverview({
         <span className="select-none text-text-muted/30" aria-hidden>
           ·
         </span>
+        <InlineFact label="Dân tộc" value={ethnicity?.trim()} />
+        <span className="select-none text-text-muted/30" aria-hidden>
+          ·
+        </span>
+        <InlineFact label="Giới tính" value={getGenderLabel(gender)} />
+        <span className="select-none text-text-muted/30" aria-hidden>
+          ·
+        </span>
         <InlineFact label="Trường ĐH" value={university?.trim()} />
+      </div>
+
+      <div className="mt-2">
+        <InlineFact label="Địa chỉ hiện tại" value={currentAddress?.trim()} />
       </div>
 
       {trimmedAchievementLink ? (

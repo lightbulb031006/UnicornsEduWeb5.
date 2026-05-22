@@ -14,7 +14,6 @@ import {
     StaffListResponse,
     StaffOption,
     StaffStatus,
-    UploadStaffCccdImagesResponse,
 } from '@/dtos/staff.dto';
 import { CreateUserPayload, UpdateUserPayload } from '@/dtos/user.dto';
 import { api } from '../client';
@@ -119,6 +118,9 @@ export async function updateStaff(payload: {
     id: string;
     full_name?: string;
     cccd_number?: string;
+    ethnicity?: string;
+    gender?: "male" | "female";
+    current_address?: string;
     cccd_issued_date?: string;
     cccd_issued_place?: string;
     birth_date?: string;
@@ -300,27 +302,6 @@ export async function regenerateStaffMeetLink(
     const safeId = encodeURIComponent(id);
     const response = await api.post<{ googleMeetLink: string }>(
         `/staff/${safeId}/regenerate-meet-link`,
-    );
-    return response.data;
-}
-
-export async function uploadStaffCccdImages(params: {
-    userId: string;
-    frontImage?: File | null;
-    backImage?: File | null;
-}): Promise<UploadStaffCccdImagesResponse> {
-    const formData = new FormData();
-    if (params.frontImage) {
-        formData.append('front_image', params.frontImage);
-    }
-    if (params.backImage) {
-        formData.append('back_image', params.backImage);
-    }
-
-    const safeUserId = encodeURIComponent(params.userId);
-    const response = await api.post<UploadStaffCccdImagesResponse>(
-        `/staff/${safeUserId}/cccd-images`,
-        formData,
     );
     return response.data;
 }

@@ -907,6 +907,9 @@ export default function StaffSelfDetailPage() {
         <StaffIdentityOverview
           birthDateLabel={formatDate(staff.birthDate)}
           province={province}
+          ethnicity={staff.ethnicity}
+          gender={staff.gender}
+          currentAddress={staff.currentAddress}
           university={staff.university}
           specialization={staff.specialization}
           personalAchievementLink={staff.personalAchievementLink}

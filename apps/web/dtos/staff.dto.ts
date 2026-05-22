@@ -1,5 +1,6 @@
 
 export type StaffStatus = "active" | "inactive";
+export type StaffGender = "male" | "female";
 
 export interface StaffListMeta {
     total: number;
@@ -69,11 +70,9 @@ export interface StaffDetail {
     cccdNumber: string | null;
     cccdIssuedDate?: string | null;
     cccdIssuedPlace?: string | null;
-    cccdFrontPath?: string | null;
-    cccdBackPath?: string | null;
-    cccdFrontUrl?: string | null;
-    cccdBackUrl?: string | null;
-    cccdVerifiedAt?: string | null;
+    ethnicity?: string | null;
+    gender?: StaffGender | null;
+    currentAddress?: string | null;
     birthDate?: string | null;
     university?: string | null;
     highSchool?: string | null;
@@ -298,6 +297,9 @@ export interface StaffPayDepositSessionsResult {
 export interface CreateStaffPayload {
     full_name: string;
     cccd_number: string;
+    ethnicity?: string;
+    gender?: StaffGender;
+    current_address?: string;
     cccd_issued_date?: string;
     cccd_issued_place?: string;
     birth_date?: string;
@@ -310,14 +312,6 @@ export interface CreateStaffPayload {
     roles: string[];
     user_id: string;
     customer_care_managed_by_staff_id?: string | null;
-}
-
-export interface UploadStaffCccdImagesResponse {
-    staffId: string;
-    cccdFrontPath?: string | null;
-    cccdBackPath?: string | null;
-    cccdFrontUrl?: string | null;
-    cccdBackUrl?: string | null;
 }
 
 export interface StaffInfoDto {

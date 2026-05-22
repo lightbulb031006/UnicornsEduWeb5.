@@ -1,4 +1,4 @@
-import type { StaffStatus } from "./staff.dto";
+import type { StaffGender, StaffStatus } from "./staff.dto";
 import type { StudentStatus, StudentGender } from "./student.dto";
 
 /** Staff record as returned in full profile (camelCase from API). */
@@ -9,11 +9,9 @@ export interface ProfileStaffInfoDto {
   cccdNumber: string | null;
   cccdIssuedDate?: string | null;
   cccdIssuedPlace?: string | null;
-  cccdFrontPath?: string | null;
-  cccdBackPath?: string | null;
-  cccdFrontUrl?: string | null;
-  cccdBackUrl?: string | null;
-  cccdVerifiedAt?: string | null;
+  ethnicity?: string | null;
+  gender?: StaffGender | null;
+  currentAddress?: string | null;
   birthDate?: string | null;
   university?: string | null;
   highSchool?: string | null;
@@ -104,6 +102,9 @@ export interface UpdateMyProfileDto {
 /** Payload to update current user's staff: PATCH /users/me/staff */
 export interface UpdateMyStaffProfileDto {
   cccd_number?: string;
+  ethnicity?: string;
+  gender?: StaffGender;
+  current_address?: string;
   cccd_issued_date?: string;
   cccd_issued_place?: string;
   birth_date?: string;

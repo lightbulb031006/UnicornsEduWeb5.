@@ -150,28 +150,6 @@ export async function updateMyStudentProfile(
   return response.data;
 }
 
-export async function uploadMyStaffCccdImages(params: {
-  frontImage?: File | null;
-  backImage?: File | null;
-}): Promise<{
-  staffId: string;
-  cccdFrontPath?: string | null;
-  cccdBackPath?: string | null;
-  cccdFrontUrl?: string | null;
-  cccdBackUrl?: string | null;
-}> {
-  const formData = new FormData();
-  if (params.frontImage) {
-    formData.append("front_image", params.frontImage);
-  }
-  if (params.backImage) {
-    formData.append("back_image", params.backImage);
-  }
-
-  const response = await api.post("/users/me/staff/cccd-images", formData);
-  return response.data;
-}
-
 /** Current linked student detail for self-service pages. */
 export async function getMyStudentDetail(): Promise<StudentSelfDetail> {
   const response = await api.get<StudentSelfDetail>("/users/me/student-detail");

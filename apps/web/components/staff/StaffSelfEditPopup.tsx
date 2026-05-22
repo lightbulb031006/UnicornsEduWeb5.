@@ -3,9 +3,10 @@
 import { useState, type SyntheticEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import CccdImageUploadFields from "@/components/staff/CccdImageUploadFields";
 import { DateInput } from "@/components/ui/DateInput";
+import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import type { FullProfileDto } from "@/dtos/profile.dto";
+import type { StaffGender } from "@/dtos/staff.dto";
 import {
   resolveCanonicalUserName,
   splitCanonicalUserName,
@@ -47,6 +48,13 @@ export default function StaffSelfEditPopup({
     resolveCanonicalUserName(profile, staffInfo?.fullName),
   );
   const [cccdNumber, setCccdNumber] = useState(staffInfo?.cccdNumber ?? "");
+  const [ethnicity, setEthnicity] = useState(staffInfo?.ethnicity ?? "");
+  const [gender, setGender] = useState<StaffGender | "">(
+    staffInfo?.gender ?? "",
+  );
+  const [currentAddress, setCurrentAddress] = useState(
+    staffInfo?.currentAddress ?? "",
+  );
   const [cccdIssuedDateInput, setCccdIssuedDateInput] = useState(
     formatDateInput(staffInfo?.cccdIssuedDate),
   );
@@ -64,8 +72,6 @@ export default function StaffSelfEditPopup({
   const [bankAccount, setBankAccount] = useState(staffInfo?.bankAccount ?? "");
   const [bankQrLink, setBankQrLink] = useState(staffInfo?.bankQrLink ?? "");
   const [personalAchievementLink, setPersonalAchievementLink] = useState(staffInfo?.personalAchievementLink ?? "");
-  const [frontImage, setFrontImage] = useState<File | null>(null);
-  const [backImage, setBackImage] = useState<File | null>(null);
 
   const isSaving = false;
 
@@ -92,6 +98,9 @@ export default function StaffSelfEditPopup({
         await authApi.updateMyProfile(splitCanonicalUserName(trimmedName));
         await authApi.updateMyStaffProfile({
           cccd_number: normalizedCccd,
+          ethnicity: ethnicity.trim(),
+          gender: gender || undefined,
+          current_address: currentAddress.trim(),
           cccd_issued_date: cccdIssuedDateInput.trim() || undefined,
           cccd_issued_place: cccdIssuedPlace.trim(),
           birth_date: birthDateInput.trim() || undefined,
@@ -102,13 +111,6 @@ export default function StaffSelfEditPopup({
           bank_qr_link: bankQrLink.trim(),
           personal_achievement_link: personalAchievementLink.trim() || null,
         });
-
-        if (frontImage || backImage) {
-          await authApi.uploadMyStaffCccdImages({
-            frontImage,
-            backImage,
-          });
-        }
       },
       onSuccess: async () => {
         await Promise.all([
@@ -228,6 +230,54 @@ export default function StaffSelfEditPopup({
                   autoComplete="off"
                   disabled={isSaving}
                   className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span>Dân tộc</span>
+                <input
+                  name="ethnicity"
+                  value={ethnicity}
+                  onChange={(event) => setEthnicity(event.target.value)}
+                  autoComplete="off"
+                  disabled={isSaving}
+                  className="rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  placeholder="Ví dụ: Kinh"
+                />
+              </label>
+
+              <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span>Giới tính</span>
+                <UpgradedSelect
+                  name="gender"
+                  value={gender}
+                  onValueChange={(nextValue) =>
+                    setGender(
+                      nextValue === "male" || nextValue === "female"
+                        ? nextValue
+                        : "",
+                    )
+                  }
+                  placeholder="Chọn giới tính"
+                  options={[
+                    { value: "male", label: "Nam" },
+                    { value: "female", label: "Nữ" },
+                  ]}
+                  buttonClassName="rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                />
+              </div>
+
+              <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                <span>Địa chỉ hiện tại</span>
+                <textarea
+                  name="currentAddress"
+                  value={currentAddress}
+                  onChange={(event) => setCurrentAddress(event.target.value)}
+                  rows={2}
+                  autoComplete="street-address"
+                  disabled={isSaving}
+                  className="resize-none rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  placeholder="Ví dụ: 123 Nguyễn Trãi, Quận 1, TP.HCM"
                 />
               </label>
 
@@ -366,21 +416,6 @@ export default function StaffSelfEditPopup({
                   Link Google Drive lưu trữ thành tích. Không bắt buộc điền.
                 </p>
               </label>
-
-              <div className="sm:col-span-2">
-                <CccdImageUploadFields
-                  frontImage={frontImage}
-                  backImage={backImage}
-                  frontPath={staffInfo.cccdFrontPath}
-                  backPath={staffInfo.cccdBackPath}
-                  frontUrl={staffInfo.cccdFrontUrl}
-                  backUrl={staffInfo.cccdBackUrl}
-                  disabled={isSaving}
-                  isUploading={false}
-                  onFrontImageChange={setFrontImage}
-                  onBackImageChange={setBackImage}
-                />
-              </div>
             </div>
           </section>
 

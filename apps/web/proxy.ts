@@ -22,6 +22,9 @@ type FullProfileGuardPayload = {
   requiresStaffDataConsent?: boolean;
   staffInfo?: {
     cccdNumber?: string | null;
+    ethnicity?: string | null;
+    gender?: string | null;
+    currentAddress?: string | null;
     cccdIssuedDate?: string | null;
     cccdIssuedPlace?: string | null;
     birthDate?: string | null;
@@ -30,8 +33,6 @@ type FullProfileGuardPayload = {
     specialization?: string | null;
     bankAccount?: string | null;
     bankQrLink?: string | null;
-    cccdFrontPath?: string | null;
-    cccdBackPath?: string | null;
   } | null;
 };
 
@@ -58,6 +59,9 @@ function isStaffProfileComplete(profile: FullProfileGuardPayload): boolean {
     hasText(profile.dataConsentVersion) &&
     profile.requiresStaffDataConsent !== true &&
     isValidCccd(staffInfo.cccdNumber) &&
+    hasText(staffInfo.ethnicity) &&
+    hasText(staffInfo.gender) &&
+    hasText(staffInfo.currentAddress) &&
     hasText(staffInfo.cccdIssuedDate) &&
     hasText(staffInfo.cccdIssuedPlace) &&
     hasText(staffInfo.birthDate) &&
@@ -65,9 +69,7 @@ function isStaffProfileComplete(profile: FullProfileGuardPayload): boolean {
     hasText(staffInfo.highSchool) &&
     hasText(staffInfo.specialization) &&
     hasText(staffInfo.bankAccount) &&
-    hasText(staffInfo.bankQrLink) &&
-    hasText(staffInfo.cccdFrontPath) &&
-    hasText(staffInfo.cccdBackPath)
+    hasText(staffInfo.bankQrLink)
   );
 }
 

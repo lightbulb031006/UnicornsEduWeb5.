@@ -2,10 +2,9 @@
 
 import { useState, type SyntheticEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import CccdImageUploadFields from "@/components/staff/CccdImageUploadFields";
 import { DateInput } from "@/components/ui/DateInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
-import type { StaffDetail } from "@/dtos/staff.dto";
+import type { StaffDetail, StaffGender } from "@/dtos/staff.dto";
 import * as staffApi from "@/lib/apis/staff.api";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 
@@ -52,6 +51,11 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
 
   const [fullName, setFullName] = useState(staff.fullName ?? "");
   const [cccdNumber, setCccdNumber] = useState(staff.cccdNumber ?? "");
+  const [ethnicity, setEthnicity] = useState(staff.ethnicity ?? "");
+  const [gender, setGender] = useState<StaffGender | "">(staff.gender ?? "");
+  const [currentAddress, setCurrentAddress] = useState(
+    staff.currentAddress ?? "",
+  );
   const [cccdIssuedDateInput, setCccdIssuedDateInput] = useState(
     formatDateInput(staff.cccdIssuedDate),
   );
@@ -72,8 +76,6 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
   const [managedByStaffId, setManagedByStaffId] = useState<string | null>(
     staff.customerCareManagedByStaffId ?? null,
   );
-  const [frontImage, setFrontImage] = useState<File | null>(null);
-  const [backImage, setBackImage] = useState<File | null>(null);
 
   const hasCustomerCareRole = selectedRoles.has("customer_care");
 
@@ -120,6 +122,9 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
           id: staff.id,
           full_name: trimmedName || undefined,
           cccd_number: normalizedCccd || undefined,
+          ethnicity: ethnicity.trim() || undefined,
+          gender: gender || undefined,
+          current_address: currentAddress.trim() || undefined,
           cccd_issued_date: cccdIssuedDateInput.trim() || undefined,
           cccd_issued_place: cccdIssuedPlace.trim() || undefined,
           birth_date: birthDateInput.trim() || undefined,
@@ -136,14 +141,6 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
         });
         if (status !== staff.status) {
           await staffApi.updateStaffStatus(staff.id, status);
-        }
-
-        if ((frontImage || backImage) && staff.user?.id) {
-          await staffApi.uploadStaffCccdImages({
-            userId: staff.user.id,
-            frontImage,
-            backImage,
-          });
         }
       },
       onSuccess: async () => {
@@ -232,6 +229,48 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
                   value={cccdIssuedDateInput}
                   onChange={(e) => setCccdIssuedDateInput(e.target.value)}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span>Dân tộc</span>
+                <input
+                  value={ethnicity}
+                  onChange={(e) => setEthnicity(e.target.value)}
+                  className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  placeholder="Ví dụ: Kinh"
+                />
+              </label>
+
+              <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span>Giới tính</span>
+                <UpgradedSelect
+                  name="staff-gender"
+                  value={gender}
+                  onValueChange={(nextValue) =>
+                    setGender(
+                      nextValue === "male" || nextValue === "female"
+                        ? nextValue
+                        : "",
+                    )
+                  }
+                  placeholder="Chọn giới tính"
+                  options={[
+                    { value: "male", label: "Nam" },
+                    { value: "female", label: "Nữ" },
+                  ]}
+                  buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                />
+              </div>
+
+              <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                <span>Địa chỉ hiện tại</span>
+                <textarea
+                  value={currentAddress}
+                  onChange={(e) => setCurrentAddress(e.target.value)}
+                  rows={2}
+                  className="resize-none rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  placeholder="Ví dụ: 123 Nguyễn Trãi, Quận 1, TP.HCM"
                 />
               </label>
 
@@ -389,21 +428,6 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
                   </p>
                 </label>
               )}
-
-              <div className="sm:col-span-2">
-                <CccdImageUploadFields
-                  frontImage={frontImage}
-                  backImage={backImage}
-                  frontPath={staff.cccdFrontPath}
-                  backPath={staff.cccdBackPath}
-                  frontUrl={staff.cccdFrontUrl}
-                  backUrl={staff.cccdBackUrl}
-                  disabled={!staff.user?.id}
-                  isUploading={false}
-                  onFrontImageChange={setFrontImage}
-                  onBackImageChange={setBackImage}
-                />
-              </div>
             </div>
           </section>
 

@@ -103,6 +103,9 @@ function isCompleteFullProfileStaffInfo(profile: FullProfileDto): boolean {
     hasText(profile.dataConsentVersion) &&
     profile.requiresStaffDataConsent !== true &&
     isValidCccd(staffInfo.cccdNumber) &&
+    hasText(staffInfo.ethnicity) &&
+    hasText(staffInfo.gender) &&
+    hasText(staffInfo.currentAddress) &&
     hasText(staffInfo.cccdIssuedDate) &&
     hasText(staffInfo.cccdIssuedPlace) &&
     hasText(staffInfo.birthDate) &&
@@ -110,9 +113,7 @@ function isCompleteFullProfileStaffInfo(profile: FullProfileDto): boolean {
     hasText(staffInfo.highSchool) &&
     hasText(staffInfo.specialization) &&
     hasText(staffInfo.bankAccount) &&
-    hasText(staffInfo.bankQrLink) &&
-    hasText(staffInfo.cccdFrontPath ?? staffInfo.cccdFrontUrl) &&
-    hasText(staffInfo.cccdBackPath ?? staffInfo.cccdBackUrl)
+    hasText(staffInfo.bankQrLink)
   );
 }
 

@@ -8,11 +8,12 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import CccdImageUploadFields from "@/components/staff/CccdImageUploadFields";
 import { DateInput } from "@/components/ui/DateInput";
+import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import type {
   StaffAssignableUser,
   StaffDetail,
+  StaffGender,
 } from "@/dtos/staff.dto";
 import * as staffApi from "@/lib/apis/staff.api";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
@@ -60,6 +61,9 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
   const [selectedUserId, setSelectedUserId] = useState("");
   const [fullName, setFullName] = useState("");
   const [cccdNumber, setCccdNumber] = useState("");
+  const [ethnicity, setEthnicity] = useState("");
+  const [gender, setGender] = useState<StaffGender | "">("");
+  const [currentAddress, setCurrentAddress] = useState("");
   const [cccdIssuedDateInput, setCccdIssuedDateInput] = useState("");
   const [cccdIssuedPlace, setCccdIssuedPlace] = useState("");
   const [birthDateInput, setBirthDateInput] = useState("");
@@ -72,8 +76,6 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(
     () => new Set(["teacher"]),
   );
-  const [frontImage, setFrontImage] = useState<File | null>(null);
-  const [backImage, setBackImage] = useState<File | null>(null);
 
   const {
     data: assignableUsers = [],
@@ -161,6 +163,10 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
       toast.error("Vui lòng chọn ít nhất một vai trò nhân sự.");
       return;
     }
+    if (!gender) {
+      toast.error("Vui lòng chọn giới tính.");
+      return;
+    }
 
     onClose();
     runBackgroundSave({
@@ -171,6 +177,9 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
         const createdStaff = await staffApi.createStaff({
           full_name: trimmedName,
           cccd_number: normalizedCccd,
+          ethnicity: ethnicity.trim() || undefined,
+          gender,
+          current_address: currentAddress.trim() || undefined,
           cccd_issued_date: cccdIssuedDateInput.trim() || undefined,
           cccd_issued_place: cccdIssuedPlace.trim() || undefined,
           birth_date: birthDateInput.trim() || undefined,
@@ -183,14 +192,6 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
           roles: Array.from(selectedRoles),
           user_id: selectedUser.id,
         });
-
-        if (frontImage || backImage) {
-          await staffApi.uploadStaffCccdImages({
-            userId: selectedUser.id,
-            frontImage,
-            backImage,
-          });
-        }
 
         return createdStaff;
       },
@@ -472,6 +473,51 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
                         />
                       </label>
 
+                      <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                        <span>Dân tộc</span>
+                        <input
+                          value={ethnicity}
+                          onChange={(event) => setEthnicity(event.target.value)}
+                          disabled={!selectedUser?.isEligible}
+                          placeholder="Ví dụ: Kinh"
+                          className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:bg-bg-tertiary disabled:text-text-muted"
+                        />
+                      </label>
+
+                      <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                        <span>Giới tính</span>
+                        <UpgradedSelect
+                          name="add-staff-gender"
+                          value={gender}
+                          onValueChange={(nextValue) =>
+                            setGender(
+                              nextValue === "male" || nextValue === "female"
+                                ? nextValue
+                                : "",
+                            )
+                          }
+                          placeholder="Chọn giới tính"
+                          options={[
+                            { value: "male", label: "Nam" },
+                            { value: "female", label: "Nữ" },
+                          ]}
+                          buttonClassName="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:bg-bg-tertiary disabled:text-text-muted"
+                          disabled={!selectedUser?.isEligible}
+                        />
+                      </div>
+
+                      <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                        <span>Địa chỉ hiện tại</span>
+                        <textarea
+                          value={currentAddress}
+                          onChange={(event) => setCurrentAddress(event.target.value)}
+                          disabled={!selectedUser?.isEligible}
+                          rows={2}
+                          placeholder="Ví dụ: 123 Nguyễn Trãi, Quận 1, TP.HCM"
+                          className="resize-none rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:bg-bg-tertiary disabled:text-text-muted"
+                        />
+                      </label>
+
                       <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
                         <span>Nơi cấp CCCD</span>
                         <input
@@ -571,17 +617,6 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
                           Link Google Drive lưu trữ thành tích. Không bắt buộc điền.
                         </p>
                       </label>
-
-                      <div className="sm:col-span-2">
-                        <CccdImageUploadFields
-                          frontImage={frontImage}
-                          backImage={backImage}
-                          disabled={!selectedUser?.isEligible}
-                          isUploading={false}
-                          onFrontImageChange={setFrontImage}
-                          onBackImageChange={setBackImage}
-                        />
-                      </div>
                     </div>
                     </div>
                   </section>
