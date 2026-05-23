@@ -64,7 +64,7 @@ export class SePayService {
   isStudentWalletStaticQrConfigured(): boolean {
     return Boolean(
       process.env.SEPAY_TRANSFER_BANK_BIN?.trim() &&
-        process.env.SEPAY_TRANSFER_ACCOUNT_NUMBER?.trim(),
+      process.env.SEPAY_TRANSFER_ACCOUNT_NUMBER?.trim(),
     );
   }
 
@@ -140,9 +140,7 @@ export class SePayService {
     classIds: string[] = [],
     classNames: string[] = [],
   ): string {
-    const baseTransferNote = ['NAPVI', studentId, ...classIds]
-      .join(' ')
-      .trim();
+    const baseTransferNote = [studentId, ...classIds].join(' ').trim();
     if (classNames.length === 0) {
       return baseTransferNote;
     }

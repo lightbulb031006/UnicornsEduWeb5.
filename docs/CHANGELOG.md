@@ -29,6 +29,8 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed
 
+- SePay static QR nạp ví: bỏ marker `NAPVI` khỏi nội dung QR tĩnh để ưu tiên hiển thị đủ token `UNIST-{uuid}` trên VietinBank/SePay; webhook vẫn tương thích QR cũ có `NAPVI`/`NAP VI`, đồng thời nhận compact/truncated `UNIST<hex>` khi prefix khớp duy nhất một học sinh và tài khoản nhận đúng `SEPAY_TRANSFER_ACCOUNT_NUMBER`.
+
 - Staff CCCD profile: bỏ flow upload ảnh CCCD ở admin/self-service, thay bằng field nhập tay `ethnicity`, `gender`, `current_address`; staff workspace gate kiểm tra các field này thay vì ảnh 2 mặt. Prisma migration `20260522100000_replace_staff_cccd_images_with_identity_fields` drop các cột path ảnh CCCD legacy.
 
 - FE `LessonTaskDetailPage` (/admin/lesson-plans/tasks/[taskId] & /staff/lesson-plans/tasks/[taskId]): Đơn giản hoá, thiết kế lại trang chi tiết công việc giáo án theo bố cục 2 cột (Main content + Sidebar) cao cấp và responsive trên desktop. Gộp mô tả thừa, thu gọn danh sách nhân sự thực hiện (avatar tròn nhỏ) và tài nguyên liên quan (DB search mở rộng dạng inline) giúp trang gọn gàng, tăng diện tích thao tác và đạt 0 lỗi/cảnh báo tsc/eslint.

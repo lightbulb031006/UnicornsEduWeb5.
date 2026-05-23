@@ -152,9 +152,7 @@ describe('SePayService', () => {
     expect(qrUrl.searchParams.get('acc')).toBe('1234567890');
     expect(qrUrl.searchParams.get('bank')).toBe('VietinBank');
     expect(qrUrl.searchParams.get('amount')).toBe('120000');
-    expect(qrUrl.searchParams.get('des')).toBe(
-      'SEVQR NAPVI UABCDEF1234567890',
-    );
+    expect(qrUrl.searchParams.get('des')).toBe('SEVQR NAPVI UABCDEF1234567890');
     expect(http.post).not.toHaveBeenCalled();
   });
 
@@ -174,7 +172,7 @@ describe('SePayService', () => {
     });
 
     const expectedTransferNote =
-      'NAPVI 0b45b3cc-6d67-4d7b-9c78-7f346c9a6fd7 4d560c5e-c3df-4470-b59a-2fd273ef95ef 71f0d9ec-c497-4d67-9256-c09e5d5d4334 LOP Toan 8A, Ly 8A';
+      '0b45b3cc-6d67-4d7b-9c78-7f346c9a6fd7 4d560c5e-c3df-4470-b59a-2fd273ef95ef 71f0d9ec-c497-4d67-9256-c09e5d5d4334 LOP Toan 8A, Ly 8A';
 
     expect(result).toMatchObject({
       studentId: '0b45b3cc-6d67-4d7b-9c78-7f346c9a6fd7',
@@ -212,7 +210,7 @@ describe('SePayService', () => {
     const qrUrl = new URL(result.qrCodeUrl);
 
     expect(result.transferNote).toBe(
-      'SEVQR NAPVI UNIST-0b45b3cc-6d67-4d7b-9c78-7f346c9a6fd7 UNICL-4d560c5e-c3df-4470-b59a-2fd273ef95ef LOP Toan 8A',
+      'SEVQR UNIST-0b45b3cc-6d67-4d7b-9c78-7f346c9a6fd7 UNICL-4d560c5e-c3df-4470-b59a-2fd273ef95ef LOP Toan 8A',
     );
     expect(qrUrl.searchParams.get('acc')).toBe('1234567890');
     expect(qrUrl.searchParams.get('bank')).toBe('VietinBank');

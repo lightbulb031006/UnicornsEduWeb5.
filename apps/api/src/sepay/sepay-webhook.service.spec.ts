@@ -222,7 +222,7 @@ describe('SePayWebhookService', () => {
       status: 'completed',
       amountRequested: 88_000,
       amountReceived: 88_000,
-      transferNote: `NAPVI ${studentId} ${classId1} ${classId2}`,
+      transferNote: `${studentId} ${classId1} ${classId2}`,
       sepayTransactionId: '92704',
       sepayReferenceCode: 'MBVCB.3278907687',
       walletTransactionId: null,
@@ -293,7 +293,7 @@ describe('SePayWebhookService', () => {
       status: 'completed',
       amountRequested: 88_000,
       amountReceived: 88_000,
-      transferNote: `NAPVI ${studentId} ${classId1} ${classId2}`,
+      transferNote: `${studentId} ${classId1} ${classId2}`,
       sepayTransactionId: '92704',
       sepayReferenceCode: 'MBVCB.3278907687',
     });
@@ -323,7 +323,7 @@ describe('SePayWebhookService', () => {
         studentCode: studentId,
         orderCode: staticOrderCode,
         amountReceived: 88_000,
-        transferNote: `NAPVI ${studentId} ${classId1} ${classId2}`,
+        transferNote: `${studentId} ${classId1} ${classId2}`,
         extensionClassNames: ['Toan 8A', 'Ly 8A'],
       }),
     );
@@ -381,7 +381,7 @@ describe('SePayWebhookService', () => {
       status: 'completed',
       amountRequested: 88_000,
       amountReceived: 88_000,
-      transferNote: `NAPVI ${studentId}`,
+      transferNote: studentId,
       sepayTransactionId: '92704',
       sepayReferenceCode: 'MBVCB.3278907687',
       walletTransactionId: 'wallet-tx-static-space',
@@ -434,7 +434,7 @@ describe('SePayWebhookService', () => {
     expect(prisma.studentWalletSepayOrder.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         studentId,
-        transferNote: `NAPVI ${studentId}`,
+        transferNote: studentId,
       }),
       include: { student: true },
     });
@@ -459,7 +459,7 @@ describe('SePayWebhookService', () => {
       status: 'completed',
       amountRequested: 3_000,
       amountReceived: 3_000,
-      transferNote: `NAPVI ${studentId}`,
+      transferNote: studentId,
       sepayTransactionId: '59913790',
       sepayReferenceCode: 'FT26142344360806',
       walletTransactionId: 'wallet-tx-compact',
@@ -531,9 +531,101 @@ describe('SePayWebhookService', () => {
         studentId,
         amountRequested: 3_000,
         amountReceived: 3_000,
-        transferNote: `NAPVI ${studentId}`,
+        transferNote: studentId,
       }),
       include: { student: true },
+    });
+    expect(prisma.studentInfo.update).toHaveBeenCalledWith({
+      where: { id: studentId },
+      data: { accountBalance: { increment: 3_000 } },
+    });
+  });
+
+  it('credits a static student QR payment without NAPVI when the bank truncates the compact student id', async () => {
+    process.env.SEPAY_TRANSFER_ACCOUNT_NUMBER = '105883075301';
+
+    const prisma = createPrismaMock();
+    const mail = { sendStudentWalletTopUpReceiptEmail: jest.fn() };
+    const compactStudentPrefix = '56e9f4adea274f4fa1d03e3';
+    const studentId = 'UNIST-56e9f4ad-ea27-4f4f-a1d0-3e386d9e2aa';
+    const staticOrderCode =
+      'STATIC22222222222222222222222222222222222222222222';
+    const completedOrder = {
+      orderCode: staticOrderCode,
+      studentId,
+      status: 'completed',
+      amountRequested: 3_000,
+      amountReceived: 3_000,
+      transferNote: studentId,
+      sepayTransactionId: '60135923',
+      sepayReferenceCode: '1VUmc-89JYg2Oau',
+      walletTransactionId: 'wallet-tx-vietin-truncated',
+      receiptEmailSentAt: null,
+      student: {
+        fullName: 'Nguyen Van A',
+        parentName: null,
+        parentEmail: null,
+      },
+    };
+
+    prisma.studentWalletSepayOrder.findFirst.mockResolvedValue(null);
+    prisma.studentWalletSepayOrder.findUnique.mockResolvedValue(null);
+    prisma.studentInfo.findMany.mockResolvedValueOnce([
+      {
+        id: studentId,
+        fullName: 'Nguyen Van A',
+        parentName: null,
+        parentEmail: null,
+      },
+    ]);
+    prisma.studentInfo.findUnique.mockResolvedValueOnce({
+      accountBalance: 191_000,
+    });
+    prisma.studentWalletSepayOrder.create.mockResolvedValue({
+      ...completedOrder,
+      walletTransactionId: null,
+    });
+    prisma.walletTransactionsHistory.create.mockResolvedValue({
+      id: 'wallet-tx-vietin-truncated',
+    });
+    prisma.studentInfo.update.mockResolvedValue({ id: studentId });
+    prisma.studentWalletSepayOrder.update.mockResolvedValue(completedOrder);
+    prisma.customerCareService.findUnique.mockResolvedValue(null);
+
+    const service = new SePayWebhookService(prisma as never, mail as never);
+
+    await expect(
+      service.reconcile(
+        buildPayload({
+          id: 60135923,
+          gateway: 'VietinBank',
+          transactionDate: '2026-05-23 15:52:30',
+          accountNumber: '105883075301',
+          code: null,
+          content: `130374321891-0785642999-SEVQR UNIST${compactStudentPrefix}`,
+          description: `BankAPINotify 130374321891-0785642999-SEVQR UNIST${compactStudentPrefix}`,
+          transferAmount: 3_000,
+          referenceCode: '1VUmc-89JYg2Oau',
+          accumulated: 0,
+        }),
+      ),
+    ).resolves.toEqual({
+      action: 'credited',
+      orderCode: staticOrderCode,
+      walletTransactionId: 'wallet-tx-vietin-truncated',
+    });
+
+    expect(prisma.studentInfo.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { startsWith: 'UNIST-56e9f4ad-ea27-4f4f-a1d0-3e3' },
+      },
+      select: {
+        id: true,
+        fullName: true,
+        parentName: true,
+        parentEmail: true,
+      },
+      take: 2,
     });
     expect(prisma.studentInfo.update).toHaveBeenCalledWith({
       where: { id: studentId },

@@ -461,13 +461,13 @@ export class SePayWebhookService {
   private extractStaticQrContextFromText(text: string): StaticQrContext | null {
     const uuid =
       '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
-    const compactUuidPrefix = '[0-9a-f]{24,32}';
+    const compactUuidPrefix = '[0-9a-f]{20,32}';
     const studentPart = `(?:UNIST-${uuid}|UNIST-?${compactUuidPrefix})`;
     const classPart = `(?:UNICL-${uuid}|UNICL-?${compactUuidPrefix})`;
-    const marker = 'NAP\\s*VI';
+    const optionalMarker = '(?:NAP\\s*VI\\s+)?';
     const match = text.match(
       new RegExp(
-        `\\b${marker}\\s+(${studentPart})((?:[\\s-]+${classPart})*)`,
+        `\\b${optionalMarker}(${studentPart})((?:[\\s-]+${classPart})*)`,
         'i',
       ),
     );
@@ -518,7 +518,7 @@ export class SePayWebhookService {
     }
 
     const compactMatch = value.match(
-      new RegExp(`^${prefix}-?([0-9a-f]{24,32})$`, 'i'),
+      new RegExp(`^${prefix}-?([0-9a-f]{20,32})$`, 'i'),
     );
     const compactHex = compactMatch?.[1]?.toLowerCase();
     if (!compactHex) {
@@ -554,7 +554,7 @@ export class SePayWebhookService {
   }
 
   private buildStaticQrTransferNote(context: StaticQrContext): string {
-    return ['NAPVI', context.studentId, ...context.classIds].join(' ');
+    return [context.studentId, ...context.classIds].join(' ');
   }
 
   private buildStaticQrOrderCode(payload: SePayWebhookDto): string {
