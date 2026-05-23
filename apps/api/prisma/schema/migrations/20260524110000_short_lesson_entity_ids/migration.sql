@@ -13,6 +13,11 @@
 
 BEGIN;
 
+-- Supabase/shared DBs can enforce statement_timeout while this migration
+-- backfills denormalized JSON/text references. Let the migration finish
+-- instead of aborting the transaction mid-backfill.
+SET LOCAL statement_timeout = 0;
+
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TEMP TABLE "_lesson_task_short_id_map" (
