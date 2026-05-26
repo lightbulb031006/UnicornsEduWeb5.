@@ -1,4 +1,9 @@
 import 'dotenv/config';
+import { setDefaultResultOrder } from 'node:dns';
+
+// Prefer IPv4 when resolving Supabase pooler hostnames (VPS without IPv6 route).
+setDefaultResultOrder('ipv4first');
+
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
