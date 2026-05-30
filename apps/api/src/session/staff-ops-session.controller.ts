@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -26,6 +27,7 @@ import {
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
   CreateStaffOpsSessionDto,
+  MissedTeachingAlertDto,
   UpdateStaffOpsSessionDto,
 } from 'src/dtos/session.dto';
 import { SessionService } from './session.service';
@@ -37,6 +39,19 @@ import { GoogleCalendarService } from '../google-calendar/google-calendar.servic
 @Roles(UserRole.staff, UserRole.admin)
 export class StaffOpsSessionController {
   constructor(private readonly sessionService: SessionService) {}
+
+  private parseOptionalPositiveDays(days?: string) {
+    if (days == null || days === '') {
+      return undefined;
+    }
+
+    const parsedDays = Number(days);
+    if (!Number.isInteger(parsedDays) || parsedDays < 1) {
+      throw new BadRequestException('days must be a positive integer.');
+    }
+
+    return parsedDays;
+  }
 
   @Get('classes/:classId/sessions')
   @ApiOperation({
@@ -61,6 +76,35 @@ export class StaffOpsSessionController {
       classId,
       month,
       year,
+    );
+  }
+
+  @Get('classes/:classId/missed-teaching-alerts')
+  @ApiOperation({
+    summary: 'Get missed teaching alerts for staff class operations',
+  })
+  @ApiParam({ name: 'classId', description: 'Class id' })
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    description: 'Số ngày gần nhất cần rà. Mặc định 31 ngày.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Missed teaching alerts for the selected class.',
+    type: MissedTeachingAlertDto,
+    isArray: true,
+  })
+  async getMissedTeachingAlertsByClassId(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Query('days') days?: string,
+  ): Promise<MissedTeachingAlertDto[]> {
+    return this.sessionService.getMissedTeachingAlertsByClassForStaff(
+      user.id,
+      user.roleType,
+      classId,
+      this.parseOptionalPositiveDays(days),
     );
   }
 

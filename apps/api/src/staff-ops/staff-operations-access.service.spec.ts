@@ -138,6 +138,40 @@ describe('StaffOperationsAccessService', () => {
     });
   });
 
+  it('allows training staff for calendar only', async () => {
+    mockPrisma.staffInfo.findFirst.mockResolvedValue({
+      id: 'training-1',
+      roles: [StaffRole.training],
+    });
+
+    await expect(
+      service.resolveCalendarActor('training-user', UserRole.staff),
+    ).resolves.toEqual({
+      id: 'training-1',
+      roles: [StaffRole.training],
+      calendarAccessMode: 'training',
+    });
+
+    await expect(
+      service.resolveActor('training-user', UserRole.staff),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('rejects non-teacher non-training staff from calendar access', async () => {
+    mockPrisma.staffInfo.findFirst.mockResolvedValue({
+      id: 'assistant-1',
+      roles: [StaffRole.assistant],
+    });
+
+    await expect(
+      service.resolveCalendarActor('assistant-user', UserRole.staff),
+    ).rejects.toThrow(
+      new ForbiddenException(
+        'Lịch staff hiện chỉ mở cho teacher hoặc Đào Tạo.',
+      ),
+    );
+  });
+
   it('returns customer care actor for class detail viewer routes', async () => {
     mockPrisma.staffInfo.findFirst.mockResolvedValue({
       id: 'staff-1',

@@ -52,6 +52,8 @@ const ELEVATED_CLASS_ACCESS_ROLES: readonly StaffRole[] = [
   StaffRole.admin,
   StaffRole.assistant,
   StaffRole.accountant,
+  StaffRole.accountant_income,
+  StaffRole.accountant_expense,
 ];
 
 function isTeacherScopedActor(roles: StaffRole[]) {

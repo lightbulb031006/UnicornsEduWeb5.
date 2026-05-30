@@ -35,7 +35,7 @@ import { BonusService } from './bonus.service';
 @AllowStaffRolesOnAdminRoutes(
   StaffRole.admin,
   StaffRole.assistant,
-  StaffRole.accountant,
+  StaffRole.accountant_expense,
 )
 @Roles(UserRole.admin)
 export class BonusController {
@@ -106,7 +106,9 @@ export class BonusController {
   @ApiParam({ name: 'id', description: 'Bonus id' })
   @ApiResponse({ status: 200, description: 'Bonus found.' })
   @ApiResponse({ status: 404, description: 'Bonus not found.' })
-  async getBonusById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+  async getBonusById(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ) {
     return this.bonusService.getBonusById(id);
   }
 
@@ -114,7 +116,7 @@ export class BonusController {
   @AllowStaffRolesOnAdminRoutes(
     StaffRole.admin,
     StaffRole.assistant,
-    StaffRole.accountant,
+    StaffRole.accountant_expense,
   )
   @ApiOperation({
     summary: 'Create bonus',
@@ -161,7 +163,7 @@ export class BonusController {
   @AllowStaffRolesOnAdminRoutes(
     StaffRole.admin,
     StaffRole.assistant,
-    StaffRole.accountant,
+    StaffRole.accountant_expense,
   )
   @ApiOperation({
     summary: 'Delete bonus',
@@ -170,7 +172,10 @@ export class BonusController {
   @ApiParam({ name: 'id', description: 'Bonus id' })
   @ApiResponse({ status: 200, description: 'Bonus deleted.' })
   @ApiResponse({ status: 404, description: 'Bonus not found.' })
-  async deleteBonus(@CurrentUser() user: JwtPayload, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+  async deleteBonus(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ) {
     return this.bonusService.deleteBonus(id, {
       userId: user.id,
       userEmail: user.email,

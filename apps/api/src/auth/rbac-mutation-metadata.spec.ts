@@ -1,7 +1,14 @@
+jest.mock('src/calendar/calendar.service', () => ({
+  CalendarService: class CalendarServiceMock {},
+}));
+
 import { StaffRole } from 'generated/enums';
+import { ALLOW_ASSISTANT_ON_ADMIN_KEY } from './decorators/allow-assistant-on-admin.decorator';
 import { ALLOW_STAFF_ROLES_ON_ADMIN_KEY } from './decorators/allow-staff-roles-on-admin.decorator';
 import { BonusController } from '../bonus/bonus.controller';
+import { ClassController } from '../class/class.controller';
 import { CostController } from '../cost/cost.controller';
+import { DeductionSettingsController } from '../deduction-settings/deduction-settings.controller';
 import { ExtraAllowanceController } from '../extra-allowance/extra-allowance.controller';
 import { StaffController } from '../staff/staff.controller';
 import { StudentController } from '../student/student.controller';
@@ -29,6 +36,34 @@ function getAllowedStaffRoles(
   return Array.isArray(metadata) ? (metadata as StaffRole[]) : undefined;
 }
 
+function getAllowAssistantOnAdminRoute(
+  controller: { prototype: object },
+  methodName?: string,
+): boolean | undefined {
+  let target: object = controller;
+
+  if (methodName !== undefined) {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      controller.prototype,
+      methodName,
+    );
+    const methodTarget: unknown = descriptor?.value;
+
+    if (typeof methodTarget !== 'function') {
+      throw new Error(`Controller method not found: ${methodName}`);
+    }
+
+    target = methodTarget;
+  }
+
+  const metadata: unknown = Reflect.getMetadata(
+    ALLOW_ASSISTANT_ON_ADMIN_KEY,
+    target,
+  );
+
+  return typeof metadata === 'boolean' ? metadata : undefined;
+}
+
 describe('RBAC route metadata', () => {
   it.each(['createUser', 'createStudentUser', 'updateUser', 'deleteUser'])(
     'requires full admin for UserController.%s',
@@ -37,68 +72,100 @@ describe('RBAC route metadata', () => {
     },
   );
 
-  it('requires full admin for staff profile role/link/status updates', () => {
+  it('requires full admin for staff profile role/link updates', () => {
     expect(getAllowedStaffRoles(StaffController, 'updateStaff')).toEqual([]);
   });
 
-  it('keeps assistant access only on staff create/delete helper routes', () => {
+  it('allows assistant on staff lifecycle helper routes', () => {
     expect(getAllowedStaffRoles(StaffController, 'createStaff')).toEqual([
       StaffRole.assistant,
     ]);
     expect(getAllowedStaffRoles(StaffController, 'deleteStaff')).toEqual([
       StaffRole.assistant,
     ]);
+    expect(getAllowedStaffRoles(StaffController, 'updateStaffStatus')).toEqual([
+      StaffRole.assistant,
+    ]);
   });
 
-  it('allows scoped staff roles to read student wallet history', () => {
+  it('allows assistant on operational student and class status actions', () => {
+    expect(
+      getAllowedStaffRoles(StudentController, 'updateStudentStatus'),
+    ).toEqual([StaffRole.assistant]);
+    expect(getAllowedStaffRoles(ClassController, 'updateClassStudents')).toEqual(
+      [StaffRole.assistant],
+    );
+    expect(getAllowedStaffRoles(ClassController, 'endClass')).toEqual([
+      StaffRole.assistant,
+    ]);
+    expect(getAllowedStaffRoles(ClassController, 'stopClassTeacher')).toEqual([
+      StaffRole.assistant,
+    ]);
+  });
+
+  it('keeps student wallet history out of accountant scopes', () => {
     expect(
       getAllowedStaffRoles(StudentController, 'getStudentWalletHistory'),
-    ).toEqual([
-      StaffRole.assistant,
-      StaffRole.accountant,
-      StaffRole.customer_care,
-    ]);
+    ).toEqual([StaffRole.assistant, StaffRole.customer_care]);
   });
 
-  it('allows assistant and accountant to create costs', () => {
+  it('keeps direct wallet adjustment and student delete full-admin only', () => {
+    expect(
+      getAllowAssistantOnAdminRoute(
+        StudentController,
+        'updateStudentAccountBalance',
+      ),
+    ).toBe(false);
+    expect(
+      getAllowAssistantOnAdminRoute(StudentController, 'deleteStudent'),
+    ).toBe(false);
+  });
+
+  it('keeps tax deduction settings full-admin only', () => {
+    expect(getAllowAssistantOnAdminRoute(DeductionSettingsController)).toBe(
+      false,
+    );
+  });
+
+  it('allows assistant and expense accountant to create costs', () => {
     expect(getAllowedStaffRoles(CostController, 'createCost')).toEqual([
       StaffRole.assistant,
-      StaffRole.accountant,
+      StaffRole.accountant_expense,
     ]);
   });
 
-  it('allows assistant and accountant to delete costs', () => {
+  it('allows assistant and expense accountant to delete costs', () => {
     expect(getAllowedStaffRoles(CostController, 'deleteCost')).toEqual([
       StaffRole.assistant,
-      StaffRole.accountant,
+      StaffRole.accountant_expense,
     ]);
   });
 
-  it('allows staff admin, assistant, and accountant to create bonuses', () => {
+  it('allows staff admin, assistant, and expense accountant to create bonuses', () => {
     expect(getAllowedStaffRoles(BonusController, 'createBonus')).toEqual([
       StaffRole.admin,
       StaffRole.assistant,
-      StaffRole.accountant,
+      StaffRole.accountant_expense,
     ]);
   });
 
-  it('allows staff admin, assistant, and accountant to delete bonuses', () => {
+  it('allows staff admin, assistant, and expense accountant to delete bonuses', () => {
     expect(getAllowedStaffRoles(BonusController, 'deleteBonus')).toEqual([
       StaffRole.admin,
       StaffRole.assistant,
-      StaffRole.accountant,
+      StaffRole.accountant_expense,
     ]);
   });
 
-  it('allows assistant and accountant to create extra allowances', () => {
+  it('allows assistant and expense accountant to create extra allowances', () => {
     expect(
       getAllowedStaffRoles(ExtraAllowanceController, 'createExtraAllowance'),
-    ).toEqual([StaffRole.assistant, StaffRole.accountant]);
+    ).toEqual([StaffRole.assistant, StaffRole.accountant_expense]);
   });
 
-  it('allows assistant and accountant to delete extra allowances', () => {
+  it('allows assistant and expense accountant to delete extra allowances', () => {
     expect(
       getAllowedStaffRoles(ExtraAllowanceController, 'deleteExtraAllowance'),
-    ).toEqual([StaffRole.assistant, StaffRole.accountant]);
+    ).toEqual([StaffRole.assistant, StaffRole.accountant_expense]);
   });
 });

@@ -13,11 +13,14 @@ export interface StaffOperationsActor {
 }
 
 export type StaffClassViewAccessMode = 'admin' | 'teacher' | 'customer_care';
+export type StaffCalendarAccessMode = 'admin' | 'teacher' | 'training';
 
 const ELEVATED_CLASS_ACCESS_ROLES = [
   StaffRole.admin,
   StaffRole.assistant,
   StaffRole.accountant,
+  StaffRole.accountant_income,
+  StaffRole.accountant_expense,
 ] as const;
 
 function hasAnyStaffRole(
@@ -78,6 +81,35 @@ export class StaffOperationsAccessService {
     }
 
     return staff;
+  }
+
+  async resolveCalendarActor(
+    userId: string,
+    roleType: UserRole,
+  ): Promise<
+    StaffOperationsActor & { calendarAccessMode: StaffCalendarAccessMode }
+  > {
+    if (roleType === UserRole.admin) {
+      return {
+        id: userId,
+        roles: [],
+        calendarAccessMode: 'admin',
+      };
+    }
+
+    const staff = await this.resolveStaffActor(userId);
+
+    if (staff.roles.includes(StaffRole.training)) {
+      return { ...staff, calendarAccessMode: 'training' };
+    }
+
+    if (staff.roles.includes(StaffRole.teacher)) {
+      return { ...staff, calendarAccessMode: 'teacher' };
+    }
+
+    throw new ForbiddenException(
+      'Lịch staff hiện chỉ mở cho teacher hoặc Đào Tạo.',
+    );
   }
 
   async resolveClassViewerActor(

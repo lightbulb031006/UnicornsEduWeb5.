@@ -134,7 +134,11 @@ function resolveAdminTier(
     return 'assistant';
   }
 
-  if (staffRoles.includes(StaffRole.accountant)) {
+  if (
+    staffRoles.includes(StaffRole.accountant) ||
+    staffRoles.includes(StaffRole.accountant_income) ||
+    staffRoles.includes(StaffRole.accountant_expense)
+  ) {
     return 'accountant';
   }
 

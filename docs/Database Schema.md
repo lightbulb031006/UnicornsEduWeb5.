@@ -114,8 +114,9 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 ### 4.2 `staff_info`
 
 - **PK format:** `UNISTAFF-[0-9a-f]{10}` — ví dụ `UNISTAFF-1a2b3c4d5e`. Đây là **mã định danh hệ thống** ngắn cho nhân sự; migration `20260523110000_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
-- Thông tin nhân sự: hồ sơ cá nhân, CCCD, ngân hàng, `roles` (`StaffRole[]` dạng Postgres enum array), `status`
+- Thông tin nhân sự: hồ sơ cá nhân, CCCD, ngân hàng, `roles` (`StaffRole[]` dạng Postgres enum array: `admin`, `teacher`, `lesson_plan`, `lesson_plan_head`, `accountant`, `accountant_income`, `accountant_expense`, `communication`, `technical`, `customer_care`, `training`, `assistant`), `status`
 - `status` là trạng thái vận hành hồ sơ nhân sự: `active` = **Hoạt động**, `inactive` = **Ngừng hoạt động**. Chỉ staff `active` được resolve staff/admin-through-staff workspace và được chọn cho phân công mới (gia sư lớp, trợ lí quản lí CSKH, giáo án, trợ cấp thêm). Staff `inactive` vẫn giữ trong lịch sử, payroll và các bản ghi đã phát sinh.
+- Khi hồ sơ nhân sự chuyển sang `inactive`, backend dừng các assignment vận hành đang mở: phân công gia sư-lớp hiện tại chuyển sang `inactive`, slot lịch cố định và buổi bù tương lai của nhân sự đó được dọn khỏi vận hành, liên kết CSKH đang chăm sóc bị gỡ. `users.status` không đổi.
 - Index: unique B-tree `staff_info_user_id_key` trên `user_id` kèm **`INCLUDE ("id", "roles")`** (covering) để tối ưu các đọc theo `user_id` (auth/session, roles guard). Trong Prisma: `@@unique([userId], map: "staff_info_user_id_key")` trên model `StaffInfo` (phần `INCLUDE` chỉ có trong migration SQL, Prisma chưa có DSL tương ứng).
 - Index: GIN trên `roles` cho lookup nhân sự theo role array.
 - Không còn lưu cột tên riêng trong `staff_info` (đã bỏ `full_name`); tên staff canonical được đọc từ `users.first_name` + `users.last_name`. Một số API vẫn có thể trả `staffInfo.fullName` dưới dạng derived field để tương thích ngược.
@@ -137,6 +138,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - **PK format:** `UNIST-[0-9a-f]{10}` — ví dụ `UNIST-1a2b3c4d5e`. Đây là **mã định danh hệ thống** ngắn cho học sinh; migration `20260523110000_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
 - Hồ sơ học viên: liên hệ phụ huynh (`parent_name`, `parent_phone`, `parent_email`), trạng thái, giới tính, mục tiêu
 - `status` là trạng thái học tập của hồ sơ học sinh: `active` = **Đang học**, `inactive` = **Nghỉ học**. Chỉ học sinh `active` được resolve student workspace và được thêm vào roster/lớp mới. Khi chuyển sang `inactive`, backend chuyển các `student_classes` còn `active` của học sinh đó sang `inactive`; bật lại `active` không tự khôi phục các membership cũ.
+- Chuyển học sinh sang `inactive` chỉ là trạng thái hồ sơ học tập; `users.status`, ví, công nợ và lịch sử học tập không bị xóa.
 - `parent_email` là email nhận biên nhận nạp ví SePay của phụ huynh; không fallback sang email học sinh.
 - Được tham chiếu bởi: `users`, `student_classes`, `attendance`, `wallet_transactions_history`, `student_wallet_sepay_orders`, `customer_care_service`, `student_exam_schedules`
 
@@ -161,6 +163,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - **PK format:** `UNICL-[0-9a-f]{10}` — ví dụ `UNICL-1a2b3c4d5e`. Đây là **mã định danh hệ thống** ngắn cho lớp; migration `20260523110000_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
 - Trường nghiệp vụ chính:
   - `type` (`ClassType`), `status` (`ClassStatus`)
+  - `status`: `running` = lớp đang vận hành; `ended` = lớp đã kết thúc. Khi kết thúc lớp, backend xóa lịch cố định hiện tại, chuyển membership học sinh đang học và phân công gia sư đang mở sang `inactive`, đồng thời dọn buổi bù tương lai của lớp. Lịch sử session, attendance, ví và payroll đã phát sinh vẫn giữ nguyên.
   - `max_students`, `allowance_per_session_per_student`, `max_allowance_per_session`, `scale_amount`
   - `max_allowance_per_session` là nullable:
     - `null` hoặc `0` = không giới hạn trần trợ cấp theo buổi (aggregate SQL dùng `NULLIF(..., 0)`; API lưu `0` thành `null`)
@@ -181,6 +184,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - Các trường học phí theo session/package
 - Mối quan hệ: teachers, students, sessions, makeupScheduleEvents, surveys
 - Bảng liên kết `class_teachers` (Class ↔ StaffInfo) ngoài `custom_allowance` còn có:
+  - `status` (`TEXT`, nullable): `null` hoặc `active` được hiểu là phân công gia sư đang mở; `inactive` là **nghỉ dạy theo lớp**. Khi gia sư nghỉ dạy ở một lớp, record được giữ để bảo toàn lịch sử trợ cấp/payroll nhưng không còn là phân công hiện tại.
   - `tax_rate_percent` (`DECIMAL(5,2)`, default `0`, Prisma field `operatingDeductionRatePercent`): % **khấu trừ vận hành** của gia sư theo từng lớp.
   - FE đang dùng semantic `operating_deduction_rate_percent`; backend vẫn map về cột `tax_rate_percent` để tương thích dữ liệu hiện có.
 - Ghi chú:
@@ -233,6 +237,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - Khi người dùng chọn **buổi học gốc**, frontend gửi `baseline_schedule_entry_id` + `original_date`; backend validate slot đó còn tồn tại trong `Class.schedule` và `original_date` khớp `dayOfWeek` của slot.
   - FE hiện quản lý CRUD buổi bù theo từng lớp tại `/admin/classes/:id` và `/staff/classes/:id`; calendar chỉ còn hiển thị aggregate event.
   - Backend sync one-off event này lên Google Calendar riêng, độc lập với recurring event của `Class.schedule`.
+  - Buổi bù tương lai bị xóa khi lớp kết thúc hoặc khi gia sư phụ trách buổi đó nghỉ dạy/ngừng hoạt động; buổi đã qua vẫn là lịch sử vận hành.
   - Nếu xóa Google Calendar event bên ngoài thất bại, backend giữ lại record và `google_calendar_event_id`, cập nhật `calendar_sync_error`, rồi trả lỗi để có thể retry thay vì mất handle sync.
 
 ### 4.5 `sessions`
@@ -349,7 +354,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - `status` (`NotificationStatus`: `draft | published`)
   - `target_all` (`BOOLEAN`, default `true`) để broadcast cho toàn bộ audience đủ điều kiện
   - `target_role_types` (`UserRole[]`) cho tag role_type như `@admin`, `@staff`, `@student`
-  - `target_staff_roles` (`StaffRole[]`) cho tag staff role như `@teacher`, `@assistant`, `@lesson_plan_head`
+  - `target_staff_roles` (`StaffRole[]`) cho tag staff role như `@teacher`, `@assistant`, `@lesson_plan_head`, `@training`
   - `target_user_ids` (`TEXT[]`) cho direct user tag; feed/realtime sẽ match động theo `users.id` hiện tại
   - `version` (bản phát hiện tại; draft bắt đầu từ `0`, lần push đầu = `1`)
   - `push_count` (tổng số lần đã push/re-push)
@@ -464,7 +469,8 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 
 - `UserRole`: `admin | staff | student | guest`
 - `UserStatus`: `active | inactive | pending`
-- `StaffRole`: `admin | teacher | assistant | lesson_plan | lesson_plan_head | accountant | communication | technical | customer_care`
+- `StaffRole`: `admin | teacher | assistant | lesson_plan | lesson_plan_head | accountant | accountant_income | accountant_expense | communication | technical | customer_care`
+  - `accountant` là legacy value; migration `20260529100000_split_accountant_roles` thêm enum mới, rồi `20260529100001_migrate_accountant_role_data` chuyển dữ liệu hiện hữu sang `accountant_income`.
 - `StaffStatus`: `active | inactive`
 - `StudentStatus`: `active | inactive`
 - `Gender`: `male | female`
@@ -502,6 +508,8 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - `staff_lesson_plan`
   - `staff_lesson_plan_head`
   - `staff_accountant`
+  - `staff_accountant_income`
+  - `staff_accountant_expense`
   - `staff_communication`
   - `staff_technical`
   - `staff_customer_care`
