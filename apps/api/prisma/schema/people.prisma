@@ -26,7 +26,6 @@ model StaffInfo {
   assistantStudentSession             Attendance[]                         @relation("AttendanceAssistant")
   customerCareStudentSession          Attendance[]                         @relation("AttendanceCustomerCare")
   bonuses                             Bonus[]
-  classTeacherOperatingDeductionRates ClassTeacherOperatingDeductionRate[]
   classSurveys                        ClassSurvey[]
   classTeachers                       ClassTeacher[]
   customerCareServices                CustomerCareService[]

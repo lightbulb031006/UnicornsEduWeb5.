@@ -96,6 +96,7 @@ Table class_teachers {
   class_id varchar [not null, ref: > classes.id]
   teacher_id varchar [not null, ref: > staffInfo.id]
   custom_allowance int
+  tax_rate_percent decimal [default: 0, note: 'Operating deduction percent']
   status varchar [note: 'active, inactive']
   created_at timestamptz [default: `now()`]
 }

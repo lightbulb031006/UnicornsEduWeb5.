@@ -44,7 +44,6 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - `bonuses`
 - `role_tax_deduction_rates`
 - `staff_tax_deduction_overrides`
-- `class_teacher_operating_deduction_rates`
 - `wallet_transactions_history`
 - `student_wallet_sepay_orders`
 - `customer_care_service`
@@ -285,7 +284,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - API create bonus không còn nhận `id` từ frontend; backend/DB luôn tự sinh UUID authoritative bằng default của bảng.
 - `role_tax_deduction_rates`: lịch sử append-only mức khấu trừ thuế mặc định theo role + `effective_from`
 - `staff_tax_deduction_overrides`: lịch sử append-only override khấu trừ thuế theo staff + role + `effective_from`
-- `class_teacher_operating_deduction_rates`: lịch sử append-only mức khấu trừ vận hành theo cặp `class-teacher` + `effective_from`
+- `class_teachers.tax_rate_percent`: source of truth duy nhất cho `% khấu trừ vận hành` theo cặp `class-teacher` (Prisma `operatingDeductionRatePercent`); dữ liệu lịch sử cũ đã được backfill vào cột này trước khi bỏ bảng lịch sử vận hành.
 - `wallet_transactions_history`: lịch sử ví học viên + thông tin chia lợi nhuận CSKH
 - `student_wallet_sepay_orders`: yêu cầu nạp ví SePay đã tạo cho học sinh; lưu `order_code`, trạng thái `pending/completed/expired/failed`, `amount_requested`, `amount_received`, `transfer_note` (QR tĩnh mới chỉ chứa prefix cấu hình + mã ngắn `UNIST-*`; đơn/QR legacy có thể còn `UNICL-*` và `LOP ...`), snapshot `parent_email`, dữ liệu QR/VA từ SePay hoặc QR chuyển khoản thường, metadata người tạo đơn (`created_by_user_id`, `created_by_user_email`, `created_by_role_type`, `created_by_staff_roles`), `sepay_transaction_id`, `sepay_reference_code`, `wallet_transaction_id`, `completed_at`, `receipt_email_sent_at`, và `webhook_payload`.
 - `student_wallet_direct_topup_requests`: yêu cầu nạp thẳng do admin/staff tạo trước khi cộng ví; lưu `student_id`, `amount`, `reason`, trạng thái `pending/approved/expired`, `token_hash` duy nhất, `expires_at` (token hiện hết hạn sau 14 ngày), `approved_at`, `wallet_transaction_id`, metadata người yêu cầu (`requested_by_user_id`, email, role type, staff roles). Chỉ khi duyệt thành công mới liên kết sang `wallet_transactions_history`.
@@ -303,7 +302,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - Payroll semantics:
   - thuế áp dụng cho mọi staff; **thưởng (bonus)** trong `income-summary` / popup thanh toán áp **khấu trừ thuế** theo mức hiện hành của role ưu tiên trên hồ sơ (không có khấu trừ vận hành trên thưởng)
   - tax base được aggregate theo **từng nguồn thu nhập trong kỳ** và tách bucket theo snapshot rate đang effective
-  - khấu trừ vận hành chỉ áp dụng cho gia sư theo `class_teacher_operating_deduction_rates`
+  - khấu trừ vận hành chỉ áp dụng cho gia sư theo `class_teachers.tax_rate_percent`
   - `snapshotUnpaidTotal` / `snapshotUnpaidNetTotal` trong staff income summary là toàn bộ khoản pending/unpaid hiện tại từ mọi nguồn, không giới hạn tháng hoặc cửa sổ `days`, và loại trừ session cọc; net của giáo viên trừ vận hành hiện hành theo lớp rồi tính thuế trên phần sau vận hành, còn role khác chỉ trừ thuế
 - `dashboard_cache`: cache JSON theo key/type + `expires_at`; hiện được backend dùng làm server-side response cache cho các read endpoint nặng của admin dashboard
 - `cost_extend`: khoản chi mở rộng theo tháng/danh mục

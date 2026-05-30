@@ -15,7 +15,6 @@ model Class {
   updatedAt                      DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(6)
   surveys                        ClassSurvey[]
   teachers                       ClassTeacher[]
-  teacherOperatingDeductionRates ClassTeacherOperatingDeductionRate[]
   makeupScheduleEvents           MakeupScheduleEvent[]
   sessions                       Session[]
   students                       StudentClass[]
