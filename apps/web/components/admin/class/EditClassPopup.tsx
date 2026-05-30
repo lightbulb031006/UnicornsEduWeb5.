@@ -199,7 +199,6 @@ function normalizeTeacherAssignmentsForComparison(
     id: string;
     customAllowance?: number | null;
     operatingDeductionRatePercent?: number | null;
-    taxRatePercent?: number | null;
   }>,
 ) {
   return teachers
@@ -208,7 +207,7 @@ function normalizeTeacherAssignmentsForComparison(
       customAllowance:
         normalizeOptionalInteger(teacher.customAllowance) ?? null,
       operatingDeductionRatePercent: normalizeOperatingDeductionRatePercent(
-        teacher.operatingDeductionRatePercent ?? teacher.taxRatePercent ?? undefined,
+        teacher.operatingDeductionRatePercent ?? undefined,
       ),
     }))
     .sort((left, right) => left.teacherId.localeCompare(right.teacherId));
@@ -322,7 +321,7 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
         name: t.fullName?.trim() ?? "—",
         customAllowance: t.customAllowance ?? undefined,
         operatingDeductionRatePercent:
-          t.operatingDeductionRatePercent ?? t.taxRatePercent ?? undefined,
+          t.operatingDeductionRatePercent ?? undefined,
       })),
   );
   const [selectedStudents, setSelectedStudents] = useState<Array<{ id: string; name: string }>>(() =>
@@ -636,27 +635,31 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-text-secondary">
-                <span>Phân loại</span>
+              <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span id="edit-class-type-label">Phân loại</span>
                 <UpgradedSelect
+                  id="edit-class-type"
                   name="edit-class-type"
                   value={type}
                   onValueChange={(nextValue) => setType(nextValue as ClassType)}
                   options={TYPE_OPTIONS}
+                  labelId="edit-class-type-label"
                   buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
-              </label>
+              </div>
 
-              <label className="flex flex-col gap-1 text-sm text-text-secondary">
-                <span>Trạng thái</span>
+              <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span id="edit-class-status-label">Trạng thái</span>
                 <UpgradedSelect
+                  id="edit-class-status"
                   name="edit-class-status"
                   value={status}
                   onValueChange={(nextValue) => setStatus(nextValue as ClassStatus)}
                   options={STATUS_OPTIONS}
+                  labelId="edit-class-status-label"
                   buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
-              </label>
+              </div>
 
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Sĩ số tối đa</span>
@@ -1018,9 +1021,10 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto_1fr] sm:items-end">
-                    <label className="flex flex-col gap-1 text-sm text-text-secondary">
-                      <span className="text-text-muted">Ngày</span>
+                    <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                      <span id={`edit-class-schedule-day-${range.id}-label`} className="text-text-muted">Ngày</span>
                       <UpgradedSelect
+                        id={`edit-class-schedule-day-${range.id}`}
                         name={`edit-class-schedule-day-${range.id}`}
                         value={String(range.dayOfWeek)}
                         onValueChange={(value) =>
@@ -1031,12 +1035,17 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
                           label: option.label,
                           selectedLabel: option.selectedLabel,
                         }))}
+                        labelId={`edit-class-schedule-day-${range.id}-label`}
                         buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                       />
-                    </label>
-                    <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                    </div>
+                    <label
+                      htmlFor={`edit-class-schedule-from-${range.id}`}
+                      className="flex flex-col gap-1 text-sm text-text-secondary"
+                    >
                       <span className="text-text-muted">Bắt đầu</span>
                       <TimeInput
+                        id={`edit-class-schedule-from-${range.id}`}
                         name={`edit-class-schedule-from-${range.id}`}
                         value={range.from}
                         autoComplete="off"
@@ -1051,9 +1060,13 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
                       </svg>
                     </div>
 
-                    <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                    <label
+                      htmlFor={`edit-class-schedule-to-${range.id}`}
+                      className="flex flex-col gap-1 text-sm text-text-secondary"
+                    >
                       <span className="text-text-muted">Kết thúc</span>
                       <TimeInput
+                        id={`edit-class-schedule-to-${range.id}`}
                         name={`edit-class-schedule-to-${range.id}`}
                         value={range.to}
                         autoComplete="off"
@@ -1062,18 +1075,20 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
                       />
                     </label>
 
-                    <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-4">
-                      <span className="text-text-muted">Gia sư chịu trách nhiệm</span>
+                    <div className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-4">
+                      <span id={`edit-class-schedule-teacher-${range.id}-label`} className="text-text-muted">Gia sư chịu trách nhiệm</span>
                       <UpgradedSelect
+                        id={`edit-class-schedule-teacher-${range.id}`}
                         name={`edit-class-schedule-teacher-${range.id}`}
                         value={range.teacherId}
                         onValueChange={(value) => handleTeacherChange(range.id, value)}
                         options={teacherOptions}
+                        labelId={`edit-class-schedule-teacher-${range.id}-label`}
                         placeholder="Chọn gia sư phụ trách"
                         emptyStateLabel="Lớp chưa có gia sư để gán."
                         buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                       />
-                    </label>
+                    </div>
                   </div>
                 </div>
               ))}

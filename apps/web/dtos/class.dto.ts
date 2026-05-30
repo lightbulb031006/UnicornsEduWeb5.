@@ -53,8 +53,6 @@ export interface ClassTeacher {
     customAllowance?: number | null;
     /** Operating deduction rate for this teacher in this class in percent. */
     operatingDeductionRatePercent?: number | null;
-    /** @deprecated Compatibility alias for legacy API contracts. */
-    taxRatePercent?: number | null;
 }
 
 export type ClassStudentStatus = "active" | "inactive" | string;
@@ -139,8 +137,6 @@ export interface UpdateClassTeacherCompensationPayload {
         teacher_id: string;
         custom_allowance: number;
         operating_deduction_rate_percent?: number;
-        /** @deprecated Compatibility alias for legacy API contracts. */
-        tax_rate_percent?: number;
     }>;
 }
 
@@ -152,8 +148,6 @@ export interface ClassTeacherPayload {
     teacher_id: string;
     custom_allowance?: number;
     operating_deduction_rate_percent?: number;
-    /** @deprecated Compatibility alias for legacy API contracts. */
-    tax_rate_percent?: number;
 }
 
 /** Payload for PATCH /class/:id/schedule */

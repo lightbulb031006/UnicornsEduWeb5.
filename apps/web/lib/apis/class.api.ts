@@ -66,7 +66,6 @@ function normalizeClassTeacher(teacher: unknown): ClassTeacher {
     ...(operatingDeductionRatePercent !== undefined
       ? {
           operatingDeductionRatePercent,
-          taxRatePercent: operatingDeductionRatePercent,
         }
       : {}),
   };
@@ -86,8 +85,7 @@ function normalizeClassRecord<T extends ClassListItem>(record: T): T {
 function normalizeClassTeacherPayload(
   teacher: ClassTeacherPayload,
 ): ClassTeacherPayload {
-  const operatingDeductionRatePercent =
-    teacher.operating_deduction_rate_percent ?? teacher.tax_rate_percent;
+  const operatingDeductionRatePercent = teacher.operating_deduction_rate_percent;
 
   if (operatingDeductionRatePercent == null) {
     return teacher;
@@ -96,7 +94,6 @@ function normalizeClassTeacherPayload(
   return {
     ...teacher,
     operating_deduction_rate_percent: operatingDeductionRatePercent,
-    tax_rate_percent: operatingDeductionRatePercent,
   };
 }
 

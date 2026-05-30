@@ -45,3 +45,30 @@ test("class detail info keeps session teacher visible when entity column is hidd
   );
   assert.doesNotMatch(body, /showTeacherEntity = entityMode === "teacher" &&/);
 });
+
+test("session edit sends attendance only after attendance fields change", () => {
+  const source = readSessionHistoryTableSource();
+
+  assert.match(
+    source,
+    /const attendanceDirtyRef = useRef\(false\);/,
+  );
+  assert.match(
+    source,
+    /\.\.\.\(attendanceDirtyRef\.current && \{ attendance: attendancePayload \}\)/,
+  );
+  assert.doesNotMatch(
+    source,
+    /attendancePayload\.length > 0 && \{ attendance: attendancePayload \}/,
+  );
+});
+
+test("session attendance edit payload excludes students no longer in the class roster", () => {
+  const source = readSessionHistoryTableSource();
+
+  assert.doesNotMatch(source, /missingExistingItems/);
+  assert.doesNotMatch(
+    source,
+    /setAttendanceItems\(\[\.\.\.merged, \.\.\.missingExistingItems\]\)/,
+  );
+});

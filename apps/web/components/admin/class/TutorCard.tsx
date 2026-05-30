@@ -68,7 +68,7 @@ function normalizeTutors(
     if (!name) return acc;
 
     const operatingDeductionRatePercent = normalizeRatePercent(
-      teacher.operatingDeductionRatePercent ?? teacher.taxRatePercent ?? null,
+      teacher.operatingDeductionRatePercent ?? null,
     );
 
     return [

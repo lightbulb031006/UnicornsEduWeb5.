@@ -109,7 +109,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
         name: t.fullName?.trim() ?? "—",
         customAllowance: t.customAllowance ?? undefined,
         operatingDeductionRatePercent:
-          t.operatingDeductionRatePercent ?? t.taxRatePercent ?? undefined,
+          t.operatingDeductionRatePercent ?? undefined,
       })),
   );
   const [teacherSearchInput, setTeacherSearchInput] = useState("");

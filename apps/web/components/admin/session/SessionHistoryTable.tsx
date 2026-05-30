@@ -822,6 +822,7 @@ export default function SessionHistoryTable({
   const [attendanceItems, setAttendanceItems] = useState<AttendanceFormItem[]>(
     [],
   );
+  const attendanceDirtyRef = useRef(false);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     new Set(),
@@ -919,6 +920,7 @@ export default function SessionHistoryTable({
   const loadAttendanceForEdit = (session: SessionItem) => {
     if (!session.classId || !getClassStudents) {
       setAttendanceItems([]);
+      attendanceDirtyRef.current = false;
       setAttendanceLoading(false);
       return;
     }
@@ -929,6 +931,7 @@ export default function SessionHistoryTable({
 
     setAttendanceLoading(true);
     setAttendanceItems([]);
+    attendanceDirtyRef.current = false;
     const existingAttendance = session.attendance ?? [];
 
     if (isLockedSession) {
@@ -990,33 +993,12 @@ export default function SessionHistoryTable({
           };
         });
 
-        const missingExistingItems: AttendanceFormItem[] = existingAttendance
-          .filter(
-            (attendanceItem) =>
-              !merged.some((row) => row.studentId === attendanceItem.studentId),
-          )
-          .map((attendanceItem) => {
-            const student = (
-              attendanceItem as SessionAttendanceRecordWithStudent
-            ).student;
-            const existingTuitionFee = normalizeMoneyValue(
-              attendanceItem.tuitionFee,
-            );
-            return {
-              studentId: attendanceItem.studentId,
-              fullName: student?.fullName?.trim() || "—",
-              status: (attendanceItem.status ??
-                "absent") as SessionAttendanceStatus,
-              notes: attendanceItem.notes ?? "",
-              tuitionFee:
-                existingTuitionFee != null ? String(existingTuitionFee) : "",
-              defaultTuitionFee: existingTuitionFee,
-            };
-          });
-
-        setAttendanceItems([...merged, ...missingExistingItems]);
+        setAttendanceItems(merged);
       })
-      .catch(() => setAttendanceItems([]))
+      .catch(() => {
+        setAttendanceItems([]);
+        attendanceDirtyRef.current = false;
+      })
       .finally(() => setAttendanceLoading(false));
   };
 
@@ -1024,6 +1006,7 @@ export default function SessionHistoryTable({
     studentId: string,
     status: SessionAttendanceStatus,
   ) => {
+    attendanceDirtyRef.current = true;
     setAttendanceItems((prev) =>
       prev.map((item) =>
         item.studentId === studentId ? { ...item, status } : item,
@@ -1032,6 +1015,7 @@ export default function SessionHistoryTable({
   };
 
   const setAttendanceNotes = (studentId: string, notes: string) => {
+    attendanceDirtyRef.current = true;
     setAttendanceItems((prev) =>
       prev.map((item) =>
         item.studentId === studentId ? { ...item, notes } : item,
@@ -1040,6 +1024,7 @@ export default function SessionHistoryTable({
   };
 
   const setAttendanceTuitionFee = (studentId: string, tuitionFee: string) => {
+    attendanceDirtyRef.current = true;
     setAttendanceItems((prev) =>
       prev.map((item) =>
         item.studentId === studentId ? { ...item, tuitionFee } : item,
@@ -1156,6 +1141,7 @@ export default function SessionHistoryTable({
     setEditEndTime(toTimeInputValue(session.endTime) || "20:00");
     setEditNotes(session.notes ?? "");
     setEditTeacherId(session.teacherId ?? "");
+    attendanceDirtyRef.current = false;
     const status = (session.teacherPaymentStatus ?? "unpaid").toLowerCase();
     setEditPaymentStatus(
       status === "paid" ? "paid" : status === "deposit" ? "deposit" : "unpaid",
@@ -1265,7 +1251,7 @@ export default function SessionHistoryTable({
       allowanceNum >= 0
         ? { allowanceAmount: allowanceNum }
         : {}),
-      ...(attendancePayload.length > 0 && { attendance: attendancePayload }),
+      ...(attendanceDirtyRef.current && { attendance: attendancePayload }),
     };
 
     closeEdit();
