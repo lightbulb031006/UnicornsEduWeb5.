@@ -23,6 +23,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Fixed
 
+- FE/BE key collision & pagination sorting: Sửa lỗi trùng lặp React element keys (`UNIST-...` student IDs) trong các danh sách hiển thị phiên bản mobile và desktop tại trang Danh sách học sinh Admin, Chi tiết lớp học Admin/Staff, và màn hình Chăm sóc khách hàng (CSKH) bằng cách thêm tiền tố unique (`mobile-` và `desktop-`), đồng thời bổ sung tie-breaker `student.id ASC` vào `orderBy` của các câu truy vấn phân trang phía backend để đảm bảo thứ tự sắp xếp deterministic và không bị lặp bản ghi học sinh giữa các trang.
 - FE popup nạp ví SePay (`StudentBalancePopup` trên `/student` và chi tiết học sinh admin/staff): đổi từ sao chép nội dung chuyển khoản sang **Sao chép QR** (ảnh/link), gỡ khối hiển thị `transferNote`; tái sử dụng `copyStudentWalletQrWithToast` trong `apps/web/lib/clipboard-qr.ts`.
 - BE test: Sửa các unit test lỗi liên quan đến việc giữ lại lịch sử khung giờ (ClassService, StaffService) và name ordering discrepancy trong DeductionSettingsService test, đồng thời cập nhật test rbac-mutation-metadata để tương thích với các decorator RBAC mới.
 - FE typecheck: Sửa lỗi kiểu dữ liệu ClassScheduleItem trên frontend (bổ sung thuộc tính optional `createdAt` và `deletedAt`) và ép kiểu result trong EditClassSchedulePopup để pass check tsc.

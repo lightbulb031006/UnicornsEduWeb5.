@@ -915,7 +915,7 @@ export default function StaffClassDetailPage() {
 
                   return (
                     <article
-                      key={student.id}
+                      key={`mobile-${student.id}`}
                       className="rounded-lg border border-border-default bg-bg-surface p-2.5 shadow-sm"
                     >
                       <div className="flex items-center justify-between gap-3">
@@ -964,7 +964,7 @@ export default function StaffClassDetailPage() {
 
                     return (
                       <tr
-                        key={student.id}
+                        key={`desktop-${student.id}`}
                         className="border-b border-border-default bg-bg-surface transition-colors duration-200 hover:bg-bg-secondary"
                       >
                         <td className="px-3 py-2 text-text-primary">{student.fullName}</td>

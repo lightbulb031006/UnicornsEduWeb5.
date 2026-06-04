@@ -585,7 +585,7 @@ export default function AdminStudentsPage() {
 
                   return (
                     <article
-                      key={student.id}
+                      key={`mobile-${student.id}`}
                       role="listitem"
                       className="cursor-pointer rounded-xl border border-border-default bg-bg-surface p-4 shadow-sm transition-colors duration-200 hover:bg-bg-secondary focus-within:bg-bg-secondary"
                       onClick={() =>
@@ -717,7 +717,7 @@ export default function AdminStudentsPage() {
 
                       return (
                         <tr
-                          key={student.id}
+                          key={`desktop-${student.id}`}
                           role="button"
                           tabIndex={0}
                           className="group cursor-pointer border-b border-border-default bg-bg-surface transition-colors duration-200 hover:bg-bg-secondary/70 focus-within:bg-bg-secondary/70"

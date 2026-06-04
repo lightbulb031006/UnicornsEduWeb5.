@@ -1103,6 +1103,7 @@ export class StudentService {
         { accountBalance: 'asc' },
         { status: 'asc' },
         { fullName: 'asc' },
+        { id: 'asc' },
       ],
       include: {
         studentClasses: studentClassDetailInclude,

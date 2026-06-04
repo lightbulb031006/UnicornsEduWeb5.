@@ -953,7 +953,7 @@ export default function AdminClassDetailPage() {
 
                   return (
                     <article
-                      key={student.id}
+                      key={`mobile-${student.id}`}
                       role={canOpenStudentDetails ? "button" : undefined}
                       tabIndex={canOpenStudentDetails ? 0 : undefined}
                       onClick={
@@ -1097,7 +1097,7 @@ export default function AdminClassDetailPage() {
 
                     return (
                       <tr
-                        key={student.id}
+                        key={`desktop-${student.id}`}
                         role={canOpenStudentDetails ? "button" : undefined}
                         tabIndex={canOpenStudentDetails ? 0 : undefined}
                         onClick={

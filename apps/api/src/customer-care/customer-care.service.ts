@@ -158,11 +158,18 @@ export class CustomerCareService {
           },
         },
       },
-      orderBy: {
-        student: {
-          accountBalance: 'asc',
+      orderBy: [
+        {
+          student: {
+            accountBalance: 'asc',
+          },
         },
-      },
+        {
+          student: {
+            id: 'asc',
+          },
+        },
+      ],
     });
 
     const studentIds = list.map((row) => row.student.id);

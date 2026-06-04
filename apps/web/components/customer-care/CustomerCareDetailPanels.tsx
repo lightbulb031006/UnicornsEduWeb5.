@@ -781,7 +781,7 @@ export default function CustomerCareDetailPanels({
               <div className="space-y-3 lg:hidden">
                 {students.map((row: CustomerCareStudentItem) => (
                   <article
-                    key={row.id}
+                    key={`mobile-${row.id}`}
                     className="rounded-[1.5rem] border border-border-default bg-bg-surface p-4 shadow-sm"
                   >
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -890,7 +890,7 @@ export default function CustomerCareDetailPanels({
                 <tbody>
                   {students.map((row: CustomerCareStudentItem) => (
                       <tr
-                        key={row.id}
+                        key={`desktop-${row.id}`}
                         className="border-b border-border-subtle bg-bg-surface last:border-b-0"
                       >
                         <td className="px-3 py-3">
@@ -1009,7 +1009,7 @@ export default function CustomerCareDetailPanels({
               <div className="space-y-3 lg:hidden">
                 {topUpHistory.map((item: CustomerCareTopUpHistoryItem) => (
                   <article
-                    key={item.id}
+                    key={`mobile-${item.id}`}
                     className="rounded-[1.5rem] border border-border-default bg-bg-surface p-4 shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -1059,7 +1059,7 @@ export default function CustomerCareDetailPanels({
                   <tbody>
                     {topUpHistory.map((item: CustomerCareTopUpHistoryItem) => (
                       <tr
-                        key={item.id}
+                        key={`desktop-${item.id}`}
                         className="border-b border-border-subtle bg-bg-surface last:border-b-0"
                       >
                         <td className="whitespace-nowrap px-3 py-3 font-medium text-text-primary">
@@ -1199,7 +1199,7 @@ export default function CustomerCareDetailPanels({
                                 session: CustomerCareSessionCommissionItem,
                               ) => (
                                 <article
-                                  key={session.sessionId}
+                                  key={`mobile-${session.sessionId}`}
                                   className="rounded-[1.15rem] border border-border-default bg-bg-surface px-4 py-3 shadow-sm"
                                 >
                                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1271,7 +1271,7 @@ export default function CustomerCareDetailPanels({
                             <ul className="divide-y divide-border-subtle">
                               {sessionCommissions.map((session: CustomerCareSessionCommissionItem) => (
                                 <li
-                                  key={session.sessionId}
+                                  key={`desktop-${session.sessionId}`}
                                   className={`grid items-center gap-3 px-3 py-3 text-sm transition-colors hover:bg-bg-secondary/45 ${SESSION_COMMISSION_GRID_CLASS}`}
                                 >
                                   <span className="font-semibold text-text-primary">
