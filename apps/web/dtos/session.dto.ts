@@ -101,6 +101,10 @@ export interface SessionItem {
   endTime?: string | null;
   teacherPaymentStatus?: SessionPaymentStatus | null;
   allowanceAmount?: number | null;
+  /** Resolved per-student allowance snapshot at session creation. */
+  snapshotPerStudentAllowance?: number | null;
+  /** Class scale amount snapshot at session creation. */
+  snapshotScaleAmount?: number | null;
   tuitionFee?: number | null;
   /** Coefficient from 0.0 to 1.0. */
   coefficient?: number | null;

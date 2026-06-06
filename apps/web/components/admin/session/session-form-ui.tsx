@@ -44,14 +44,81 @@ export function RequiredMark() {
 
 type SessionTeacherAllowanceEstimateCardProps = {
   amount?: number | null;
+  breakdownText?: string | null;
+  showBreakdown?: boolean;
+  usesSnapshot?: boolean;
+  loading?: boolean;
+  errorMessage?: string | null;
+  className?: string;
+};
+
+type SessionAttendanceAllowancePreviewStripProps = {
+  grossAmount?: number | null;
+  breakdownText?: string | null;
+  showBreakdown?: boolean;
+  usesSnapshot?: boolean;
+  chargeableCount?: number;
   loading?: boolean;
   errorMessage?: string | null;
   className?: string;
 };
 
 /** Khối read-only trợ cấp gia sư (đồng bộ AddSessionPopup / chỉnh sửa buổi học). */
+/** Thanh preview trợ cấp gia sư ngay trong khu vực điểm danh (cập nhật theo sĩ số). */
+export function SessionAttendanceAllowancePreviewStrip({
+  grossAmount = null,
+  breakdownText = null,
+  showBreakdown = false,
+  usesSnapshot = false,
+  chargeableCount = 0,
+  loading = false,
+  errorMessage = null,
+  className = "",
+}: SessionAttendanceAllowancePreviewStripProps) {
+  return (
+    <div
+      className={`rounded-lg border border-border-default bg-bg-secondary/40 px-3 py-3 text-xs ${className}`.trim()}
+    >
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="font-medium text-text-secondary">Trợ cấp gia sư (ước tính):</span>
+        {loading ? (
+          <span className="text-text-muted">Đang tải…</span>
+        ) : errorMessage ? (
+          <span className="text-warning">{errorMessage}</span>
+        ) : grossAmount == null ? (
+          <span className="text-text-muted">Chưa tính được</span>
+        ) : (
+          <span className="text-sm font-semibold tabular-nums text-primary">
+            {formatCurrency(grossAmount)}
+          </span>
+        )}
+      </div>
+      {!loading && !errorMessage ? (
+        <div className="mt-2 space-y-1 text-text-muted">
+          <p>
+            Sĩ số tính trợ cấp:{" "}
+            <span className="font-medium text-text-primary">{chargeableCount}</span>{" "}
+            (học + phép)
+          </p>
+          {showBreakdown && breakdownText ? (
+            <p>{breakdownText}</p>
+          ) : null}
+          <p>
+            {usesSnapshot
+              ? "Tính từ snapshot trợ cấp lúc tạo buổi học."
+              : "Tính từ cấu hình lớp/gia sư hiện tại (buổi chưa có snapshot)."}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SessionTeacherAllowanceEstimateCard({
-  amount = 0,
+  amount = null,
+  breakdownText = null,
+  showBreakdown = false,
+  usesSnapshot = false,
   loading = false,
   errorMessage = null,
   className = "",
@@ -65,13 +132,23 @@ export function SessionTeacherAllowanceEstimateCard({
         <p className="mt-2 text-sm text-text-muted">Đang tải cấu hình lớp…</p>
       ) : errorMessage ? (
         <p className="mt-2 text-sm text-warning">{errorMessage}</p>
+      ) : amount == null ? (
+        <p className="mt-2 text-sm text-text-muted">Chưa tính được</p>
       ) : (
         <p className="mt-2 text-lg font-semibold tabular-nums text-primary">
-          {formatCurrency(amount ?? 0)}
+          {formatCurrency(amount)}
         </p>
       )}
       <div className="mt-2 space-y-1 text-xs text-text-muted">
-        <p>Lấy trực tiếp từ allowance của buổi học (theo cấu hình gia sư/lớp).</p>
+        {showBreakdown && breakdownText ? (
+          <p>{breakdownText}</p>
+        ) : (
+          <p>
+            {usesSnapshot
+              ? "Tính từ snapshot trợ cấp lúc tạo buổi học × sĩ số điểm danh hiện tại."
+              : "Lấy trực tiếp từ allowance của buổi học (theo cấu hình gia sư/lớp)."}
+          </p>
+        )}
       </div>
     </div>
   );

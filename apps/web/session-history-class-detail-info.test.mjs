@@ -72,3 +72,31 @@ test("session attendance edit payload excludes students no longer in the class r
     /setAttendanceItems\(\[\.\.\.merged, \.\.\.missingExistingItems\]\)/,
   );
 });
+
+test("session edit does not pre-fill allowance from saved session amount", () => {
+  const source = readSessionHistoryTableSource();
+
+  assert.match(source, /const allowanceDirtyRef = useRef\(false\);/);
+  assert.match(source, /setEditAllowanceAmount\(""\);/);
+  assert.doesNotMatch(
+    source,
+    /const allowance = session\.allowanceAmount;\s*\n\s*setEditAllowanceAmount\(/,
+  );
+});
+
+test("session edit only overrides allowance preview and payload when allowance is dirty", () => {
+  const source = readSessionHistoryTableSource();
+
+  assert.match(
+    source,
+    /if \(allowanceDirtyRef\.current && allowanceInput !== ""\)/,
+  );
+  assert.match(
+    source,
+    /canEditAllowance &&\s*\n\s*allowanceDirtyRef\.current &&\s*\n\s*editAllowanceAmount\.trim\(\)/,
+  );
+  assert.match(
+    source,
+    /allowanceDirtyRef\.current = true;\s*\n\s*setEditAllowanceAmount/,
+  );
+});

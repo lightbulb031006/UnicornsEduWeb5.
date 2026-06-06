@@ -247,7 +247,10 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 
 - Mỗi buổi học gắn với 1 lớp và 1 giáo viên
 - Trường chính: ngày học, start/end time, `coefficient` (hệ số buổi học 0.0–1.0), `allowance_amount`, `teacher_payment_status`, `tuition_fee`
-- `allowance_amount`: snapshot **trước hệ số** = tổng `(trợ cấp mỗi học sinh theo cặp gia sư–lớp × số bản ghi điểm danh present/excused) + scale_amount của lớp` tại thời điểm tạo/cập nhật buổi (làm tròn VND theo logic API). Các truy vấn payroll **không** cộng thêm `classes.scale_amount` vào `allowance_amount`.
+- `allowance_amount`: snapshot **trước hệ số** = tổng `(snapshot_per_student_allowance × số bản ghi điểm danh present/excused) + snapshot_scale_amount` (làm tròn VND theo logic API). Các truy vấn payroll **không** cộng thêm `classes.scale_amount` vào `allowance_amount`.
+- `snapshot_per_student_allowance` (`INTEGER`, nullable): trợ cấp mỗi học sinh đã resolve (`class_teachers.custom_allowance` ?? `classes.allowance_per_session_per_student`) tại thời điểm **tạo** buổi học; không ghi đè sau đó.
+- `snapshot_scale_amount` (`INTEGER`, nullable): `classes.scale_amount` tại thời điểm **tạo** buổi học; không ghi đè sau đó.
+- Khi sửa điểm danh buổi chưa thanh toán (`teacher_payment_status = unpaid`), API tự tính lại `allowance_amount` từ hai snapshot trên. Buổi cũ không có snapshot (null) fallback đọc live từ `classes` / `class_teachers`.
 - `max_allowance_per_session` không snapshot tại `sessions`; các aggregate payroll/report đọc động từ `classes.max_allowance_per_session` tại thời điểm query, nên thay đổi cấu hình lớp có thể ảnh hưởng kết quả historical aggregate.
 - Snapshot khấu trừ theo buổi:
   - `teacher_tax_rate_percent` (`DECIMAL(5,2)`, default `0`, Prisma field `teacherOperatingDeductionRatePercent`): snapshot mức **khấu trừ vận hành** effective của cặp gia sư-lớp; trước thanh toán được refresh khi tạo/cập nhật session, khi chuyển sang `paid` được snapshot lại theo thời điểm thanh toán.

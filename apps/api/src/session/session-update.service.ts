@@ -32,7 +32,10 @@ import {
   normalizePercent,
   resolveTaxDeductionRate,
 } from '../payroll/deduction-rates';
-import { computeDefaultSessionAllowanceAmountVnd } from './session-allowance.util';
+import {
+  computeDefaultSessionAllowanceAmountVnd,
+  hasSessionAllowanceSnapshots,
+} from './session-allowance.util';
 
 const SESSION_UPDATE_TRANSACTION_MAX_WAIT_MS = 10_000;
 const SESSION_UPDATE_TRANSACTION_TIMEOUT_MS = 20_000;
@@ -358,6 +361,8 @@ export class SessionUpdateService {
             teacherId: true,
             date: true,
             teacherPaymentStatus: true,
+            snapshotPerStudentAllowance: true,
+            snapshotScaleAmount: true,
             class: {
               select: {
                 name: true,
@@ -556,11 +561,74 @@ export class SessionUpdateService {
           )
           .map((attendanceItem) => attendanceItem.studentId);
 
+        const hasAttendancePayload = data.attendance !== undefined;
+
         if (
           data.allowanceAmount !== undefined &&
           data.allowanceAmount !== null
         ) {
           allowanceAmountUpdate = Math.floor(Number(data.allowanceAmount));
+        } else if (
+          hasAttendancePayload &&
+          currentTeacherPaymentStatus !== SessionPaymentStatus.paid
+        ) {
+          if (
+            hasSessionAllowanceSnapshots({
+              snapshotPerStudentAllowance:
+                existingSession.snapshotPerStudentAllowance,
+              snapshotScaleAmount: existingSession.snapshotScaleAmount,
+            })
+          ) {
+            allowanceAmountUpdate = computeDefaultSessionAllowanceAmountVnd({
+              perStudentAllowance:
+                existingSession.snapshotPerStudentAllowance,
+              classDefaultPerStudent: null,
+              scaleAmount: existingSession.snapshotScaleAmount,
+              chargeableStudentCount: chargeableAttendanceStudentIds.length,
+            });
+          } else {
+            if (!classTeacherForAllowance) {
+              const classTeacher = await tx.classTeacher.findUnique({
+                where: {
+                  classId_teacherId: {
+                    classId: nextClassId,
+                    teacherId: nextTeacherId,
+                  },
+                },
+                select: {
+                  customAllowance: true,
+                  class: {
+                    select: {
+                      allowancePerSessionPerStudent: true,
+                      scaleAmount: true,
+                    },
+                  },
+                },
+              });
+              if (classTeacher) {
+                classTeacherForAllowance = {
+                  customAllowance: classTeacher.customAllowance,
+                  class: {
+                    name: existingSession.class.name,
+                    allowancePerSessionPerStudent:
+                      classTeacher.class.allowancePerSessionPerStudent,
+                    scaleAmount: classTeacher.class.scaleAmount,
+                  },
+                };
+              }
+            }
+            if (classTeacherForAllowance) {
+              allowanceAmountUpdate = computeDefaultSessionAllowanceAmountVnd({
+                perStudentAllowance:
+                  classTeacherForAllowance.customAllowance,
+                classDefaultPerStudent:
+                  classTeacherForAllowance.class
+                    .allowancePerSessionPerStudent,
+                scaleAmount: classTeacherForAllowance.class.scaleAmount,
+                chargeableStudentCount: chargeableAttendanceStudentIds.length,
+              });
+            }
+          }
         } else if (hasClassOrTeacherChange && classTeacherForAllowance) {
           allowanceAmountUpdate = computeDefaultSessionAllowanceAmountVnd({
             perStudentAllowance: classTeacherForAllowance.customAllowance,

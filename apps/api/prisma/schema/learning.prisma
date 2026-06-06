@@ -65,6 +65,8 @@ model Session {
   teacherId                            String               @map("teacher_id")
   classId                              String               @map("class_id")
   allowanceAmount                      Int?                 @map("allowance_amount")
+  snapshotPerStudentAllowance          Int?                 @map("snapshot_per_student_allowance")
+  snapshotScaleAmount                  Int?                 @map("snapshot_scale_amount")
   teacherOperatingDeductionRatePercent Decimal              @default(0) @map("teacher_tax_rate_percent") @db.Decimal(5, 2)
   teacherTaxDeductionRatePercent       Decimal              @default(0) @map("teacher_tax_deduction_rate_percent") @db.Decimal(5, 2)
   teacherPaymentStatus                 String               @default("unpaid") @map("teacher_payment_status")

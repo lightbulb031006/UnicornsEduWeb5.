@@ -24,7 +24,11 @@ import { SessionStudentBalanceService } from './session-student-balance.service'
 import { SessionValidationService } from './session-validation.service';
 import { SessionScheduleRulesService } from './session-schedule-rules.service';
 import { createMemoizedTaxDeductionResolver } from '../payroll/deduction-rates';
-import { computeDefaultSessionAllowanceAmountVnd } from './session-allowance.util';
+import {
+  computeDefaultSessionAllowanceAmountVnd,
+  resolveSnapshotPerStudentAllowanceVnd,
+  resolveSnapshotScaleAmountVnd,
+} from './session-allowance.util';
 
 /** Interactive tx: create runs many reads, balance/wallet writes, nested attendance create, optional audit snapshot. */
 const SESSION_CREATE_TRANSACTION_MAX_WAIT_MS = 10_000;
@@ -191,14 +195,23 @@ export class SessionCreateService {
           this.sessionValidationService.normalizeCoefficient(
             data.coefficient,
           ) ?? 1.0;
+        const snapshotPerStudentAllowance = resolveSnapshotPerStudentAllowanceVnd(
+          {
+            customAllowance: classTeacher.customAllowance,
+            classDefaultPerStudent:
+              classTeacher.class.allowancePerSessionPerStudent,
+          },
+        );
+        const snapshotScaleAmount = resolveSnapshotScaleAmountVnd(
+          classTeacher.class.scaleAmount,
+        );
         const allowanceAmount =
           data.allowanceAmount !== undefined && data.allowanceAmount !== null
             ? Math.floor(Number(data.allowanceAmount))
             : computeDefaultSessionAllowanceAmountVnd({
-                perStudentAllowance: classTeacher.customAllowance,
-                classDefaultPerStudent:
-                  classTeacher.class.allowancePerSessionPerStudent,
-                scaleAmount: classTeacher.class.scaleAmount,
+                perStudentAllowance: snapshotPerStudentAllowance,
+                classDefaultPerStudent: null,
+                scaleAmount: snapshotScaleAmount,
                 chargeableStudentCount: chargeableAttendanceStudentIds.length,
               });
         const currentTeacherOperatingDeductionRatePercent = Number(
@@ -340,6 +353,8 @@ export class SessionCreateService {
             teacherId: data.teacherId,
             coefficient,
             allowanceAmount,
+            snapshotPerStudentAllowance,
+            snapshotScaleAmount,
             teacherOperatingDeductionRatePercent: Number.isFinite(
               teacherOperatingDeductionRatePercent,
             )

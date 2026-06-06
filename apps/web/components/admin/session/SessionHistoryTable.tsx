@@ -22,14 +22,16 @@ import {
 } from "@/lib/sanitize";
 import { formatCurrency } from "@/lib/class.helpers";
 import {
-  computeSessionAllowanceRawBaseVnd,
   computeTeacherSessionAllowanceGrossPreviewVnd,
+  formatSessionAllowanceBreakdownVnd,
+  resolveSessionAllowancePreviewInputs,
 } from "@/lib/session-allowance.helpers";
 import {
   AttendanceInlineSummary,
   AttendanceStatusQuickPick,
   formatVnSessionDuration,
   RequiredMark,
+  SessionAttendanceAllowancePreviewStrip,
   SessionFormDialogHeader,
   SessionTeacherAllowanceEstimateCard,
 } from "@/components/admin/session/session-form-ui";
@@ -823,6 +825,7 @@ export default function SessionHistoryTable({
     [],
   );
   const attendanceDirtyRef = useRef(false);
+  const allowanceDirtyRef = useRef(false);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     new Set(),
@@ -1150,12 +1153,8 @@ export default function SessionHistoryTable({
     setEditCoefficient(
       coeff != null && Number.isFinite(Number(coeff)) ? String(coeff) : "1",
     );
-    const allowance = session.allowanceAmount;
-    setEditAllowanceAmount(
-      allowance != null && Number.isFinite(Number(allowance))
-        ? String(allowance)
-        : "",
-    );
+    setEditAllowanceAmount("");
+    allowanceDirtyRef.current = false;
     loadTeachersForEdit(session);
     loadAttendanceForEdit(session);
   };
@@ -1166,6 +1165,7 @@ export default function SessionHistoryTable({
     setTeachersLoading(false);
     setAttendanceItems([]);
     setAttendanceLoading(false);
+    allowanceDirtyRef.current = false;
   };
 
   const handleSaveEdit = () => {
@@ -1222,11 +1222,11 @@ export default function SessionHistoryTable({
         ? Number(editCoefficient)
         : undefined;
     const allowanceNum =
-      canEditAllowance && editAllowanceAmount.trim()
+      canEditAllowance &&
+      allowanceDirtyRef.current &&
+      editAllowanceAmount.trim()
         ? Math.floor(Number(editAllowanceAmount))
-        : canEditAllowance && allowanceRawBaseEdit != null
-          ? allowanceRawBaseEdit
-          : undefined;
+        : undefined;
     const validCoeff =
       coeffNum !== undefined &&
       Number.isFinite(coeffNum) &&
@@ -1363,16 +1363,6 @@ export default function SessionHistoryTable({
       ?.fullName?.trim() ||
     editingSession?.teacher?.fullName?.trim() ||
     (selectedTeacherId ? "Gia sư đang phụ trách" : "");
-  const selectedTeacherCustomAllowance =
-    editingClassDetail?.teachers?.find(
-      (teacher) => teacher.id === selectedTeacherId,
-    )?.customAllowance ?? null;
-  const classDefaultAllowance = normalizeMoneyValue(
-    editingClassDetail?.allowancePerSessionPerStudent,
-  );
-  const fallbackTeacherAllowance =
-    normalizeMoneyValue(selectedTeacherCustomAllowance) ??
-    classDefaultAllowance;
   const allowanceInput = editAllowanceAmount.trim();
   const allowanceInputValue =
     allowanceInput === "" ? null : Number(editAllowanceAmount);
@@ -1380,17 +1370,6 @@ export default function SessionHistoryTable({
     allowanceInputValue != null &&
     Number.isFinite(allowanceInputValue) &&
     allowanceInputValue >= 0;
-
-  const allowancePerStudentNumeric = useMemo(
-    () =>
-      fallbackTeacherAllowance ??
-      editingClassDetail?.allowancePerSessionPerStudent ??
-      0,
-    [
-      fallbackTeacherAllowance,
-      editingClassDetail?.allowancePerSessionPerStudent,
-    ],
-  );
 
   const chargeableAttendanceCountForAllowance = useMemo(
     () =>
@@ -1400,13 +1379,27 @@ export default function SessionHistoryTable({
     [attendanceItems],
   );
 
-  const allowanceRawBaseEdit = !editingClassDetail
-    ? null
-    : computeSessionAllowanceRawBaseVnd({
-        allowancePerStudent: allowancePerStudentNumeric,
+  const allowancePreviewInputs = useMemo(
+    () =>
+      resolveSessionAllowancePreviewInputs({
+        session: editingSession,
+        classDetail: editingClassDetail,
+        teacherId: selectedTeacherId || null,
         chargeableStudentCount: chargeableAttendanceCountForAllowance,
-        scaleAmount: editingClassDetail.scaleAmount,
-      });
+      }),
+    [
+      editingSession,
+      editingClassDetail,
+      selectedTeacherId,
+      chargeableAttendanceCountForAllowance,
+    ],
+  );
+
+  const usesSessionAllowanceSnapshot =
+    allowancePreviewInputs?.source === "snapshot";
+  const allowancePerStudentNumeric = allowancePreviewInputs?.perStudent ?? 0;
+  const scaleAmountForAllowancePreview = allowancePreviewInputs?.scaleAmount ?? 0;
+  const allowanceRawBaseEdit = allowancePreviewInputs?.rawBase ?? null;
 
   const coefficientForAllowancePreview = useMemo(() => {
     if (
@@ -1428,7 +1421,7 @@ export default function SessionHistoryTable({
   ]);
 
   const rawBaseForAllowancePreview = useMemo(() => {
-    if (allowanceInput !== "") {
+    if (allowanceDirtyRef.current && allowanceInput !== "") {
       if (!isAllowanceInputValid) return null;
       return Math.floor(allowanceInputValue!);
     }
@@ -1438,29 +1431,53 @@ export default function SessionHistoryTable({
     isAllowanceInputValid,
     allowanceInputValue,
     allowanceRawBaseEdit,
+    attendanceItems,
   ]);
 
   const editTutorAllowanceTotal = useMemo(() => {
-    if (rawBaseForAllowancePreview == null || !editingClassDetail) return null;
+    if (rawBaseForAllowancePreview == null || allowancePreviewInputs == null) {
+      return null;
+    }
     return computeTeacherSessionAllowanceGrossPreviewVnd({
       rawBase: rawBaseForAllowancePreview,
       coefficient: coefficientForAllowancePreview,
-      maxAllowancePerSession: editingClassDetail.maxAllowancePerSession,
+      maxAllowancePerSession: editingClassDetail?.maxAllowancePerSession,
     });
   }, [
     rawBaseForAllowancePreview,
-    editingClassDetail,
+    allowancePreviewInputs,
+    editingClassDetail?.maxAllowancePerSession,
     coefficientForAllowancePreview,
   ]);
 
+  const allowanceBreakdownText = useMemo(() => {
+    if (rawBaseForAllowancePreview == null) return null;
+    return formatSessionAllowanceBreakdownVnd({
+      perStudent: allowancePerStudentNumeric,
+      chargeableStudentCount: chargeableAttendanceCountForAllowance,
+      scaleAmount: scaleAmountForAllowancePreview,
+      rawBase: rawBaseForAllowancePreview,
+    });
+  }, [
+    rawBaseForAllowancePreview,
+    allowancePerStudentNumeric,
+    chargeableAttendanceCountForAllowance,
+    scaleAmountForAllowancePreview,
+  ]);
+
+  const isAdminViewer = fullProfile?.roleType === "admin";
+
   const shouldWaitForClassFormula =
-    Boolean(editingSession && editingClassId) && isEditingClassDetailLoading;
+    Boolean(editingSession && editingClassId) &&
+    !usesSessionAllowanceSnapshot &&
+    isEditingClassDetailLoading;
   const hasPreviewValidationIssue =
     (canEditCoefficient &&
       coefficientInput !== "" &&
       !isCoefficientInputValid) ||
     (canEditAllowance && allowanceInput !== "" && !isAllowanceInputValid);
-  const allowanceFormulaNote = isEditingClassDetailError
+  const allowanceFormulaNote = isEditingClassDetailError &&
+    !usesSessionAllowanceSnapshot
     ? "Công thức trợ cấp: không tải được cấu hình lớp để preview."
     : shouldWaitForClassFormula
       ? "Công thức trợ cấp: đang tải cấu hình lớp..."
@@ -1468,7 +1485,9 @@ export default function SessionHistoryTable({
         ? "Công thức trợ cấp: nhập hệ số từ 0 đến 1 và trợ cấp không âm để xem preview."
         : rawBaseForAllowancePreview == null || editTutorAllowanceTotal == null
           ? "Công thức trợ cấp: chưa đủ dữ liệu để tính."
-          : `Gốc lưu buổi: ${formatCurrency(rawBaseForAllowancePreview)}. Gross (hệ số + trần max): ${formatCurrency(editTutorAllowanceTotal)}.`;
+          : isAdminViewer && allowanceBreakdownText
+            ? `${allowanceBreakdownText}. Gross (hệ số + trần max): ${formatCurrency(editTutorAllowanceTotal)}.`
+            : `Gốc lưu buổi: ${formatCurrency(rawBaseForAllowancePreview)}. Gross (hệ số + trần max): ${formatCurrency(editTutorAllowanceTotal)}.`;
   const editHeaderTuition = useMemo(() => {
     if (!canViewTuitionHeader) return null;
     return `Học phí: ${formatCurrency(resolvedEditSessionTuition)}`;
@@ -1477,15 +1496,17 @@ export default function SessionHistoryTable({
     if (editTutorAllowanceTotal == null) return null;
     return `Trợ cấp gia sư: ${formatCurrency(editTutorAllowanceTotal)}`;
   }, [editTutorAllowanceTotal]);
-  const showEditAllowanceEstimate =
-    !canEditAllowance &&
-    (shouldWaitForClassFormula ||
-      !!editingClassDetail ||
-      isEditingClassDetailError);
+  const showEditAllowanceEstimate = Boolean(
+    editingSession &&
+      (shouldWaitForClassFormula ||
+        usesSessionAllowanceSnapshot ||
+        !!editingClassDetail ||
+        isEditingClassDetailError),
+  );
   const editAllowanceEstimateError =
     editingSession && !editingClassId
       ? "Không xác định được lớp của buổi học để ước tính trợ cấp."
-      : isEditingClassDetailError
+      : isEditingClassDetailError && !usesSessionAllowanceSnapshot
         ? "Không tải được cấu hình lớp để ước tính trợ cấp."
         : hasPreviewValidationIssue
           ? "Nhập hệ số từ 0 đến 1 để xem ước tính trợ cấp."
@@ -2632,11 +2653,12 @@ export default function SessionHistoryTable({
                                 min={0}
                                 value={editAllowanceAmount}
                                 autoComplete="off"
-                                onChange={(e) =>
-                                  setEditAllowanceAmount(e.target.value)
-                                }
+                                onChange={(e) => {
+                                  allowanceDirtyRef.current = true;
+                                  setEditAllowanceAmount(e.target.value);
+                                }}
                                 className="min-h-11 rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                                placeholder="Để trống = giữ nguyên"
+                                placeholder="Để trống = tự tính từ snapshot"
                               />
                             </label>
                           ) : null}
@@ -2662,6 +2684,9 @@ export default function SessionHistoryTable({
                           loading={shouldWaitForClassFormula}
                           errorMessage={editAllowanceEstimateError}
                           amount={editTutorAllowanceTotal}
+                          breakdownText={allowanceBreakdownText}
+                          showBreakdown={isAdminViewer}
+                          usesSnapshot={usesSessionAllowanceSnapshot}
                         />
                       ) : null}
 
@@ -2714,6 +2739,20 @@ export default function SessionHistoryTable({
                                 </>
                               ) : null}
                             </div>
+                          ) : null}
+                          {showEditAllowanceEstimate ? (
+                            <SessionAttendanceAllowancePreviewStrip
+                              className="mt-3"
+                              loading={shouldWaitForClassFormula}
+                              errorMessage={editAllowanceEstimateError}
+                              grossAmount={editTutorAllowanceTotal}
+                              breakdownText={allowanceBreakdownText}
+                              showBreakdown={isAdminViewer}
+                              usesSnapshot={usesSessionAllowanceSnapshot}
+                              chargeableCount={
+                                chargeableAttendanceCountForAllowance
+                              }
+                            />
                           ) : null}
                         </div>
 
