@@ -237,6 +237,23 @@ export interface StaffPayAllPaymentsPayload {
     year: string;
 }
 
+export type StaffPaymentSourceType =
+    | "teacher_session"
+    | "customer_care"
+    | "assistant_share"
+    | "lesson_output"
+    | "extra_allowance"
+    | "bonus";
+
+export interface StaffPaySelectedPaymentItem {
+    sourceType: StaffPaymentSourceType;
+    id: string;
+}
+
+export interface StaffPaySelectedPaymentsPayload extends StaffPayAllPaymentsPayload {
+    items: StaffPaySelectedPaymentItem[];
+}
+
 export interface StaffPayAllPaymentsSourceResult {
     sourceType: string;
     sourceLabel: string;

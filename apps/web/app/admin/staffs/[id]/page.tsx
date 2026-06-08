@@ -31,6 +31,7 @@ import {
   StaffPayDepositSessionsResult,
   StaffPayAllPaymentsResult,
   StaffPaymentPreview,
+  StaffPaymentSourceType,
   StaffStatus,
 } from "@/dtos/staff.dto";
 import { StaffRoleType } from "@/dtos/deduction-settings.dto";
@@ -195,6 +196,18 @@ const EMPTY_DEPOSIT_PREVIEW_SUMMARY = {
 
 const EMPTY_DEPOSIT_PREVIEW_CLASSES: StaffDepositPaymentPreview["classes"] = [];
 
+const EMPTY_PAYMENT_PREVIEW_SUMMARY = {
+  grossTotal: 0,
+  operatingTotal: 0,
+  taxTotal: 0,
+  netTotal: 0,
+  itemCount: 0,
+};
+
+function buildPaymentItemKey(sourceType: string, id: string): string {
+  return `${sourceType}:${id}`;
+}
+
 function normalizeMoneyAmount(value?: number | string | null): number {
   const amount = typeof value === "number" ? value : Number(value ?? 0);
   return Number.isFinite(amount) ? amount : 0;
@@ -282,6 +295,9 @@ export default function AdminStaffDetailPage({
     string[]
   >([]);
   const [paymentPreviewPopupOpen, setPaymentPreviewPopupOpen] = useState(false);
+  const [selectedPaymentItemKeys, setSelectedPaymentItemKeys] = useState<
+    string[]
+  >([]);
   const [isTaxEditMode, setIsTaxEditMode] = useState(false);
   const [taxBulkDrafts, setTaxBulkDrafts] = useState<
     Partial<Record<StaffRoleType, TaxBulkDraftItem>>
@@ -461,26 +477,6 @@ export default function AdminStaffDetailPage({
     queryClient.invalidateQueries({ queryKey: ["staff", "detail", id] });
     queryClient.invalidateQueries({ queryKey: ["staff", "list"] });
   }, [queryClient, id]);
-
-  const statusMutation = useMutation({
-    mutationFn: (payload: { status: StaffStatus; reason?: string }) =>
-      staffApi.updateStaffStatus(id, payload.status, payload.reason),
-    onSuccess: async (_updatedStaff, payload) => {
-      toast.success(
-        payload.status === "inactive"
-          ? "Đã chuyển nhân sự sang ngừng hoạt động."
-          : "Đã chuyển nhân sự sang hoạt động.",
-      );
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["staff", "detail", id] }),
-        queryClient.invalidateQueries({ queryKey: ["staff", "list"] }),
-        queryClient.invalidateQueries({ queryKey: ["class", "list"] }),
-      ]);
-    },
-    onError: (err: unknown) => {
-      toast.error(getApiErrorMessage(err, "Không thể cập nhật trạng thái nhân sự."));
-    },
-  });
 
   const updateQrLinkMutation = useMutation({
     mutationFn: (link: string) =>
@@ -809,6 +805,51 @@ export default function AdminStaffDetailPage({
   const paymentPreviewSummary = paymentPreview?.summary ?? null;
   const paymentPreviewSections = paymentPreview?.sections ?? [];
   const paymentPreviewTaxAsOfDate = paymentPreview?.taxAsOfDate ?? today;
+  const allPaymentPreviewItems = useMemo(
+    () =>
+      paymentPreviewSections.flatMap((section) =>
+        section.sources.flatMap((source) =>
+          source.items.map((item) => ({
+            sourceType: source.sourceType as StaffPaymentSourceType,
+            id: item.id,
+            item,
+          })),
+        ),
+      ),
+    [paymentPreviewSections],
+  );
+  const allPaymentItemKeys = useMemo(
+    () =>
+      allPaymentPreviewItems.map((entry) =>
+        buildPaymentItemKey(entry.sourceType, entry.id),
+      ),
+    [allPaymentPreviewItems],
+  );
+  const selectedPaymentItemKeySet = useMemo(
+    () => new Set(selectedPaymentItemKeys),
+    [selectedPaymentItemKeys],
+  );
+  const allPaymentItemsSelected =
+    allPaymentItemKeys.length > 0 &&
+    allPaymentItemKeys.every((key) => selectedPaymentItemKeySet.has(key));
+  const selectedPaymentSummary = useMemo(() => {
+    return allPaymentPreviewItems.reduce(
+      (summary, entry) => {
+        const key = buildPaymentItemKey(entry.sourceType, entry.id);
+        if (!selectedPaymentItemKeySet.has(key)) {
+          return summary;
+        }
+
+        summary.grossTotal += entry.item.grossAmount;
+        summary.operatingTotal += entry.item.operatingAmount;
+        summary.taxTotal += entry.item.taxAmount;
+        summary.netTotal += entry.item.netAmount;
+        summary.itemCount += 1;
+        return summary;
+      },
+      { ...EMPTY_PAYMENT_PREVIEW_SUMMARY },
+    );
+  }, [allPaymentPreviewItems, selectedPaymentItemKeySet]);
   const depositPreviewSummary =
     depositPaymentPreview?.summary ?? EMPTY_DEPOSIT_PREVIEW_SUMMARY;
   const depositPreviewClasses = useMemo(
@@ -1002,6 +1043,7 @@ export default function AdminStaffDetailPage({
         toast.success("Không có khoản nào cần cập nhật trạng thái.");
       }
 
+      setSelectedPaymentItemKeys([]);
       setPaymentPreviewPopupOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({
@@ -1030,6 +1072,66 @@ export default function AdminStaffDetailPage({
     onError: (error) => {
       toast.error(
         getApiErrorMessage(error, "Không thể thanh toán tất cả các khoản."),
+      );
+    },
+  });
+  const paySelectedPaymentsMutation = useMutation<
+    StaffPayAllPaymentsResult,
+    unknown,
+    void
+  >({
+    mutationFn: () => {
+      const items = selectedPaymentItemKeys.map((key) => {
+        const separatorIndex = key.indexOf(":");
+        const sourceType = key.slice(0, separatorIndex) as StaffPaymentSourceType;
+        const itemId = key.slice(separatorIndex + 1);
+        return { sourceType, id: itemId };
+      });
+
+      return staffApi.paySelectedStaffPayments(id, {
+        month: selectedMonthValue,
+        year: selectedYear,
+        items,
+      });
+    },
+    onSuccess: async (result) => {
+      if (result.updatedCount > 0) {
+        toast.success(
+          `Đã chuyển ${result.updatedCount} khoản đã chọn sang trạng thái đã thanh toán.`,
+        );
+      } else {
+        toast.success("Không có khoản nào cần cập nhật trạng thái.");
+      }
+
+      setSelectedPaymentItemKeys([]);
+      setPaymentPreviewPopupOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["staff", "payment-preview", id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["staff", "income-summary", id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["staff", "detail", id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["staff", "list"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["sessions", "staff", id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["bonus", "list", "staff", id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["lesson", "output-stats", "staff", id],
+        }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(
+        getApiErrorMessage(error, "Không thể thanh toán các khoản đã chọn."),
       );
     },
   });
@@ -1079,8 +1181,60 @@ export default function AdminStaffDetailPage({
   });
 
   const closePaymentPreviewPopup = () => {
-    if (payAllPaymentsMutation.isPending) return;
+    if (
+      payAllPaymentsMutation.isPending ||
+      paySelectedPaymentsMutation.isPending
+    ) {
+      return;
+    }
+    setSelectedPaymentItemKeys([]);
     setPaymentPreviewPopupOpen(false);
+  };
+  const togglePaymentItem = (sourceType: StaffPaymentSourceType, itemId: string) => {
+    const key = buildPaymentItemKey(sourceType, itemId);
+    setSelectedPaymentItemKeys((prev) => {
+      if (prev.includes(key)) {
+        return prev.filter((entry) => entry !== key);
+      }
+
+      return [...prev, key];
+    });
+  };
+  const toggleAllPaymentItems = () => {
+    setSelectedPaymentItemKeys(
+      allPaymentItemsSelected ? [] : allPaymentItemKeys,
+    );
+  };
+  const togglePaymentSourceItems = (
+    sourceType: StaffPaymentSourceType,
+    itemIds: string[],
+  ) => {
+    setSelectedPaymentItemKeys((prev) => {
+      const next = new Set(prev);
+      const keys = itemIds.map((itemId) => buildPaymentItemKey(sourceType, itemId));
+      const allSelected = keys.every((key) => next.has(key));
+
+      keys.forEach((key) => {
+        if (allSelected) {
+          next.delete(key);
+          return;
+        }
+
+        next.add(key);
+      });
+
+      return Array.from(next);
+    });
+  };
+  const handlePaySelectedPaymentItems = () => {
+    if (
+      paySelectedPaymentsMutation.isPending ||
+      selectedPaymentSummary.itemCount === 0
+    ) {
+      return;
+    }
+
+    paySelectedPaymentsMutation.mutate();
   };
   const closeDepositPopup = () => {
     if (payDepositSessionsMutation.isPending) return;
@@ -1442,19 +1596,6 @@ export default function AdminStaffDetailPage({
     staff.id === ownStaffId ? fullProfile?.avatarUrl : null,
     staff.user?.id === authUser.id ? authUser.avatarUrl : null,
   );
-  const handleToggleStaffStatus = () => {
-    const nextStatus: StaffStatus = staff.status === "active" ? "inactive" : "active";
-    const confirmed = window.confirm(
-      nextStatus === "inactive"
-        ? "Chuyển nhân sự sang ngừng hoạt động? Các phân công vận hành hiện tại sẽ được đóng."
-        : "Chuyển nhân sự sang hoạt động? Hệ thống sẽ không tự khôi phục phân công cũ.",
-    );
-    if (!confirmed) return;
-
-    const reason = window.prompt("Lý do (không bắt buộc)") ?? undefined;
-    statusMutation.mutate({ status: nextStatus, reason });
-  };
-
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-bg-primary p-4 pb-8 sm:p-6">
       <button
@@ -1521,20 +1662,6 @@ export default function AdminStaffDetailPage({
                       d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
                     />
                   </svg>
-                </button>
-              ) : null}
-              {canEditStaffProfile ? (
-                <button
-                  type="button"
-                  onClick={handleToggleStaffStatus}
-                  disabled={statusMutation.isPending}
-                  className="inline-flex min-h-9 shrink-0 items-center rounded-full border border-border-default bg-bg-surface px-3 text-xs font-semibold text-text-secondary transition hover:bg-bg-tertiary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
-                >
-                  {statusMutation.isPending
-                    ? "Đang lưu..."
-                    : staff.status === "active"
-                      ? "Ngừng hoạt động"
-                      : "Mở lại"}
                 </button>
               ) : null}
             </div>
@@ -2477,27 +2604,42 @@ export default function AdminStaffDetailPage({
             className="fixed left-1/2 top-1/2 z-50 flex max-h-[88vh] w-[calc(100%-1rem)] max-w-6xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border-default bg-bg-surface shadow-2xl"
           >
             <div className="border-b border-border-default bg-bg-secondary/65 px-4 py-4 sm:px-6">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-text-muted">
-                    Thanh Toán Tất Cả
+                    Thanh toán khoản chọn
                   </p>
                   <h2
                     id="staff-payment-preview-title"
                     className="mt-1 text-lg font-semibold text-text-primary sm:text-xl"
                   >
-                    {staff.fullName?.trim() || "Nhân sự"} · Thanh toán hàng loạt
+                    {staff.fullName?.trim() || "Nhân sự"} · Thanh toán nhân sự
                   </h2>
                   <p className="mt-1 text-sm text-text-muted">
-                    Mọi khoản chưa thanh toán của mọi role, mọi tháng (trừ cọc).
-                    Thuế trong popup theo mức hiện hành tại{" "}
-                    {paymentPreviewTaxAsOfDate}.
+                    Chọn từng khoản hoặc chọn cả nhóm. Mọi khoản chưa thanh toán
+                    của mọi role, mọi tháng (trừ cọc). Thuế theo mức hiện hành
+                    tại {paymentPreviewTaxAsOfDate}.
                   </p>
                 </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {paymentPreviewSummary?.itemCount ? (
+                    <button
+                      type="button"
+                      onClick={toggleAllPaymentItems}
+                      className="inline-flex min-h-10 items-center justify-center rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-sm font-medium text-text-primary transition hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                    >
+                      {allPaymentItemsSelected
+                        ? "Bỏ chọn tất cả"
+                        : "Chọn tất cả"}
+                    </button>
+                  ) : null}
                 <button
                   type="button"
                   onClick={closePaymentPreviewPopup}
-                  disabled={payAllPaymentsMutation.isPending}
+                  disabled={
+                    payAllPaymentsMutation.isPending ||
+                    paySelectedPaymentsMutation.isPending
+                  }
                   className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-muted transition hover:bg-bg-tertiary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
                   aria-label="Đóng popup thanh toán"
                 >
@@ -2516,6 +2658,7 @@ export default function AdminStaffDetailPage({
                     />
                   </svg>
                 </button>
+                </div>
               </div>
             </div>
 
@@ -2647,6 +2790,20 @@ export default function AdminStaffDetailPage({
 
                           <div className="space-y-4 px-4 py-4 sm:px-5">
                             {section.sources.map((source) => {
+                              const sourceType =
+                                source.sourceType as StaffPaymentSourceType;
+                              const sourceItemIds = source.items.map(
+                                (item) => item.id,
+                              );
+                              const selectedSourceCount = sourceItemIds.filter(
+                                (itemId) =>
+                                  selectedPaymentItemKeySet.has(
+                                    buildPaymentItemKey(sourceType, itemId),
+                                  ),
+                              ).length;
+                              const allSourceItemsSelected =
+                                sourceItemIds.length > 0 &&
+                                selectedSourceCount === sourceItemIds.length;
                               const showSourceOperating =
                                 shouldShowPaymentOperatingColumn(section.role);
                               const showSourceTax = shouldShowPaymentTaxColumn(
@@ -2661,17 +2818,32 @@ export default function AdminStaffDetailPage({
                                   className="rounded-xl border border-border-default bg-bg-secondary/35"
                                 >
                                   <div className="flex flex-col gap-2 border-b border-border-default px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                                    <div className="min-w-0">
-                                      <h4 className="text-sm font-semibold text-text-primary">
-                                        {source.sourceLabel}
-                                      </h4>
-                                      <p className="text-xs text-text-muted">
-                                        {source.itemCount} khoản · Trước thuế{" "}
-                                        {formatCurrency(source.grossTotal)} ·
-                                         Sau cuối{" "}
-                                        {formatCurrency(source.netTotal)}
-                                      </p>
-                                    </div>
+                                    <label className="flex min-w-0 cursor-pointer items-center gap-3">
+                                      <input
+                                        type="checkbox"
+                                        checked={allSourceItemsSelected}
+                                        onChange={() =>
+                                          togglePaymentSourceItems(
+                                            sourceType,
+                                            sourceItemIds,
+                                          )
+                                        }
+                                        className="size-4 shrink-0 rounded border-border-default text-primary focus:ring-border-focus"
+                                        aria-label={`Chọn tất cả khoản ${source.sourceLabel}`}
+                                      />
+                                      <div className="min-w-0">
+                                        <h4 className="text-sm font-semibold text-text-primary">
+                                          {source.sourceLabel}
+                                        </h4>
+                                        <p className="text-xs text-text-muted">
+                                          {source.itemCount} khoản · Đã chọn{" "}
+                                          {selectedSourceCount} · Trước thuế{" "}
+                                          {formatCurrency(source.grossTotal)} ·
+                                          Sau cuối{" "}
+                                          {formatCurrency(source.netTotal)}
+                                        </p>
+                                      </div>
+                                    </label>
                                     {showSourceMeta ? (
                                       <div className="flex flex-wrap gap-2 text-xs font-medium">
                                         {showSourceOperating ? (
@@ -2693,44 +2865,34 @@ export default function AdminStaffDetailPage({
                                   </div>
 
                                   <div className="space-y-3 p-3 md:hidden">
-                                    {source.items.map((item) => (
-                                      <article
+                                    {source.items.map((item) => {
+                                      const itemKey = buildPaymentItemKey(
+                                        sourceType,
+                                        item.id,
+                                      );
+                                      const isItemSelected =
+                                        selectedPaymentItemKeySet.has(itemKey);
+
+                                      return (
+                                      <label
                                         key={item.id}
-                                        role={item.classId ? "button" : undefined}
-                                        tabIndex={item.classId ? 0 : undefined}
-                                        onClick={
-                                          item.classId
-                                            ? () =>
-                                                push(
-                                                  buildAdminLikePath(
-                                                    routeBase,
-                                                    `classes/${encodeURIComponent(item.classId ?? "")}`,
-                                                  ),
-                                                )
-                                            : undefined
-                                        }
-                                        onKeyDown={
-                                          item.classId
-                                            ? (event) => {
-                                                if (event.key === "Enter" || event.key === " ") {
-                                                  event.preventDefault();
-                                                  push(
-                                                    buildAdminLikePath(
-                                                      routeBase,
-                                                      `classes/${encodeURIComponent(item.classId ?? "")}`,
-                                                    ),
-                                                  );
-                                                }
-                                              }
-                                            : undefined
-                                        }
-                                        className={`rounded-xl border border-border-default bg-bg-surface px-4 py-3 ${
-                                          item.classId
-                                            ? "cursor-pointer transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                                            : ""
+                                        className={`flex cursor-pointer items-center gap-3 rounded-xl border border-border-default px-4 py-3 transition-colors ${
+                                          isItemSelected
+                                            ? "bg-primary/5"
+                                            : "bg-bg-surface hover:bg-bg-secondary/35"
                                         }`}
                                       >
-                                        <div className="flex items-start justify-between gap-3">
+                                        <input
+                                          type="checkbox"
+                                          checked={isItemSelected}
+                                          onChange={() =>
+                                            togglePaymentItem(sourceType, item.id)
+                                          }
+                                          className="size-4 shrink-0 rounded border-border-default text-primary focus:ring-border-focus"
+                                          aria-label={`Chọn khoản ${item.label}`}
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                        <div className="flex items-center justify-between gap-3">
                                           <div className="min-w-0">
                                             <p className="font-medium text-text-primary">
                                               {item.label}
@@ -2796,14 +2958,17 @@ export default function AdminStaffDetailPage({
                                             </div>
                                           ) : null}
                                         </div>
-                                      </article>
-                                    ))}
+                                        </div>
+                                      </label>
+                                    );
+                                    })}
                                   </div>
 
                                   <div className="hidden overflow-x-auto md:block">
                                     <table className="w-full min-w-[760px] border-collapse text-left text-sm">
                                       <thead>
                                         <tr className="border-b border-border-default bg-bg-secondary/55">
+                                          <th className="w-10 px-3 py-3" aria-label="Chọn khoản" />
                                           <th className="px-4 py-3 font-medium text-text-primary">
                                             Khoản
                                           </th>
@@ -2835,55 +3000,51 @@ export default function AdminStaffDetailPage({
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {source.items.map((item) => (
+                                        {source.items.map((item) => {
+                                          const itemKey = buildPaymentItemKey(
+                                            sourceType,
+                                            item.id,
+                                          );
+                                          const isItemSelected =
+                                            selectedPaymentItemKeySet.has(itemKey);
+
+                                          return (
                                           <tr
                                             key={item.id}
-                                            role={item.classId ? "button" : undefined}
-                                            tabIndex={item.classId ? 0 : undefined}
-                                            onClick={
-                                              item.classId
-                                                ? () =>
-                                                    push(
-                                                      buildAdminLikePath(
-                                                        routeBase,
-                                                        `classes/${encodeURIComponent(item.classId ?? "")}`,
-                                                      ),
-                                                    )
-                                                : undefined
-                                            }
-                                            onKeyDown={
-                                              item.classId
-                                                ? (event) => {
-                                                    if (event.key === "Enter" || event.key === " ") {
-                                                      event.preventDefault();
-                                                      push(
-                                                        buildAdminLikePath(
-                                                          routeBase,
-                                                          `classes/${encodeURIComponent(item.classId ?? "")}`,
-                                                        ),
-                                                      );
-                                                    }
-                                                  }
-                                                : undefined
-                                            }
-                                            className={`border-b border-border-default bg-bg-surface ${
-                                              item.classId
-                                                ? "cursor-pointer transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                                                : ""
+                                            className={`border-b border-border-default ${
+                                              isItemSelected
+                                                ? "bg-primary/5"
+                                                : "bg-bg-surface"
                                             }`}
                                           >
-                                            <td className="px-4 py-3 text-text-primary">
+                                            <td className="px-3 py-3 align-middle">
+                                              <div className="flex items-center justify-center">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isItemSelected}
+                                                  onChange={() =>
+                                                    togglePaymentItem(
+                                                      sourceType,
+                                                      item.id,
+                                                    )
+                                                  }
+                                                  className="size-4 rounded border-border-default text-primary focus:ring-border-focus"
+                                                  aria-label={`Chọn khoản ${item.label}`}
+                                                />
+                                              </div>
+                                            </td>
+                                            <td className="px-4 py-3 align-middle text-text-primary">
                                               <div className="font-medium">
                                                 {item.label}
                                               </div>
                                             </td>
-                                            <td className="px-4 py-3 text-text-secondary">
+                                            <td className="px-4 py-3 align-middle text-text-secondary">
                                               {item.secondaryLabel || "—"}
                                             </td>
-                                            <td className="px-4 py-3 text-text-secondary">
+                                            <td className="px-4 py-3 align-middle text-text-secondary">
                                               {formatCompactDate(item.date)}
                                             </td>
-                                            <td className="px-4 py-3 text-center">
+                                            <td className="px-4 py-3 align-middle text-center">
                                               <span
                                                 className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getPaymentStatusBadgeClass(
                                                   item.currentStatus,
@@ -2894,26 +3055,27 @@ export default function AdminStaffDetailPage({
                                                 )}
                                               </span>
                                             </td>
-                                            <td className="px-4 py-3 tabular-nums font-semibold text-primary">
+                                            <td className="px-4 py-3 align-middle tabular-nums font-semibold text-primary">
                                               {formatCurrency(item.grossAmount)}
                                             </td>
                                             {showSourceOperating ? (
-                                              <td className="px-4 py-3 tabular-nums font-semibold text-warning">
+                                              <td className="px-4 py-3 align-middle tabular-nums font-semibold text-warning">
                                                 {formatCurrency(
                                                   item.operatingAmount,
                                                 )}
                                               </td>
                                             ) : null}
                                             {showSourceTax ? (
-                                              <td className="px-4 py-3 tabular-nums font-semibold text-error">
+                                              <td className="px-4 py-3 align-middle tabular-nums font-semibold text-error">
                                                 {formatCurrency(item.taxAmount)}
                                               </td>
                                             ) : null}
-                                            <td className="px-4 py-3 tabular-nums font-semibold text-success">
+                                            <td className="px-4 py-3 align-middle tabular-nums font-semibold text-success">
                                               {formatCurrency(item.netAmount)}
                                             </td>
                                           </tr>
-                                        ))}
+                                        );
+                                        })}
                                       </tbody>
                                     </table>
                                   </div>
@@ -2937,33 +3099,58 @@ export default function AdminStaffDetailPage({
             <div className="border-t border-border-default bg-bg-surface px-4 py-4 sm:px-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-text-muted">
-                  {paymentPreviewSummary?.itemCount
-                    ? `Sẽ chuyển ${paymentPreviewSummary.itemCount} khoản được liệt kê sang trạng thái đã thanh toán (gồm mọi buổi GV chưa thanh toán và các khoản pending của ${selectedMonthLabel}).`
-                    : `Chưa có khoản nào: mọi buổi GV đã thanh toán hoặc không có pending trong ${selectedMonthLabel}.`}
+                  {selectedPaymentSummary.itemCount > 0
+                    ? `Đã chọn ${selectedPaymentSummary.itemCount} khoản · Trước thuế ${formatCurrency(
+                        selectedPaymentSummary.grossTotal,
+                      )} · Sau cuối ${formatCurrency(selectedPaymentSummary.netTotal)}`
+                    : paymentPreviewSummary?.itemCount
+                      ? "Chọn ít nhất một khoản để thanh toán, hoặc dùng Thanh toán tất cả."
+                      : `Chưa có khoản nào: mọi buổi GV đã thanh toán hoặc không có pending trong ${selectedMonthLabel}.`}
                 </p>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row">
                   <button
                     type="button"
                     onClick={closePaymentPreviewPopup}
-                    disabled={payAllPaymentsMutation.isPending}
+                    disabled={
+                      payAllPaymentsMutation.isPending ||
+                      paySelectedPaymentsMutation.isPending
+                    }
                     className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border-default px-4 py-2.5 text-sm font-medium text-text-secondary transition hover:bg-bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Hủy
                   </button>
+                  {paymentPreviewSummary?.itemCount ? (
+                    <button
+                      type="button"
+                      onClick={() => payAllPaymentsMutation.mutate()}
+                      disabled={
+                        payAllPaymentsMutation.isPending ||
+                        paySelectedPaymentsMutation.isPending ||
+                        isPaymentPreviewLoading ||
+                        isPaymentPreviewError
+                      }
+                      className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border-default bg-bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary transition hover:bg-bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {payAllPaymentsMutation.isPending
+                        ? "Đang xử lý…"
+                        : `Thanh toán tất cả ${paymentPreviewSummary.itemCount} khoản`}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    onClick={() => payAllPaymentsMutation.mutate()}
+                    onClick={handlePaySelectedPaymentItems}
                     disabled={
+                      paySelectedPaymentsMutation.isPending ||
                       payAllPaymentsMutation.isPending ||
                       isPaymentPreviewLoading ||
                       isPaymentPreviewError ||
-                      !paymentPreviewSummary?.itemCount
+                      selectedPaymentSummary.itemCount === 0
                     }
                     className="inline-flex min-h-11 items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-text-inverse transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {payAllPaymentsMutation.isPending
+                    {paySelectedPaymentsMutation.isPending
                       ? "Đang xử lý…"
-                      : `Thanh toán ${paymentPreviewSummary?.itemCount ?? 0} khoản`}
+                      : `Thanh toán ${selectedPaymentSummary.itemCount} khoản đã chọn`}
                   </button>
                 </div>
               </div>

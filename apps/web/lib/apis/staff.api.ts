@@ -9,6 +9,7 @@ import {
     StaffPayDepositSessionsResult,
     StaffPayAllPaymentsPayload,
     StaffPayAllPaymentsResult,
+    StaffPaySelectedPaymentsPayload,
     StaffPaymentPreview,
     StaffIncomeSummary,
     StaffListResponse,
@@ -280,6 +281,19 @@ export async function payAllStaffPayments(
     const safeId = encodeURIComponent(id);
     const response = await api.patch<StaffPayAllPaymentsResult>(
         `/staff/${safeId}/payment-status/pay-all`,
+        data,
+    );
+
+    return response.data;
+}
+
+export async function paySelectedStaffPayments(
+    id: string,
+    data: StaffPaySelectedPaymentsPayload,
+): Promise<StaffPayAllPaymentsResult> {
+    const safeId = encodeURIComponent(id);
+    const response = await api.patch<StaffPayAllPaymentsResult>(
+        `/staff/${safeId}/payment-status/pay-selected`,
         data,
     );
 
