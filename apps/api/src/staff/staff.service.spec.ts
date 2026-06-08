@@ -2185,6 +2185,110 @@ describe('StaffService', () => {
     ]);
   });
 
+  it('pays only selected customer care preview items', async () => {
+    jest
+      .spyOn(service as any, 'loadStaffPaymentPreviewRecords')
+      .mockResolvedValue({
+        monthKey: '2026-03',
+        records: [
+          {
+            id: 'attendance-1',
+            role: StaffRole.customer_care,
+            sourceType: 'customer_care',
+            sourceLabel: 'Hoa hồng CSKH',
+            label: 'Toán 10A',
+            secondaryLabel: null,
+            date: '2026-03-15T00:00:00.000Z',
+            currentStatus: PaymentStatus.pending,
+            grossAmount: 20000,
+            operatingAmount: 0,
+            operatingRatePercent: 0,
+            taxRatePercent: 10,
+            taxAmount: 2000,
+            netAmount: 18000,
+          },
+          {
+            id: 'attendance-2',
+            role: StaffRole.customer_care,
+            sourceType: 'customer_care',
+            sourceLabel: 'Hoa hồng CSKH',
+            label: 'Lý 11B',
+            secondaryLabel: null,
+            date: '2026-03-16T00:00:00.000Z',
+            currentStatus: PaymentStatus.pending,
+            grossAmount: 30000,
+            operatingAmount: 0,
+            operatingRatePercent: 0,
+            taxRatePercent: 10,
+            taxAmount: 3000,
+            netAmount: 27000,
+          },
+        ],
+      });
+    jest
+      .spyOn(service as any, 'getSessionPaymentSnapshots')
+      .mockResolvedValue(new Map());
+    jest
+      .spyOn(service as any, 'getAttendancePaymentSnapshots')
+      .mockResolvedValue(new Map());
+    jest
+      .spyOn(service as any, 'getLessonOutputSnapshots')
+      .mockResolvedValue(new Map());
+    jest
+      .spyOn(service as any, 'getExtraAllowanceSnapshots')
+      .mockResolvedValue(new Map());
+    jest
+      .spyOn(service as any, 'getBonusSnapshots')
+      .mockResolvedValue(new Map());
+    mockPrisma.attendance.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.paySelectedPayments('staff-1', {
+      month: '03',
+      year: '2026',
+      items: [{ sourceType: 'customer_care', id: 'attendance-1' }],
+    });
+
+    expect(mockPrisma.attendance.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: {
+          in: ['attendance-1'],
+        },
+      },
+      data: {
+        customerCareTaxDeductionRatePercent: 10,
+        customerCarePaymentStatus: PaymentStatus.paid,
+      },
+    });
+    expect(result.requestedItemCount).toBe(1);
+    expect(result.updatedCount).toBe(1);
+    expect(result.updatedBySource).toEqual([
+      {
+        sourceType: 'customer_care',
+        sourceLabel: 'Hoa hồng CSKH',
+        updatedCount: 1,
+      },
+    ]);
+  });
+
+  it('rejects selected payment items that are no longer in preview', async () => {
+    jest
+      .spyOn(service as any, 'loadStaffPaymentPreviewRecords')
+      .mockResolvedValue({
+        monthKey: '2026-03',
+        records: [],
+      });
+
+    await expect(
+      service.paySelectedPayments('staff-1', {
+        month: '03',
+        year: '2026',
+        items: [{ sourceType: 'customer_care', id: 'attendance-missing' }],
+      }),
+    ).rejects.toThrow(
+      'Có khoản không còn trong danh sách cần thanh toán. Vui lòng tải lại popup rồi thử lại.',
+    );
+  });
+
   it('zeroes teacher deductions before paying selected deposit sessions', async () => {
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-1',

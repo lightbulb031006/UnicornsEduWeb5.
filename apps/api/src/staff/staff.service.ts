@@ -27,6 +27,7 @@ import {
   type StaffDepositPaymentPreviewTotalsDto,
   type StaffPayDepositSessionsResultDto,
   type StaffPayAllPaymentsResultDto,
+  type StaffPaySelectedPaymentsDto,
   type StaffPaymentPreviewDto,
   type StaffPaymentPreviewItemDto,
   type StaffPaymentPreviewSectionDto,
@@ -3232,6 +3233,74 @@ export class StaffService {
         query,
       );
 
+      return this.applyStaffPaymentPreviewRecords(
+        tx,
+        id,
+        monthKey,
+        records,
+        records.length,
+        auditActor,
+        'all',
+      );
+    });
+  }
+
+  async paySelectedPayments(
+    id: string,
+    data: StaffPaySelectedPaymentsDto,
+    auditActor?: ActionHistoryActor,
+  ): Promise<StaffPayAllPaymentsResultDto> {
+    return this.prisma.$transaction(async (tx) => {
+      const { monthKey, records: previewRecords } =
+        await this.loadStaffPaymentPreviewRecords(tx, id, data);
+
+      const recordMap = new Map(
+        previewRecords.map((record) => [
+          `${record.sourceType}:${record.id}`,
+          record,
+        ]),
+      );
+      const seenKeys = new Set<string>();
+      const selectedRecords: StaffPaymentPreviewRecord[] = [];
+
+      for (const item of data.items) {
+        const key = `${item.sourceType}:${item.id}`;
+        if (seenKeys.has(key)) {
+          continue;
+        }
+        seenKeys.add(key);
+
+        const record = recordMap.get(key);
+        if (!record) {
+          throw new BadRequestException(
+            'Có khoản không còn trong danh sách cần thanh toán. Vui lòng tải lại popup rồi thử lại.',
+          );
+        }
+
+        selectedRecords.push(record);
+      }
+
+      return this.applyStaffPaymentPreviewRecords(
+        tx,
+        id,
+        monthKey,
+        selectedRecords,
+        data.items.length,
+        auditActor,
+        'selected',
+      );
+    });
+  }
+
+  private async applyStaffPaymentPreviewRecords(
+    tx: Prisma.TransactionClient,
+    id: string,
+    monthKey: string,
+    records: StaffPaymentPreviewRecord[],
+    requestedItemCount: number,
+    auditActor: ActionHistoryActor | undefined,
+    auditScope: 'all' | 'selected',
+  ): Promise<StaffPayAllPaymentsResultDto> {
       const teacherSessionIds = records
         .filter((record) => record.sourceType === 'teacher_session')
         .map((record) => record.id);
@@ -3289,6 +3358,33 @@ export class StaffService {
           updatedBySource: [],
         };
       }
+
+      const auditDescriptions = {
+        teacher_session:
+          auditScope === 'all'
+            ? 'Thanh toán toàn bộ khoản dạy học'
+            : 'Thanh toán khoản dạy học đã chọn',
+        customer_care:
+          auditScope === 'all'
+            ? 'Thanh toán toàn bộ hoa hồng CSKH'
+            : 'Thanh toán hoa hồng CSKH đã chọn',
+        assistant_share:
+          auditScope === 'all'
+            ? 'Thanh toán toàn bộ phần chia trợ lí'
+            : 'Thanh toán phần chia trợ lí đã chọn',
+        lesson_output:
+          auditScope === 'all'
+            ? 'Thanh toán toàn bộ lesson output'
+            : 'Thanh toán lesson output đã chọn',
+        extra_allowance:
+          auditScope === 'all'
+            ? 'Thanh toán toàn bộ trợ cấp thêm'
+            : 'Thanh toán trợ cấp thêm đã chọn',
+        bonus:
+          auditScope === 'all'
+            ? 'Thanh toán toàn bộ khoản thưởng'
+            : 'Thanh toán khoản thưởng đã chọn',
+      } as const;
 
       const [
         sessionBeforeSnapshots,
@@ -3465,7 +3561,7 @@ export class StaffService {
             actor: auditActor,
             entityType: 'session',
             entityId: sessionId,
-            description: 'Thanh toán toàn bộ khoản dạy học',
+            description: auditDescriptions.teacher_session,
             beforeValue: sessionBeforeSnapshots.get(sessionId) ?? null,
             afterValue: sessionAfterSnapshots.get(sessionId) ?? null,
           });
@@ -3476,7 +3572,7 @@ export class StaffService {
             actor: auditActor,
             entityType: 'attendance',
             entityId: attendanceId,
-            description: 'Thanh toán toàn bộ hoa hồng CSKH',
+            description: auditDescriptions.customer_care,
             beforeValue: customerCareBeforeSnapshots.get(attendanceId) ?? null,
             afterValue: customerCareAfterSnapshots.get(attendanceId) ?? null,
           });
@@ -3487,7 +3583,7 @@ export class StaffService {
             actor: auditActor,
             entityType: 'attendance',
             entityId: attendanceId,
-            description: 'Thanh toán toàn bộ phần chia trợ lí',
+            description: auditDescriptions.assistant_share,
             beforeValue: assistantBeforeSnapshots.get(attendanceId) ?? null,
             afterValue: assistantAfterSnapshots.get(attendanceId) ?? null,
           });
@@ -3498,7 +3594,7 @@ export class StaffService {
             actor: auditActor,
             entityType: 'lesson_output',
             entityId: outputId,
-            description: 'Thanh toán toàn bộ lesson output',
+            description: auditDescriptions.lesson_output,
             beforeValue: lessonOutputBeforeSnapshots.get(outputId) ?? null,
             afterValue: lessonOutputAfterSnapshots.get(outputId) ?? null,
           });
@@ -3509,7 +3605,7 @@ export class StaffService {
             actor: auditActor,
             entityType: 'extra_allowance',
             entityId: allowanceId,
-            description: 'Thanh toán toàn bộ trợ cấp thêm',
+            description: auditDescriptions.extra_allowance,
             beforeValue: extraAllowanceBeforeSnapshots.get(allowanceId) ?? null,
             afterValue: extraAllowanceAfterSnapshots.get(allowanceId) ?? null,
           });
@@ -3520,7 +3616,7 @@ export class StaffService {
             actor: auditActor,
             entityType: 'bonus',
             entityId: bonusId,
-            description: 'Thanh toán toàn bộ khoản thưởng',
+            description: auditDescriptions.bonus,
             beforeValue: bonusBeforeSnapshots.get(bonusId) ?? null,
             afterValue: bonusAfterSnapshots.get(bonusId) ?? null,
           });
@@ -3530,7 +3626,7 @@ export class StaffService {
       return {
         staffId: id,
         month: monthKey,
-        requestedItemCount: records.length,
+        requestedItemCount,
         updatedCount: sourceResults.reduce(
           (sum, sourceResult) => sum + sourceResult.updatedCount,
           0,
@@ -3539,7 +3635,6 @@ export class StaffService {
           (sourceResult) => sourceResult.updatedCount > 0,
         ),
       };
-    });
   }
 
   /**

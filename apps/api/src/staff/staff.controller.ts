@@ -39,6 +39,7 @@ import {
   StaffDepositPaymentYearDto,
   type StaffPayAllPaymentsResultDto,
   StaffPayAllPaymentsDto,
+  StaffPaySelectedPaymentsDto,
   type StaffPayDepositSessionsResultDto,
   StaffPayDepositSessionsDto,
   type StaffPaymentPreviewDto,
@@ -407,6 +408,36 @@ export class StaffController {
     @Body() data: StaffPayAllPaymentsDto,
   ): Promise<StaffPayAllPaymentsResultDto> {
     return this.staffService.payAllPayments(id, data, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Patch(':id/payment-status/pay-selected')
+  @ApiOperation({
+    summary: 'Pay selected staff payments',
+    description:
+      'Mark only the selected payment-preview items as paid in one transaction. Each item must match a current pending/unpaid preview row for the staff. Body month/year are UI context only.',
+  })
+  @ApiParam({ name: 'id', description: 'Staff id' })
+  @ApiBody({
+    type: StaffPaySelectedPaymentsDto,
+    description:
+      'Selected preview items identified by sourceType and entity id.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Selected staff payments processed.',
+  })
+  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({ status: 404, description: 'Staff not found.' })
+  async paySelectedStaffPayments(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStaffIdPipe()) id: string,
+    @Body() data: StaffPaySelectedPaymentsDto,
+  ): Promise<StaffPayAllPaymentsResultDto> {
+    return this.staffService.paySelectedPayments(id, data, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,

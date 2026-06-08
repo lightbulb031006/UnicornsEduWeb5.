@@ -5,6 +5,7 @@ import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsIn,
   IsInt,
   IsDateString,
   IsEnum,
@@ -16,6 +17,7 @@ import {
   Max,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { IsStaffId } from '../common/entity-id.validators';
 
@@ -402,6 +404,48 @@ export interface StaffPaymentPreviewDto {
 }
 
 export class StaffPayAllPaymentsDto extends StaffPaymentMonthDto {}
+
+export const STAFF_PAYMENT_SOURCE_TYPES = [
+  'teacher_session',
+  'customer_care',
+  'assistant_share',
+  'lesson_output',
+  'extra_allowance',
+  'bonus',
+] as const;
+
+export type StaffPaymentSourceTypeDto =
+  (typeof STAFF_PAYMENT_SOURCE_TYPES)[number];
+
+export class StaffPaySelectedPaymentItemDto {
+  @ApiProperty({
+    description: 'Payment preview source type',
+    enum: STAFF_PAYMENT_SOURCE_TYPES,
+    example: 'customer_care',
+  })
+  @IsString()
+  @IsIn(STAFF_PAYMENT_SOURCE_TYPES)
+  sourceType: StaffPaymentSourceTypeDto;
+
+  @ApiProperty({
+    description: 'Entity id from payment preview item',
+    example: '53d7f00c-4ae7-4a1d-b4d3-67415159f4c8',
+  })
+  @IsUUID('4')
+  id: string;
+}
+
+export class StaffPaySelectedPaymentsDto extends StaffPaymentMonthDto {
+  @ApiProperty({
+    description: 'Selected payable items from payment preview',
+    type: [StaffPaySelectedPaymentItemDto],
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => StaffPaySelectedPaymentItemDto)
+  items: StaffPaySelectedPaymentItemDto[];
+}
 
 export interface StaffPayAllPaymentsSourceResultDto {
   sourceType: string;
