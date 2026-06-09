@@ -138,11 +138,15 @@ describe('CustomerCareService', () => {
         studentId: 'student-1',
         fullName: 'Nguyen An',
         totalCommission: '12345',
+        pendingCommission: '5000',
+        paidCommission: '7345',
       },
       {
         studentId: 'student-2',
         fullName: '',
         totalCommission: 67890n,
+        pendingCommission: 67890n,
+        paidCommission: 0,
       },
     ]);
 
@@ -150,7 +154,7 @@ describe('CustomerCareService', () => {
       'admin-user',
       UserRole.admin,
       'staff-1',
-      7,
+      { days: 7 },
     );
 
     expect(mockPrisma.staffInfo.findUnique).toHaveBeenCalledWith({
@@ -164,11 +168,15 @@ describe('CustomerCareService', () => {
         studentId: 'student-1',
         fullName: 'Nguyen An',
         totalCommission: 12345,
+        pendingCommission: 5000,
+        paidCommission: 7345,
       },
       {
         studentId: 'student-2',
         fullName: '',
         totalCommission: 67890,
+        pendingCommission: 67890,
+        paidCommission: 0,
       },
     ]);
   });

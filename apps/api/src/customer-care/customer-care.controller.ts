@@ -115,33 +115,63 @@ export class CustomerCareController {
   @ApiOperation({
     summary: 'List students with total commission',
     description:
-      'Students with commission from attendances in the last N days.',
+      'Students with commission from attendances. Default scope=pending returns all unpaid rows; scope=month returns every commission row in the selected calendar month.',
   })
   @ApiParam({ name: 'staffId', description: 'Staff ID' })
+  @ApiQuery({
+    name: 'scope',
+    required: false,
+    enum: ['pending', 'month'],
+    description: 'Filter scope (default pending).',
+  })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    type: String,
+    description: 'Month key YYYY-MM (required when scope=month).',
+  })
   @ApiQuery({
     name: 'days',
     required: false,
     type: Number,
-    description: 'Last N days (default 30)',
+    description:
+      'Legacy last-N-days filter used only when scope is omitted (default 30).',
   })
   @ApiResponse({
     status: 200,
-    description: 'List of studentId, fullName, totalCommission.',
+    description:
+      'List of studentId, fullName, totalCommission, pendingCommission, paidCommission.',
   })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
   async getCommissionsByStaffId(
     @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
+    @Query('scope') scope?: string,
+    @Query('month') month?: string,
     @Query('days') days?: string,
   ): Promise<CustomerCareCommissionDto[]> {
-    const parsed = days ? parseInt(days, 10) : 30;
+    const parsedDays = days ? parseInt(days, 10) : undefined;
     const safeDays =
-      Number.isFinite(parsed) && parsed >= 1 ? Math.min(parsed, 365) : 30;
+      parsedDays != null &&
+      Number.isFinite(parsedDays) &&
+      parsedDays >= 1
+        ? Math.min(parsedDays, 365)
+        : undefined;
+
     return this.customerCareService.getCommissionsByStaffId(
       user.id,
       user.roleType,
       staffId,
-      safeDays,
+      {
+        scope:
+          scope === 'month'
+            ? 'month'
+            : scope === 'pending'
+              ? 'pending'
+              : undefined,
+        month,
+        days: safeDays,
+      },
     );
   }
 
@@ -149,15 +179,28 @@ export class CustomerCareController {
   @ApiOperation({
     summary: 'Session-level commissions for one student',
     description:
-      'Attendances (sessions) in the last N days with commission per session.',
+      'Attendances with commission per session. Default scope=pending returns all unpaid rows; scope=month returns every commission row in the selected calendar month.',
   })
   @ApiParam({ name: 'staffId', description: 'Staff ID' })
   @ApiParam({ name: 'studentId', description: 'Student ID' })
   @ApiQuery({
+    name: 'scope',
+    required: false,
+    enum: ['pending', 'month'],
+    description: 'Filter scope (default pending).',
+  })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    type: String,
+    description: 'Month key YYYY-MM (required when scope=month).',
+  })
+  @ApiQuery({
     name: 'days',
     required: false,
     type: Number,
-    description: 'Last N days (default 30)',
+    description:
+      'Legacy last-N-days filter used only when scope is omitted (default 30).',
   })
   @ApiResponse({
     status: 200,
@@ -169,17 +212,33 @@ export class CustomerCareController {
     @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Param('studentId', new ParseStudentIdPipe()) studentId: string,
+    @Query('scope') scope?: string,
+    @Query('month') month?: string,
     @Query('days') days?: string,
   ): Promise<CustomerCareSessionCommissionDto[]> {
-    const parsed = days ? parseInt(days, 10) : 30;
+    const parsedDays = days ? parseInt(days, 10) : undefined;
     const safeDays =
-      Number.isFinite(parsed) && parsed >= 1 ? Math.min(parsed, 365) : 30;
+      parsedDays != null &&
+      Number.isFinite(parsedDays) &&
+      parsedDays >= 1
+        ? Math.min(parsedDays, 365)
+        : undefined;
+
     return this.customerCareService.getSessionCommissionsByStudent(
       user.id,
       user.roleType,
       staffId,
       studentId,
-      safeDays,
+      {
+        scope:
+          scope === 'month'
+            ? 'month'
+            : scope === 'pending'
+              ? 'pending'
+              : undefined,
+        month,
+        days: safeDays,
+      },
     );
   }
 

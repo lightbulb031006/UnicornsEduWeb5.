@@ -42,10 +42,20 @@ export interface CustomerCareTopUpHistoryListDto {
   meta: CustomerCareStudentListMetaDto;
 }
 
+export type CustomerCareCommissionScope = 'pending' | 'month';
+
+export interface CustomerCareCommissionListQueryDto {
+  scope?: CustomerCareCommissionScope;
+  month?: string;
+  days?: number;
+}
+
 export interface CustomerCareCommissionDto {
   studentId: string;
   fullName: string;
   totalCommission: number;
+  pendingCommission: number;
+  paidCommission: number;
 }
 
 export interface CustomerCareSessionCommissionDto {

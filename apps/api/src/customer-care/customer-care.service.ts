@@ -15,6 +15,8 @@ import {
 import type {
   CustomerCareBulkPaymentStatusUpdateResultDto,
   CustomerCareCommissionDto,
+  CustomerCareCommissionListQueryDto,
+  CustomerCareCommissionScope,
   CustomerCareSessionCommissionDto,
   CustomerCareStudentListDto,
   CustomerCareTopUpHistoryListDto,
@@ -37,7 +39,46 @@ type CustomerCareCommissionAggregateRow = {
   studentId: string;
   fullName: string | null;
   totalCommission: unknown;
+  pendingCommission: unknown;
+  paidCommission: unknown;
 };
+
+function parseMonthRange(monthKey: string): { start: Date; endExclusive: Date } {
+  const matched = /^(\d{4})-(\d{2})$/.exec(monthKey.trim());
+  if (!matched) {
+    throw new BadRequestException('month must use YYYY-MM format.');
+  }
+
+  const year = Number(matched[1]);
+  const month = Number(matched[2]);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12
+  ) {
+    throw new BadRequestException('month must use YYYY-MM format.');
+  }
+
+  return {
+    start: new Date(Date.UTC(year, month - 1, 1)),
+    endExclusive: new Date(Date.UTC(year, month, 1)),
+  };
+}
+
+function normalizeCommissionScope(
+  query: CustomerCareCommissionListQueryDto = {},
+): CustomerCareCommissionScope | 'days' {
+  if (query.scope === 'month') {
+    return 'month';
+  }
+
+  if (query.scope === 'pending') {
+    return 'pending';
+  }
+
+  return 'days';
+}
 
 type CustomerCareStudentListQuery = {
   page?: number;
@@ -332,12 +373,57 @@ export class CustomerCareService {
     };
   }
 
-  /** List students with total commission (last 30 days) for this staff. */
+  private buildCommissionScopeFilters(
+    scope: CustomerCareCommissionScope | 'days',
+    query: CustomerCareCommissionListQueryDto,
+  ): {
+    attendancePaymentFilter: Prisma.Sql;
+    sessionDateFilter: Prisma.Sql;
+  } {
+    if (scope === 'month') {
+      if (!query.month?.trim()) {
+        throw new BadRequestException(
+          'month is required when scope is month.',
+        );
+      }
+
+      const { start, endExclusive } = parseMonthRange(query.month);
+
+      return {
+        attendancePaymentFilter: Prisma.empty,
+        sessionDateFilter: Prisma.sql`
+          AND sessions.date >= ${start}
+          AND sessions.date < ${endExclusive}
+        `,
+      };
+    }
+
+    if (scope === 'pending') {
+      return {
+        attendancePaymentFilter: Prisma.sql`
+          AND COALESCE(attendance.customer_care_payment_status::text, ${PaymentStatus.pending}) = ${PaymentStatus.pending}
+        `,
+        sessionDateFilter: Prisma.empty,
+      };
+    }
+
+    const days = query.days ?? DEFAULT_DAYS;
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
+
+    return {
+      attendancePaymentFilter: Prisma.empty,
+      sessionDateFilter: Prisma.sql`AND sessions.date >= ${since}`,
+    };
+  }
+
+  /** List students with total commission for this staff. */
   async getCommissionsByStaffId(
     userId: string,
     roleType: UserRole,
     staffId: string,
-    days: number = DEFAULT_DAYS,
+    query: CustomerCareCommissionListQueryDto = {},
   ): Promise<CustomerCareCommissionDto[]> {
     const accessibleStaffId = await this.resolveAccessibleStaffId(
       userId,
@@ -351,9 +437,9 @@ export class CustomerCareService {
     });
     if (!staff) throw new NotFoundException('Staff not found');
 
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-    since.setHours(0, 0, 0, 0);
+    const scope = normalizeCommissionScope(query);
+    const { attendancePaymentFilter, sessionDateFilter } =
+      this.buildCommissionScopeFilters(scope, query);
 
     const rows = await this.prisma.$queryRaw<
       CustomerCareCommissionAggregateRow[]
@@ -370,32 +456,71 @@ export class CustomerCareService {
                 )
               ),
               0
-            ) AS "totalCommission"
+            ) AS "totalCommission",
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN COALESCE(attendance.customer_care_payment_status::text, ${PaymentStatus.pending}) = ${PaymentStatus.pending}
+                  THEN ROUND(
+                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    * COALESCE(attendance.customer_care_coef, 0)
+                  )
+                  ELSE 0
+                END
+              ),
+              0
+            ) AS "pendingCommission",
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN attendance.customer_care_payment_status::text = ${PaymentStatus.paid}
+                  THEN ROUND(
+                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    * COALESCE(attendance.customer_care_coef, 0)
+                  )
+                  ELSE 0
+                END
+              ),
+              0
+            ) AS "paidCommission"
           FROM attendance
           INNER JOIN sessions
             ON sessions.id = attendance.session_id
           INNER JOIN student_info
             ON student_info.id = attendance.student_id
           WHERE attendance.customer_care_staff_id = ${accessibleStaffId}
-            AND sessions.date >= ${since}
+            ${attendancePaymentFilter}
+            ${sessionDateFilter}
           GROUP BY student_info.id, student_info.full_name
         `,
     );
 
-    return rows.map((row) => ({
+    const mappedRows = rows.map((row) => ({
       studentId: row.studentId,
       fullName: row.fullName ?? '',
       totalCommission: toNumber(row.totalCommission),
+      pendingCommission: toNumber(row.pendingCommission),
+      paidCommission: toNumber(row.paidCommission),
     }));
+
+    if (scope === 'pending') {
+      return mappedRows.filter((row) => row.pendingCommission > 0);
+    }
+
+    if (scope === 'month') {
+      return mappedRows.filter((row) => row.totalCommission > 0);
+    }
+
+    return mappedRows;
   }
 
-  /** Session-level commissions for one student under this staff (last N days). */
+  /** Session-level commissions for one student under this staff. */
   async getSessionCommissionsByStudent(
     userId: string,
     roleType: UserRole,
     staffId: string,
     studentId: string,
-    days: number = DEFAULT_DAYS,
+    query: CustomerCareCommissionListQueryDto = {},
   ): Promise<CustomerCareSessionCommissionDto[]> {
     const accessibleStaffId = await this.resolveAccessibleStaffId(
       userId,
@@ -409,15 +534,48 @@ export class CustomerCareService {
     });
     if (!staff) throw new NotFoundException('Staff not found');
 
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-    since.setHours(0, 0, 0, 0);
+    const scope = normalizeCommissionScope(query);
+    const sessionDateWhere =
+      scope === 'month'
+        ? (() => {
+            if (!query.month?.trim()) {
+              throw new BadRequestException(
+                'month is required when scope is month.',
+              );
+            }
+            const { start, endExclusive } = parseMonthRange(query.month);
+            return {
+              gte: start,
+              lt: endExclusive,
+            };
+          })()
+        : scope === 'days'
+          ? (() => {
+              const days = query.days ?? DEFAULT_DAYS;
+              const since = new Date();
+              since.setDate(since.getDate() - days);
+              since.setHours(0, 0, 0, 0);
+              return { gte: since };
+            })()
+          : undefined;
 
     const attendances = await this.prisma.attendance.findMany({
       where: {
         customerCareStaffId: accessibleStaffId,
         studentId,
-        session: { date: { gte: since } },
+        ...(scope === 'pending'
+          ? {
+              OR: [
+                { customerCarePaymentStatus: PaymentStatus.pending },
+                { customerCarePaymentStatus: null },
+              ],
+            }
+          : {}),
+        ...(sessionDateWhere
+          ? {
+              session: { date: sessionDateWhere },
+            }
+          : {}),
       },
       select: {
         id: true,
