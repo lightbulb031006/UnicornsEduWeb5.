@@ -105,6 +105,28 @@ describe('AssistantCommissionService', () => {
     ]);
   });
 
+  it('excludes self-managed customer-care staff from managed list', async () => {
+    mockPrisma.staffInfo.findMany.mockResolvedValue([
+      { id: 'cskh-1', user: buildStaffUserMock('CSKH', 'A') },
+    ]);
+    mockPrisma.$queryRaw.mockResolvedValue([]);
+
+    await service.getManagedCustomerCare(
+      'admin-user',
+      UserRole.admin,
+      'assistant-1',
+    );
+
+    expect(mockPrisma.staffInfo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          customerCareManagedByStaffId: 'assistant-1',
+          id: { not: 'assistant-1' },
+        }),
+      }),
+    );
+  });
+
   it('filters managed customer-care rows to pending scope', async () => {
     mockPrisma.staffInfo.findMany.mockResolvedValue([
       { id: 'cskh-1', user: buildStaffUserMock('CSKH', 'A') },

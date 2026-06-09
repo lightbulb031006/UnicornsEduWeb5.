@@ -20,6 +20,7 @@ import type {
 } from 'src/dtos/assistant-commission.dto';
 import { getPreferredUserFullName } from 'src/common/user-name.util';
 import { resolveTaxDeductionRate } from 'src/payroll/deduction-rates';
+import { ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL } from 'src/payroll/assistant-share.util';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 const DEFAULT_PAGE = 1;
@@ -207,6 +208,12 @@ export class AssistantCommissionService {
     assistantStaffId: string,
     customerCareStaffId: string,
   ) {
+    if (customerCareStaffId === assistantStaffId) {
+      throw new NotFoundException(
+        'Customer-care staff not found for this assistant manager',
+      );
+    }
+
     const customerCareStaff = await this.prisma.staffInfo.findFirst({
       where: {
         id: customerCareStaffId,
@@ -301,6 +308,7 @@ export class AssistantCommissionService {
       where: {
         customerCareManagedByStaffId: accessibleAssistantStaffId,
         roles: { has: StaffRole.customer_care },
+        id: { not: accessibleAssistantStaffId },
       },
       select: {
         id: true,
@@ -354,6 +362,7 @@ export class AssistantCommissionService {
       WHERE attendance.assistant_manager_staff_id = ${accessibleAssistantStaffId}
         AND attendance.status IN (${Prisma.join(CHARGEABLE_ATTENDANCE_STATUSES)})
         AND attendance.customer_care_staff_id IS NOT NULL
+        ${ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL}
         ${attendancePaymentFilter}
         ${sessionDateFilter}
       GROUP BY attendance.customer_care_staff_id
@@ -448,6 +457,7 @@ export class AssistantCommissionService {
         WHERE attendance.assistant_manager_staff_id = ${accessibleAssistantStaffId}
           AND attendance.customer_care_staff_id = ${customerCareStaffId}
           AND attendance.status IN (${Prisma.join(CHARGEABLE_ATTENDANCE_STATUSES)})
+          ${ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL}
           ${attendancePaymentFilter}
           ${sessionDateFilter}
         GROUP BY student_info.id, student_info.full_name
