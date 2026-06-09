@@ -32,6 +32,7 @@ import {
   normalizePercent,
   resolveTaxDeductionRate,
 } from '../payroll/deduction-rates';
+import { resolveAssistantManagerStaffIdForAttendance } from '../payroll/assistant-share.util';
 import {
   computeDefaultSessionAllowanceAmountVnd,
   hasSessionAllowanceSnapshots,
@@ -779,9 +780,13 @@ export class SessionUpdateService {
                 : (existingAttendance?.customerCareStaffId ?? null);
 
               const resolvedAssistantId = shouldRefreshAttendanceAssignments
-                ? resolvedCareStaffId
-                  ? (assistantManagerByStaffId.get(resolvedCareStaffId) ?? null)
-                  : null
+                ? resolveAssistantManagerStaffIdForAttendance({
+                    customerCareStaffId: resolvedCareStaffId,
+                    customerCareManagedByStaffId: resolvedCareStaffId
+                      ? (assistantManagerByStaffId.get(resolvedCareStaffId) ??
+                        null)
+                      : null,
+                  })
                 : (existingAttendance?.assistantManagerStaffId ?? null);
 
               return {

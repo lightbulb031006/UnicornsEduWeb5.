@@ -24,6 +24,7 @@ import { SessionStudentBalanceService } from './session-student-balance.service'
 import { SessionValidationService } from './session-validation.service';
 import { SessionScheduleRulesService } from './session-schedule-rules.service';
 import { createMemoizedTaxDeductionResolver } from '../payroll/deduction-rates';
+import { resolveAssistantManagerStaffIdForAttendance } from '../payroll/assistant-share.util';
 import {
   computeDefaultSessionAllowanceAmountVnd,
   resolveSnapshotPerStudentAllowanceVnd,
@@ -310,11 +311,14 @@ export class SessionCreateService {
 
         const attendanceCreateData = await Promise.all(
           resolvedAttendance.map(async (attendanceItem) => {
-            const assistantId = attendanceItem.customerCareStaffId
-              ? (assistantManagerByStaffId.get(
-                  attendanceItem.customerCareStaffId,
-                ) ?? null)
-              : null;
+            const assistantId = resolveAssistantManagerStaffIdForAttendance({
+              customerCareStaffId: attendanceItem.customerCareStaffId,
+              customerCareManagedByStaffId: attendanceItem.customerCareStaffId
+                ? (assistantManagerByStaffId.get(
+                    attendanceItem.customerCareStaffId,
+                  ) ?? null)
+                : null,
+            });
 
             return {
               studentId: attendanceItem.studentId,
