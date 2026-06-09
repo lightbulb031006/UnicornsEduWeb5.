@@ -59,6 +59,10 @@ import {
   resolveTaxDeductionRate,
   roundMoney,
 } from 'src/payroll/deduction-rates';
+import {
+  ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL,
+  isSelfManagedCustomerCareStaff,
+} from 'src/payroll/assistant-share.util';
 
 /** Prisma expects DateTime; normalize date-only string (YYYY-MM-DD) to Date. */
 function toDateOrNull(
@@ -783,6 +787,62 @@ export class StaffService {
     return getPreferredUserFullName(user) ?? '';
   }
 
+  private resolveCustomerCareManagedByStaffIdForWrite(params: {
+    staffId: string;
+    existingManagedByStaffId: string | null;
+    nextRoles: StaffRole[];
+    requestedManagedByStaffId: string | null | undefined;
+    hasExplicitManagedByField: boolean;
+  }): string | null | undefined {
+    const isDualRole =
+      params.nextRoles.includes(StaffRole.assistant) &&
+      params.nextRoles.includes(StaffRole.customer_care);
+
+    if (isDualRole) {
+      return null;
+    }
+
+    if (params.hasExplicitManagedByField) {
+      const managedBy = params.requestedManagedByStaffId ?? null;
+      if (
+        isSelfManagedCustomerCareStaff({
+          staffId: params.staffId,
+          customerCareManagedByStaffId: managedBy,
+        })
+      ) {
+        throw new BadRequestException(
+          'Trợ lí quản lí không được là chính nhân sự CSKH này.',
+        );
+      }
+      return managedBy;
+    }
+
+    if (
+      params.nextRoles.includes(StaffRole.customer_care) &&
+      isSelfManagedCustomerCareStaff({
+        staffId: params.staffId,
+        customerCareManagedByStaffId: params.existingManagedByStaffId,
+      })
+    ) {
+      return null;
+    }
+
+    return undefined;
+  }
+
+  private buildAssistantShareAttendanceWhere(
+    staffId: string,
+    extra?: Prisma.AttendanceWhereInput,
+  ): Prisma.AttendanceWhereInput {
+    return {
+      ...extra,
+      assistantManagerStaffId: staffId,
+      NOT: {
+        customerCareStaffId: staffId,
+      },
+    };
+  }
+
   private attachDerivedStaffFullName<
     T extends {
       user?: (StaffNameUser & Record<string, unknown>) | null;
@@ -1494,6 +1554,7 @@ export class StaffService {
       INNER JOIN sessions ON sessions.id = attendance.session_id
       WHERE attendance.assistant_manager_staff_id = ${params.assistantStaffId}
         AND attendance.status IN ('present', 'excused')
+        ${ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL}
         AND sessions.date >= ${params.start}
         AND sessions.date < ${params.end}
       GROUP BY
@@ -1851,8 +1912,7 @@ export class StaffService {
     staffId: string,
   ): Promise<StaffPaymentPreviewDraftRecord[]> {
     const rows = await db.attendance.findMany({
-      where: {
-        assistantManagerStaffId: staffId,
+      where: this.buildAssistantShareAttendanceWhere(staffId, {
         status: {
           in: ['present', 'excused'],
         },
@@ -1860,7 +1920,7 @@ export class StaffService {
           { assistantPaymentStatus: PaymentStatus.pending },
           { assistantPaymentStatus: null },
         ],
-      },
+      }),
       select: {
         id: true,
         tuitionFee: true,
@@ -2072,8 +2132,7 @@ export class StaffService {
     },
   ): Promise<StaffPaymentPreviewDraftRecord[]> {
     const rows = await db.attendance.findMany({
-      where: {
-        assistantManagerStaffId: params.staffId,
+      where: this.buildAssistantShareAttendanceWhere(params.staffId, {
         status: {
           in: ['present', 'excused'],
         },
@@ -2087,7 +2146,7 @@ export class StaffService {
           { assistantPaymentStatus: PaymentStatus.pending },
           { assistantPaymentStatus: null },
         ],
-      },
+      }),
       select: {
         id: true,
         tuitionFee: true,
@@ -3774,6 +3833,7 @@ export class StaffService {
         INNER JOIN target_staff ON target_staff.id = attendance.assistant_manager_staff_id
         WHERE attendance.status IN ('present', 'excused')
           AND COALESCE(attendance.assistant_payment_status::text, 'pending') = 'pending'
+          ${ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL}
       ),
       assistant_unpaid AS (
         SELECT
@@ -4460,16 +4520,26 @@ export class StaffService {
       const staffWithDisplayFields =
         await this.attachStaffUserDisplayFields(staff);
 
+      const sanitizedManagedByStaffId =
+        isSelfManagedCustomerCareStaff({
+          staffId: staff.id,
+          customerCareManagedByStaffId: staff.customerCareManagedByStaffId,
+        })
+          ? null
+          : staff.customerCareManagedByStaffId;
+
       return {
         ...staffWithDisplayFields,
-        customerCareManagedBy: staff.customerCareManagedBy
-          ? {
-              id: staff.customerCareManagedBy.id,
-              fullName: this.resolveStaffFullName(
-                staff.customerCareManagedBy.user,
-              ),
-            }
-          : null,
+        customerCareManagedByStaffId: sanitizedManagedByStaffId,
+        customerCareManagedBy:
+          sanitizedManagedByStaffId && staff.customerCareManagedBy
+            ? {
+                id: staff.customerCareManagedBy.id,
+                fullName: this.resolveStaffFullName(
+                  staff.customerCareManagedBy.user,
+                ),
+              }
+            : null,
         classAllowance,
       };
     });
@@ -4733,9 +4803,20 @@ export class StaffService {
     if (data.roles != null) payload.roles = data.roles;
     if (data.user_id != null) payload.userId = data.user_id;
     if (data.status != null) payload.status = data.status;
-    if (data.customer_care_managed_by_staff_id !== undefined) {
-      payload.customerCareManagedByStaffId =
-        data.customer_care_managed_by_staff_id ?? null;
+
+    const nextRoles = ((data.roles ?? existingStaff.roles) ??
+      []) as StaffRole[];
+    const resolvedManagedByStaffId =
+      this.resolveCustomerCareManagedByStaffIdForWrite({
+        staffId: data.id,
+        existingManagedByStaffId: existingStaff.customerCareManagedByStaffId,
+        nextRoles,
+        requestedManagedByStaffId: data.customer_care_managed_by_staff_id,
+        hasExplicitManagedByField:
+          data.customer_care_managed_by_staff_id !== undefined,
+      });
+    if (resolvedManagedByStaffId !== undefined) {
+      payload.customerCareManagedByStaffId = resolvedManagedByStaffId;
     }
 
     const targetUserId = data.user_id ?? existingStaff.userId;
@@ -4952,17 +5033,26 @@ export class StaffService {
     try {
       const createdStaffId = await this.withEntityIdRetry(() =>
         this.prisma.$transaction(async (tx) => {
-          if (
-            data.customer_care_managed_by_staff_id != null &&
-            data.customer_care_managed_by_staff_id.trim() !== ''
-          ) {
+          const isDualRole =
+            data.roles.includes(StaffRole.assistant) &&
+            data.roles.includes(StaffRole.customer_care);
+          const managedByStaffId = isDualRole
+            ? null
+            : (data.customer_care_managed_by_staff_id ?? null);
+
+          if (managedByStaffId != null && managedByStaffId.trim() !== '') {
             const manager = await tx.staffInfo.findUnique({
-              where: { id: data.customer_care_managed_by_staff_id },
-              select: { roles: true },
+              where: { id: managedByStaffId },
+              select: { roles: true, status: true },
             });
             if (!manager || !manager.roles.includes(StaffRole.assistant)) {
               throw new BadRequestException(
                 'Nhân sự được chỉ định phải có role trợ lí.',
+              );
+            }
+            if (manager.status !== StaffStatus.active) {
+              throw new BadRequestException(
+                'Nhân sự đang ở trạng thái ngừng hoạt động.',
               );
             }
           }
@@ -4984,8 +5074,7 @@ export class StaffService {
             personalAchievementLink: data.personal_achievement_link ?? null,
             roles: data.roles,
             userId: data.user_id,
-            customerCareManagedByStaffId:
-              data.customer_care_managed_by_staff_id ?? null,
+            customerCareManagedByStaffId: managedByStaffId,
           };
 
           if (
