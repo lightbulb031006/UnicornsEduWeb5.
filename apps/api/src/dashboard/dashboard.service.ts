@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../../generated/client';
+import { ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL } from 'src/payroll/assistant-share.util';
 import {
   AttendanceStatus,
   ClassStatus,
@@ -1326,6 +1327,7 @@ export class DashboardService {
         INNER JOIN active_staff ON active_staff.id = attendance.assistant_manager_staff_id
         WHERE attendance.status IN ('present', 'excused')
           AND COALESCE(attendance.assistant_payment_status::text, 'pending') = 'pending'
+          ${ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL}
           ${
             period
               ? Prisma.sql`AND sessions.date >= ${period.monthStart}
@@ -2346,15 +2348,57 @@ export class DashboardService {
     };
   }
 
-  private async getAssistantSection(range: {
-    month: string;
-    year: string;
-  }): Promise<StaffDashboardAssistantSectionDto> {
+  private async getMyCustomerCarePortfolio(
+    staffId: string,
+  ): Promise<StaffDashboardCustomerCarePortfolioItemDto | null> {
+    const items = await this.getCustomerCarePortfolios([staffId]);
+    return items[0] ?? null;
+  }
+
+  private async getManagedCustomerCarePortfolios(
+    assistantStaffId: string,
+  ): Promise<StaffDashboardCustomerCarePortfolioItemDto[]> {
+    const managedStaff = await this.prisma.staffInfo.findMany({
+      where: {
+        status: StaffStatus.active,
+        roles: {
+          has: StaffRole.customer_care,
+        },
+        customerCareManagedByStaffId: assistantStaffId,
+        id: {
+          not: assistantStaffId,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (managedStaff.length === 0) {
+      return [];
+    }
+
+    return this.getCustomerCarePortfolios(
+      managedStaff.map((staff) => staff.id),
+    );
+  }
+
+  private async getAssistantSection(
+    range: {
+      month: string;
+      year: string;
+    },
+    context: {
+      assistantStaffId: string;
+      hasCustomerCareRole: boolean;
+    },
+  ): Promise<StaffDashboardAssistantSectionDto> {
     const [
       adminDashboard,
       summaryCounts,
       activeTeachers,
-      customerCarePortfolios,
+      managedCustomerCarePortfolios,
+      myCustomerCarePortfolio,
     ] = await Promise.all([
       this.getAdminDashboard({
         month: range.month,
@@ -2364,7 +2408,10 @@ export class DashboardService {
       }),
       this.getSummaryCounts(),
       this.getActiveTeacherCount(),
-      this.getCustomerCarePortfolios(),
+      this.getManagedCustomerCarePortfolios(context.assistantStaffId),
+      context.hasCustomerCareRole
+        ? this.getMyCustomerCarePortfolio(context.assistantStaffId)
+        : Promise.resolve(null),
     ]);
 
     const systemSummary: StaffDashboardSystemSummaryDto = {
@@ -2376,7 +2423,9 @@ export class DashboardService {
     return {
       actionAlerts: adminDashboard.actionAlerts,
       systemSummary,
-      customerCarePortfolios,
+      myCustomerCarePortfolio,
+      managedCustomerCarePortfolios,
+      customerCarePortfolios: managedCustomerCarePortfolios,
     };
   }
 
@@ -2504,6 +2553,7 @@ export class DashboardService {
         INNER JOIN sessions ON sessions.id = attendance.session_id
         WHERE attendance.assistant_manager_staff_id IS NOT NULL
           AND attendance.status IN ('present', 'excused')
+          ${ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL}
           AND sessions.date >= ${period.monthStart}
           AND sessions.date < ${period.monthEnd}
 
@@ -2889,10 +2939,18 @@ export class DashboardService {
               })
             : Promise.resolve(undefined),
           normalizedRoles.includes(StaffRole.assistant)
-            ? this.getAssistantSection({
-                month: range.month,
-                year: range.year,
-              })
+            ? this.getAssistantSection(
+                {
+                  month: range.month,
+                  year: range.year,
+                },
+                {
+                  assistantStaffId: params.staffId,
+                  hasCustomerCareRole: normalizedRoles.includes(
+                    StaffRole.customer_care,
+                  ),
+                },
+              )
             : Promise.resolve(undefined),
           normalizedRoles.includes(StaffRole.customer_care)
             ? this.getCustomerCareSection(params.staffId, {

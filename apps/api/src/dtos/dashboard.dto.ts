@@ -489,7 +489,10 @@ export interface StaffDashboardCustomerCarePortfolioItemDto {
 export interface StaffDashboardAssistantSectionDto {
   actionAlerts: AdminDashboardActionAlertDto[];
   systemSummary: StaffDashboardSystemSummaryDto;
+  /** @deprecated Use managedCustomerCarePortfolios */
   customerCarePortfolios: StaffDashboardCustomerCarePortfolioItemDto[];
+  myCustomerCarePortfolio: StaffDashboardCustomerCarePortfolioItemDto | null;
+  managedCustomerCarePortfolios: StaffDashboardCustomerCarePortfolioItemDto[];
 }
 
 export interface StaffDashboardStudentAlertItemDto {
