@@ -60,7 +60,7 @@
   - `teacher`: thêm 3 khối `Lớp phụ trách`, `Lớp chưa điền lịch / khảo sát`, `Lịch hôm nay`
   - `lesson_plan`: thêm thẻ tiến độ task giáo án (`tổng task`, `đã hoàn thành`, `còn lại`) và danh sách task còn mở
   - `lesson_plan_head`: thêm thẻ cảnh báo task chưa hoàn thành kèm nhân sự thực hiện, cùng thẻ tổng hợp lesson output (`tổng số bài`, `bài mới tháng này`, `bài mới tuần này`)
-  - `assistant`: thêm cảnh báo hành động kiểu admin, summary vận hành (`lớp`, `học sinh`, `giáo viên`) và danh sách nhân sự `customer_care` thuộc phạm vi theo dõi kèm `tổng học phí đã học` và `tổng doanh thu đã nạp`
+  - `assistant`: thêm cảnh báo hành động kiểu admin, summary vận hành (`lớp`, `học sinh`, `giáo viên`), khối **CSKH của tôi** (khi user cũng có role `customer_care`) và khối **CSKH tôi quản lí** (chỉ CSKH có `customer_care_managed_by_staff_id` trỏ về trợ lí đang đăng nhập, không gồm self-managed) kèm `tổng học phí đã học` và `tổng doanh thu đã nạp`
   - `customer_care`: thêm số học sinh mới/nghỉ trong tháng, số học sinh đang chăm sóc, tổng học phí, tổng doanh thu, danh sách học sinh số dư thấp và học sinh nợ tiền
   - `accountant_income`: thêm khối báo cáo thu rút gọn (tổng nạp, học phí đã học, lợi nhuận tháng) cùng nguồn aggregate với admin dashboard
   - `accountant_expense`: thêm dashboard tổng hợp chi riêng, chỉ hiển thị dữ liệu outbound/payables; gồm KPI tháng `Tổng phát sinh` / `Đã chi` / `Chờ chi`, breakdown chi tháng theo buổi dạy, CSKH, trợ lí, giáo án, bonus, extra allowance và chi phí vận hành, backlog pending toàn thời gian theo top 6 nhân sự, cùng card chi phí vận hành pending trỏ `/staff/costs?status=pending`
