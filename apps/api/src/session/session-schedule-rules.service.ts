@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const SCHEDULE_TIME_TOLERANCE_MINUTES = 180;
 const DEFAULT_MISSED_ALERT_DAYS = 31;
+const MISSED_TEACHING_ALERT_MIN_DATE_KEY = '2026-06-01';
 const SESSION_DATE_ERROR =
   'Ngày học không trùng với lịch cố định hoặc lịch bù. Vui lòng quay ra báo cáo thêm lịch bù trước!';
 const SESSION_TIME_ERROR =
@@ -388,6 +389,10 @@ export class SessionScheduleRulesService {
           continue;
         }
 
+        if (dateKey < MISSED_TEACHING_ALERT_MIN_DATE_KEY) {
+          continue;
+        }
+
         for (const entry of scheduleEntries) {
           if (entry.dayOfWeek !== date.getUTCDay()) {
             continue;
@@ -559,7 +564,12 @@ export class SessionScheduleRulesService {
       return this.timeStringToMinutes(value);
     }
 
-    return value.getHours() * 60 + value.getMinutes();
+    const isoMatch = /T(\d{2}):(\d{2})/.exec(value.toISOString());
+    if (isoMatch) {
+      return Number(isoMatch[1]) * 60 + Number(isoMatch[2]);
+    }
+
+    return value.getUTCHours() * 60 + value.getUTCMinutes();
   }
 
   private formatDate(value: Date): string {
