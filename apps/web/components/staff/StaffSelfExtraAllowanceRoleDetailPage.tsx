@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import AssistantCommissionTabPanel from "@/components/admin/extra-allowance/AssistantCommissionTabPanel";
 import ExtraAllowanceFormPopup, {
   type ExtraAllowanceFormSubmitPayload,
 } from "@/components/admin/extra-allowance/ExtraAllowanceFormPopup";
@@ -30,6 +31,7 @@ import {
   getMyStaffDetail,
   updateMyStaffExtraAllowance,
 } from "@/lib/apis/auth.api";
+import { formatMonthKeyLabel } from "@/lib/month-format";
 
 const MAX_VISIBLE_ALLOWANCES = 20;
 
@@ -115,19 +117,6 @@ function formatCurrency(value: number | null | undefined) {
   }).format(value);
 }
 
-function formatMonthLabel(value: string | null | undefined) {
-  if (!value?.trim()) {
-    return "—";
-  }
-
-  const matched = /^(\d{4})-(\d{2})$/.exec(value.trim());
-  if (!matched) {
-    return value;
-  }
-
-  return `${matched[2]}/${matched[1]}`;
-}
-
 function resolveStaffName(item: ExtraAllowanceListItem) {
   return item.staff?.fullName?.trim() || "Nhân sự chưa xác định";
 }
@@ -207,11 +196,15 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
   const [editFormKey, setEditFormKey] = useState(0);
   const [editingAllowance, setEditingAllowance] =
     useState<ExtraAllowanceListItem | null>(null);
+  const [assistantDetailTab, setAssistantDetailTab] = useState<
+    "allowance" | "commission"
+  >("allowance");
+  const showAssistantCommissionTab = roleType === "assistant";
 
   const { data: meStaff, isLoading: isMeStaffLoading } = useQuery({
     queryKey: ["users", "me", "staff-detail"],
     queryFn: getMyStaffDetail,
-    enabled: canSelfEditAllowance,
+    enabled: canSelfEditAllowance || showAssistantCommissionTab,
     staleTime: 60_000,
   });
 
@@ -410,7 +403,40 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
         Quay lại
       </button>
 
-      {isLoading ? (
+      {showAssistantCommissionTab ? (
+        <div className="inline-flex w-full rounded-xl border border-border-default bg-bg-surface p-1 sm:w-auto">
+          <button
+            type="button"
+            onClick={() => setAssistantDetailTab("allowance")}
+            className={`min-h-11 flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
+              assistantDetailTab === "allowance"
+                ? "bg-primary text-text-inverse"
+                : "text-text-secondary hover:bg-bg-secondary"
+            }`}
+          >
+            Trợ cấp
+          </button>
+          <button
+            type="button"
+            onClick={() => setAssistantDetailTab("commission")}
+            className={`min-h-11 flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors sm:flex-none ${
+              assistantDetailTab === "commission"
+                ? "bg-primary text-text-inverse"
+                : "text-text-secondary hover:bg-bg-secondary"
+            }`}
+          >
+            Hoa hồng
+          </button>
+        </div>
+      ) : null}
+
+      {showAssistantCommissionTab && assistantDetailTab === "commission" ? (
+        <section className="rounded-[1.25rem] border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5">
+          <AssistantCommissionTabPanel assistantStaffId={meStaff?.id ?? ""} />
+        </section>
+      ) : null}
+
+      {assistantDetailTab === "allowance" && isLoading ? (
         <>
           <section className="rounded-[2rem] border border-border-default bg-bg-surface p-5 shadow-sm lg:p-6">
             <div className="grid gap-3 md:grid-cols-3">
@@ -436,7 +462,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
             </div>
           </section>
         </>
-      ) : isError ? (
+      ) : assistantDetailTab === "allowance" && isError ? (
         <section className="rounded-[2rem] border border-error/30 bg-error/8 p-5 shadow-sm lg:p-6">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-error">
             Allowance Unavailable
@@ -458,7 +484,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
             Tải lại
           </button>
         </section>
-      ) : (
+      ) : assistantDetailTab === "allowance" ? (
         <>
           <section className="rounded-[1.25rem] border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5">
             <div className="grid gap-3 sm:grid-cols-3">
@@ -590,7 +616,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                                 {resolveStaffName(allowance)}
                               </p>
                               <p className="mt-1 text-xs text-text-muted">
-                                {formatMonthLabel(allowance.month)}
+                                {formatMonthKeyLabel(allowance.month)}
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
@@ -678,7 +704,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                                   </p>
                                 </td>
                                 <td className="px-3 py-2.5 align-top text-sm text-text-secondary">
-                                  {formatMonthLabel(allowance.month)}
+                                  {formatMonthKeyLabel(allowance.month)}
                                 </td>
                                 <td className="px-3 py-2.5 align-top text-sm text-text-secondary">
                                   <p className="line-clamp-2 break-words">
@@ -740,7 +766,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
             />
           ) : null}
         </>
-      )}
+      ) : null}
     </div>
   );
 }
