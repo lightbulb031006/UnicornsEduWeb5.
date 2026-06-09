@@ -23,15 +23,23 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Added
 
+- FE popup **Thanh toán** trên `/admin/staffs/[id]` và mirror `/staff/staffs/[id]`: mỗi card role mặc định **thu gọn** (accordion); bấm header role để mở rộng và xem toàn bộ khoản/source bên trong.
+- BE/FE assistant detail tab **Hoa hồng**: thêm module `assistant-commission` với `GET /assistant-commission/staff/:assistantStaffId/managed-customer-care`, `GET .../managed-customer-care/:customerCareStaffId/students`, `GET .../students/:studentId/session-shares`, và `PATCH .../payment-status/bulk`; FE `/admin/assistant_detail?staffId=...` và `/staff/assistant-detail` có tab **Trợ cấp** / **Hoa hồng** hiển thị CSKH được quản lý → học sinh → buổi học (phần chia 3% học phí), filter mặc định **Chưa thanh toán** hoặc **Theo tháng**, và cho phép admin/assistant/kế toán chọn từng buổi để đổi `assistant_payment_status` `pending`/`paid`.
 - BE/FE thanh toán nhân sự theo khoản chọn: thêm `PATCH /staff/:id/payment-status/pay-selected` với body `{ month, year, items: [{ sourceType, id }] }`; popup **Thanh toán** trên `/admin/staffs/[id]` và mirror `/staff/staffs/[id]` có checkbox chọn từng khoản (gồm hoa hồng CSKH), nút **Thanh toán N khoản đã chọn**, và giữ shortcut **Thanh toán tất cả** qua `pay-all`.
 - BE/FE customer-care detail: thêm `PATCH /customer-care/staff/:staffId/payment-status/bulk` với body `{ attendanceIds, paymentStatus }`; tab **Hoa hồng** trên `/admin/customer_care_detail/[staffId]` và mirror `/staff/customer-care-detail/[staffId]` cho phép admin/assistant/kế toán chọn từng buổi hoa hồng và đổi trạng thái `pending`/`paid` (khi paid snapshot % thuế CSKH hiện hành; khi pending reset về 0). Response `session-commissions` bổ sung `attendanceId`.
 
 ### Changed
 
+- BE cảnh báo chưa dạy / lịch bù: `GET /sessions/class/:classId/missed-teaching-alerts` và `GET /sessions/staff/:staffId/missed-teaching-alerts` (cùng mirror staff-ops) chỉ trả các cảnh báo có `originalDate >= 2026-06-01`; card **Cảnh báo chưa dạy** trên trang chi tiết lớp/nhân sự tự ẩn khi không còn dòng hợp lệ.
+- BE/FE customer-care tab **Hoa hồng**: bỏ giới hạn 30 ngày mặc định; thêm filter `scope=pending|month&month=YYYY-MM` cho `GET /customer-care/staff/:staffId/commissions` và `GET .../session-commissions`, trả thêm `pendingCommission`/`paidCommission`; FE `CustomerCareDetailPanels` đồng bộ UX với tab hoa hồng trợ lí (toggle **Chưa thanh toán** / **Theo tháng**, `MonthInput`, cột `Chưa thanh toán` + `Tổng hoa hồng`). Filter theo tháng hiển thị toàn bộ khoản trong tháng (cả đã thanh toán lẫn chưa thanh toán).
+- FE month UX: `MonthInput` reuse `MonthNav` (nút tháng trước/sau + popup chọn tháng/năm giống trang chi tiết staff), `MonthNav` popup dùng nhãn `Tháng 1` thay `Jan/Feb`, và helper `apps/web/lib/month-format.ts` chuẩn hoá hiển thị `Tháng X/YYYY` trên dashboard, extra allowance, lesson work, hoa hồng CSKH/trợ lí.
+- FE tab **Công việc** (`/admin/lesson-plans`, mirror `/staff/lesson-plans`): chip trạng thái thanh toán ở cột **Trạng thái** hiển thị thêm **người nhận** (`staffDisplayName`) bên trong pill, cùng số tiền khi `pending`.
+
 - FE customer-care detail tab **Hoa hồng**: cho phép mở rộng đồng thời nhiều học sinh (accordion độc lập, mỗi học sinh fetch `session-commissions` riêng qua TanStack `useQueries`); chọn khoản và đổi trạng thái thanh toán vẫn hoạt động xuyên suốt các học sinh đang mở.
 
 ### Fixed
 
+- BE cảnh báo chưa dạy: sửa so khớp `session.startTime` (`@db.Time`) dùng wall-clock từ ISO/UTC thay vì `getHours()` local — tránh false positive khi server TZ `Asia/Ho_Chi_Minh` khiến buổi đã ghi (ví dụ `01/06/2026 09:00`) vẫn hiện trong card **Cảnh báo chưa dạy**.
 - FE `/admin/notification`: dedupe nhãn người nhận và dùng key theo index để tránh cảnh báo React duplicate key khi cùng một role (ví dụ `@admin`) xuất hiện ở cả `targetRoleTypes` và `targetStaffRoles`.
 - FE phân quyền `accountant_expense`: mở các trang chi tiết role của nhân sự khác trên staff shell (`/staff/customer-care-detail/[staffId]`, `/staff/lesson-plan-detail/[staffId]`, `/staff/*-detail?staffId=...`) và render admin-like detail thay vì self-service khi có `staffId`.
 - FE trang chi tiết học sinh/nhân sự: gỡ nút header **Nghỉ học / Mở lại** và **Ngừng hoạt động / Mở lại**; đổi trạng thái chỉ qua popup chỉnh sửa (confirm khi inactive, field lý do tùy chọn, invalidate query lớp khi đổi status học sinh). Nút **Nghỉ học** trên trang chi tiết lớp vẫn giữ nguyên.

@@ -39,7 +39,7 @@
 - **Lịch học hệ thống**: lịch học chính thức của lớp được lưu trong hệ thống; đây là nguồn sự thật cho lịch định kỳ của lớp.
 - **Lịch cố định**: cách gọi vận hành của các slot định kỳ trong **lịch học hệ thống** (`Class.schedule`), gồm thứ, giờ bắt đầu/kết thúc và gia sư chịu trách nhiệm.
 - **Lịch bù**: các buổi học một lần trong `makeup_schedule_events`; khi dùng để bù một buổi cố định bị lỡ, record phải giữ `baselineScheduleEntryId` và `originalDate` để biết buổi gốc nào đã được xếp bù.
-- **Cảnh báo chưa dạy**: cảnh báo động cho một buổi thuộc **lịch cố định** đã quá giờ học + 3 tiếng nhưng chưa có buổi dạy thực tế khớp trong ±3 tiếng và chưa có **lịch bù** gắn cùng `baselineScheduleEntryId` + `originalDate`.
+- **Cảnh báo chưa dạy**: cảnh báo động cho một buổi thuộc **lịch cố định** đã quá giờ học + 3 tiếng nhưng chưa có buổi dạy thực tế khớp trong ±3 tiếng và chưa có **lịch bù** gắn cùng `baselineScheduleEntryId` + `originalDate`; chỉ hiển thị các cảnh báo có `originalDate >= 2026-06-01`.
 - **Bản chiếu Google Calendar**: event Google Calendar được tạo từ lịch học hệ thống để nhắc lịch và mở lớp; không phải nguồn sự thật khi có sai khác.
 - **Đồng bộ lại lịch học**: thao tác tạo, cập nhật hoặc xoá các bản chiếu Google Calendar để khớp lại với lịch học hệ thống.
 - Mỗi slot trong **lịch học hệ thống** có thể có một **bản chiếu Google Calendar** dạng recurring event.

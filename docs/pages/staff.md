@@ -82,7 +82,7 @@
   - là các mirror route của admin workspace nhưng chạy trong staff shell
   - internal link, pagination, search và các deep-link nội bộ đều giữ route-base `/staff`
   - `/staff/deductions` là mirror route cho `assistant`; kế toán và các staff role khác vẫn không mở được
-  - riêng `/staff/staffs/[id]` mirror đầy đủ staff detail cho `assistant` và `accountant_expense`, gồm nút **Copy & vào lớp** trong card `Hồ sơ nhân sự` và nút **Thanh toán** ở header. Assistant đổi **Hoạt động / Ngừng hoạt động** qua popup chỉnh sửa nhân sự; kế toán chi chỉ xem/chạy thanh toán/bonus/trợ cấp, không chỉnh hồ sơ/role/status nhân sự. Popup **Thanh toán** dùng `GET /staff/:id/payment-preview`, `PATCH /staff/:id/payment-status/pay-selected` (chọn từng khoản) và `PATCH /staff/:id/payment-status/pay-all` (shortcut thanh toán tất cả): preview gồm **mọi khoản pending/unpaid mọi role và mọi tháng** (trừ cọc); **bonus** là section riêng; thuế trong popup luôn tính theo mức hiện hành của staff theo từng role tại thời điểm thanh toán
+  - riêng `/staff/staffs/[id]` mirror đầy đủ staff detail cho `assistant` và `accountant_expense`, gồm nút **Copy & vào lớp** trong card `Hồ sơ nhân sự` và nút **Thanh toán** ở header. Assistant đổi **Hoạt động / Ngừng hoạt động** qua popup chỉnh sửa nhân sự; kế toán chi chỉ xem/chạy thanh toán/bonus/trợ cấp, không chỉnh hồ sơ/role/status nhân sự. Popup **Thanh toán** dùng `GET /staff/:id/payment-preview`, `PATCH /staff/:id/payment-status/pay-selected` (chọn từng khoản) và `PATCH /staff/:id/payment-status/pay-all` (shortcut thanh toán tất cả): preview gồm **mọi khoản pending/unpaid mọi role và mọi tháng** (trừ cọc); **bonus** là section riêng; thuế trong popup luôn tính theo mức hiện hành của staff theo từng role tại thời điểm thanh toán; mỗi role trong popup mặc định **thu gọn**, bấm header để mở xem chi tiết khoản
   - khi `id` trùng `staffInfo.id` của user hiện tại (trang **Cá nhân**): **không** hiển thị chỉnh sửa kiểu admin (nút **Chỉnh sửa thông tin nhân sự**, popup `EditStaffPopup`, chỉnh QR thanh toán trong `Hồ sơ nhân sự`); tự cập nhật hồ sơ qua `/staff/profile` hoặc khối Nhân sự trên `/user-profile`
   - chỉ số **Ghi cọc** trên `/staff/staffs/[id]` mở popup **Thanh toán cọc theo lớp**, dùng `GET /staff/:id/deposit-payment-preview?year=` để liệt kê buổi cọc theo lớp theo semantics `không vận hành / không thuế`, cho chọn từng buổi hoặc chọn cả lớp, rồi gọi `PATCH /staff/:id/payment-status/pay-deposit` với `sessionIds[]`; backend zero snapshot deductions trước khi chuyển riêng các buổi được chọn sang `paid`
   - riêng `/staff/history` re-export trực tiếp page admin history nên giữ nguyên hành vi timeline, filter, lazy detail fetch và snapshot before/after có đồng bộ scroll theo cả trục dọc lẫn ngang
@@ -156,7 +156,7 @@
   - bấm trực tiếp vào con số ở cột/thẻ **Tiền vào** sẽ mở popup **Lịch sử tiền vào**, chỉ đọc các giao dịch ví `topup` mới nhất qua `GET /student/:id/wallet-history?type=topup&limit=`; CSKH chỉ xem được lịch sử của học sinh đang được giao
   - tab **Thanh Toán** hiển thị lịch sử nạp tiền chung của toàn bộ học sinh đang do CSKH đó chăm sóc, sort mới nhất trước, dùng infinite scroll 20 khoản/lần để đối soát nhanh theo thời gian, học sinh, số tiền và nội dung chuyển khoản
   - ở tab **Học sinh**, tên học sinh mở trực tiếp `/staff/students/[id]` và tên lớp mở `/staff/classes/[id]`; cả hai route đều bị ép về policy read-only của `customer_care` và backend chỉ trả dữ liệu cho đúng học sinh/lớp thuộc hồ sơ CSKH hiện tại
-  - tab **Hoa hồng** hiển thị tổng hoa hồng 30 ngày qua theo học sinh; có thể mở rộng **nhiều học sinh cùng lúc** để xem commission theo buổi; trên desktop, hàng danh sách dùng cột `Tên` và `Tổng tiền hoa hồng` cố định để giữ số liệu thẳng cột; `customer_care` self-service chỉ xem badge trạng thái, không có checkbox đổi trạng thái thanh toán
+  - tab **Hoa hồng** có filter **Chưa thanh toán** (mặc định) và **Theo tháng**; filter theo tháng liệt kê toàn bộ khoản hoa hồng trong tháng dương lịch đang chọn (cả `pending` lẫn `paid`); có thể mở rộng **nhiều học sinh cùng lúc** để xem commission theo buổi; trên desktop, hàng danh sách dùng cột `Tên`, `Chưa thanh toán` và `Tổng hoa hồng` cố định để giữ số liệu thẳng cột; `customer_care` self-service chỉ xem badge trạng thái, không có checkbox đổi trạng thái thanh toán
   - khi mở rộng từng học sinh, mỗi buổi học hiển thị theo đúng một hàng ở desktop và chuyển sang stacked cards ở mobile/tablet; cả hai layout đều có badge trạng thái thanh toán CSKH lấy từ `customerCarePaymentStatus`, kèm lớp, học phí, hệ số CSKH và số tiền commission của buổi
 - `/staff/customer-care-detail/[staffId]`
   - chỉ dành cho `staff.assistant`
@@ -166,7 +166,8 @@
   - layout giữ cùng visual language với admin extra allowance detail; `assistant`, `accountant_income`, `accountant_expense` không có create / bulk / edit trên self route; `communication`, `technical` và `training` có **Thêm trợ cấp** và được bấm vào từng khoản của chính mình để **chỉnh sửa** `month / amount / note`
   - self-service `communication` vẫn không có xóa, không có bulk, không tự đổi `payment status`; trạng thái thanh toán tiếp tục do admin/kế toán xử lý
   - hiển thị lịch sử trợ cấp, trạng thái thanh toán và số tiền của chính mình
-  - nếu actor là `staff.assistant` và route có query `staffId`, trang sẽ chuyển sang admin-like detail của staff được chọn nhưng vẫn giữ staff shell; mode này có **Thêm trợ cấp**, cập nhật trạng thái hàng loạt và xóa từng khoản giống admin role detail
+  - riêng `/staff/assistant-detail` (self-service): thêm tab **Hoa hồng** bên cạnh **Trợ cấp** để xem phần chia 3% từ CSKH mà trợ lí quản lý theo cấu trúc CSKH → học sinh → buổi học; mặc định filter **Chưa thanh toán**, có thêm filter **Theo tháng**; trợ lí được chọn từng buổi và đổi `assistant_payment_status` qua `PATCH /assistant-commission/staff/:assistantStaffId/payment-status/bulk`
+  - nếu actor là `staff.assistant` và route có query `staffId`, trang sẽ chuyển sang admin-like detail của staff được chọn nhưng vẫn giữ staff shell; mode này có **Thêm trợ cấp**, cập nhật trạng thái hàng loạt và xóa từng khoản giống admin role detail, đồng thời có tab **Hoa hồng** như mirror admin
 - `/staff/notes-subject`
   - với `staff.assistant`, route render nguyên admin **Quy định** workspace ngay trong staff shell
   - với các staff role khác, route chỉ còn phần `Quy định` read-only, đọc dữ liệu thật từ `GET /regulations`; backend tự lọc theo `audiences` nên staff chỉ thấy bài dành cho role của mình hoặc `all`
@@ -185,6 +186,7 @@
   - dùng chung lesson workspace với admin nhưng route-base giữ trong nhóm `/staff`
   - `lesson_plan_head` thấy đủ 3 tab `Tổng quan`, `Công việc`, `Giáo Án`; có quyền tạo/sửa `LessonResource`, `LessonTask`, `LessonOutput`, mở popup detail, mở màn phóng to và vào trang task detail ngay trong staff shell; không được sửa `paymentStatus` của lesson output
   - layout responsive của workspace này có dải tablet riêng: trước desktop table, các tab sẽ hiển thị card grid 2 cột để không bị nén trong staff shell
+  - tab `Công việc`: chip trạng thái thanh toán ở cột **Trạng thái** hiển thị thêm người nhận (`staffDisplayName`) bên trong pill, cùng số tiền khi `pending`
   - với `lesson_plan_head` và `assistant`, item tài nguyên trong tab `Tổng quan` cũng mở popup chỉnh sửa khi bấm trực tiếp vào card/dòng; link ngoài và nút xóa vẫn giữ hành vi riêng
   - `lesson_plan` dùng chính route `/staff/lesson-plans` ở `participantMode`; chỉ thấy 2 tab `Tổng quan` và `Công việc`
   - trong `participantMode`, tab `Tổng quan` hiển thị toàn bộ tài nguyên tổng giáo án, nhưng danh sách task vẫn chỉ hiển thị task mà backend xác nhận staff hiện tại đang tham gia qua `StaffLessonTask`; đây là assignment riêng của task, không suy ra từ `lesson_outputs.staff_id`
@@ -357,8 +359,8 @@
   - `PUT /staff-ops/sessions/:id`
   - `GET /customer-care/staff/:staffId/students?page=&limit=` — trả `{ data, meta }`; FE dùng infinite scroll với `limit=10`; mỗi học sinh có `recentTopUpTotalLast21Days` và `recentTopUpMeetsThreshold` để render cột **Tiền vào**
   - `GET /customer-care/staff/:staffId/topup-history?page=&limit=` — trả lịch sử `wallet_transactions_history.type = topup` của toàn bộ học sinh thuộc CSKH đó; FE dùng tab **Thanh Toán** với infinite scroll `limit=20`; `staff.customer_care` chỉ xem được chính staff hiện tại
-  - `GET /customer-care/staff/:staffId/commissions?days=30`
-  - `GET /customer-care/staff/:staffId/students/:studentId/session-commissions?days=30`
+  - `GET /customer-care/staff/:staffId/commissions?scope=pending|month&month=YYYY-MM`
+  - `GET /customer-care/staff/:staffId/students/:studentId/session-commissions?scope=pending|month&month=YYYY-MM`
     - response chi tiết buổi hiện có thêm `paymentStatus` (map từ `attendance.customer_care_payment_status`, mặc định `pending` nếu DB trả `null`)
   - `GET /student/:id`
     - `staff.assistant` giữ quyền admin-like như cũ; `staff.accountant_income` đọc được để mở link tài chính/học sinh; `staff.customer_care` chỉ đọc được khi `customer_care_service.student_id` trỏ đúng về staff hiện tại
