@@ -2,9 +2,10 @@ jest.mock('./auth.service', () => ({
   AuthService: class AuthServiceMock {},
 }));
 
+import { ForbiddenException } from '@nestjs/common';
 import { UserRole } from '../../generated/enums';
 import { AuthController } from './auth.controller';
-import { IS_PUBLIC_KEY } from './constants';
+import { IS_PUBLIC_KEY, PUBLIC_REGISTRATION_DISABLED_MESSAGE } from './constants';
 
 describe('AuthController', () => {
   const originalNodeEnv = process.env.NODE_ENV;
@@ -270,5 +271,20 @@ describe('AuthController', () => {
         getControllerHandler('acceptDataConsent'),
       ),
     ).toBe(true);
+  });
+
+  it('rejects public registration with ForbiddenException', async () => {
+    await expect(
+      controller.register({
+        email: 'new-user@example.com',
+        phone: '0123456789',
+        password: 'secret123',
+        first_name: 'New',
+        last_name: 'User',
+        accountHandle: 'new-user',
+      }),
+    ).rejects.toThrow(
+      new ForbiddenException(PUBLIC_REGISTRATION_DISABLED_MESSAGE),
+    );
   });
 });

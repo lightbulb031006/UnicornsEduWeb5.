@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -9,6 +10,7 @@ import {
   Req,
   Res,
   UnauthorizedException,
+  UseFilters,
   UseGuards,
 } from '@nestjs/common';
 import type { CookieOptions, Request, Response } from 'express';
@@ -43,6 +45,8 @@ import {
 import { UserRole } from 'generated/enums';
 import { JwtService } from '@nestjs/jwt';
 import type { RequestWithResolvedAuthContext } from './auth-request-context';
+import { PUBLIC_REGISTRATION_DISABLED_MESSAGE } from './constants';
+import { GoogleAuthExceptionFilter } from './filters/google-auth.exception-filter';
 
 const ONE_MINUTE_IN_MS = 60_000;
 const THIRTY_MINUTES_IN_MS = 30 * ONE_MINUTE_IN_MS;
@@ -427,23 +431,20 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: ONE_HOUR_IN_MS } })
   @ApiOperation({
     summary: 'Register',
-    description: 'Register a new user with full CreateUserDto payload.',
+    description:
+      'Public registration is disabled. Use admin user provisioning instead.',
   })
   @ApiBody({
     type: CreateUserDto,
     description: 'User registration payload',
   })
   @ApiResponse({
-    status: 200,
-    description: 'User created; returns tokens or confirmation message.',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Validation error or email already exists.',
+    status: 403,
+    description: 'Public registration is disabled.',
   })
   @ApiResponse({ status: 429, description: 'Too many requests.' })
-  async register(@Body() body: CreateUserDto) {
-    return this.authService.register(body);
+  async register(@Body() _body: CreateUserDto) {
+    throw new ForbiddenException(PUBLIC_REGISTRATION_DISABLED_MESSAGE);
   }
 
   @Public()
@@ -574,11 +575,13 @@ export class AuthController {
 
   @Public()
   @Get('google')
+  @UseFilters(GoogleAuthExceptionFilter)
   @UseGuards(AuthGuard('google'))
   async googleAuth() {}
 
   @Public()
   @Get('google/callback')
+  @UseFilters(GoogleAuthExceptionFilter)
   @UseGuards(AuthGuard('google'))
   async googleAuthRedirect(
     @Req() req: GoogleAuthRequest,
