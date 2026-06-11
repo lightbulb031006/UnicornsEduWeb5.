@@ -16,6 +16,7 @@ model Class {
   surveys                        ClassSurvey[]
   teachers                       ClassTeacher[]
   makeupScheduleEvents           MakeupScheduleEvent[]
+  missedTeachingExplanations     MissedTeachingExplanation[]
   sessions                       Session[]
   students                       StudentClass[]
 
@@ -130,6 +131,27 @@ model MakeupScheduleEvent {
   @@index([teacherId, date])
   @@index([googleCalendarEventId])
   @@map("makeup_schedule_events")
+}
+
+model MissedTeachingExplanation {
+  id                      String   @id @default(uuid()) @db.Text
+  classId                 String   @map("class_id") @db.Text
+  teacherId               String   @map("teacher_id") @db.Text
+  baselineScheduleEntryId String   @map("baseline_schedule_entry_id") @db.Text
+  originalDate            DateTime @map("original_date") @db.Date
+  reason                  String
+  explainedByStaffId      String?  @map("explained_by_staff_id") @db.Text
+  explainedByUserId       String?  @map("explained_by_user_id") @db.Text
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  class                   Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher                 StaffInfo @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+
+  @@unique([classId, baselineScheduleEntryId, originalDate])
+  @@index([classId])
+  @@index([teacherId])
+  @@index([classId, teacherId, originalDate])
+  @@map("missed_teaching_explanations")
 }
 
 model Attendance {

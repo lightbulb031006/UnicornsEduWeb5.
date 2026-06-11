@@ -243,6 +243,22 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - Buổi bù tương lai bị xóa khi lớp kết thúc hoặc khi gia sư phụ trách buổi đó nghỉ dạy/ngừng hoạt động; buổi đã qua vẫn là lịch sử vận hành.
   - Nếu xóa Google Calendar event bên ngoài thất bại, backend giữ lại record và `google_calendar_event_id`, cập nhật `calendar_sync_error`, rồi trả lỗi để có thể retry thay vì mất handle sync.
 
+### 4.4.2 `missed_teaching_explanations`
+
+- Lưu **giải trình vắng** cho buổi thuộc lịch cố định chưa được dạy (cảnh báo chưa dạy); tách khỏi `makeup_schedule_events.note`.
+- Trường chính:
+  - `class_id` (FK → `classes.id`)
+  - `teacher_id` (FK → `staff_info.id`)
+  - `baseline_schedule_entry_id` (`TEXT`) — slot cố định trong `Class.schedule`
+  - `original_date` (`DATE`) — ngày buổi gốc bị lỡ
+  - `reason` (`TEXT`, bắt buộc non-empty sau trim)
+  - `explained_by_staff_id`, `explained_by_user_id` (`TEXT`, nullable) — audit người lưu giải trình
+- Unique: `(class_id, baseline_schedule_entry_id, original_date)`
+- Ghi chú:
+  - Bắt buộc có bản ghi giải trình trước khi tạo `makeup_schedule_events` gắn cùng `baseline_schedule_entry_id` + `original_date`.
+  - Cho phép sửa `reason` khi chưa có lịch bù tương ứng; khóa sau khi đã xếp bù.
+  - Cảnh báo/giải trình chưa bù không còn hiển thị khi lớp `ended` hoặc gia sư nghỉ dạy theo lớp (filter ở API, không xóa record).
+
 ### 4.5 `sessions`
 
 - Mỗi buổi học gắn với 1 lớp và 1 giáo viên

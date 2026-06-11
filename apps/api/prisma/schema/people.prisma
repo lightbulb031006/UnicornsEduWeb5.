@@ -32,6 +32,7 @@ model StaffInfo {
   extraAllowances                     ExtraAllowance[]
   lessonOutputs                       LessonOutput[]
   makeupScheduleEvents                MakeupScheduleEvent[]
+  missedTeachingExplanations          MissedTeachingExplanation[]
   staffTaxDeductionOverrides          StaffTaxDeductionOverride[]
   tasksCreated                        LessonTask[]
   sessions                            Session[]
