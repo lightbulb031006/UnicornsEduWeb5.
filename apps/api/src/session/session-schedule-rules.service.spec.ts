@@ -18,6 +18,12 @@ describe('SessionScheduleRulesService', () => {
       findMany: jest.fn(),
       updateMany: jest.fn(),
     },
+    missedTeachingExplanation: {
+      findMany: jest.fn(),
+    },
+    user: {
+      findMany: jest.fn(),
+    },
   };
 
   let service: SessionScheduleRulesService;
@@ -25,6 +31,8 @@ describe('SessionScheduleRulesService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers().setSystemTime(new Date('2026-05-29T12:00:00'));
+    prisma.missedTeachingExplanation.findMany.mockResolvedValue([]);
+    prisma.user.findMany.mockResolvedValue([]);
     service = new SessionScheduleRulesService(prisma as never);
   });
 
@@ -129,6 +137,7 @@ describe('SessionScheduleRulesService', () => {
     prisma.class.findUnique.mockResolvedValue({
       id: 'class-1',
       name: 'IELTS Foundation',
+      status: 'running',
       schedule: [
         {
           id: 'slot-1',
@@ -141,6 +150,7 @@ describe('SessionScheduleRulesService', () => {
       teachers: [
         {
           teacherId: 'teacher-1',
+          status: 'active',
           teacher: {
             id: 'teacher-1',
             user: {
@@ -171,6 +181,7 @@ describe('SessionScheduleRulesService', () => {
     prisma.class.findUnique.mockResolvedValue({
       id: 'class-1',
       name: 'IELTS Foundation',
+      status: 'running',
       createdAt: new Date('2026-05-27T00:00:00.000Z'), // Created Wednesday May 27th
       schedule: [
         {
@@ -184,6 +195,7 @@ describe('SessionScheduleRulesService', () => {
       teachers: [
         {
           teacherId: 'teacher-1',
+          status: 'active',
           teacher: {
             id: 'teacher-1',
             user: {
@@ -208,6 +220,7 @@ describe('SessionScheduleRulesService', () => {
     prisma.class.findUnique.mockResolvedValue({
       id: 'class-1',
       name: 'IELTS Foundation',
+      status: 'running',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
       schedule: [
         {
@@ -221,6 +234,7 @@ describe('SessionScheduleRulesService', () => {
       teachers: [
         {
           teacherId: 'teacher-1',
+          status: 'active',
           teacher: {
             id: 'teacher-1',
             user: {
@@ -246,6 +260,7 @@ describe('SessionScheduleRulesService', () => {
     prisma.class.findUnique.mockResolvedValue({
       id: 'class-1',
       name: 'IELTS Foundation',
+      status: 'running',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
       schedule: [
         {
@@ -259,6 +274,7 @@ describe('SessionScheduleRulesService', () => {
       teachers: [
         {
           teacherId: 'teacher-1',
+          status: 'active',
           teacher: {
             id: 'teacher-1',
             user: {
@@ -280,6 +296,91 @@ describe('SessionScheduleRulesService', () => {
         classId: 'class-1',
         originalDate: '2026-06-01',
         scheduleEntryId: 'slot-1',
+        status: 'pending_explanation',
+      }),
+    ]);
+  });
+
+  it('returns empty alerts for ended classes', async () => {
+    prisma.class.findUnique.mockResolvedValue({
+      id: 'class-1',
+      name: 'IELTS Foundation',
+      status: 'ended',
+      createdAt: new Date('2026-05-01T00:00:00.000Z'),
+      schedule: [],
+      teachers: [],
+    });
+
+    await expect(
+      service.getMissedTeachingAlertsByClass('class-1', 7),
+    ).resolves.toEqual([]);
+  });
+
+  it('marks alerts as explained_pending_makeup when explanation exists', async () => {
+    jest.setSystemTime(new Date('2026-06-05T12:00:00'));
+
+    prisma.class.findUnique.mockResolvedValue({
+      id: 'class-1',
+      name: 'IELTS Foundation',
+      status: 'running',
+      createdAt: new Date('2026-05-01T00:00:00.000Z'),
+      schedule: [
+        {
+          id: 'slot-1',
+          dayOfWeek: 1,
+          from: '08:00:00',
+          to: '09:30:00',
+          teacherId: 'teacher-1',
+        },
+      ],
+      teachers: [
+        {
+          teacherId: 'teacher-1',
+          status: 'active',
+          teacher: {
+            id: 'teacher-1',
+            user: {
+              first_name: 'An',
+              last_name: 'Nguyen',
+              email: 'an@example.com',
+            },
+          },
+        },
+      ],
+    });
+    prisma.session.findMany.mockResolvedValue([]);
+    prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
+    prisma.missedTeachingExplanation.findMany.mockResolvedValue([
+      {
+        id: 'explanation-1',
+        classId: 'class-1',
+        teacherId: 'teacher-1',
+        baselineScheduleEntryId: 'slot-1',
+        originalDate: new Date(Date.UTC(2026, 5, 1)),
+        reason: 'Gia sư ốm',
+        createdAt: new Date('2026-06-02T10:00:00.000Z'),
+        explainedByUserId: 'user-1',
+      },
+    ]);
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-1',
+        first_name: 'Admin',
+        last_name: 'User',
+        email: 'admin@example.com',
+      },
+    ]);
+
+    await expect(
+      service.getMissedTeachingAlertsByClass('class-1', 7),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        status: 'explained_pending_makeup',
+        explanation: expect.objectContaining({
+          id: 'explanation-1',
+          reason: 'Gia sư ốm',
+          canEdit: true,
+        }),
       }),
     ]);
   });
@@ -303,6 +404,7 @@ describe('SessionScheduleRulesService', () => {
     const classFixture = {
       id: 'class-1',
       name: 'IELTS Foundation',
+      status: 'running',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
       schedule: [
         {
@@ -316,6 +418,7 @@ describe('SessionScheduleRulesService', () => {
       teachers: [
         {
           teacherId: 'teacher-1',
+          status: 'active',
           teacher: {
             id: 'teacher-1',
             user: {
@@ -373,6 +476,7 @@ describe('SessionScheduleRulesService', () => {
     prisma.class.findUnique.mockResolvedValue({
       id: 'class-1',
       name: 'IELTS Foundation',
+      status: 'running',
       createdAt: new Date('2026-05-20T00:00:00.000Z'),
       schedule: [
         {
@@ -395,6 +499,7 @@ describe('SessionScheduleRulesService', () => {
       teachers: [
         {
           teacherId: 'teacher-1',
+          status: 'active',
           teacher: {
             id: 'teacher-1',
             user: {

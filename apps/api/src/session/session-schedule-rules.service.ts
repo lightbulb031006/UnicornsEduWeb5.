@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '../../generated/client';
+import { ClassStatus, Prisma } from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const SCHEDULE_TIME_TOLERANCE_MINUTES = 180;
@@ -36,10 +36,12 @@ type ScheduleCandidate = {
 type AlertClassRecord = {
   id: string;
   name: string;
+  status: ClassStatus;
   createdAt: Date;
   schedule: Prisma.JsonValue | null;
   teachers: Array<{
     teacherId: string;
+    status: string | null;
     teacher: {
       id: string;
       user?: {
@@ -51,6 +53,22 @@ type AlertClassRecord = {
   }>;
 };
 
+function isActiveClassTeacherStatus(status: string | null | undefined): boolean {
+  return status == null || status === 'active';
+}
+
+export type MissedTeachingAlertStatus =
+  | 'pending_explanation'
+  | 'explained_pending_makeup';
+
+export interface MissedTeachingAlertExplanationItem {
+  id: string;
+  reason: string;
+  explainedAt: string;
+  explainedByName: string | null;
+  canEdit: boolean;
+}
+
 export interface MissedTeachingAlertItem {
   id: string;
   classId: string;
@@ -61,6 +79,8 @@ export interface MissedTeachingAlertItem {
   originalDate: string;
   scheduledStartTime: string;
   scheduledEndTime: string | null;
+  status: MissedTeachingAlertStatus;
+  explanation?: MissedTeachingAlertExplanationItem;
 }
 
 @Injectable()
@@ -142,12 +162,14 @@ export class SessionScheduleRulesService {
       select: {
         id: true,
         name: true,
+        status: true,
         createdAt: true,
         schedule: true,
         teachers: {
           where: teacherId ? { teacherId } : undefined,
           select: {
             teacherId: true,
+            status: true,
             teacher: {
               select: {
                 id: true,
@@ -169,6 +191,10 @@ export class SessionScheduleRulesService {
       throw new NotFoundException('Class not found');
     }
 
+    if (cls.status !== ClassStatus.running) {
+      return [];
+    }
+
     return this.buildMissedTeachingAlerts([cls], { days, teacherId });
   }
 
@@ -178,21 +204,28 @@ export class SessionScheduleRulesService {
   ): Promise<MissedTeachingAlertItem[]> {
     const classes = await this.prisma.class.findMany({
       where: {
+        status: ClassStatus.running,
         teachers: {
           some: {
             teacherId,
+            OR: [{ status: null }, { status: 'active' }],
           },
         },
       },
       select: {
         id: true,
         name: true,
+        status: true,
         createdAt: true,
         schedule: true,
         teachers: {
-          where: { teacherId },
+          where: {
+            teacherId,
+            OR: [{ status: null }, { status: 'active' }],
+          },
           select: {
             teacherId: true,
+            status: true,
             teacher: {
               select: {
                 id: true,
@@ -360,6 +393,15 @@ export class SessionScheduleRulesService {
     const alerts: MissedTeachingAlertItem[] = [];
 
     for (const cls of classes) {
+      if (cls.status !== ClassStatus.running) {
+        continue;
+      }
+
+      const activeTeacherIds = new Set(
+        cls.teachers
+          .filter((assignment) => isActiveClassTeacherStatus(assignment.status))
+          .map((assignment) => assignment.teacherId),
+      );
       const teacherNameById = new Map(
         cls.teachers.map((teacherAssignment) => [
           teacherAssignment.teacherId,
@@ -394,6 +436,10 @@ export class SessionScheduleRulesService {
         }
 
         for (const entry of scheduleEntries) {
+          if (!entry.teacherId || !activeTeacherIds.has(entry.teacherId)) {
+            continue;
+          }
+
           if (entry.dayOfWeek !== date.getUTCDay()) {
             continue;
           }
@@ -460,12 +506,15 @@ export class SessionScheduleRulesService {
             originalDate: dateKey,
             scheduledStartTime: this.normalizeTimeString(entry.from)!,
             scheduledEndTime: this.normalizeTimeString(entry.to),
+            status: 'pending_explanation',
           });
         }
       }
     }
 
-    return alerts.sort((a, b) =>
+    const enrichedAlerts = await this.enrichAlertsWithExplanations(alerts);
+
+    return enrichedAlerts.sort((a, b) =>
       a.originalDate === b.originalDate
         ? a.scheduledStartTime.localeCompare(b.scheduledStartTime)
         : b.originalDate.localeCompare(a.originalDate),
@@ -610,6 +659,88 @@ export class SessionScheduleRulesService {
     return (
       nowMinutes >= scheduledStartMinutes + SCHEDULE_TIME_TOLERANCE_MINUTES
     );
+  }
+
+  private async enrichAlertsWithExplanations(
+    alerts: MissedTeachingAlertItem[],
+  ): Promise<MissedTeachingAlertItem[]> {
+    if (alerts.length === 0) {
+      return alerts;
+    }
+
+    const classIds = [...new Set(alerts.map((alert) => alert.classId))];
+    const explanations = await this.prisma.missedTeachingExplanation.findMany({
+      where: { classId: { in: classIds } },
+      select: {
+        id: true,
+        classId: true,
+        teacherId: true,
+        baselineScheduleEntryId: true,
+        originalDate: true,
+        reason: true,
+        createdAt: true,
+        explainedByUserId: true,
+      },
+    });
+
+    const userIds = [
+      ...new Set(
+        explanations
+          .map((item) => item.explainedByUserId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ];
+    const users =
+      userIds.length > 0
+        ? await this.prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          })
+        : [];
+    const userNameById = new Map(
+      users.map((user) => [
+        user.id,
+        this.getTeacherName(user),
+      ]),
+    );
+
+    const explanationByOccurrenceKey = new Map(
+      explanations.map((explanation) => [
+        this.buildOccurrenceKey({
+          classId: explanation.classId,
+          teacherId: explanation.teacherId,
+          scheduleEntryId: explanation.baselineScheduleEntryId,
+          dateKey: this.formatDate(explanation.originalDate),
+        }),
+        explanation,
+      ]),
+    );
+
+    return alerts.map((alert) => {
+      const explanation = explanationByOccurrenceKey.get(alert.id);
+      if (!explanation) {
+        return alert;
+      }
+
+      return {
+        ...alert,
+        status: 'explained_pending_makeup',
+        explanation: {
+          id: explanation.id,
+          reason: explanation.reason,
+          explainedAt: explanation.createdAt.toISOString(),
+          explainedByName: explanation.explainedByUserId
+            ? (userNameById.get(explanation.explainedByUserId) ?? null)
+            : null,
+          canEdit: true,
+        },
+      };
+    });
   }
 
   private buildOccurrenceKey(params: {
