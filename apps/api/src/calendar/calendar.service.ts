@@ -28,6 +28,7 @@ import {
 import { GoogleCalendarApiError } from '../google-calendar/errors/google-calendar.errors';
 import { v4 as uuidv4 } from 'uuid';
 import { getUserFullNameFromParts } from '../common/user-name.util';
+import { MissedTeachingExplanationService } from '../session/missed-teaching-explanation.service';
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -91,6 +92,7 @@ export class CalendarService {
     private readonly googleCalendarService: GoogleCalendarService,
     private readonly staffService: StaffService,
     private readonly actionHistoryService: ActionHistoryService,
+    private readonly missedTeachingExplanationService: MissedTeachingExplanationService,
   ) {}
 
   private getStoredClassScheduleEntries(
@@ -2585,6 +2587,17 @@ export class CalendarService {
       dto.originalDate,
     );
 
+    if (
+      baseline.baselineScheduleEntryId &&
+      baseline.originalDate
+    ) {
+      await this.missedTeachingExplanationService.assertExplanationExists(
+        dto.classId,
+        baseline.baselineScheduleEntryId,
+        baseline.originalDate,
+      );
+    }
+
     const overlaps = await this.checkMakeupScheduleConflicts(
       null,
       dto.classId,
@@ -2745,6 +2758,19 @@ export class CalendarService {
             nextOriginalDateValue,
           )
         : {};
+
+    const effectiveBaselineEntryId =
+      baseline.baselineScheduleEntryId ?? nextBaselineScheduleEntryId;
+    const effectiveOriginalDate =
+      baseline.originalDate ??
+      (existing.originalDate ? existing.originalDate : null);
+    if (effectiveBaselineEntryId && effectiveOriginalDate) {
+      await this.missedTeachingExplanationService.assertExplanationExists(
+        nextClassId,
+        effectiveBaselineEntryId,
+        effectiveOriginalDate,
+      );
+    }
 
     const updated = await this.prisma.makeupScheduleEvent.update({
       where: { id },

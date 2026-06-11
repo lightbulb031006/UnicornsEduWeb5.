@@ -29,12 +29,15 @@ import {
 } from 'src/auth/decorators/current-user.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
+  CreateMissedTeachingExplanationDto,
   SessionBulkPaymentStatusUpdateDto,
   SessionBulkPaymentStatusUpdateResult,
   SessionCreateDto,
   MissedTeachingAlertDto,
+  MissedTeachingExplanationResponseDto,
   SessionUnpaidSummaryItem,
   SessionUpdateDto,
+  UpdateMissedTeachingExplanationDto,
 } from 'src/dtos/session.dto';
 import {
   ParseClassIdPipe,
@@ -358,5 +361,64 @@ export class SessionController {
       classId,
       this.parseOptionalPositiveDays(days),
     );
+  }
+
+  @Post('/class/:classId/missed-teaching-explanations')
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Lưu giải trình vắng cho buổi học gốc',
+  })
+  @ApiParam({
+    name: 'classId',
+    description: 'ID lớp học',
+    example: 'UNICL-b2c3d4e5f6',
+  })
+  @ApiBody({ type: CreateMissedTeachingExplanationDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Giải trình vắng đã được lưu.',
+    type: MissedTeachingExplanationResponseDto,
+  })
+  async createMissedTeachingExplanationByClassId(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Body() dto: CreateMissedTeachingExplanationDto,
+  ): Promise<MissedTeachingExplanationResponseDto> {
+    return this.sessionService.createMissedTeachingExplanationForClass(
+      classId,
+      dto,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+  }
+
+  @Patch('/missed-teaching-explanations/:id')
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Cập nhật giải trình vắng',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID giải trình vắng',
+  })
+  @ApiBody({ type: UpdateMissedTeachingExplanationDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Giải trình vắng đã được cập nhật.',
+    type: MissedTeachingExplanationResponseDto,
+  })
+  async updateMissedTeachingExplanation(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateMissedTeachingExplanationDto,
+  ): Promise<MissedTeachingExplanationResponseDto> {
+    return this.sessionService.updateMissedTeachingExplanation(id, dto, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
   }
 }

@@ -24,6 +24,28 @@ import {
 import { AttendanceStatus, SessionPaymentStatus } from '../../generated/enums';
 import { AttendanceCreateDto, AttendanceUpdateDto } from './attendance.dto';
 
+export class MissedTeachingAlertExplanationDto {
+  @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
+  @IsUUID()
+  id: string;
+
+  @ApiProperty({ example: 'Gia sư bị ốm nên không dạy được buổi này.' })
+  @IsString()
+  reason: string;
+
+  @ApiProperty({ example: '2026-06-11T10:00:00.000Z' })
+  @IsString()
+  explainedAt: string;
+
+  @ApiPropertyOptional({ example: 'Nguyen Van A', nullable: true })
+  @IsOptional()
+  @IsString()
+  explainedByName: string | null;
+
+  @ApiProperty({ example: true })
+  canEdit: boolean;
+}
+
 export class MissedTeachingAlertDto {
   @ApiProperty({ example: 'UNICL-a:UNISTAFF-b:slot-1:2026-05-18' })
   id: string;
@@ -61,6 +83,69 @@ export class MissedTeachingAlertDto {
   @IsOptional()
   @IsString()
   scheduledEndTime: string | null;
+
+  @ApiProperty({
+    enum: ['pending_explanation', 'explained_pending_makeup'],
+    example: 'pending_explanation',
+  })
+  @IsString()
+  status: 'pending_explanation' | 'explained_pending_makeup';
+
+  @ApiPropertyOptional({ type: MissedTeachingAlertExplanationDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MissedTeachingAlertExplanationDto)
+  explanation?: MissedTeachingAlertExplanationDto;
+}
+
+export class CreateMissedTeachingExplanationDto {
+  @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
+  @IsUUID()
+  scheduleEntryId: string;
+
+  @ApiProperty({ example: '2026-06-01' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  originalDate: string;
+
+  @ApiProperty({ example: 'UNISTAFF-c3d4e5f6a7' })
+  @IsStaffId()
+  teacherId: string;
+
+  @ApiProperty({ example: 'Gia sư bị ốm nên không dạy được buổi này.' })
+  @IsString()
+  reason: string;
+}
+
+export class UpdateMissedTeachingExplanationDto {
+  @ApiProperty({ example: 'Gia sư bị ốm, đã báo phụ huynh trước.' })
+  @IsString()
+  reason: string;
+}
+
+export class MissedTeachingExplanationResponseDto {
+  @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
+  id: string;
+
+  @ApiProperty({ example: 'UNICL-b2c3d4e5f6' })
+  classId: string;
+
+  @ApiProperty({ example: 'UNISTAFF-c3d4e5f6a7' })
+  teacherId: string;
+
+  @ApiProperty({ example: 'slot-1' })
+  baselineScheduleEntryId: string;
+
+  @ApiProperty({ example: '2026-06-01' })
+  originalDate: string;
+
+  @ApiProperty({ example: 'Gia sư bị ốm nên không dạy được buổi này.' })
+  reason: string;
+
+  @ApiProperty({ example: '2026-06-11T10:00:00.000Z' })
+  explainedAt: string;
+
+  @ApiPropertyOptional({ example: 'Nguyen Van A', nullable: true })
+  explainedByName: string | null;
 }
 
 export class SessionCreateDto {

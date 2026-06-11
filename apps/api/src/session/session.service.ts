@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import {
+  CreateMissedTeachingExplanationDto,
   SessionBulkPaymentStatusUpdateResult,
   SessionCreateDto,
   MissedTeachingAlertDto,
+  MissedTeachingExplanationResponseDto,
   SessionUnpaidSummaryItem,
   SessionUpdateDto,
+  UpdateMissedTeachingExplanationDto,
 } from '../dtos/session.dto';
 import { SessionPaymentStatus, UserRole } from '../../generated/enums';
 import { ActionHistoryActor } from '../action-history/action-history.service';
@@ -13,7 +16,22 @@ import { SessionDeleteService } from './session-delete.service';
 import { SessionReportingService } from './session-reporting.service';
 import { SessionUpdateService } from './session-update.service';
 import { SessionScheduleRulesService } from './session-schedule-rules.service';
+import { MissedTeachingExplanationService } from './missed-teaching-explanation.service';
 import { StaffOperationsAccessService } from '../staff-ops/staff-operations-access.service';
+import { StaffRole } from '../../generated/enums';
+
+const ELEVATED_CLASS_ACCESS_ROLES: StaffRole[] = [
+  StaffRole.assistant,
+  StaffRole.accountant_income,
+  StaffRole.accountant_expense,
+];
+
+function isTeacherScopedActor(roles: StaffRole[]) {
+  return (
+    roles.includes(StaffRole.teacher) &&
+    !roles.some((role) => ELEVATED_CLASS_ACCESS_ROLES.includes(role))
+  );
+}
 
 @Injectable()
 export class SessionService {
@@ -23,6 +41,7 @@ export class SessionService {
     private readonly sessionDeleteService: SessionDeleteService,
     private readonly sessionReportingService: SessionReportingService,
     private readonly sessionScheduleRulesService: SessionScheduleRulesService,
+    private readonly missedTeachingExplanationService: MissedTeachingExplanationService,
     private readonly staffOperationsAccess: StaffOperationsAccessService,
   ) {}
 
@@ -186,6 +205,84 @@ export class SessionService {
     return this.sessionScheduleRulesService.getMissedTeachingAlertsByTeacher(
       teacherId,
       days,
+    );
+  }
+
+  async createMissedTeachingExplanationForClass(
+    classId: string,
+    dto: CreateMissedTeachingExplanationDto,
+    actor?: ActionHistoryActor,
+  ): Promise<MissedTeachingExplanationResponseDto> {
+    return this.missedTeachingExplanationService.createExplanationForClass(
+      classId,
+      dto,
+      actor,
+    );
+  }
+
+  async createMissedTeachingExplanationForStaff(
+    userId: string,
+    roleType: UserRole,
+    classId: string,
+    dto: CreateMissedTeachingExplanationDto,
+    actor?: ActionHistoryActor,
+  ): Promise<MissedTeachingExplanationResponseDto> {
+    const resolvedActor = await this.staffOperationsAccess.resolveActor(
+      userId,
+      roleType,
+    );
+
+    if (isTeacherScopedActor(resolvedActor.roles)) {
+      await this.staffOperationsAccess.assertTeacherAssignedToClass(
+        resolvedActor.id,
+        classId,
+      );
+      return this.missedTeachingExplanationService.createExplanationForClass(
+        classId,
+        dto,
+        actor,
+        { restrictTeacherId: resolvedActor.id },
+      );
+    }
+
+    return this.missedTeachingExplanationService.createExplanationForClass(
+      classId,
+      dto,
+      actor,
+    );
+  }
+
+  async updateMissedTeachingExplanation(
+    id: string,
+    dto: UpdateMissedTeachingExplanationDto,
+    actor?: ActionHistoryActor,
+  ): Promise<MissedTeachingExplanationResponseDto> {
+    return this.missedTeachingExplanationService.updateExplanation(
+      id,
+      dto,
+      actor,
+    );
+  }
+
+  async updateMissedTeachingExplanationForStaff(
+    userId: string,
+    roleType: UserRole,
+    id: string,
+    dto: UpdateMissedTeachingExplanationDto,
+    actor?: ActionHistoryActor,
+  ): Promise<MissedTeachingExplanationResponseDto> {
+    const resolvedActor = await this.staffOperationsAccess.resolveActor(
+      userId,
+      roleType,
+    );
+
+    return this.missedTeachingExplanationService.updateExplanation(
+      id,
+      dto,
+      actor,
+      isTeacherScopedActor(resolvedActor.roles)
+        ? { restrictTeacherId: resolvedActor.id }
+        : undefined,
     );
   }
 }

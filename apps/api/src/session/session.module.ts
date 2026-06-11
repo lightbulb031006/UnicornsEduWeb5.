@@ -15,6 +15,7 @@ import { SessionLedgerService } from './session-ledger.service';
 import { SessionRosterService } from './session-roster.service';
 import { SessionSnapshotService } from './session-snapshot.service';
 import { SessionScheduleRulesService } from './session-schedule-rules.service';
+import { MissedTeachingExplanationService } from './missed-teaching-explanation.service';
 
 @Module({
   imports: [PrismaModule, StaffOperationsModule, ActionHistoryModule],
@@ -31,7 +32,12 @@ import { SessionScheduleRulesService } from './session-schedule-rules.service';
     SessionRosterService,
     SessionSnapshotService,
     SessionScheduleRulesService,
+    MissedTeachingExplanationService,
   ],
-  exports: [SessionService],
+  exports: [
+    SessionService,
+    SessionScheduleRulesService,
+    MissedTeachingExplanationService,
+  ],
 })
 export class SessionModule {}

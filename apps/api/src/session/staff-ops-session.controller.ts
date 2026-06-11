@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Put,
   Query,
@@ -26,8 +27,11 @@ import {
 } from 'src/auth/decorators/current-user.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
+  CreateMissedTeachingExplanationDto,
   CreateStaffOpsSessionDto,
   MissedTeachingAlertDto,
+  MissedTeachingExplanationResponseDto,
+  UpdateMissedTeachingExplanationDto,
   UpdateStaffOpsSessionDto,
 } from 'src/dtos/session.dto';
 import { SessionService } from './session.service';
@@ -105,6 +109,64 @@ export class StaffOpsSessionController {
       user.roleType,
       classId,
       this.parseOptionalPositiveDays(days),
+    );
+  }
+
+  @Post('classes/:classId/missed-teaching-explanations')
+  @ApiOperation({
+    summary: 'Save missed teaching explanation for staff class operations',
+  })
+  @ApiParam({ name: 'classId', description: 'Class id' })
+  @ApiBody({ type: CreateMissedTeachingExplanationDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Missed teaching explanation saved.',
+    type: MissedTeachingExplanationResponseDto,
+  })
+  async createMissedTeachingExplanationByClassId(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Body() dto: CreateMissedTeachingExplanationDto,
+  ): Promise<MissedTeachingExplanationResponseDto> {
+    return this.sessionService.createMissedTeachingExplanationForStaff(
+      user.id,
+      user.roleType,
+      classId,
+      dto,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+  }
+
+  @Patch('missed-teaching-explanations/:id')
+  @ApiOperation({
+    summary: 'Update missed teaching explanation for staff operations',
+  })
+  @ApiParam({ name: 'id', description: 'Missed teaching explanation id' })
+  @ApiBody({ type: UpdateMissedTeachingExplanationDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Missed teaching explanation updated.',
+    type: MissedTeachingExplanationResponseDto,
+  })
+  async updateMissedTeachingExplanation(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: UpdateMissedTeachingExplanationDto,
+  ): Promise<MissedTeachingExplanationResponseDto> {
+    return this.sessionService.updateMissedTeachingExplanationForStaff(
+      user.id,
+      user.roleType,
+      id,
+      dto,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
     );
   }
 
