@@ -1265,7 +1265,6 @@ export default function AdminClassDetailPage() {
           onOpenPastEvents={() => setPastMakeupPopupOpen(true)}
           disabledCreateMessage={makeupScheduleDisabledMessage}
           month={selectedMonth}
-          scheduleItems={allScheduleItems}
           missedTeachingAlerts={missedTeachingAlerts}
           queryKeyPrefix={classDetailQueryKey}
           listFn={classApi.getClassMakeupEvents}

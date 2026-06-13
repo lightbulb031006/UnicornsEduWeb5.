@@ -23,6 +23,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed
 
+- FE form **Thêm buổi bù** (`MakeupScheduleCard`): bỏ ràng buộc chọn buổi gốc từ card **Cảnh báo chưa dạy**; chỉ còn **Ngày gốc** (DateInput tuỳ chọn). Vẫn hiện textarea giải trình khi ngày gốc + gia sư khớp cảnh báo chưa dạy. BE cho phép lưu `originalDate` không kèm `baselineScheduleEntryId`.
 - Auth: tắt đăng ký công khai — `POST /auth/register` trả `403`; `/auth/register` redirect login; Google OAuth không tạo user mới (email chưa có → `/auth/login?error=registration_disabled`); ẩn link Đăng ký trên Navbar/login/verify-email. Admin provisioning (`POST /users`) giữ nguyên.
 
 ### Added

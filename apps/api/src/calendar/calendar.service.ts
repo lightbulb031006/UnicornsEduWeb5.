@@ -292,9 +292,16 @@ export class CalendarService {
       return {};
     }
 
+    if (normalizedOriginalDate && !normalizedEntryId) {
+      return {
+        baselineScheduleEntryId: null,
+        originalDate: this.parseDateOnly(normalizedOriginalDate),
+      };
+    }
+
     if (!normalizedEntryId || !normalizedOriginalDate) {
       throw new BadRequestException(
-        'Vui lòng chọn đầy đủ buổi học gốc và ngày gốc cần học bù.',
+        'Vui lòng nhập ngày gốc cần học bù.',
       );
     }
 

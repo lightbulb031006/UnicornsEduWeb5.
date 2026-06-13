@@ -1022,7 +1022,6 @@ export default function StaffClassDetailPage() {
           onOpenPastEvents={() => setPastMakeupPopupOpen(true)}
           disabledCreateMessage={makeupScheduleDisabledMessage}
           month={selectedMonth}
-          scheduleItems={scheduleItems}
           missedTeachingAlerts={missedTeachingAlerts}
           queryKeyPrefix={["staff-ops", "class", "detail", id]}
           listFn={staffOpsApi.getClassMakeupEvents}

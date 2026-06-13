@@ -236,7 +236,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - có thể liên kết ngược tới `sessions`
 - Ghi chú:
   - Buổi bù không thay thế recurring slot trong `Class.schedule`; nó chỉ bổ sung thêm vào feed lịch.
-  - Khi người dùng chọn **buổi học gốc**, frontend gửi `baseline_schedule_entry_id` + `original_date`; backend validate slot đó còn tồn tại trong `Class.schedule` và `original_date` khớp `dayOfWeek` của slot.
+  - Khi người dùng nhập **ngày gốc**, frontend có thể gửi chỉ `original_date` hoặc kèm `baseline_schedule_entry_id` nếu khớp cảnh báo chưa dạy. Nếu gửi cả hai, backend validate slot đó còn tồn tại trong `Class.schedule` và `original_date` khớp `dayOfWeek` của slot.
   - Lịch bù (bao gồm cả cảnh báo chưa dạy và lịch bù tạo thủ công) phải có ngày học lớn hơn hoặc bằng ngày tạo lớp học (`Class.createdAt`).
   - FE hiện quản lý CRUD buổi bù theo từng lớp tại `/admin/classes/:id` và `/staff/classes/:id`; calendar chỉ còn hiển thị aggregate event.
   - Backend sync one-off event này lên Google Calendar riêng, độc lập với recurring event của `Class.schedule`.

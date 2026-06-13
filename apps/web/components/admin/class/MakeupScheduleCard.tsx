@@ -10,7 +10,6 @@ import type {
   MakeupGoogleCalendarResyncSummary,
   MakeupScheduleEventRecord,
 } from "@/dtos/class-schedule.dto";
-import type { ClassScheduleItem } from "@/dtos/class.dto";
 import type {
   CreateMissedTeachingExplanationPayload,
   MissedTeachingAlert,
@@ -45,7 +44,6 @@ type MakeupScheduleCardProps = {
   onOpenPastEvents?: () => void;
   disabledCreateMessage?: string;
   month?: string;
-  scheduleItems?: ClassScheduleItem[];
   missedTeachingAlerts?: MissedTeachingAlert[];
   queryKeyPrefix: readonly unknown[];
   listFn: (
@@ -94,17 +92,6 @@ type MakeupEditorSavePayload = {
   explanationReason: string;
 };
 
-type BaselineOccurrenceOption = {
-  value: string;
-  label: string;
-  selectedLabel: string;
-  scheduleEntryId: string;
-  originalDate: string;
-  teacherId?: string;
-  startTime: string;
-  endTime: string;
-};
-
 type MakeupEditorDialogProps = {
   open: boolean;
   mode: "create" | "edit";
@@ -121,16 +108,42 @@ type MakeupEditorDialogProps = {
   onDelete: () => void;
 };
 
-function findMatchingMissedAlert(
+function findMissedAlertForMakeupForm(
   alerts: MissedTeachingAlert[],
-  baselineScheduleEntryId: string,
   originalDate: string,
+  teacherId: string,
+  baselineScheduleEntryId?: string,
 ): MissedTeachingAlert | undefined {
-  return alerts.find(
-    (alert) =>
-      alert.scheduleEntryId === baselineScheduleEntryId &&
-      alert.originalDate === originalDate,
-  );
+  if (!originalDate) {
+    return undefined;
+  }
+
+  const candidates = alerts.filter((alert) => alert.originalDate === originalDate);
+
+  if (baselineScheduleEntryId) {
+    const exactMatch = candidates.find(
+      (alert) => alert.scheduleEntryId === baselineScheduleEntryId,
+    );
+    if (exactMatch) {
+      return exactMatch;
+    }
+  }
+
+  if (teacherId) {
+    const byTeacher = candidates.filter((alert) => alert.teacherId === teacherId);
+    if (byTeacher.length === 1) {
+      return byTeacher[0];
+    }
+    if (byTeacher.length > 1) {
+      return undefined;
+    }
+  }
+
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
+  return undefined;
 }
 
 const MAKEUP_EVENTS_PAGE_SIZE = 5;
@@ -166,97 +179,6 @@ function getMonthDateRange(monthValue?: string): { startDate: string; endDate: s
     startDate: `${yearRaw}-${monthRaw}-01`,
     endDate: `${yearRaw}-${monthRaw}-${String(endDate.getDate()).padStart(2, "0")}`,
   };
-}
-
-function formatTimeFromAlert(value?: string | null): string {
-  if (!value) {
-    return "00:00";
-  }
-  return value.slice(0, 5);
-}
-
-function getMissedAlertBaselineOptions(options: {
-  missedTeachingAlerts: MissedTeachingAlert[];
-  teachers: TeacherOption[];
-  teacherMode: MakeupTeacherMode;
-  defaultTeacherId?: string;
-  editingEvent?: MakeupScheduleEventRecord | null;
-}): BaselineOccurrenceOption[] {
-  const teacherNameById = new Map(
-    options.teachers.map((teacher) => [teacher.id, teacher.fullName]),
-  );
-
-  let alerts = options.missedTeachingAlerts;
-  if (
-    options.teacherMode === "readOnly" &&
-    options.defaultTeacherId
-  ) {
-    alerts = alerts.filter(
-      (alert) => alert.teacherId === options.defaultTeacherId,
-    );
-  }
-
-  const occurrences = alerts.map((alert) => {
-    const startTime = formatTimeFromAlert(alert.scheduledStartTime);
-    const endTime = formatTimeFromAlert(
-      alert.scheduledEndTime ?? alert.scheduledStartTime,
-    );
-    const teacherName =
-      alert.teacherName ??
-      (alert.teacherId ? teacherNameById.get(alert.teacherId) : undefined);
-    const labelParts = [
-      formatDateLabel(alert.originalDate),
-      `${startTime} - ${endTime}`,
-      teacherName,
-    ].filter(Boolean);
-
-    return {
-      value: `${alert.scheduleEntryId}:${alert.originalDate}`,
-      label: labelParts.join(" · "),
-      selectedLabel: labelParts.join(" · "),
-      scheduleEntryId: alert.scheduleEntryId,
-      originalDate: alert.originalDate,
-      teacherId: alert.teacherId,
-      startTime,
-      endTime,
-    };
-  });
-
-  const editingBaselineId = options.editingEvent?.baselineScheduleEntryId;
-  const editingOriginalDate = options.editingEvent?.originalDate;
-  const editingEvent = options.editingEvent;
-  if (editingBaselineId && editingOriginalDate && editingEvent) {
-    const editingValue = `${editingBaselineId}:${editingOriginalDate}`;
-    if (!occurrences.some((occurrence) => occurrence.value === editingValue)) {
-      const startTime = formatTimeFromAlert(editingEvent.startTime);
-      const endTime = formatTimeFromAlert(
-        editingEvent.endTime ?? editingEvent.startTime,
-      );
-      const teacherName = teacherNameById.get(editingEvent.teacherId);
-      const labelParts = [
-        formatDateLabel(editingOriginalDate),
-        `${startTime} - ${endTime}`,
-        teacherName,
-      ].filter(Boolean);
-
-      occurrences.unshift({
-        value: editingValue,
-        label: labelParts.join(" · "),
-        selectedLabel: labelParts.join(" · "),
-        scheduleEntryId: editingBaselineId,
-        originalDate: editingOriginalDate,
-        teacherId: editingEvent.teacherId,
-        startTime,
-        endTime,
-      });
-    }
-  }
-
-  return occurrences.sort(
-    (first, second) =>
-      first.originalDate.localeCompare(second.originalDate) ||
-      first.startTime.localeCompare(second.startTime),
-  );
 }
 
 function formatDateLabel(dateValue: string): string {
@@ -311,14 +233,14 @@ function buildInitialEditorState(options: {
 
   const baselineScheduleEntryId = options.event?.baselineScheduleEntryId ?? "";
   const originalDate = options.event?.originalDate ?? "";
-  const matchingAlert =
-    baselineScheduleEntryId && originalDate
-      ? findMatchingMissedAlert(
-          options.missedTeachingAlerts ?? [],
-          baselineScheduleEntryId,
-          originalDate,
-        )
-      : undefined;
+  const matchingAlert = originalDate
+    ? findMissedAlertForMakeupForm(
+        options.missedTeachingAlerts ?? [],
+        originalDate,
+        defaultTeacherId,
+        baselineScheduleEntryId || undefined,
+      )
+    : undefined;
 
   return {
     teacherId: defaultTeacherId,
@@ -359,16 +281,22 @@ function MakeupEditorDialog({
   );
 
   const matchingAlert = useMemo(() => {
-    if (!form.baselineScheduleEntryId || !form.originalDate) {
+    if (!form.originalDate) {
       return undefined;
     }
 
-    return findMatchingMissedAlert(
+    return findMissedAlertForMakeupForm(
       missedTeachingAlerts,
-      form.baselineScheduleEntryId,
       form.originalDate,
+      form.teacherId,
+      form.baselineScheduleEntryId || undefined,
     );
-  }, [form.baselineScheduleEntryId, form.originalDate, missedTeachingAlerts]);
+  }, [
+    form.baselineScheduleEntryId,
+    form.originalDate,
+    form.teacherId,
+    missedTeachingAlerts,
+  ]);
 
   const requiresExplanation =
     mode === "create" &&
@@ -384,23 +312,6 @@ function MakeupEditorDialog({
       })),
     [teachers],
   );
-  const baselineOptions = useMemo<
-    Array<
-      { value: string; label: string; selectedLabel: string } &
-        Partial<BaselineOccurrenceOption>
-    >
-  >(
-    () =>
-      getMissedAlertBaselineOptions({
-        missedTeachingAlerts,
-        teachers,
-        teacherMode,
-        defaultTeacherId,
-        editingEvent: mode === "edit" ? event : null,
-      }),
-    [defaultTeacherId, event, missedTeachingAlerts, mode, teacherMode, teachers],
-  );
-  const hasBaselineOptions = baselineOptions.length > 0;
 
   if (!open) {
     return null;
@@ -446,60 +357,35 @@ function MakeupEditorDialog({
 
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <label htmlFor="makeup-baseline" className="block text-xs font-medium text-text-secondary">
-                Buổi học gốc
+              <label htmlFor="makeup-original-date" className="block text-xs font-medium text-text-secondary">
+                Ngày gốc
               </label>
-              <div className="mt-1">
-                <UpgradedSelect
-                  id="makeup-baseline"
-                  ariaLabel="Chọn buổi học cố định cần học bù"
-                  value={
-                    form.baselineScheduleEntryId && form.originalDate
-                      ? `${form.baselineScheduleEntryId}:${form.originalDate}`
-                      : ""
-                  }
-                  onValueChange={(value) => {
-                    const selected = baselineOptions.find((option) => option.value === value);
-                    if (!value || !selected || !("scheduleEntryId" in selected)) {
-                      setForm((prev) => ({
-                        ...prev,
-                        baselineScheduleEntryId: "",
-                        originalDate: "",
-                        explanationReason: "",
-                      }));
-                      return;
-                    }
+              <DateInput
+                id="makeup-original-date"
+                value={form.originalDate}
+                onChange={(nextEvent) => {
+                  const nextOriginalDate = nextEvent.target.value;
+                  const nextMatchingAlert = nextOriginalDate
+                    ? findMissedAlertForMakeupForm(
+                        missedTeachingAlerts,
+                        nextOriginalDate,
+                        form.teacherId,
+                        form.baselineScheduleEntryId || undefined,
+                      )
+                    : undefined;
 
-                    const nextMatchingAlert = findMatchingMissedAlert(
-                      missedTeachingAlerts,
-                      selected.scheduleEntryId ?? "",
-                      selected.originalDate ?? "",
-                    );
-
-                    setForm((prev) => ({
-                      ...prev,
-                      baselineScheduleEntryId: selected.scheduleEntryId ?? "",
-                      originalDate: selected.originalDate ?? "",
-                      teacherId: selected.teacherId ?? prev.teacherId,
-                      startTime: selected.startTime ?? prev.startTime,
-                      endTime: selected.endTime ?? prev.endTime,
-                      explanationReason: nextMatchingAlert?.explanation?.reason ?? "",
-                    }));
-                  }}
-                  options={baselineOptions}
-                  placeholder={
-                    hasBaselineOptions
-                      ? "Chọn buổi từ cảnh báo chưa dạy"
-                      : "Không có buổi trong cảnh báo chưa dạy"
-                  }
-                  disabled={isSubmitting || !hasBaselineOptions}
-                />
-              </div>
-              {!hasBaselineOptions && mode === "create" ? (
-                <p className="mt-1 text-xs text-text-muted">
-                  Chỉ có thể chọn buổi gốc từ card Cảnh báo chưa dạy. Hiện chưa có buổi nào cần học bù.
-                </p>
-              ) : null}
+                  setForm((prev) => ({
+                    ...prev,
+                    originalDate: nextOriginalDate,
+                    explanationReason: nextMatchingAlert?.explanation?.reason ?? "",
+                  }));
+                }}
+                disabled={isSubmitting}
+                className="mt-1 h-10 w-full rounded-lg border border-border-default bg-bg-surface px-3 text-sm text-text-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-border-focus/30"
+              />
+              <p className="mt-1 text-xs text-text-muted">
+                Nhập ngày buổi học gốc cần bù. Có thể bỏ trống nếu không cần ghi nhận buổi gốc.
+              </p>
             </div>
 
             <div>
@@ -526,7 +412,25 @@ function MakeupEditorDialog({
                   id="makeup-teacher"
                   ariaLabel="Chọn gia sư cho buổi bù"
                   value={form.teacherId}
-                  onValueChange={(value) => setForm((prev) => ({ ...prev, teacherId: value }))}
+                  onValueChange={(value) =>
+                    setForm((prev) => {
+                      const nextMatchingAlert = prev.originalDate
+                        ? findMissedAlertForMakeupForm(
+                            missedTeachingAlerts,
+                            prev.originalDate,
+                            value,
+                            prev.baselineScheduleEntryId || undefined,
+                          )
+                        : undefined;
+
+                      return {
+                        ...prev,
+                        teacherId: value,
+                        explanationReason:
+                          nextMatchingAlert?.explanation?.reason ?? "",
+                      };
+                    })
+                  }
                   options={teacherOptions}
                   placeholder="Chọn gia sư"
                   disabled={teacherMode === "readOnly" || teachers.length === 0 || isSubmitting}
@@ -659,14 +563,6 @@ function MakeupEditorDialog({
                     return;
                   }
 
-                  if (
-                    mode === "create" &&
-                    (!form.baselineScheduleEntryId || !form.originalDate)
-                  ) {
-                    toast.error("Vui lòng chọn buổi gốc từ cảnh báo chưa dạy.");
-                    return;
-                  }
-
                   if (form.endTime <= form.startTime) {
                     toast.error("Giờ kết thúc phải sau giờ bắt đầu.");
                     return;
@@ -678,6 +574,10 @@ function MakeupEditorDialog({
                     return;
                   }
 
+                  const resolvedBaselineScheduleEntryId =
+                    matchingAlert?.scheduleEntryId ??
+                    (form.baselineScheduleEntryId || undefined);
+
                   onSave({
                     payload: {
                       teacherId: form.teacherId,
@@ -685,10 +585,15 @@ function MakeupEditorDialog({
                       startTime: normalizeTimePayload(form.startTime),
                       endTime: normalizeTimePayload(form.endTime),
                       note: form.note.trim(),
-                      ...(form.baselineScheduleEntryId && form.originalDate
+                      ...(form.originalDate
                         ? {
-                            baselineScheduleEntryId: form.baselineScheduleEntryId,
                             originalDate: form.originalDate,
+                            ...(resolvedBaselineScheduleEntryId
+                              ? {
+                                  baselineScheduleEntryId:
+                                    resolvedBaselineScheduleEntryId,
+                                }
+                              : {}),
                           }
                         : mode === "edit"
                           ? {
@@ -733,7 +638,6 @@ export default function MakeupScheduleCard({
   onOpenPastEvents,
   disabledCreateMessage,
   month,
-  scheduleItems = [],
   missedTeachingAlerts = [],
   queryKeyPrefix,
   listFn,
