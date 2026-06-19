@@ -278,6 +278,7 @@ export interface AdminDashboardSummaryDto {
   expiringStudentsCount: number;
   debtStudentsCount: number;
   unpaidStaffCount: number;
+  classAlertCount: number;
   totalAlerts: number;
 }
 
@@ -303,6 +304,16 @@ export interface AdminDashboardBreakdownItemDto {
   amount: number;
 }
 
+export const ADMIN_DASHBOARD_ACTION_ALERT_GROUPS = [
+  'expiring',
+  'debt',
+  'payroll',
+  'class',
+] as const;
+
+export type AdminDashboardActionAlertGroupDto =
+  (typeof ADMIN_DASHBOARD_ACTION_ALERT_GROUPS)[number];
+
 export interface AdminDashboardActionAlertDto {
   type:
     | 'Sắp hết tiền'
@@ -316,6 +327,66 @@ export interface AdminDashboardActionAlertDto {
   severity: 'warning' | 'destructive' | 'info';
   targetType: 'student' | 'staff' | 'class';
   targetId: string;
+}
+
+export class GetAdminDashboardActionAlertsQueryDto {
+  @ApiProperty({
+    description: 'Action alert group to paginate.',
+    enum: ADMIN_DASHBOARD_ACTION_ALERT_GROUPS,
+    example: 'expiring',
+  })
+  @IsIn(ADMIN_DASHBOARD_ACTION_ALERT_GROUPS)
+  group!: AdminDashboardActionAlertGroupDto;
+
+  @ApiPropertyOptional({
+    description: 'Month in 01-12 format. Defaults to current month.',
+    example: '03',
+  })
+  @IsOptional()
+  @Matches(/^(0[1-9]|1[0-2])$/, {
+    message: 'month must use 01-12 format.',
+  })
+  month?: string;
+
+  @ApiPropertyOptional({
+    description: 'Year in YYYY format. Defaults to current year.',
+    example: '2026',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}$/, {
+    message: 'year must use YYYY format.',
+  })
+  year?: string;
+
+  @ApiPropertyOptional({
+    description: 'Page number (1-based).',
+    example: 1,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @ApiPropertyOptional({
+    description: 'Rows per page.',
+    example: 20,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number;
+}
+
+export interface AdminDashboardActionAlertListDto {
+  data: AdminDashboardActionAlertDto[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+  };
 }
 
 export interface AdminDashboardClassPerformanceDto {

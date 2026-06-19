@@ -11,11 +11,13 @@ import { AllowAssistantOnAdminRoutes } from 'src/auth/decorators/allow-assistant
 import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
+  type AdminDashboardActionAlertListDto,
   type AdminDashboardFinancialDetailDto,
   type AdminDashboardTopupHistoryItemDto,
   type AdminDashboardStudentBalanceItemDto,
   type AdminDashboardDto,
   GetAdminDashboardQueryDto,
+  GetAdminDashboardActionAlertsQueryDto,
   GetAdminDashboardFinancialDetailQueryDto,
   GetAdminStudentBalanceDetailsQueryDto,
   GetAdminTopupHistoryQueryDto,
@@ -89,6 +91,57 @@ export class DashboardController {
     @Query() query: GetAdminDashboardQueryDto,
   ): Promise<AdminDashboardDto> {
     return this.dashboardService.getAdminDashboard(query);
+  }
+
+  @Get('action-alerts')
+  @ApiOperation({
+    summary: 'Get paginated admin dashboard action alerts',
+    description:
+      'Return paginated action alerts for a specific dashboard alert group in the selected month.',
+  })
+  @ApiQuery({
+    name: 'group',
+    required: true,
+    type: String,
+    description: 'Alert group key: expiring, debt, payroll, or class.',
+    example: 'expiring',
+  })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    type: String,
+    description: 'Month in 01-12 format. Defaults to current month.',
+    example: '03',
+  })
+  @ApiQuery({
+    name: 'year',
+    required: false,
+    type: String,
+    description: 'Year in YYYY format. Defaults to current year.',
+    example: '2026',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (1-based).',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Rows per page.',
+    example: 20,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated action alert rows.',
+  })
+  async getAdminActionAlerts(
+    @Query() query: GetAdminDashboardActionAlertsQueryDto,
+  ): Promise<AdminDashboardActionAlertListDto> {
+    return this.dashboardService.getAdminActionAlerts(query);
   }
 
   @Get('topup-history')

@@ -11,6 +11,7 @@ import {
 } from 'generated/enums';
 import {
   type AdminDashboardActionAlertDto,
+  type AdminDashboardActionAlertListDto,
   type AdminDashboardBreakdownItemDto,
   type AdminDashboardClassPerformanceDto,
   type AdminDashboardDto,
@@ -21,6 +22,7 @@ import {
   type AdminDashboardTrendPointDto,
   type AdminDashboardYearlySummaryDto,
   GetAdminDashboardQueryDto,
+  GetAdminDashboardActionAlertsQueryDto,
   GetAdminDashboardFinancialDetailQueryDto,
   GetAdminStudentBalanceDetailsQueryDto,
   GetStaffDashboardQueryDto,
@@ -131,6 +133,10 @@ type ClassPerformanceSqlRow = {
   revenue: number | string | null;
   profit: number | string | null;
   balanceRisk: number | string | null;
+};
+
+type ClassAlertSqlRow = ClassPerformanceSqlRow & {
+  totalCount: number | string | null;
 };
 
 type QuarterClassCountSqlRow = {
@@ -400,6 +406,78 @@ function buildStaffUnpaidSourceLabel(row: StaffUnpaidAlertSqlRow) {
   }
 
   return `${sources[0]} +${sources.length - 1} nguồn`;
+}
+
+function formatStaffUnpaidAlertDue(row: StaffUnpaidAlertSqlRow) {
+  const pendingSourceCount = [
+    normalizeMoneyAmount(row.sessionAmount) > 0 ? 'buổi dạy' : null,
+    normalizeMoneyAmount(row.bonusAmount) > 0 ? 'bonus' : null,
+    normalizeMoneyAmount(row.customerCareAmount) > 0 ? 'CSKH' : null,
+    normalizeMoneyAmount(row.lessonAmount) > 0 ? 'giáo án' : null,
+    normalizeMoneyAmount(row.extraAllowanceAmount) > 0 ? 'trợ cấp' : null,
+  ].filter(Boolean).length;
+
+  return `${pendingSourceCount} nguồn pending`;
+}
+
+function mapExpiringStudentToActionAlert(
+  row: StudentAlertSqlRow,
+): AdminDashboardActionAlertDto {
+  return {
+    type: 'Sắp hết tiền',
+    subject: `${row.studentName} · ${row.classNames}`,
+    owner: row.ownerName,
+    due: formatStudentBalanceDue(row),
+    amount: normalizeMoneyAmount(row.accountBalance),
+    severity: 'warning',
+    targetType: 'student',
+    targetId: row.studentId,
+  };
+}
+
+function mapDebtStudentToActionAlert(
+  row: StudentAlertSqlRow,
+): AdminDashboardActionAlertDto {
+  return {
+    type: 'Chưa thu',
+    subject: `${row.studentName} · ${row.classNames}`,
+    owner: row.ownerName,
+    due: formatDebtDue(row),
+    amount: normalizeMoneyAmount(row.debtAmount),
+    severity: 'destructive',
+    targetType: 'student',
+    targetId: row.studentId,
+  };
+}
+
+function mapUnpaidStaffToActionAlert(
+  row: StaffUnpaidAlertSqlRow,
+): AdminDashboardActionAlertDto {
+  return {
+    type: 'Nhân sự chưa thanh toán',
+    subject: `${row.staffName} · ${buildStaffUnpaidSourceLabel(row)}`,
+    owner: 'Kế toán',
+    due: formatStaffUnpaidAlertDue(row),
+    amount: normalizeMoneyAmount(row.totalUnpaid),
+    severity: 'info',
+    targetType: 'staff',
+    targetId: row.staffId,
+  };
+}
+
+function mapClassAlertToActionAlert(
+  row: ClassAlertSqlRow,
+): AdminDashboardActionAlertDto {
+  return {
+    type: 'Lớp cảnh báo',
+    subject: row.name,
+    owner: 'Vận hành',
+    due: 'Có rủi ro công nợ',
+    amount: normalizeMoneyAmount(row.balanceRisk),
+    severity: 'warning',
+    targetType: 'class',
+    targetId: row.classId,
+  };
 }
 
 function buildCacheKey(scope: string, params: Record<string, number | string>) {
@@ -964,6 +1042,7 @@ export class DashboardService {
   private async getExpiringStudents(
     limit: number,
     period: { monthStart: Date; monthEnd: Date },
+    offset = 0,
   ) {
     return this.prisma.$queryRaw<StudentAlertSqlRow[]>(Prisma.sql`
       WITH student_financials AS (
@@ -1067,12 +1146,14 @@ export class DashboardService {
       FROM counted
       ORDER BY "remainingSessions" ASC, "accountBalance" ASC, "studentName" ASC
       LIMIT ${limit}
+      OFFSET ${offset}
     `);
   }
 
   private async getDebtStudents(
     limit: number,
     period: { monthStart: Date; monthEnd: Date },
+    offset = 0,
   ) {
     return this.prisma.$queryRaw<StudentAlertSqlRow[]>(Prisma.sql`
       WITH student_financials AS (
@@ -1170,6 +1251,7 @@ export class DashboardService {
       FROM counted
       ORDER BY "debtAmount" DESC, "studentName" ASC
       LIMIT ${limit}
+      OFFSET ${offset}
     `);
   }
 
@@ -1181,6 +1263,7 @@ export class DashboardService {
       fromMonthKey: string;
       toMonthKeyExclusive: string;
     },
+    offset = 0,
   ) {
     return this.prisma.$queryRaw<StaffUnpaidAlertSqlRow[]>(Prisma.sql`
       WITH active_staff AS (
@@ -1407,6 +1490,7 @@ export class DashboardService {
       FROM counted
       ORDER BY "totalUnpaid" DESC, "staffName" ASC
       LIMIT ${limit}
+      OFFSET ${offset}
     `);
   }
 
@@ -1493,6 +1577,114 @@ export class DashboardService {
       WHERE classes.status = 'running'
       ORDER BY COALESCE(class_revenue.revenue, 0) DESC, classes.name ASC
       LIMIT ${params.limit}
+    `);
+  }
+
+  private async getClassAlertRows(params: {
+    monthStart: Date;
+    monthEnd: Date;
+    limit: number;
+    offset?: number;
+  }) {
+    const offset = params.offset ?? 0;
+
+    return this.prisma.$queryRaw<ClassAlertSqlRow[]>(Prisma.sql`
+      WITH class_revenue AS (
+        SELECT
+          sessions.class_id AS class_id,
+          COALESCE(SUM(COALESCE(attendance.tuition_fee, 0)), 0) AS revenue
+        FROM attendance
+        INNER JOIN sessions ON sessions.id = attendance.session_id
+        WHERE sessions.date >= ${params.monthStart}
+          AND sessions.date < ${params.monthEnd}
+          AND attendance.status IN ('present', 'excused')
+        GROUP BY sessions.class_id
+      ),
+      class_allowances AS (
+        SELECT
+          sessions.class_id AS class_id,
+          sessions.id AS session_id,
+          LEAST(
+            COALESCE(
+              NULLIF(classes.max_allowance_per_session, 0),
+              COALESCE(sessions.allowance_amount, 0) *
+                COALESCE(sessions.coefficient, 1)
+            ),
+            COALESCE(sessions.allowance_amount, 0) *
+              COALESCE(sessions.coefficient, 1)
+          ) AS teacher_allowance_total
+        FROM attendance
+        INNER JOIN sessions ON sessions.id = attendance.session_id
+        INNER JOIN classes ON classes.id = sessions.class_id
+        WHERE sessions.date >= ${params.monthStart}
+          AND sessions.date < ${params.monthEnd}
+        GROUP BY
+          sessions.class_id,
+          sessions.id,
+          sessions.allowance_amount,
+          classes.max_allowance_per_session,
+          sessions.coefficient
+      ),
+      class_allowance_totals AS (
+        SELECT
+          class_id,
+          COALESCE(SUM(teacher_allowance_total), 0) AS teacher_cost
+        FROM class_allowances
+        GROUP BY class_id
+      ),
+      class_members AS (
+        SELECT
+          student_classes.class_id AS class_id,
+          COUNT(DISTINCT student_classes.student_id) FILTER (
+            WHERE student_info.status = 'active'
+          ) AS students,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN COALESCE(student_info.account_balance, 0) < 0
+                  THEN ABS(COALESCE(student_info.account_balance, 0))
+                ELSE 0
+              END
+            ),
+            0
+          ) AS balance_risk
+        FROM student_classes
+        INNER JOIN student_info ON student_info.id = student_classes.student_id
+        GROUP BY student_classes.class_id
+      ),
+      eligible AS (
+        SELECT
+          classes.id AS "classId",
+          classes.name AS name,
+          COALESCE(class_members.students, 0) AS students,
+          COALESCE(class_revenue.revenue, 0) AS revenue,
+          COALESCE(class_revenue.revenue, 0) - COALESCE(class_allowance_totals.teacher_cost, 0) AS profit,
+          COALESCE(class_members.balance_risk, 0) AS "balanceRisk"
+        FROM classes
+        LEFT JOIN class_revenue ON class_revenue.class_id = classes.id
+        LEFT JOIN class_allowance_totals ON class_allowance_totals.class_id = classes.id
+        LEFT JOIN class_members ON class_members.class_id = classes.id
+        WHERE classes.status = 'running'
+          AND COALESCE(class_members.balance_risk, 0) > 0
+      ),
+      counted AS (
+        SELECT
+          *,
+          COUNT(*) OVER() AS "totalCount"
+        FROM eligible
+      )
+      SELECT
+        "classId",
+        name,
+        students,
+        revenue,
+        profit,
+        "balanceRisk",
+        "totalCount"
+      FROM counted
+      ORDER BY revenue DESC, name ASC
+      LIMIT ${params.limit}
+      OFFSET ${offset}
     `);
   }
 
@@ -3036,6 +3228,7 @@ export class DashboardService {
             debtStudents,
             unpaidStaff,
             topClasses,
+            classAlertRows,
           ] = await Promise.all([
             this.getSummaryCounts(),
             this.getMonthlyTopupTotal({
@@ -3055,6 +3248,11 @@ export class DashboardService {
               monthEnd: period.monthEnd,
               limit: topClassLimit,
             }),
+            this.getClassAlertRows({
+              monthStart: period.monthStart,
+              monthEnd: period.monthEnd,
+              limit: alertLimit,
+            }),
           ]);
 
           const expiringStudentsCount = normalizeInteger(
@@ -3064,6 +3262,7 @@ export class DashboardService {
             debtStudents[0]?.totalCount,
           );
           const unpaidStaffCount = normalizeInteger(unpaidStaff[0]?.totalCount);
+          const classAlertCount = normalizeInteger(classAlertRows[0]?.totalCount);
           const pendingCollectionTotal = normalizeMoneyAmount(
             debtStudents[0]?.totalAmount,
           );
@@ -3117,63 +3316,10 @@ export class DashboardService {
           ];
 
           const actionAlerts: AdminDashboardActionAlertDto[] = [
-            ...expiringStudents.map((row) => ({
-              type: 'Sắp hết tiền' as const,
-              subject: `${row.studentName} · ${row.classNames}`,
-              owner: row.ownerName,
-              due: formatStudentBalanceDue(row),
-              amount: normalizeMoneyAmount(row.accountBalance),
-              severity: 'warning' as const,
-              targetType: 'student' as const,
-              targetId: row.studentId,
-            })),
-            ...debtStudents.map((row) => ({
-              type: 'Chưa thu' as const,
-              subject: `${row.studentName} · ${row.classNames}`,
-              owner: row.ownerName,
-              due: formatDebtDue(row),
-              amount: normalizeMoneyAmount(row.debtAmount),
-              severity: 'destructive' as const,
-              targetType: 'student' as const,
-              targetId: row.studentId,
-            })),
-            ...unpaidStaff.map((row) => ({
-              type: 'Nhân sự chưa thanh toán' as const,
-              subject: `${row.staffName} · ${buildStaffUnpaidSourceLabel(row)}`,
-              owner: 'Kế toán',
-              due: `${
-                [
-                  normalizeMoneyAmount(row.sessionAmount) > 0
-                    ? 'buổi dạy'
-                    : null,
-                  normalizeMoneyAmount(row.bonusAmount) > 0 ? 'bonus' : null,
-                  normalizeMoneyAmount(row.customerCareAmount) > 0
-                    ? 'CSKH'
-                    : null,
-                  normalizeMoneyAmount(row.lessonAmount) > 0 ? 'giáo án' : null,
-                  normalizeMoneyAmount(row.extraAllowanceAmount) > 0
-                    ? 'trợ cấp'
-                    : null,
-                ].filter(Boolean).length
-              } nguồn pending`,
-              amount: normalizeMoneyAmount(row.totalUnpaid),
-              severity: 'info' as const,
-              targetType: 'staff' as const,
-              targetId: row.staffId,
-            })),
-            ...topClasses
-              .filter((row) => normalizeMoneyAmount(row.balanceRisk) > 0)
-              .slice(0, alertLimit)
-              .map((row) => ({
-                type: 'Lớp cảnh báo' as const,
-                subject: row.name,
-                owner: 'Vận hành',
-                due: 'Có rủi ro công nợ',
-                amount: normalizeMoneyAmount(row.balanceRisk),
-                severity: 'warning' as const,
-                targetType: 'class' as const,
-                targetId: row.classId,
-              })),
+            ...expiringStudents.map(mapExpiringStudentToActionAlert),
+            ...debtStudents.map(mapDebtStudentToActionAlert),
+            ...unpaidStaff.map(mapUnpaidStaffToActionAlert),
+            ...classAlertRows.map(mapClassAlertToActionAlert),
           ];
 
           const classPerformance: AdminDashboardClassPerformanceDto[] =
@@ -3209,6 +3355,7 @@ export class DashboardService {
               expiringStudentsCount,
               debtStudentsCount,
               unpaidStaffCount,
+              classAlertCount,
               totalAlerts:
                 expiringStudentsCount + debtStudentsCount + unpaidStaffCount,
             },
@@ -3230,6 +3377,7 @@ export class DashboardService {
           debtStudents,
           unpaidStaff,
           topClasses,
+          classAlertRows,
           quarterClassCounts,
         ] = await Promise.all([
           this.getSummaryCounts(),
@@ -3252,6 +3400,11 @@ export class DashboardService {
             monthEnd: period.monthEnd,
             limit: topClassLimit,
           }),
+          this.getClassAlertRows({
+            monthStart: period.monthStart,
+            monthEnd: period.monthEnd,
+            limit: alertLimit,
+          }),
           this.getQuarterClassCounts({
             monthStart: period.monthStart,
             monthEnd: period.monthEnd,
@@ -3269,6 +3422,7 @@ export class DashboardService {
         );
         const debtStudentsCount = normalizeInteger(debtStudents[0]?.totalCount);
         const unpaidStaffCount = normalizeInteger(unpaidStaff[0]?.totalCount);
+        const classAlertCount = normalizeInteger(classAlertRows[0]?.totalCount);
         const pendingCollectionTotal = normalizeMoneyAmount(
           debtStudents[0]?.totalAmount,
         );
@@ -3332,61 +3486,10 @@ export class DashboardService {
         );
 
         const actionAlerts: AdminDashboardActionAlertDto[] = [
-          ...expiringStudents.map((row) => ({
-            type: 'Sắp hết tiền' as const,
-            subject: `${row.studentName} · ${row.classNames}`,
-            owner: row.ownerName,
-            due: formatStudentBalanceDue(row),
-            amount: normalizeMoneyAmount(row.accountBalance),
-            severity: 'warning' as const,
-            targetType: 'student' as const,
-            targetId: row.studentId,
-          })),
-          ...debtStudents.map((row) => ({
-            type: 'Chưa thu' as const,
-            subject: `${row.studentName} · ${row.classNames}`,
-            owner: row.ownerName,
-            due: formatDebtDue(row),
-            amount: normalizeMoneyAmount(row.debtAmount),
-            severity: 'destructive' as const,
-            targetType: 'student' as const,
-            targetId: row.studentId,
-          })),
-          ...unpaidStaff.map((row) => ({
-            type: 'Nhân sự chưa thanh toán' as const,
-            subject: `${row.staffName} · ${buildStaffUnpaidSourceLabel(row)}`,
-            owner: 'Kế toán',
-            due: `${
-              [
-                normalizeMoneyAmount(row.sessionAmount) > 0 ? 'buổi dạy' : null,
-                normalizeMoneyAmount(row.bonusAmount) > 0 ? 'bonus' : null,
-                normalizeMoneyAmount(row.customerCareAmount) > 0
-                  ? 'CSKH'
-                  : null,
-                normalizeMoneyAmount(row.lessonAmount) > 0 ? 'giáo án' : null,
-                normalizeMoneyAmount(row.extraAllowanceAmount) > 0
-                  ? 'trợ cấp'
-                  : null,
-              ].filter(Boolean).length
-            } nguồn pending`,
-            amount: normalizeMoneyAmount(row.totalUnpaid),
-            severity: 'info' as const,
-            targetType: 'staff' as const,
-            targetId: row.staffId,
-          })),
-          ...topClasses
-            .filter((row) => normalizeMoneyAmount(row.balanceRisk) > 0)
-            .slice(0, alertLimit)
-            .map((row) => ({
-              type: 'Lớp cảnh báo' as const,
-              subject: row.name,
-              owner: 'Vận hành',
-              due: 'Có rủi ro công nợ',
-              amount: normalizeMoneyAmount(row.balanceRisk),
-              severity: 'warning' as const,
-              targetType: 'class' as const,
-              targetId: row.classId,
-            })),
+          ...expiringStudents.map(mapExpiringStudentToActionAlert),
+          ...debtStudents.map(mapDebtStudentToActionAlert),
+          ...unpaidStaff.map(mapUnpaidStaffToActionAlert),
+          ...classAlertRows.map(mapClassAlertToActionAlert),
         ];
 
         const classPerformance: AdminDashboardClassPerformanceDto[] =
@@ -3445,6 +3548,7 @@ export class DashboardService {
             expiringStudentsCount,
             debtStudentsCount,
             unpaidStaffCount,
+            classAlertCount,
             totalAlerts:
               expiringStudentsCount + debtStudentsCount + unpaidStaffCount,
           },
@@ -3456,6 +3560,85 @@ export class DashboardService {
         };
       },
     });
+  }
+
+  async getAdminActionAlerts(
+    query: GetAdminDashboardActionAlertsQueryDto,
+  ): Promise<AdminDashboardActionAlertListDto> {
+    const period = resolveFinancialPeriod({
+      month: query.month,
+      year: query.year,
+    });
+    const page = typeof query.page === 'number' ? query.page : 1;
+    const limit = typeof query.limit === 'number' ? query.limit : 20;
+    const offset = (page - 1) * limit;
+    const dashboardPeriod = {
+      monthStart: period.monthStart,
+      monthEnd: period.monthEnd,
+      fromMonthKey: period.fromMonthKey,
+      toMonthKeyExclusive: period.toMonthKeyExclusive,
+    };
+
+    switch (query.group) {
+      case 'expiring': {
+        const rows = await this.getExpiringStudents(
+          limit,
+          dashboardPeriod,
+          offset,
+        );
+        const total = normalizeInteger(rows[0]?.totalCount);
+
+        return {
+          data: rows.map(mapExpiringStudentToActionAlert),
+          meta: { total, page, limit },
+        };
+      }
+      case 'debt': {
+        const rows = await this.getDebtStudents(
+          limit,
+          dashboardPeriod,
+          offset,
+        );
+        const total = normalizeInteger(rows[0]?.totalCount);
+
+        return {
+          data: rows.map(mapDebtStudentToActionAlert),
+          meta: { total, page, limit },
+        };
+      }
+      case 'payroll': {
+        const rows = await this.getUnpaidStaff(
+          limit,
+          dashboardPeriod,
+          offset,
+        );
+        const total = normalizeInteger(rows[0]?.totalCount);
+
+        return {
+          data: rows.map(mapUnpaidStaffToActionAlert),
+          meta: { total, page, limit },
+        };
+      }
+      case 'class': {
+        const rows = await this.getClassAlertRows({
+          monthStart: period.monthStart,
+          monthEnd: period.monthEnd,
+          limit,
+          offset,
+        });
+        const total = normalizeInteger(rows[0]?.totalCount);
+
+        return {
+          data: rows.map(mapClassAlertToActionAlert),
+          meta: { total, page, limit },
+        };
+      }
+      default:
+        return {
+          data: [],
+          meta: { total: 0, page, limit },
+        };
+    }
   }
 
   async getAdminFinancialDetail(

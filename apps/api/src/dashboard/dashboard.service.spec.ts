@@ -129,4 +129,71 @@ describe('DashboardService staff training dashboard', () => {
       ]),
     );
   });
+
+  it('returns paginated expiring action alerts with meta total', async () => {
+    prisma.$queryRaw.mockResolvedValueOnce([
+      {
+        studentId: 'student-1',
+        studentName: 'An',
+        classNames: 'Lớp A',
+        ownerName: 'CSKH 1',
+        accountBalance: 100000,
+        referenceTuition: 100000,
+        remainingSessions: 1,
+        debtAmount: 0,
+        totalCount: 3,
+        totalAmount: 300000,
+      },
+    ]);
+
+    const result = await service.getAdminActionAlerts({
+      group: 'expiring',
+      month: '05',
+      year: '2026',
+      page: 1,
+      limit: 20,
+    });
+
+    expect(result.meta).toEqual({ total: 3, page: 1, limit: 20 });
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        type: 'Sắp hết tiền',
+        targetType: 'student',
+        targetId: 'student-1',
+        subject: 'An · Lớp A',
+      }),
+    ]);
+  });
+
+  it('returns paginated class action alerts with meta total', async () => {
+    prisma.$queryRaw.mockResolvedValueOnce([
+      {
+        classId: 'class-1',
+        name: 'Lớp cảnh báo',
+        students: 5,
+        revenue: 1000000,
+        profit: 500000,
+        balanceRisk: 200000,
+        totalCount: 2,
+      },
+    ]);
+
+    const result = await service.getAdminActionAlerts({
+      group: 'class',
+      month: '05',
+      year: '2026',
+      page: 2,
+      limit: 10,
+    });
+
+    expect(result.meta).toEqual({ total: 2, page: 2, limit: 10 });
+    expect(result.data).toEqual([
+      expect.objectContaining({
+        type: 'Lớp cảnh báo',
+        targetType: 'class',
+        targetId: 'class-1',
+        amount: 200000,
+      }),
+    ]);
+  });
 });
