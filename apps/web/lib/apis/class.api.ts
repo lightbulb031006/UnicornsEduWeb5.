@@ -1,4 +1,5 @@
 import {
+  ClassEndEligibility,
   ClassListItem,
   ClassListResponse,
   ClassStatus,
@@ -71,14 +72,56 @@ function normalizeClassTeacher(teacher: unknown): ClassTeacher {
   };
 }
 
+function normalizeClassEndEligibility(
+  source: Record<string, unknown>,
+): ClassEndEligibility | undefined {
+  const raw =
+    source.endClassEligibility ?? source.end_class_eligibility ?? undefined;
+
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+
+  const eligibility = raw as Record<string, unknown>;
+
+  return {
+    canEnd: Boolean(eligibility.canEnd ?? eligibility.can_end ?? false),
+    sessionCount: Number(
+      eligibility.sessionCount ?? eligibility.session_count ?? 0,
+    ),
+    unpaidSessionCount: Number(
+      eligibility.unpaidSessionCount ?? eligibility.unpaid_session_count ?? 0,
+    ),
+    blockReason:
+      typeof eligibility.blockReason === "string"
+        ? eligibility.blockReason
+        : typeof eligibility.block_reason === "string"
+          ? eligibility.block_reason
+          : null,
+    canEndClass:
+      eligibility.canEndClass == null && eligibility.can_end_class == null
+        ? undefined
+        : Boolean(eligibility.canEndClass ?? eligibility.can_end_class),
+  };
+}
+
 function normalizeClassRecord<T extends ClassListItem>(record: T): T {
-  if (!Array.isArray(record.teachers)) {
-    return record;
+  const source = record as T & Record<string, unknown>;
+  const endClassEligibility = normalizeClassEndEligibility(source);
+  const withTeachers = Array.isArray(record.teachers)
+    ? {
+        ...record,
+        teachers: record.teachers.map((teacher) => normalizeClassTeacher(teacher)),
+      }
+    : record;
+
+  if (!endClassEligibility) {
+    return withTeachers;
   }
 
   return {
-    ...record,
-    teachers: record.teachers.map((teacher) => normalizeClassTeacher(teacher)),
+    ...withTeachers,
+    endClassEligibility,
   };
 }
 

@@ -73,10 +73,19 @@ export interface ClassStudent {
     totalAttendedSession?: number | null;
 }
 
+export interface ClassEndEligibility {
+    canEnd: boolean;
+    sessionCount: number;
+    unpaidSessionCount: number;
+    blockReason?: string | null;
+    canEndClass?: boolean;
+}
+
 export interface ClassDetail extends ClassListItem {
     teachers?: ClassTeacher[];
     students?: ClassStudent[];
     sessionTuitionTotal?: number | null;
+    endClassEligibility?: ClassEndEligibility;
 }
 
 export interface CreateClassPayload {
