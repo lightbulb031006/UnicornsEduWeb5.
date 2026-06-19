@@ -13,6 +13,7 @@ import { MailModule } from '../mail/mail.module';
 import { GoogleStrategy } from './strategies/google-oauth.strategy';
 import { AuthAccessService } from './auth-access.service';
 import { GoogleAuthExceptionFilter } from './filters/google-auth.exception-filter';
+import { ApiKeyGuard } from './guards/api-key.guard';
 
 @Module({
   imports: [
@@ -39,7 +40,13 @@ import { GoogleAuthExceptionFilter } from './filters/google-auth.exception-filte
     JwtRefreshStrategy,
     GoogleStrategy,
     GoogleAuthExceptionFilter,
+    ApiKeyGuard,
   ],
-  exports: [AuthService, AuthAccessService, AuthIdentityCacheService],
+  exports: [
+    AuthService,
+    AuthAccessService,
+    AuthIdentityCacheService,
+    ApiKeyGuard,
+  ],
 })
 export class AuthModule {}
