@@ -2525,4 +2525,52 @@ describe('StaffService', () => {
       },
     });
   });
+
+  it('returns sanitized staff landing profiles with default teacher/active filters', async () => {
+    mockPrisma.staffInfo.count.mockResolvedValue(1);
+    mockPrisma.staffInfo.findMany.mockResolvedValue([
+      {
+        id: 'teacher-1',
+        university: 'HCMUS',
+        specialization: 'Computer Science',
+        user: {
+          first_name: 'Nguyen',
+          last_name: 'Van A',
+          accountHandle: 'teacher-a',
+          email: 'teacher@example.com',
+          avatarPath: 'users/user-1/avatar',
+        },
+      },
+    ]);
+
+    await expect(service.getLandingProfiles({})).resolves.toEqual({
+      total: 1,
+      data: [
+        {
+          id: 'teacher-1',
+          name: 'Van A Nguyen',
+          avatarUrl: 'signed:users/user-1/avatar',
+          avatarPath: 'users/user-1/avatar',
+          university: 'HCMUS',
+          specialization: 'Computer Science',
+        },
+      ],
+    });
+
+    expect(mockPrisma.staffInfo.count).toHaveBeenCalledWith({
+      where: {
+        status: StaffStatus.active,
+        roles: { has: StaffRole.teacher },
+      },
+    });
+    expect(mockPrisma.staffInfo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: StaffStatus.active,
+          roles: { has: StaffRole.teacher },
+        },
+        take: 50,
+      }),
+    );
+  });
 });

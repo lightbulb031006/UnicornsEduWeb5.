@@ -11,6 +11,7 @@ import {
   Post,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ParseStaffIdPipe,
@@ -19,15 +20,20 @@ import {
 import {
   ApiBody,
   ApiCookieAuth,
+  ApiHeader,
   ApiOperation,
   ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { StaffRole, UserRole } from 'generated/enums';
 import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
+import { Public } from 'src/auth/decorators/public.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
+import { LANDING_API_KEY_HEADER } from 'src/auth/decorators/api-key.decorator';
+import { ApiKeyGuard } from 'src/auth/guards/api-key.guard';
 import { PaginationQueryDto } from 'src/dtos/pagination.dto';
 import {
   CurrentUser,
@@ -52,6 +58,10 @@ import {
   UpdateStaffStatusDto,
   PatchStaffClassTeacherOperatingDeductionDto,
 } from 'src/dtos/staff.dto';
+import {
+  StaffLandingProfileQueryDto,
+  StaffLandingProfilesResponseDto,
+} from 'src/dtos/landing-profile.dto';
 import { normalizeHttpHttpsUrl } from 'src/storage/supabase-storage';
 import { StaffService } from './staff.service';
 import type { RequestWithResolvedAuthContext } from 'src/auth/auth-request-context';
@@ -271,6 +281,52 @@ export class StaffController {
       highSchool,
       role,
     });
+  }
+
+  @Get('landing-profiles')
+  @Public()
+  @Roles()
+  @UseGuards(ApiKeyGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'List public staff landing profiles',
+    description:
+      'API-key protected endpoint for the marketing landing site. Returns sanitized teacher/staff identity fields only.',
+  })
+  @ApiHeader({
+    name: LANDING_API_KEY_HEADER,
+    required: true,
+    description: 'Landing site API key (LANDING_API_KEY)',
+  })
+  @ApiQuery({
+    name: 'role',
+    required: false,
+    enum: StaffRole,
+    description: 'Filter by staff role (default: teacher)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['active', 'inactive'],
+    description: 'Filter by staff status (default: active)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Max profiles to return (default: 50, max: 100)',
+    example: 50,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Sanitized staff landing profiles.',
+    type: StaffLandingProfilesResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Missing or invalid API key.' })
+  async getStaffLandingProfiles(
+    @Query() query: StaffLandingProfileQueryDto,
+  ): Promise<StaffLandingProfilesResponseDto> {
+    return this.staffService.getLandingProfiles(query);
   }
 
   @Get(':id/income-summary')

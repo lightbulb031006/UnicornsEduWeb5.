@@ -1544,4 +1544,44 @@ describe('StudentService', () => {
       }),
     );
   });
+
+  it('returns sanitized student landing profiles with default active filter', async () => {
+    mockPrisma.studentInfo.count.mockResolvedValue(1);
+    mockPrisma.studentInfo.findMany.mockResolvedValue([
+      {
+        id: 'student-1',
+        fullName: 'Nguyen Van A',
+        school: 'THPT Nguyen Du',
+        province: 'Ha Noi',
+      },
+    ]);
+
+    await expect(service.getLandingProfiles({})).resolves.toEqual({
+      total: 1,
+      data: [
+        {
+          id: 'student-1',
+          name: 'Nguyen Van A',
+          school: 'THPT Nguyen Du',
+          province: 'Ha Noi',
+        },
+      ],
+    });
+
+    expect(mockPrisma.studentInfo.count).toHaveBeenCalledWith({
+      where: { status: StudentStatus.active },
+    });
+    expect(mockPrisma.studentInfo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { status: StudentStatus.active },
+        take: 100,
+        select: {
+          id: true,
+          fullName: true,
+          school: true,
+          province: true,
+        },
+      }),
+    );
+  });
 });

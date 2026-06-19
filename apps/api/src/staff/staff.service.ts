@@ -19,6 +19,7 @@ import {
   UserRole,
 } from 'generated/enums';
 import { PaginationQueryDto } from 'src/dtos/pagination.dto';
+import { StaffLandingProfileQueryDto } from 'src/dtos/landing-profile.dto';
 import {
   CreateStaffDto,
   type StaffDepositPaymentPreviewClassDto,
@@ -1260,6 +1261,61 @@ export class StaffService {
         limit,
       },
     };
+  }
+
+  async getLandingProfiles(query: StaffLandingProfileQueryDto) {
+    const status = query.status ?? StaffStatus.active;
+    const role = query.role ?? StaffRole.teacher;
+    const limit =
+      typeof query.limit === 'number' && Number.isInteger(query.limit)
+        ? Math.min(Math.max(query.limit, 1), 100)
+        : 50;
+
+    const where: Prisma.StaffInfoWhereInput = {
+      status,
+      roles: {
+        has: role,
+      },
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.staffInfo.count({ where }),
+      this.prisma.staffInfo.findMany({
+        where,
+        take: limit,
+        orderBy: [
+          { user: { first_name: 'asc' } },
+          { user: { last_name: 'asc' } },
+        ],
+        select: {
+          id: true,
+          university: true,
+          specialization: true,
+          user: {
+            select: {
+              first_name: true,
+              last_name: true,
+              accountHandle: true,
+              email: true,
+              avatarPath: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const data = await Promise.all(
+      rows.map(async (staff) => ({
+        id: staff.id,
+        name: getPreferredUserFullName(staff.user) ?? '',
+        avatarUrl: await this.createAvatarSignedUrl(staff.user?.avatarPath),
+        avatarPath: staff.user?.avatarPath ?? null,
+        university: staff.university,
+        specialization: staff.specialization,
+      })),
+    );
+
+    return { data, total };
   }
 
   async searchStaffOptions(query: { search?: string; limit?: number }) {

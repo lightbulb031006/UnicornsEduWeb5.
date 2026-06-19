@@ -42,6 +42,7 @@ import {
   UpdateStudentDto,
   UpdateStudentStatusDto,
 } from 'src/dtos/student.dto';
+import { StudentLandingProfileQueryDto } from 'src/dtos/landing-profile.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { getUserFullNameFromParts } from 'src/common/user-name.util';
 import {
@@ -1129,6 +1130,41 @@ export class StudentService {
         page: safePage,
         limit,
       },
+    };
+  }
+
+  async getLandingProfiles(query: StudentLandingProfileQueryDto) {
+    const status = query.status ?? StudentStatus.active;
+    const limit =
+      typeof query.limit === 'number' && Number.isInteger(query.limit)
+        ? Math.min(Math.max(query.limit, 1), 500)
+        : 100;
+
+    const where: Prisma.StudentInfoWhereInput = { status };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.studentInfo.count({ where }),
+      this.prisma.studentInfo.findMany({
+        where,
+        take: limit,
+        orderBy: [{ fullName: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          fullName: true,
+          school: true,
+          province: true,
+        },
+      }),
+    ]);
+
+    return {
+      data: rows.map((student) => ({
+        id: student.id,
+        name: student.fullName,
+        school: student.school,
+        province: student.province,
+      })),
+      total,
     };
   }
 
