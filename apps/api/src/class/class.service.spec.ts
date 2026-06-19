@@ -15,10 +15,16 @@ jest.mock('../calendar/calendar.service', () => ({
 }));
 
 jest.mock('../../generated/client', () => ({
-  Prisma: {},
+  Prisma: {
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
+  },
 }));
 
 import { ClassService } from './class.service';
+import { BadRequestException } from '@nestjs/common';
 import {
   ClassStatus,
   ClassType,
@@ -65,6 +71,7 @@ describe('ClassService', () => {
       createMany: jest.fn(),
       create: jest.fn(),
     },
+    $queryRaw: jest.fn(),
   };
 
   const mockPrisma = {
@@ -82,6 +89,7 @@ describe('ClassService', () => {
     studentClass: {
       groupBy: jest.fn(),
     },
+    $queryRaw: jest.fn(),
     $transaction: jest.fn(),
   };
 
@@ -112,6 +120,12 @@ describe('ClassService', () => {
       async (callback: (tx: typeof mockTx) => Promise<unknown>) =>
         callback(mockTx),
     );
+    mockPrisma.$queryRaw.mockResolvedValue([
+      { session_count: 0, unpaid_session_count: 0 },
+    ]);
+    mockTx.$queryRaw.mockResolvedValue([
+      { session_count: 0, unpaid_session_count: 0 },
+    ]);
     mockTx.class.create.mockResolvedValue({
       id: 'class-1',
       name: 'Math 10A',
@@ -488,7 +502,25 @@ describe('ClassService', () => {
   });
 
   describe('operational status actions', () => {
+    it('rejects ending a class when teacher sessions are not fully paid', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { session_count: 3, unpaid_session_count: 1 },
+      ]);
+
+      await expect(
+        service.endClass('class-1', {}, {
+          userId: 'admin-1',
+          roleType: UserRole.admin,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
     it('ends a class and closes active roster plus teacher assignments', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { session_count: 2, unpaid_session_count: 0 },
+      ]);
       const beforeSnapshot = {
         id: 'class-1',
         status: ClassStatus.running,

@@ -163,7 +163,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - **PK format:** `UNICL-[0-9a-f]{10}` — ví dụ `UNICL-1a2b3c4d5e`. Đây là **mã định danh hệ thống** ngắn cho lớp; migration `20260523110000_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
 - Trường nghiệp vụ chính:
   - `type` (`ClassType`), `status` (`ClassStatus`)
-  - `status`: `running` = lớp đang vận hành; `ended` = lớp đã kết thúc. Khi kết thúc lớp, backend xóa lịch cố định hiện tại, chuyển membership học sinh đang học và phân công gia sư đang mở sang `inactive`, đồng thời dọn buổi bù tương lai của lớp. Lịch sử session, attendance, ví và payroll đã phát sinh vẫn giữ nguyên.
+  - `status`: `running` = lớp đang vận hành; `ended` = lớp đã kết thúc. `POST /class/:id/end` chỉ cho phép khi mọi `sessions` của lớp có `teacher_payment_status = paid` (case-insensitive); nếu còn `unpaid`/`pending`/`deposit` backend trả `400`. Khi kết thúc lớp, backend xóa lịch cố định hiện tại, chuyển membership học sinh đang học và phân công gia sư đang mở sang `inactive`, đồng thời dọn buổi bù tương lai của lớp. Response `GET /class/:id` trả thêm `endClassEligibility` (`canEnd`, `sessionCount`, `unpaidSessionCount`, `blockReason`) để FE disable nút **Kết thúc lớp**. Lịch sử session, attendance, ví và payroll đã phát sinh vẫn giữ nguyên.
   - `max_students`, `allowance_per_session_per_student`, `max_allowance_per_session`, `scale_amount`
   - `max_allowance_per_session` là nullable:
     - `null` hoặc `0` = không giới hạn trần trợ cấp theo buổi (aggregate SQL dùng `NULLIF(..., 0)`; API lưu `0` thành `null`)
@@ -187,6 +187,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - Mối quan hệ: teachers, students, sessions, makeupScheduleEvents, surveys
 - Bảng liên kết `class_teachers` (Class ↔ StaffInfo) ngoài `custom_allowance` còn có:
   - `status` (`TEXT`, nullable): `null` hoặc `active` được hiểu là phân công gia sư đang mở; `inactive` là **nghỉ dạy theo lớp**. Khi gia sư nghỉ dạy ở một lớp, record được giữ để bảo toàn lịch sử trợ cấp/payroll nhưng không còn là phân công hiện tại.
+  - Data migration `20260617120000_inactivate_teachers_on_settled_ended_classes` (superseded): ban đầu yêu cầu cả học phí học sinh có `transaction_id`; `20260617130000_inactivate_teachers_on_teacher_paid_ended_classes` sửa lại — chỉ cần mọi `sessions.teacher_payment_status = paid` trên lớp `ended`, rồi inactive gia sư active trên `class_teachers`; không đụng `student_classes`. Runbook: `docs/ops/README.md`.
   - `tax_rate_percent` (`DECIMAL(5,2)`, default `0`, Prisma field `operatingDeductionRatePercent`): % **khấu trừ vận hành** của gia sư theo từng lớp.
   - FE đang dùng semantic `operating_deduction_rate_percent`; backend vẫn map về cột `tax_rate_percent` để tương thích dữ liệu hiện có.
 - Ghi chú:

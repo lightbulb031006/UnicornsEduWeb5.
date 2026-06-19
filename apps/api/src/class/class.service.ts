@@ -56,6 +56,10 @@ import {
   assertStaffCanReceiveAssignment,
   assertStudentCanJoinActiveWorkflow,
 } from 'src/common/profile-status.policy';
+import {
+  buildClassEndEligibility,
+  getClassTeacherSessionSettlement,
+} from 'src/common/class-teacher-session-settlement.util';
 
 /** `0` is stored as unlimited (same semantics as `null`) across SQL aggregates. */
 function normalizeMaxAllowancePerSessionWrite(
@@ -484,7 +488,10 @@ export class ClassService {
   }
 
   private async getClassDetailSnapshot(
-    db: Pick<PrismaService, 'class' | 'classTeacher' | 'studentClass'>,
+    db: Pick<
+      PrismaService,
+      'class' | 'classTeacher' | 'studentClass' | '$queryRaw'
+    >,
     id: string,
   ) {
     const classInfo = await db.class.findUnique({
@@ -581,10 +588,20 @@ export class ClassService {
       };
     });
 
+    const teacherSessionSettlement = await getClassTeacherSessionSettlement(
+      db,
+      id,
+    );
+    const endClassEligibility = buildClassEndEligibility(
+      classInfo.status,
+      teacherSessionSettlement,
+    );
+
     return {
       ...classInfo,
       teachers,
       students,
+      endClassEligibility,
       sessionTuitionTotal: students.reduce(
         (sum, student) =>
           sum +
@@ -597,7 +614,10 @@ export class ClassService {
   }
 
   private async getClassAuditSnapshot(
-    db: Pick<PrismaService, 'class' | 'classTeacher' | 'studentClass'>,
+    db: Pick<
+      PrismaService,
+      'class' | 'classTeacher' | 'studentClass' | '$queryRaw'
+    >,
     id: string,
   ) {
     return this.getClassDetailSnapshot(db, id);
@@ -1933,6 +1953,14 @@ export class ClassService {
     dto: ClassStatusActionDto = {},
     auditActor?: ActionHistoryActor,
   ) {
+    const settlement = await getClassTeacherSessionSettlement(this.prisma, id);
+    if (!settlement.canEndClass) {
+      throw new BadRequestException(
+        settlement.blockReason ??
+          'Chưa thể kết thúc lớp khi còn buổi học chưa thanh toán trợ cấp gia sư.',
+      );
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       const beforeValue = await this.getClassAuditSnapshot(tx, id);
       if (!beforeValue) {

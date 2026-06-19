@@ -316,7 +316,11 @@ export class ClassController {
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: ClassStatusActionDto, required: false })
   @ApiResponse({ status: 200, description: 'Class ended.' })
-  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error (class already ended or teacher sessions not fully paid).',
+  })
   @ApiResponse({ status: 404, description: 'Class not found.' })
   async endClass(
     @CurrentUser() user: JwtPayload,
