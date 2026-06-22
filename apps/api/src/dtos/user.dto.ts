@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -172,6 +173,16 @@ export class UserInfoDto {
   @IsString()
   name?: string;
 
+  @ApiPropertyOptional({ example: 'Nguyen' })
+  @IsOptional()
+  @IsString()
+  first_name?: string;
+
+  @ApiPropertyOptional({ example: 'Van A' })
+  @IsOptional()
+  @IsString()
+  last_name?: string;
+
   @ApiPropertyOptional({ enum: UserRole })
   @IsOptional()
   @IsEnum(UserRole)
@@ -199,11 +210,13 @@ export class UserInfoDto {
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   emailVerified?: boolean;
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
+  @Type(() => Boolean)
   @IsBoolean()
   phoneVerified?: boolean;
 

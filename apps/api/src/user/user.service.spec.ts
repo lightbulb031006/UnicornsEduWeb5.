@@ -190,6 +190,8 @@ describe('UserService', () => {
         accountHandle: 'nguyenvan',
         createdAt: new Date('2026-03-20T10:00:00.000Z'),
         updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        staffInfo: null,
+        studentInfo: null,
       },
     ]);
 
@@ -230,6 +232,10 @@ describe('UserService', () => {
       skip: 0,
       take: 20,
       orderBy: { createdAt: 'desc' },
+      include: {
+        staffInfo: { select: { id: true } },
+        studentInfo: { select: { id: true } },
+      },
     });
     expect(response.meta).toEqual({
       total: 1,
@@ -622,5 +628,239 @@ describe('UserService', () => {
       where: { userId: 'user-1' },
       select: { id: true },
     });
+  });
+
+  it('updates first_name and last_name through admin updateUser', async () => {
+    mockPrisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'user@example.com',
+        phone: null,
+        passwordHash: 'hashed-password',
+        refreshToken: null,
+        first_name: 'Old',
+        last_name: 'Name',
+        roleType: UserRole.guest,
+        province: null,
+        accountHandle: 'old-user',
+        createdAt: new Date('2026-03-20T10:00:00.000Z'),
+        updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        staffInfo: null,
+        studentInfo: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'user@example.com',
+        phone: null,
+        passwordHash: 'hashed-password',
+        refreshToken: null,
+        first_name: 'New',
+        last_name: 'Person',
+        roleType: UserRole.guest,
+        province: null,
+        accountHandle: 'old-user',
+        createdAt: new Date('2026-03-20T10:00:00.000Z'),
+        updatedAt: new Date('2026-03-21T10:00:00.000Z'),
+        staffInfo: null,
+        studentInfo: null,
+      });
+    mockPrisma.user.update.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      first_name: 'New',
+      last_name: 'Person',
+      accountHandle: 'old-user',
+      roleType: UserRole.guest,
+    });
+
+    await service.updateUser({
+      id: 'user-1',
+      first_name: 'New',
+      last_name: 'Person',
+    });
+
+    expect(mockPrisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: expect.objectContaining({
+        first_name: 'New',
+        last_name: 'Person',
+      }),
+    });
+  });
+
+  it('persists emailVerified when admin toggles verification flag', async () => {
+    mockPrisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'user@example.com',
+        phone: null,
+        passwordHash: 'hashed-password',
+        refreshToken: null,
+        first_name: null,
+        last_name: null,
+        roleType: UserRole.guest,
+        province: null,
+        accountHandle: 'user-1',
+        emailVerified: false,
+        phoneVerified: false,
+        createdAt: new Date('2026-03-20T10:00:00.000Z'),
+        updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        staffInfo: null,
+        studentInfo: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'user@example.com',
+        phone: null,
+        passwordHash: 'hashed-password',
+        refreshToken: null,
+        first_name: null,
+        last_name: null,
+        roleType: UserRole.guest,
+        province: null,
+        accountHandle: 'user-1',
+        emailVerified: true,
+        phoneVerified: false,
+        createdAt: new Date('2026-03-20T10:00:00.000Z'),
+        updatedAt: new Date('2026-03-21T10:00:00.000Z'),
+        staffInfo: null,
+        studentInfo: null,
+      });
+    mockPrisma.user.update.mockResolvedValue({
+      id: 'user-1',
+      email: 'user@example.com',
+      accountHandle: 'user-1',
+      roleType: UserRole.guest,
+      emailVerified: true,
+    });
+
+    await service.updateUser({
+      id: 'user-1',
+      emailVerified: true,
+    });
+
+    expect(mockPrisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: expect.objectContaining({
+        emailVerified: true,
+      }),
+    });
+  });
+
+  it('resets emailVerified when admin changes email', async () => {
+    mockPrisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'old@example.com',
+        phone: null,
+        passwordHash: 'hashed-password',
+        refreshToken: null,
+        first_name: null,
+        last_name: null,
+        roleType: UserRole.guest,
+        province: null,
+        accountHandle: 'user-1',
+        emailVerified: true,
+        createdAt: new Date('2026-03-20T10:00:00.000Z'),
+        updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+        staffInfo: null,
+        studentInfo: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'new@example.com',
+        phone: null,
+        passwordHash: 'hashed-password',
+        refreshToken: null,
+        first_name: null,
+        last_name: null,
+        roleType: UserRole.guest,
+        province: null,
+        accountHandle: 'user-1',
+        emailVerified: false,
+        createdAt: new Date('2026-03-20T10:00:00.000Z'),
+        updatedAt: new Date('2026-03-21T10:00:00.000Z'),
+        staffInfo: null,
+        studentInfo: null,
+      });
+    mockPrisma.user.update.mockResolvedValue({
+      id: 'user-1',
+      email: 'new@example.com',
+      accountHandle: 'user-1',
+      roleType: UserRole.guest,
+      emailVerified: false,
+    });
+
+    await service.updateUser({
+      id: 'user-1',
+      email: 'new@example.com',
+    });
+
+    expect(mockPrisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: expect.objectContaining({
+        email: 'new@example.com',
+        emailVerified: false,
+      }),
+    });
+  });
+
+  it('soft-deletes user linked to staff profile by unlinking staff_info first', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'staff@example.com',
+      accountHandle: 'staff-user',
+      passwordHash: 'hash',
+      refreshToken: null,
+      staffInfo: { id: 'staff-1' },
+      studentInfo: null,
+    });
+    mockPrisma.staffInfo.update.mockResolvedValue({ id: 'staff-1', userId: null });
+    mockPrisma.user.delete.mockResolvedValue({
+      id: 'user-1',
+      email: 'staff@example.com',
+      accountHandle: 'staff-user',
+      passwordHash: 'hash',
+      refreshToken: null,
+    });
+
+    await expect(
+      service.deleteUser('user-1', {
+        userId: 'admin-1',
+        userEmail: 'admin@example.com',
+        roleType: 'admin',
+      }),
+    ).resolves.toMatchObject({
+      id: 'user-1',
+      email: 'staff@example.com',
+    });
+
+    expect(mockPrisma.staffInfo.update).toHaveBeenCalledWith({
+      where: { id: 'staff-1' },
+      data: { userId: null },
+    });
+    expect(mockPrisma.user.delete).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+    });
+    expect(authService.invalidateAuthIdentityCache).toHaveBeenCalledWith('user-1');
+  });
+
+  it('rejects deleteUser for the currently signed-in account', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      email: 'self@example.com',
+      accountHandle: 'self-user',
+      staffInfo: null,
+      studentInfo: null,
+    });
+
+    await expect(
+      service.deleteUser('user-1', {
+        userId: 'user-1',
+        userEmail: 'self@example.com',
+        roleType: 'admin',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(mockPrisma.user.delete).not.toHaveBeenCalled();
   });
 });

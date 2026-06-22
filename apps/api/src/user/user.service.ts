@@ -104,12 +104,21 @@ export class UserService {
   }
 
   private sanitizeUser<
-    T extends { passwordHash: string | null; refreshToken: string | null },
+    T extends {
+      passwordHash: string | null;
+      refreshToken: string | null;
+      emailVerified?: boolean | null;
+      phoneVerified?: boolean | null;
+    },
   >(user: T): Omit<T, 'passwordHash' | 'refreshToken'> {
     const { passwordHash, refreshToken, ...safeUser } = user;
     void passwordHash;
     void refreshToken;
-    return safeUser;
+    return {
+      ...safeUser,
+      emailVerified: Boolean(safeUser.emailVerified),
+      phoneVerified: Boolean(safeUser.phoneVerified),
+    };
   }
 
   private serializeUserDetail<
@@ -351,13 +360,23 @@ export class UserService {
       skip,
       take: limit,
       orderBy: { createdAt: 'desc' },
+      include: {
+        staffInfo: { select: { id: true } },
+        studentInfo: { select: { id: true } },
+      },
     });
 
     return {
-      data: users.map((user) => ({
-        ...this.sanitizeUser(user),
-        fullName: getPreferredUserFullName(user) ?? null,
-      })),
+      data: users.map((user) => {
+        const { staffInfo, studentInfo, ...safeUser } = user;
+
+        return {
+          ...this.sanitizeUser(safeUser),
+          fullName: getPreferredUserFullName(user) ?? null,
+          staffInfo: staffInfo ? { id: staffInfo.id } : null,
+          studentInfo: studentInfo ? { id: studentInfo.id } : null,
+        };
+      }),
       meta: { total, page: safePage, limit },
     };
   }
@@ -623,7 +642,18 @@ export class UserService {
     const normalizedStaffRoles = this.normalizeStaffRoles(data.staffRoles);
     const updateData: Prisma.UserUpdateInput = {};
 
-    if (data.email !== undefined) updateData.email = data.email;
+    if (data.email !== undefined) {
+      const normalizedEmail = data.email.trim();
+      updateData.email = normalizedEmail;
+      if (
+        normalizedEmail.toLowerCase() !== existingUser.email.toLowerCase() &&
+        data.emailVerified === undefined
+      ) {
+        updateData.emailVerified = false;
+      }
+    }
+    if (data.first_name !== undefined) updateData.first_name = data.first_name;
+    if (data.last_name !== undefined) updateData.last_name = data.last_name;
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.roleType !== undefined) updateData.roleType = data.roleType;
     if (data.status !== undefined) updateData.status = data.status;
@@ -727,6 +757,46 @@ export class UserService {
             }
           }
 
+          if (
+            existingUser.studentInfo &&
+            (data.first_name !== undefined ||
+              data.last_name !== undefined ||
+              data.email !== undefined)
+          ) {
+            const studentUpdateData: Prisma.StudentInfoUpdateInput = {
+              fullName: this.getPreferredProfileFullName(updatedUser),
+            };
+            if (data.email !== undefined) {
+              studentUpdateData.email = updatedUser.email;
+            }
+            await tx.studentInfo.update({
+              where: { id: existingUser.studentInfo.id },
+              data: studentUpdateData,
+            });
+
+            if (auditActor) {
+              const beforeStudentValue = await this.getStudentAuditSnapshot(
+                tx,
+                existingUser.studentInfo.id,
+              );
+              const afterStudentValue = await this.getStudentAuditSnapshot(
+                tx,
+                existingUser.studentInfo.id,
+              );
+              if (beforeStudentValue && afterStudentValue) {
+                await this.actionHistoryService.recordUpdate(tx, {
+                  actor: auditActor,
+                  entityType: 'student',
+                  entityId: existingUser.studentInfo.id,
+                  description:
+                    'Đồng bộ hồ sơ học sinh khi cập nhật thông tin user',
+                  beforeValue: beforeStudentValue,
+                  afterValue: afterStudentValue,
+                });
+              }
+            }
+          }
+
           const afterValue = await this.getUserAuditSnapshot(tx, data.id);
           if (!afterValue) {
             throw new NotFoundException('User not found');
@@ -763,12 +833,17 @@ export class UserService {
   }
 
   async deleteUser(id: string, auditActor?: ActionHistoryActor) {
+    if (auditActor?.userId === id) {
+      throw new BadRequestException(
+        'Không thể xóa tài khoản đang đăng nhập.',
+      );
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id },
       include: {
         staffInfo: { select: { id: true } },
         studentInfo: { select: { id: true } },
-        _count: { select: { actionHistories: true } },
       },
     });
 
@@ -776,27 +851,46 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
-    if (user.staffInfo || user.studentInfo || user._count.actionHistories > 0) {
-      throw new BadRequestException(
-        'User is linked to staff, student, or action histories',
-      );
-    }
+    const preservedStaffInfoId = user.staffInfo?.id ?? null;
+    const preservedStudentInfoId = user.studentInfo?.id ?? null;
 
     try {
       const deletedUser = await this.prisma.$transaction(async (tx) => {
+        if (preservedStaffInfoId) {
+          await tx.staffInfo.update({
+            where: { id: preservedStaffInfoId },
+            data: { userId: null },
+          });
+        }
+
+        if (preservedStudentInfoId) {
+          await tx.studentInfo.update({
+            where: { id: preservedStudentInfoId },
+            data: { userId: null },
+          });
+        }
+
         const deletedUser = await tx.user.delete({
           where: { id },
         });
 
         if (auditActor) {
-          const { _count, ...beforeValue } = user;
-          void _count;
+          const { staffInfo, studentInfo, ...beforeValue } = user;
+          void staffInfo;
+          void studentInfo;
           await this.actionHistoryService.recordDelete(tx, {
             actor: auditActor,
             entityType: 'user',
             entityId: id,
-            description: 'Xóa người dùng',
-            beforeValue,
+            description:
+              preservedStaffInfoId || preservedStudentInfoId
+                ? 'Xóa tài khoản user (giữ lại hồ sơ nhân sự/học sinh liên kết)'
+                : 'Xóa người dùng',
+            beforeValue: {
+              ...beforeValue,
+              preservedStaffInfoId,
+              preservedStudentInfoId,
+            },
           });
         }
 

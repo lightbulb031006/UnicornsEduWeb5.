@@ -196,13 +196,14 @@ export class UserController {
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Delete user',
-    description: 'Delete a user by ID. Admin only.',
+    description:
+      'Soft-delete user account: unlinks staff_info/student_info (sets user_id null, keeps profiles), nulls other user FKs via DB constraints, then removes the user row. Admin/assistant only.',
   })
   @ApiParam({ name: 'id', description: 'User ID' })
   @ApiResponse({ status: 200, description: 'User deleted.' })
   @ApiResponse({
     status: 400,
-    description: 'User linked to staff/student/histories.',
+    description: 'Cannot delete the currently signed-in account.',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
   @ApiResponse({ status: 403, description: 'Forbidden. Admin only.' })
