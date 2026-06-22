@@ -33,7 +33,7 @@ const PAYMENT_STATUS_LABELS: Record<AssistantCommissionPaymentStatus, string> = 
 };
 
 const CUSTOMER_CARE_ROW_GRID_CLASS =
-  "grid-cols-[minmax(0,1fr)_minmax(7rem,8.5rem)_minmax(7rem,8.5rem)_1.25rem]";
+  "grid-cols-[minmax(0,1fr)_minmax(6rem,7rem)_minmax(6rem,7rem)_minmax(4.5rem,5.5rem)_minmax(6.5rem,8rem)_1.25rem]";
 const STUDENT_ROW_GRID_CLASS =
   "grid-cols-[minmax(0,1fr)_minmax(7rem,8.5rem)_1.25rem]";
 const SESSION_SHARE_GRID_CLASS =
@@ -842,14 +842,16 @@ export default function AssistantCommissionTabPanel({
       ) : null}
 
       {!managedLoading && !managedError && managedRows.length > 0 ? (
-        <div className="space-y-2">
+        <div className="space-y-2 overflow-x-auto">
           <div
-            className={`hidden items-center gap-3 rounded-[1.25rem] border border-border-default/80 bg-bg-secondary/80 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted lg:grid ${CUSTOMER_CARE_ROW_GRID_CLASS}`}
+            className={`hidden min-w-[42rem] items-center gap-3 rounded-[1.25rem] border border-border-default/80 bg-bg-secondary/80 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted lg:grid ${CUSTOMER_CARE_ROW_GRID_CLASS}`}
             aria-hidden
           >
             <span>Nhân sự CSKH</span>
             <span className="text-right">Chưa thanh toán</span>
             <span className="text-right">Tổng hoa hồng</span>
+            <span className="text-right">Số người nợ</span>
+            <span className="text-right">Tổng tiền nợ</span>
             <span className="sr-only">Mở rộng</span>
           </div>
 
@@ -872,7 +874,7 @@ export default function AssistantCommissionTabPanel({
                   type="button"
                   onClick={() => toggleCustomerCareExpand(item.customerCareStaffId)}
                   aria-expanded={isExpanded}
-                  className={`grid w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-inset ${CUSTOMER_CARE_ROW_GRID_CLASS}`}
+                  className={`grid w-full min-w-[42rem] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-inset ${CUSTOMER_CARE_ROW_GRID_CLASS}`}
                 >
                   <span
                     className="min-w-0 truncate font-medium text-text-primary"
@@ -889,6 +891,12 @@ export default function AssistantCommissionTabPanel({
                         ? item.pendingShareAmount
                         : item.totalShareAmount,
                     )}
+                  </span>
+                  <span className="text-right tabular-nums font-medium text-text-secondary">
+                    {item.debtStudentCount}
+                  </span>
+                  <span className="text-right tabular-nums font-semibold text-warning">
+                    {formatCurrency(item.totalDebtAmount)}
                   </span>
                   <svg
                     className={`size-4 justify-self-end text-text-muted transition-transform ${isExpanded ? "rotate-180" : ""}`}

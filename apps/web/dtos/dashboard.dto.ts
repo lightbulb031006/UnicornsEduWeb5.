@@ -232,6 +232,22 @@ export interface StaffDashboardCustomerCarePortfolioItem {
   topupTotal: number;
 }
 
+export interface StaffDashboardSalesCsSummary {
+  activeStudentsCount: number;
+  newStudentsThisMonth: number;
+  droppedStudentsThisMonth: number;
+  debtStudentCount: number;
+  totalDebtAmount: number;
+}
+
+export interface StaffDashboardSalesCsStaffItem {
+  staffId: string;
+  staffName: string;
+  monthlyRevenue: number;
+  debtStudentCount: number;
+  totalDebtAmount: number;
+}
+
 export interface StaffDashboardAssistantSection {
   actionAlerts: AdminDashboardActionAlert[];
   systemSummary: StaffDashboardSystemSummary;
@@ -239,6 +255,8 @@ export interface StaffDashboardAssistantSection {
   customerCarePortfolios: StaffDashboardCustomerCarePortfolioItem[];
   myCustomerCarePortfolio: StaffDashboardCustomerCarePortfolioItem | null;
   managedCustomerCarePortfolios: StaffDashboardCustomerCarePortfolioItem[];
+  salesCsSummary: StaffDashboardSalesCsSummary;
+  salesCsStaffBreakdown: StaffDashboardSalesCsStaffItem[];
 }
 
 export interface StaffDashboardStudentAlertItem {

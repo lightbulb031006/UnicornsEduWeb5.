@@ -16,6 +16,8 @@ export interface AssistantManagedCustomerCareItem {
   totalShareAmount: number;
   pendingShareAmount: number;
   paidShareAmount: number;
+  debtStudentCount: number;
+  totalDebtAmount: number;
 }
 
 export interface AssistantManagedCustomerCareListResponse {

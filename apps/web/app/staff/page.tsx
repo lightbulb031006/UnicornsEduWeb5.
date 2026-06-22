@@ -13,6 +13,8 @@ import {
   type AdminDashboardActionAlert,
   type StaffDashboardAccountantSection,
   type StaffDashboardAssistantSection,
+  type StaffDashboardSalesCsStaffItem,
+  type StaffDashboardSalesCsSummary,
   type StaffDashboardCustomerCareSection,
   type StaffDashboardDto,
   type StaffDashboardExpenseSection,
@@ -588,7 +590,7 @@ function CustomerCarePortfolioList({
               tone="success"
             />
             <MiniStat
-              label="Doanh thu đã nạp"
+              label="Tiền nạp ví"
               value={formatCurrency(item.topupTotal)}
               tone="primary"
             />
@@ -599,10 +601,132 @@ function CustomerCarePortfolioList({
   );
 }
 
+function SalesCsSummarySection({
+  summary,
+  staffBreakdown,
+  monthLabel,
+}: {
+  summary: StaffDashboardSalesCsSummary;
+  staffBreakdown: StaffDashboardSalesCsStaffItem[];
+  monthLabel: string;
+}) {
+  return (
+    <SurfaceCard
+      eyebrow="Tổng hợp CSKH"
+      title={`Bảng tổng hợp — ${monthLabel}`}
+      description="Tổng hợp portfolio bạn quản lí (và portfolio cá nhân nếu có) trong tháng này."
+    >
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        <MiniStat
+          label="HS đang học"
+          value={String(summary.activeStudentsCount)}
+          tone="success"
+        />
+        <MiniStat
+          label="HS mới tháng này"
+          value={String(summary.newStudentsThisMonth)}
+          tone="primary"
+        />
+        <MiniStat
+          label="HS nghỉ tháng này"
+          value={String(summary.droppedStudentsThisMonth)}
+          tone="warning"
+        />
+        <MiniStat
+          label="HS đang nợ học phí"
+          value={String(summary.debtStudentCount)}
+          tone="warning"
+        />
+        <MiniStat
+          label="Tổng nợ học phí (ví âm)"
+          value={formatCurrency(summary.totalDebtAmount)}
+          tone="warning"
+        />
+      </div>
+
+      {staffBreakdown.length === 0 ? (
+        <div className="mt-4">
+          <EmptyState
+            title="Chưa có CSKH thuộc phạm vi quản lí"
+            description="Khi bạn được phân công quản lí CSKH, bảng tiền nạp ví và công nợ sẽ hiện ở đây."
+          />
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+              Tiền nạp ví theo nhân sự
+            </p>
+            <div className="space-y-2">
+              {staffBreakdown.map((item) => {
+                const detailHref =
+                  item.staffName === "(Tôi)"
+                    ? "/staff/customer-care-detail"
+                    : `/staff/customer-care-detail/${encodeURIComponent(item.staffId)}`;
+
+                return (
+                <Link
+                  key={`revenue-${item.staffId}`}
+                  href={detailHref}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-border-default bg-bg-secondary/20 px-3 py-2 transition-colors hover:bg-bg-secondary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                >
+                  <span className="min-w-0 truncate text-sm font-medium text-text-primary">
+                    {item.staffName}
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-primary">
+                    {formatCurrency(item.monthlyRevenue)}
+                  </span>
+                </Link>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+              Công nợ theo nhân sự
+            </p>
+            <div className="space-y-2">
+              {staffBreakdown.map((item) => {
+                const detailHref =
+                  item.staffName === "(Tôi)"
+                    ? "/staff/customer-care-detail"
+                    : `/staff/customer-care-detail/${encodeURIComponent(item.staffId)}`;
+
+                return (
+                <Link
+                  key={`debt-${item.staffId}`}
+                  href={detailHref}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-border-default bg-bg-secondary/20 px-3 py-2 transition-colors hover:bg-bg-secondary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                >
+                  <span className="min-w-0 truncate text-sm font-medium text-text-primary">
+                    {item.staffName}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-3 text-sm tabular-nums">
+                    <span className="font-medium text-text-secondary">
+                      {item.debtStudentCount} người
+                    </span>
+                    <span className="font-semibold text-warning">
+                      {formatCurrency(item.totalDebtAmount)}
+                    </span>
+                  </div>
+                </Link>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </SurfaceCard>
+  );
+}
+
 function AssistantSection({
   section,
+  monthLabel,
 }: {
   section: StaffDashboardAssistantSection;
+  monthLabel: string;
 }) {
   const managedPortfolios =
     section.managedCustomerCarePortfolios ?? section.customerCarePortfolios ?? [];
@@ -685,7 +809,11 @@ function AssistantSection({
           </SurfaceCard>
 
           {section.myCustomerCarePortfolio ? (
-            <SurfaceCard eyebrow="CSKH của tôi" title="Portfolio cá nhân">
+            <SurfaceCard
+              eyebrow="CSKH của tôi"
+              title="Portfolio cá nhân"
+              description="Học phí đã học và tiền nạp ví của portfolio trong tháng này."
+            >
               <CustomerCarePortfolioList
                 items={[section.myCustomerCarePortfolio]}
                 emptyTitle="Chưa có dữ liệu CSKH"
@@ -695,7 +823,11 @@ function AssistantSection({
             </SurfaceCard>
           ) : null}
 
-          <SurfaceCard eyebrow="CSKH tôi quản lí" title="Học phí đã học · Doanh thu nạp">
+          <SurfaceCard
+            eyebrow="CSKH tôi quản lí"
+            title="Học phí đã học · Tiền nạp ví"
+            description="Học phí đã học và tiền nạp ví của portfolio trong tháng này."
+          >
             <CustomerCarePortfolioList
               items={managedPortfolios}
               emptyTitle="Chưa có CSKH thuộc phạm vi quản lí"
@@ -707,6 +839,20 @@ function AssistantSection({
           </SurfaceCard>
         </div>
       </div>
+
+      <SalesCsSummarySection
+        summary={
+          section.salesCsSummary ?? {
+            activeStudentsCount: 0,
+            newStudentsThisMonth: 0,
+            droppedStudentsThisMonth: 0,
+            debtStudentCount: 0,
+            totalDebtAmount: 0,
+          }
+        }
+        staffBreakdown={section.salesCsStaffBreakdown ?? []}
+        monthLabel={monthLabel}
+      />
     </section>
   );
 }
@@ -767,7 +913,11 @@ function CustomerCareSection({
         linkLabel="Chi tiết CSKH"
       />
       <div className="grid gap-3 xl:grid-cols-3">
-        <SurfaceCard eyebrow="Tổng hợp" title={`CSKH — ${monthLabel}`}>
+        <SurfaceCard
+          eyebrow="Tổng hợp"
+          title={`CSKH — ${monthLabel}`}
+          description="Số liệu học sinh và tiền trong tháng đang xem."
+        >
           <div className="grid gap-2 sm:grid-cols-2">
             <MiniStat
               label="Học sinh mới tháng này"
@@ -785,19 +935,23 @@ function CustomerCareSection({
               tone="success"
             />
             <MiniStat
-              label="Tổng học phí"
+              label="Học phí đã học"
               value={formatCurrency(section.learnedTuitionTotal)}
               tone="success"
             />
             <MiniStat
-              label="Tổng doanh thu"
+              label="Tiền nạp ví"
               value={formatCurrency(section.topupTotal)}
               tone="primary"
             />
           </div>
         </SurfaceCard>
 
-        <SurfaceCard eyebrow="Số dư thấp" title="Cần follow-up">
+        <SurfaceCard
+          eyebrow="Số dư thấp"
+          title="Cần follow-up"
+          description="Học sinh active còn ≤ 2 buổi học theo học phí tham chiếu — chưa âm ví."
+        >
           <StudentAlertList
             items={section.lowBalanceStudents}
             emptyTitle="Không có học sinh sắp hết tiền"
@@ -805,7 +959,11 @@ function CustomerCareSection({
           />
         </SurfaceCard>
 
-        <SurfaceCard eyebrow="Công nợ" title="Số dư âm">
+        <SurfaceCard
+          eyebrow="Công nợ"
+          title="Số dư âm"
+          description="Học sinh được gán cho bạn có số dư ví âm."
+        >
           <StudentAlertList
             items={section.debtStudents}
             emptyTitle="Không có học sinh nợ tiền"
@@ -1418,7 +1576,10 @@ export default function StaffDashboardPage() {
             ) : null}
 
             {staffRoles.includes("assistant") && dashboard?.assistant ? (
-              <AssistantSection section={dashboard.assistant} />
+              <AssistantSection
+                section={dashboard.assistant}
+                monthLabel={monthLabel}
+              />
             ) : null}
 
             {staffRoles.includes("customer_care") && dashboard?.customerCare ? (
