@@ -563,6 +563,22 @@ export interface StaffDashboardCustomerCarePortfolioItemDto {
   topupTotal: number;
 }
 
+export interface StaffDashboardSalesCsSummaryDto {
+  activeStudentsCount: number;
+  newStudentsThisMonth: number;
+  droppedStudentsThisMonth: number;
+  debtStudentCount: number;
+  totalDebtAmount: number;
+}
+
+export interface StaffDashboardSalesCsStaffItemDto {
+  staffId: string;
+  staffName: string;
+  monthlyRevenue: number;
+  debtStudentCount: number;
+  totalDebtAmount: number;
+}
+
 export interface StaffDashboardAssistantSectionDto {
   actionAlerts: AdminDashboardActionAlertDto[];
   systemSummary: StaffDashboardSystemSummaryDto;
@@ -570,6 +586,8 @@ export interface StaffDashboardAssistantSectionDto {
   customerCarePortfolios: StaffDashboardCustomerCarePortfolioItemDto[];
   myCustomerCarePortfolio: StaffDashboardCustomerCarePortfolioItemDto | null;
   managedCustomerCarePortfolios: StaffDashboardCustomerCarePortfolioItemDto[];
+  salesCsSummary: StaffDashboardSalesCsSummaryDto;
+  salesCsStaffBreakdown: StaffDashboardSalesCsStaffItemDto[];
 }
 
 export interface StaffDashboardStudentAlertItemDto {

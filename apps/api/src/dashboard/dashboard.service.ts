@@ -39,6 +39,8 @@ import {
   type StaffDashboardLessonPlanHeadSectionDto,
   type StaffDashboardLessonPlanSectionDto,
   type StaffDashboardStudentAlertItemDto,
+  type StaffDashboardSalesCsStaffItemDto,
+  type StaffDashboardSalesCsSummaryDto,
   type StaffDashboardSystemSummaryDto,
   type StaffDashboardTaskItemDto,
   type StaffDashboardTeacherSectionDto,
@@ -54,6 +56,23 @@ import { SurveyRoundService } from '../class/survey-round.service';
 type SummaryCountRow = {
   activeClasses: number | string | null;
   activeStudents: number | string | null;
+};
+
+type CustomerCareStaffDebtAggregateRow = {
+  staffId: string;
+  debtStudentCount: number | string | null;
+  totalDebtAmount: number | string | null;
+};
+
+type CustomerCareStaffMonthlyTopupRow = {
+  staffId: string;
+  monthlyRevenue: number | string | null;
+};
+
+type CustomerCareStudentMetricsRow = {
+  activeStudentsCount: number | string | null;
+  newStudentsThisMonth: number | string | null;
+  droppedStudentsThisMonth: number | string | null;
 };
 
 type AggregateMoneySqlRow = {
@@ -301,6 +320,17 @@ function resolveFinancialPeriod(params: {
 /** Calendar month key for SQL/FE; use UTC so PG DATE rows parse consistently across server TZ. */
 function formatMonthKey(date: Date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function isDropOutDateInDashboardMonth(
+  dropOutDate: Date | null | undefined,
+  monthKey: string,
+) {
+  if (!dropOutDate) {
+    return false;
+  }
+
+  return formatMonthKey(dropOutDate) === monthKey;
 }
 
 function formatMonthShort(date: Date) {
@@ -2082,7 +2112,10 @@ export class DashboardService {
     });
   }
 
-  private async getStudentAggregateMaps(studentIds: string[]) {
+  private async getStudentAggregateMaps(
+    studentIds: string[],
+    range: { monthStart: Date; monthEnd: Date },
+  ) {
     const normalizedStudentIds = Array.from(new Set(studentIds));
 
     if (normalizedStudentIds.length === 0) {
@@ -2102,6 +2135,12 @@ export class DashboardService {
           status: {
             in: [AttendanceStatus.present, AttendanceStatus.excused],
           },
+          session: {
+            date: {
+              gte: range.monthStart,
+              lt: range.monthEnd,
+            },
+          },
         },
         _sum: {
           tuitionFee: true,
@@ -2114,6 +2153,10 @@ export class DashboardService {
             in: normalizedStudentIds,
           },
           type: WalletTransactionType.topup,
+          createdAt: {
+            gte: range.monthStart,
+            lt: range.monthEnd,
+          },
         },
         _sum: {
           amount: true,
@@ -2138,6 +2181,7 @@ export class DashboardService {
   }
 
   private async getCustomerCarePortfolios(
+    range: { monthStart: Date; monthEnd: Date },
     staffIds?: string[],
   ): Promise<StaffDashboardCustomerCarePortfolioItemDto[]> {
     const customerCareStaff = await this.prisma.staffInfo.findMany({
@@ -2189,6 +2233,7 @@ export class DashboardService {
     const { learnedTuitionByStudentId, topupByStudentId } =
       await this.getStudentAggregateMaps(
         assignments.map((assignment) => assignment.student.id),
+        range,
       );
 
     const portfolioByStaffId = new Map(
@@ -2389,11 +2434,10 @@ export class DashboardService {
         INNER JOIN student_info ON student_info.id = customer_care_service.student_id
         INNER JOIN staff_info ON staff_info.id = customer_care_service.staff_id
         INNER JOIN users owner_user ON owner_user.id = staff_info.user_id
-        INNER JOIN student_classes ON student_classes.student_id = student_info.id
-        INNER JOIN classes ON classes.id = student_classes.class_id
+        LEFT JOIN student_classes ON student_classes.student_id = student_info.id
+        LEFT JOIN classes ON classes.id = student_classes.class_id
         WHERE customer_care_service.staff_id = ${staffId}
-          AND classes.status = 'running'
-          AND student_info.status = 'active'
+          AND student_info.account_balance < 0
         GROUP BY
           student_info.id,
           student_info.full_name,
@@ -2463,6 +2507,7 @@ export class DashboardService {
     const { learnedTuitionByStudentId, topupByStudentId } =
       await this.getStudentAggregateMaps(
         assignedStudents.map((student) => student.id),
+        range,
       );
 
     const [lowBalanceRows, debtRows] = await Promise.all([
@@ -2485,11 +2530,11 @@ export class DashboardService {
           student.createdAt >= range.monthStart &&
           student.createdAt < range.monthEnd,
       ).length,
-      droppedStudentsThisMonth: assignedStudents.filter(
-        (student) =>
-          student.dropOutDate != null &&
-          student.dropOutDate >= range.monthStart &&
-          student.dropOutDate < range.monthEnd,
+      droppedStudentsThisMonth: assignedStudents.filter((student) =>
+        isDropOutDateInDashboardMonth(
+          student.dropOutDate,
+          formatMonthKey(range.monthStart),
+        ),
       ).length,
       activeStudentsCount: assignedStudents.filter(
         (student) => student.status === 'active',
@@ -2505,15 +2550,32 @@ export class DashboardService {
 
   private async getMyCustomerCarePortfolio(
     staffId: string,
+    range: { monthStart: Date; monthEnd: Date },
   ): Promise<StaffDashboardCustomerCarePortfolioItemDto | null> {
-    const items = await this.getCustomerCarePortfolios([staffId]);
+    const items = await this.getCustomerCarePortfolios(range, [staffId]);
     return items[0] ?? null;
   }
 
   private async getManagedCustomerCarePortfolios(
     assistantStaffId: string,
+    range: { monthStart: Date; monthEnd: Date },
   ): Promise<StaffDashboardCustomerCarePortfolioItemDto[]> {
-    const managedStaff = await this.prisma.staffInfo.findMany({
+    const managedStaff = await this.getManagedCustomerCareStaffRecords(
+      assistantStaffId,
+    );
+
+    if (managedStaff.length === 0) {
+      return [];
+    }
+
+    return this.getCustomerCarePortfolios(
+      range,
+      managedStaff.map((staff) => staff.id),
+    );
+  }
+
+  private async getManagedCustomerCareStaffRecords(assistantStaffId: string) {
+    return this.prisma.staffInfo.findMany({
       where: {
         status: StaffStatus.active,
         roles: {
@@ -2526,16 +2588,261 @@ export class DashboardService {
       },
       select: {
         id: true,
+        user: {
+          select: {
+            first_name: true,
+            last_name: true,
+          },
+        },
       },
+      orderBy: [
+        { user: { first_name: 'asc' } },
+        { user: { last_name: 'asc' } },
+        { id: 'asc' },
+      ],
     });
+  }
 
-    if (managedStaff.length === 0) {
-      return [];
+  private async getDebtAggregateByCustomerCareStaffIds(staffIds: string[]) {
+    if (staffIds.length === 0) {
+      return new Map<
+        string,
+        { debtStudentCount: number; totalDebtAmount: number }
+      >();
     }
 
-    return this.getCustomerCarePortfolios(
-      managedStaff.map((staff) => staff.id),
+    const rows = await this.prisma.$queryRaw<CustomerCareStaffDebtAggregateRow[]>(
+      Prisma.sql`
+        WITH student_debt AS (
+          SELECT
+            customer_care_service.staff_id AS "staffId",
+            student_info.id AS "studentId",
+            ABS(student_info.account_balance) AS "debtAmount"
+          FROM customer_care_service
+          INNER JOIN student_info ON student_info.id = customer_care_service.student_id
+          WHERE customer_care_service.staff_id IN (${Prisma.join(staffIds)})
+            AND student_info.account_balance < 0
+          GROUP BY
+            customer_care_service.staff_id,
+            student_info.id,
+            student_info.account_balance
+        )
+        SELECT
+          "staffId",
+          COUNT(*)::int AS "debtStudentCount",
+          COALESCE(SUM("debtAmount"), 0) AS "totalDebtAmount"
+        FROM student_debt
+        GROUP BY "staffId"
+      `,
     );
+
+    return new Map(
+      rows.map((row) => [
+        row.staffId,
+        {
+          debtStudentCount: normalizeInteger(row.debtStudentCount),
+          totalDebtAmount: normalizeMoneyAmount(row.totalDebtAmount),
+        },
+      ]),
+    );
+  }
+
+  private async getMonthlyTopupByCustomerCareStaffIds(
+    staffIds: string[],
+    range: { monthStart: Date; monthEnd: Date },
+  ) {
+    if (staffIds.length === 0) {
+      return new Map<string, number>();
+    }
+
+    const rows = await this.prisma.$queryRaw<CustomerCareStaffMonthlyTopupRow[]>(
+      Prisma.sql`
+        SELECT
+          customer_care_service.staff_id AS "staffId",
+          COALESCE(SUM(COALESCE(wallet_transactions_history.amount, 0)), 0) AS "monthlyRevenue"
+        FROM wallet_transactions_history
+        INNER JOIN customer_care_service
+          ON customer_care_service.student_id = wallet_transactions_history.student_id
+        WHERE customer_care_service.staff_id IN (${Prisma.join(staffIds)})
+          AND wallet_transactions_history.type::text = 'topup'
+          AND wallet_transactions_history.created_at >= ${range.monthStart}
+          AND wallet_transactions_history.created_at < ${range.monthEnd}
+        GROUP BY customer_care_service.staff_id
+      `,
+    );
+
+    return new Map(
+      rows.map((row) => [
+        row.staffId,
+        normalizeMoneyAmount(row.monthlyRevenue),
+      ]),
+    );
+  }
+
+  private async getCustomerCareStudentMetricsByStaffIds(
+    staffIds: string[],
+    range: {
+      monthStart: Date;
+      monthEnd: Date;
+      monthKey: string;
+    },
+  ): Promise<{
+    activeStudentsCount: number;
+    newStudentsThisMonth: number;
+    droppedStudentsThisMonth: number;
+  }> {
+    if (staffIds.length === 0) {
+      return {
+        activeStudentsCount: 0,
+        newStudentsThisMonth: 0,
+        droppedStudentsThisMonth: 0,
+      };
+    }
+
+    const { periodStartStr, periodEndExclusiveStr } = buildCalendarPeriodStrings(
+      range.monthKey,
+    );
+
+    const rows = await this.prisma.$queryRaw<CustomerCareStudentMetricsRow[]>(
+      Prisma.sql`
+        WITH scoped_students AS (
+          SELECT DISTINCT
+            student_info.id AS "studentId",
+            student_info.status AS status,
+            student_info.created_at AS "createdAt",
+            student_info.drop_out_date AS "dropOutDate"
+          FROM customer_care_service
+          INNER JOIN student_info ON student_info.id = customer_care_service.student_id
+          WHERE customer_care_service.staff_id IN (${Prisma.join(staffIds)})
+        )
+        SELECT
+          COUNT(*) FILTER (WHERE status = 'active')::int AS "activeStudentsCount",
+          COUNT(*) FILTER (
+            WHERE "createdAt" >= ${range.monthStart}
+              AND "createdAt" < ${range.monthEnd}
+          )::int AS "newStudentsThisMonth",
+          COUNT(*) FILTER (
+            WHERE "dropOutDate" IS NOT NULL
+              AND "dropOutDate" >= ${periodStartStr}::date
+              AND "dropOutDate" < ${periodEndExclusiveStr}::date
+          )::int AS "droppedStudentsThisMonth"
+        FROM scoped_students
+      `,
+    );
+
+    const row = rows[0];
+    return {
+      activeStudentsCount: normalizeInteger(row?.activeStudentsCount),
+      newStudentsThisMonth: normalizeInteger(row?.newStudentsThisMonth),
+      droppedStudentsThisMonth: normalizeInteger(row?.droppedStudentsThisMonth),
+    };
+  }
+
+  private async getSalesCsSummaryForAssistant(
+    assistantStaffId: string,
+    range: {
+      monthStart: Date;
+      monthEnd: Date;
+      monthKey: string;
+    },
+    context: {
+      includeOwnCustomerCarePortfolio: boolean;
+    },
+  ): Promise<{
+    summary: StaffDashboardSalesCsSummaryDto;
+    staffBreakdown: StaffDashboardSalesCsStaffItemDto[];
+  }> {
+    const managedStaff = await this.getManagedCustomerCareStaffRecords(
+      assistantStaffId,
+    );
+    const managedStaffIds = managedStaff.map((staff) => staff.id);
+    const staffIdsForMetrics = context.includeOwnCustomerCarePortfolio
+      ? Array.from(new Set([...managedStaffIds, assistantStaffId]))
+      : managedStaffIds;
+
+    if (staffIdsForMetrics.length === 0) {
+      return {
+        summary: {
+          activeStudentsCount: 0,
+          newStudentsThisMonth: 0,
+          droppedStudentsThisMonth: 0,
+          debtStudentCount: 0,
+          totalDebtAmount: 0,
+        },
+        staffBreakdown: [],
+      };
+    }
+
+    const [studentMetrics, debtByStaffId, monthlyTopupByStaffId] =
+      await Promise.all([
+        this.getCustomerCareStudentMetricsByStaffIds(
+          staffIdsForMetrics,
+          range,
+        ),
+        this.getDebtAggregateByCustomerCareStaffIds(staffIdsForMetrics),
+        this.getMonthlyTopupByCustomerCareStaffIds(
+          context.includeOwnCustomerCarePortfolio
+            ? Array.from(new Set([...managedStaffIds, assistantStaffId]))
+            : managedStaffIds,
+          range,
+        ),
+      ]);
+
+    const summary: StaffDashboardSalesCsSummaryDto = {
+      activeStudentsCount: studentMetrics.activeStudentsCount,
+      newStudentsThisMonth: studentMetrics.newStudentsThisMonth,
+      droppedStudentsThisMonth: studentMetrics.droppedStudentsThisMonth,
+      debtStudentCount: Array.from(debtByStaffId.values()).reduce(
+        (sum, item) => sum + item.debtStudentCount,
+        0,
+      ),
+      totalDebtAmount: Array.from(debtByStaffId.values()).reduce(
+        (sum, item) => sum + item.totalDebtAmount,
+        0,
+      ),
+    };
+
+    const staffBreakdown = [
+      ...managedStaff.map((staff) => {
+        const debt = debtByStaffId.get(staff.id);
+        return {
+          staffId: staff.id,
+          staffName: getUserFullNameFromParts(staff.user) ?? '',
+          monthlyRevenue: monthlyTopupByStaffId.get(staff.id) ?? 0,
+          debtStudentCount: debt?.debtStudentCount ?? 0,
+          totalDebtAmount: debt?.totalDebtAmount ?? 0,
+        };
+      }),
+      ...(context.includeOwnCustomerCarePortfolio
+        ? [
+            {
+              staffId: assistantStaffId,
+              staffName: '(Tôi)',
+              monthlyRevenue:
+                monthlyTopupByStaffId.get(assistantStaffId) ?? 0,
+              debtStudentCount:
+                debtByStaffId.get(assistantStaffId)?.debtStudentCount ?? 0,
+              totalDebtAmount:
+                debtByStaffId.get(assistantStaffId)?.totalDebtAmount ?? 0,
+            },
+          ]
+        : []),
+    ].sort((left, right) => {
+        if (right.monthlyRevenue !== left.monthlyRevenue) {
+          return right.monthlyRevenue - left.monthlyRevenue;
+        }
+
+        if (right.totalDebtAmount !== left.totalDebtAmount) {
+          return right.totalDebtAmount - left.totalDebtAmount;
+        }
+
+        return left.staffName.localeCompare(right.staffName);
+      });
+
+    return {
+      summary,
+      staffBreakdown,
+    };
   }
 
   private async getAssistantSection(
@@ -2548,12 +2855,14 @@ export class DashboardService {
       hasCustomerCareRole: boolean;
     },
   ): Promise<StaffDashboardAssistantSectionDto> {
+    const builtRange = buildDashboardRange(range.month, range.year);
     const [
       adminDashboard,
       summaryCounts,
       activeTeachers,
       managedCustomerCarePortfolios,
       myCustomerCarePortfolio,
+      salesCs,
     ] = await Promise.all([
       this.getAdminDashboard({
         month: range.month,
@@ -2563,10 +2872,27 @@ export class DashboardService {
       }),
       this.getSummaryCounts(),
       this.getActiveTeacherCount(),
-      this.getManagedCustomerCarePortfolios(context.assistantStaffId),
+      this.getManagedCustomerCarePortfolios(context.assistantStaffId, {
+        monthStart: builtRange.monthStart,
+        monthEnd: builtRange.monthEnd,
+      }),
       context.hasCustomerCareRole
-        ? this.getMyCustomerCarePortfolio(context.assistantStaffId)
+        ? this.getMyCustomerCarePortfolio(context.assistantStaffId, {
+            monthStart: builtRange.monthStart,
+            monthEnd: builtRange.monthEnd,
+          })
         : Promise.resolve(null),
+      this.getSalesCsSummaryForAssistant(
+        context.assistantStaffId,
+        {
+          monthStart: builtRange.monthStart,
+          monthEnd: builtRange.monthEnd,
+          monthKey: builtRange.monthKey,
+        },
+        {
+          includeOwnCustomerCarePortfolio: context.hasCustomerCareRole,
+        },
+      ),
     ]);
 
     const systemSummary: StaffDashboardSystemSummaryDto = {
@@ -2581,6 +2907,8 @@ export class DashboardService {
       myCustomerCarePortfolio,
       managedCustomerCarePortfolios,
       customerCarePortfolios: managedCustomerCarePortfolios,
+      salesCsSummary: salesCs.summary,
+      salesCsStaffBreakdown: salesCs.staffBreakdown,
     };
   }
 

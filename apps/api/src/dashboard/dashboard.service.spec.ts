@@ -2,7 +2,7 @@ jest.mock('../prisma/prisma.service', () => ({
   PrismaService: class PrismaServiceMock {},
 }));
 
-import { StaffRole } from '../../generated/enums';
+import { AttendanceStatus, StaffRole } from '../../generated/enums';
 import { DashboardService } from './dashboard.service';
 
 describe('DashboardService staff training dashboard', () => {
@@ -10,12 +10,26 @@ describe('DashboardService staff training dashboard', () => {
     $queryRaw: jest.fn(),
     class: {
       findMany: jest.fn(),
+      count: jest.fn(),
     },
     makeupScheduleEvent: {
       findMany: jest.fn(),
     },
     studentExamSchedule: {
       findMany: jest.fn(),
+    },
+    staffInfo: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
+    customerCareService: {
+      findMany: jest.fn(),
+    },
+    attendance: {
+      groupBy: jest.fn(),
+    },
+    walletTransactionsHistory: {
+      groupBy: jest.fn(),
     },
   };
   const dashboardCacheService = {
@@ -34,6 +48,11 @@ describe('DashboardService staff training dashboard', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-05-29T05:30:00.000Z'));
     jest.clearAllMocks();
     prisma.$queryRaw.mockResolvedValue([]);
+    prisma.staffInfo.findMany.mockResolvedValue([]);
+    prisma.staffInfo.count.mockResolvedValue(0);
+    prisma.customerCareService.findMany.mockResolvedValue([]);
+    prisma.attendance.groupBy.mockResolvedValue([]);
+    prisma.walletTransactionsHistory.groupBy.mockResolvedValue([]);
     surveyRoundService.getCurrentRound.mockResolvedValue(6);
     service = new DashboardService(
       prisma as never,
@@ -200,5 +219,241 @@ describe('DashboardService staff training dashboard', () => {
         detail: 'Mới nhất: lần 4',
       }),
     ]);
+  });
+});
+
+describe('DashboardService CSKH dashboard clarity', () => {
+  const prisma = {
+    $queryRaw: jest.fn(),
+    class: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
+    makeupScheduleEvent: {
+      findMany: jest.fn(),
+    },
+    studentExamSchedule: {
+      findMany: jest.fn(),
+    },
+    staffInfo: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
+    customerCareService: {
+      findMany: jest.fn(),
+    },
+    attendance: {
+      groupBy: jest.fn(),
+    },
+    walletTransactionsHistory: {
+      groupBy: jest.fn(),
+    },
+  };
+  const dashboardCacheService = {
+    wrapJson: jest.fn(
+      async <T>(options: { loader: () => Promise<T> }): Promise<T> =>
+        options.loader(),
+    ),
+  };
+  const surveyRoundService = {
+    getCurrentRound: jest.fn(async () => 6),
+  };
+
+  let service: DashboardService;
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-15T05:30:00.000Z'));
+    jest.clearAllMocks();
+    prisma.$queryRaw.mockResolvedValue([]);
+    prisma.staffInfo.findMany.mockResolvedValue([]);
+    prisma.staffInfo.count.mockResolvedValue(0);
+    prisma.customerCareService.findMany.mockResolvedValue([]);
+    prisma.attendance.groupBy.mockResolvedValue([]);
+    prisma.walletTransactionsHistory.groupBy.mockResolvedValue([]);
+    surveyRoundService.getCurrentRound.mockResolvedValue(6);
+    service = new DashboardService(
+      prisma as never,
+      dashboardCacheService as never,
+      surveyRoundService as never,
+    );
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('scopes customer-care learned tuition and wallet topups to the selected month', async () => {
+    prisma.customerCareService.findMany.mockResolvedValue([
+      {
+        student: {
+          id: 'student-1',
+          status: 'active',
+          createdAt: new Date('2026-05-01T00:00:00.000Z'),
+          dropOutDate: null,
+        },
+      },
+    ]);
+    prisma.attendance.groupBy.mockResolvedValue([
+      {
+        studentId: 'student-1',
+        _sum: { tuitionFee: 450000 },
+      },
+    ]);
+    prisma.walletTransactionsHistory.groupBy.mockResolvedValue([
+      {
+        studentId: 'student-1',
+        _sum: { amount: 1200000 },
+      },
+    ]);
+
+    const dashboard = await service.getStaffDashboard({
+      staffId: 'cskh-1',
+      staffRoles: [StaffRole.customer_care],
+      query: { month: '05', year: '2026' },
+    });
+
+    expect(dashboard.customerCare).toMatchObject({
+      learnedTuitionTotal: 450000,
+      topupTotal: 1200000,
+    });
+    expect(prisma.attendance.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: {
+            in: [AttendanceStatus.present, AttendanceStatus.excused],
+          },
+          session: {
+            date: {
+              gte: new Date(Date.UTC(2026, 4, 1)),
+              lt: new Date(Date.UTC(2026, 5, 1)),
+            },
+          },
+        }),
+      }),
+    );
+    expect(prisma.walletTransactionsHistory.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdAt: {
+            gte: new Date(Date.UTC(2026, 4, 1)),
+            lt: new Date(Date.UTC(2026, 5, 1)),
+          },
+        }),
+      }),
+    );
+  });
+
+  it('includes a self row in assistant sales breakdown when dual-role', async () => {
+    prisma.staffInfo.findMany.mockImplementation(
+      async (args: {
+        where?: {
+          id?: { in?: string[] };
+          customerCareManagedByStaffId?: string;
+        };
+      }) => {
+        if (args.where?.customerCareManagedByStaffId) {
+          return [
+            {
+              id: 'managed-cskh-1',
+              user: { first_name: 'Lan', last_name: 'CSKH' },
+            },
+          ];
+        }
+
+        if (args.where?.id?.in?.includes('assistant-1')) {
+          return [
+            {
+              id: 'assistant-1',
+              user: { first_name: 'Minh', last_name: 'Trợ lí' },
+            },
+          ];
+        }
+
+        if (args.where?.id?.in?.includes('managed-cskh-1')) {
+          return [
+            {
+              id: 'managed-cskh-1',
+              user: { first_name: 'Lan', last_name: 'CSKH' },
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+    prisma.customerCareService.findMany.mockResolvedValue([
+      {
+        staffId: 'managed-cskh-1',
+        student: { id: 'student-managed', status: 'active' },
+      },
+      {
+        staffId: 'assistant-1',
+        student: { id: 'student-self', status: 'active' },
+      },
+    ]);
+    prisma.$queryRaw.mockImplementation(async (query: { strings: string[] }) => {
+      const sql = query.strings.join('');
+
+      if (sql.includes('scoped_students')) {
+        return [
+          {
+            activeStudentsCount: 2,
+            newStudentsThisMonth: 0,
+            droppedStudentsThisMonth: 0,
+          },
+        ];
+      }
+
+      if (sql.includes('"monthlyRevenue"')) {
+        return [
+          {
+            staffId: 'managed-cskh-1',
+            monthlyRevenue: 5000000,
+          },
+          {
+            staffId: 'assistant-1',
+            monthlyRevenue: 1500000,
+          },
+        ];
+      }
+
+      if (sql.includes('"debtStudentCount"')) {
+        return [
+          {
+            staffId: 'managed-cskh-1',
+            debtStudentCount: 1,
+            totalDebtAmount: 300000,
+          },
+          {
+            staffId: 'assistant-1',
+            debtStudentCount: 0,
+            totalDebtAmount: 0,
+          },
+        ];
+      }
+
+      return [];
+    });
+
+    const dashboard = await service.getStaffDashboard({
+      staffId: 'assistant-1',
+      staffRoles: [StaffRole.assistant, StaffRole.customer_care],
+      query: { month: '05', year: '2026' },
+    });
+
+    expect(dashboard.assistant?.salesCsStaffBreakdown).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          staffId: 'managed-cskh-1',
+          staffName: 'CSKH Lan',
+          monthlyRevenue: 5000000,
+        }),
+        expect.objectContaining({
+          staffId: 'assistant-1',
+          staffName: '(Tôi)',
+          monthlyRevenue: 1500000,
+        }),
+      ]),
+    );
   });
 });
