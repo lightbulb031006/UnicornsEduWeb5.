@@ -17,6 +17,7 @@ import {
 } from "@/components/admin/student";
 import { UserLinkedProfileLinks } from "@/components/admin/user";
 import ParentReceiptEmailSwitch from "@/components/student/ParentReceiptEmailSwitch";
+import OjProgressSection from "@/components/student/OjProgressSection";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
 import type { StudentDetail, StudentGender, StudentStatus } from "@/dtos/student.dto";
 import {
@@ -908,6 +909,7 @@ export default function AdminStudentDetailPage() {
                 </div>
             </section>
 
+            <OjProgressSection studentName={student.fullName ?? ""} />
         </div>
     );
 }

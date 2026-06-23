@@ -16,6 +16,7 @@ import {
 } from "@/components/admin/student";
 import ParentReceiptEmailSwitch from "@/components/student/ParentReceiptEmailSwitch";
 import { StudentDashboardSkeleton } from "@/components/student/StudentDashboardSkeleton";
+import OjProgressSection from "@/components/student/OjProgressSection";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
 import type {
     StudentGender,
@@ -990,6 +991,8 @@ export default function StudentSelfPage() {
                     </div>
                 </div>
             </section>
+
+            <OjProgressSection studentName={student.fullName ?? ""} />
         </div>
     );
 }
