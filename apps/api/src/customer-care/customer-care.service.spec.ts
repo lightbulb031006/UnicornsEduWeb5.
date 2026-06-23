@@ -6,10 +6,7 @@ jest.mock('src/payroll/deduction-rates', () => ({
   resolveTaxDeductionRate: jest.fn().mockResolvedValue(10),
 }));
 
-import {
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import {
   PaymentStatus,
   StaffRole,
@@ -47,7 +44,8 @@ describe('CustomerCareService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.$transaction.mockImplementation(
-      async (callback: (tx: typeof mockPrisma) => unknown) => callback(mockPrisma),
+      async (callback: (tx: typeof mockPrisma) => unknown) =>
+        callback(mockPrisma),
     );
     mockPrisma.attendance.findMany.mockResolvedValue([]);
     mockPrisma.attendance.updateMany.mockResolvedValue({ count: 0 });

@@ -1288,20 +1288,22 @@ describe('StaffService', () => {
       id: 'staff-1',
       roles: [StaffRole.communication],
     });
-    jest.spyOn(service as any, 'loadAllPendingPaymentPreviewDraftRecords').mockResolvedValue([
-      {
-        id: 'bonus-old',
-        role: null,
-        sourceType: 'bonus',
-        sourceLabel: 'Thưởng',
-        label: 'Truyền thông',
-        secondaryLabel: '2026-02',
-        date: null,
-        currentStatus: PaymentStatus.pending,
-        grossAmount: 7000,
-        operatingAmount: 0,
-      },
-    ]);
+    jest
+      .spyOn(service as any, 'loadAllPendingPaymentPreviewDraftRecords')
+      .mockResolvedValue([
+        {
+          id: 'bonus-old',
+          role: null,
+          sourceType: 'bonus',
+          sourceLabel: 'Thưởng',
+          label: 'Truyền thông',
+          secondaryLabel: '2026-02',
+          date: null,
+          currentStatus: PaymentStatus.pending,
+          grossAmount: 7000,
+          operatingAmount: 0,
+        },
+      ]);
 
     const result = await service.getPaymentPreview('staff-1', {
       month: '03',

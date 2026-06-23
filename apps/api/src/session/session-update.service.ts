@@ -343,10 +343,7 @@ export class SessionUpdateService {
     this.sessionValidationService.validateAttendanceItems(data.attendance, {
       required: false,
     });
-    if (
-      data.lessonContent !== undefined ||
-      data.homework !== undefined
-    ) {
+    if (data.lessonContent !== undefined || data.homework !== undefined) {
       this.sessionValidationService.validateSessionCommentFields(
         {
           lessonContent: data.lessonContent,
@@ -474,7 +471,11 @@ export class SessionUpdateService {
         let allowanceAmountUpdate: number | null | undefined;
         let classTeacherForAllowance: {
           customAllowance: number | null;
-          operatingDeductionRatePercent?: Prisma.Decimal | number | string | null;
+          operatingDeductionRatePercent?:
+            | Prisma.Decimal
+            | number
+            | string
+            | null;
           class: {
             name: string;
             allowancePerSessionPerStudent: number;
@@ -653,8 +654,7 @@ export class SessionUpdateService {
             })
           ) {
             allowanceAmountUpdate = computeDefaultSessionAllowanceAmountVnd({
-              perStudentAllowance:
-                existingSession.snapshotPerStudentAllowance,
+              perStudentAllowance: existingSession.snapshotPerStudentAllowance,
               classDefaultPerStudent: null,
               scaleAmount: existingSession.snapshotScaleAmount,
               chargeableStudentCount: chargeableAttendanceStudentIds.length,
@@ -692,11 +692,9 @@ export class SessionUpdateService {
             }
             if (classTeacherForAllowance) {
               allowanceAmountUpdate = computeDefaultSessionAllowanceAmountVnd({
-                perStudentAllowance:
-                  classTeacherForAllowance.customAllowance,
+                perStudentAllowance: classTeacherForAllowance.customAllowance,
                 classDefaultPerStudent:
-                  classTeacherForAllowance.class
-                    .allowancePerSessionPerStudent,
+                  classTeacherForAllowance.class.allowancePerSessionPerStudent,
                 scaleAmount: classTeacherForAllowance.class.scaleAmount,
                 chargeableStudentCount: chargeableAttendanceStudentIds.length,
               });

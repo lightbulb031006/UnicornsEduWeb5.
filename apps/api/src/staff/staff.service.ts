@@ -2684,12 +2684,13 @@ export class StaffService {
     isAssistant: boolean,
   ): Promise<Map<StaffRole, number>> {
     const db = this.prisma;
-    const draftRecords = await this.loadNonTeacherNonBonusPendingPreviewDraftRecords(
-      db,
-      staffId,
-      roles,
-      isAssistant,
-    );
+    const draftRecords =
+      await this.loadNonTeacherNonBonusPendingPreviewDraftRecords(
+        db,
+        staffId,
+        roles,
+        isAssistant,
+      );
 
     if (draftRecords.length === 0) {
       return new Map();
@@ -3416,98 +3417,249 @@ export class StaffService {
     auditActor: ActionHistoryActor | undefined,
     auditScope: 'all' | 'selected',
   ): Promise<StaffPayAllPaymentsResultDto> {
-      const teacherSessionIds = records
-        .filter((record) => record.sourceType === 'teacher_session')
-        .map((record) => record.id);
-      const customerCareAttendanceIds = records
-        .filter((record) => record.sourceType === 'customer_care')
-        .map((record) => record.id);
-      const assistantAttendanceIds = records
-        .filter((record) => record.sourceType === 'assistant_share')
-        .map((record) => record.id);
-      const lessonOutputIds = records
-        .filter((record) => record.sourceType === 'lesson_output')
-        .map((record) => record.id);
-      const extraAllowanceIds = records
-        .filter((record) => record.sourceType === 'extra_allowance')
-        .map((record) => record.id);
-      const bonusIds = records
-        .filter((record) => record.sourceType === 'bonus')
-        .map((record) => record.id);
-      const teacherTaxRatePercent =
-        records.find((record) => record.sourceType === 'teacher_session')
-          ?.taxRatePercent ?? 0;
-      const customerCareTaxRatePercent =
-        records.find((record) => record.sourceType === 'customer_care')
-          ?.taxRatePercent ?? 0;
-      const assistantTaxRatePercent =
-        records.find((record) => record.sourceType === 'assistant_share')
-          ?.taxRatePercent ?? 0;
-      const lessonOutputTaxRatePercent =
-        records.find((record) => record.sourceType === 'lesson_output')
-          ?.taxRatePercent ?? 0;
-      const extraAllowanceIdsByRole = records
-        .filter(
-          (record): record is StaffPaymentPreviewRecord & { role: StaffRole } =>
-            record.sourceType === 'extra_allowance' && record.role != null,
-        )
-        .reduce<Map<StaffRole, { ids: string[]; taxRatePercent: number }>>(
-          (grouped, record) => {
-            const current = grouped.get(record.role) ?? {
-              ids: [],
-              taxRatePercent: record.taxRatePercent,
-            };
-            current.ids.push(record.id);
-            grouped.set(record.role, current);
-            return grouped;
-          },
-          new Map(),
-        );
+    const teacherSessionIds = records
+      .filter((record) => record.sourceType === 'teacher_session')
+      .map((record) => record.id);
+    const customerCareAttendanceIds = records
+      .filter((record) => record.sourceType === 'customer_care')
+      .map((record) => record.id);
+    const assistantAttendanceIds = records
+      .filter((record) => record.sourceType === 'assistant_share')
+      .map((record) => record.id);
+    const lessonOutputIds = records
+      .filter((record) => record.sourceType === 'lesson_output')
+      .map((record) => record.id);
+    const extraAllowanceIds = records
+      .filter((record) => record.sourceType === 'extra_allowance')
+      .map((record) => record.id);
+    const bonusIds = records
+      .filter((record) => record.sourceType === 'bonus')
+      .map((record) => record.id);
+    const teacherTaxRatePercent =
+      records.find((record) => record.sourceType === 'teacher_session')
+        ?.taxRatePercent ?? 0;
+    const customerCareTaxRatePercent =
+      records.find((record) => record.sourceType === 'customer_care')
+        ?.taxRatePercent ?? 0;
+    const assistantTaxRatePercent =
+      records.find((record) => record.sourceType === 'assistant_share')
+        ?.taxRatePercent ?? 0;
+    const lessonOutputTaxRatePercent =
+      records.find((record) => record.sourceType === 'lesson_output')
+        ?.taxRatePercent ?? 0;
+    const extraAllowanceIdsByRole = records
+      .filter(
+        (record): record is StaffPaymentPreviewRecord & { role: StaffRole } =>
+          record.sourceType === 'extra_allowance' && record.role != null,
+      )
+      .reduce<Map<StaffRole, { ids: string[]; taxRatePercent: number }>>(
+        (grouped, record) => {
+          const current = grouped.get(record.role) ?? {
+            ids: [],
+            taxRatePercent: record.taxRatePercent,
+          };
+          current.ids.push(record.id);
+          grouped.set(record.role, current);
+          return grouped;
+        },
+        new Map(),
+      );
 
-      if (records.length === 0) {
-        return {
-          staffId: id,
-          month: monthKey,
-          requestedItemCount: 0,
-          updatedCount: 0,
-          updatedBySource: [],
-        };
+    if (records.length === 0) {
+      return {
+        staffId: id,
+        month: monthKey,
+        requestedItemCount: 0,
+        updatedCount: 0,
+        updatedBySource: [],
+      };
+    }
+
+    const auditDescriptions = {
+      teacher_session:
+        auditScope === 'all'
+          ? 'Thanh toán toàn bộ khoản dạy học'
+          : 'Thanh toán khoản dạy học đã chọn',
+      customer_care:
+        auditScope === 'all'
+          ? 'Thanh toán toàn bộ hoa hồng CSKH'
+          : 'Thanh toán hoa hồng CSKH đã chọn',
+      assistant_share:
+        auditScope === 'all'
+          ? 'Thanh toán toàn bộ phần chia trợ lí'
+          : 'Thanh toán phần chia trợ lí đã chọn',
+      lesson_output:
+        auditScope === 'all'
+          ? 'Thanh toán toàn bộ lesson output'
+          : 'Thanh toán lesson output đã chọn',
+      extra_allowance:
+        auditScope === 'all'
+          ? 'Thanh toán toàn bộ trợ cấp thêm'
+          : 'Thanh toán trợ cấp thêm đã chọn',
+      bonus:
+        auditScope === 'all'
+          ? 'Thanh toán toàn bộ khoản thưởng'
+          : 'Thanh toán khoản thưởng đã chọn',
+    } as const;
+
+    const [
+      sessionBeforeSnapshots,
+      customerCareBeforeSnapshots,
+      assistantBeforeSnapshots,
+      lessonOutputBeforeSnapshots,
+      extraAllowanceBeforeSnapshots,
+      bonusBeforeSnapshots,
+    ] = await Promise.all([
+      this.getSessionPaymentSnapshots(tx, teacherSessionIds),
+      this.getAttendancePaymentSnapshots(tx, customerCareAttendanceIds),
+      this.getAttendancePaymentSnapshots(tx, assistantAttendanceIds),
+      this.getLessonOutputSnapshots(tx, lessonOutputIds),
+      this.getExtraAllowanceSnapshots(tx, extraAllowanceIds),
+      this.getBonusSnapshots(tx, bonusIds),
+    ]);
+
+    const sourceResults: StaffPaymentSourceResult[] = [];
+
+    if (teacherSessionIds.length > 0) {
+      // Group by operatingRatePercent (per-class; teacher tax rate is the same across all sessions)
+      const teacherSessionRecords = records.filter(
+        (record) => record.sourceType === 'teacher_session',
+      );
+      const byOperatingRate = new Map<number, string[]>();
+      teacherSessionRecords.forEach((record) => {
+        const rate = record.operatingRatePercent;
+        const ids = byOperatingRate.get(rate) ?? [];
+        ids.push(record.id);
+        byOperatingRate.set(rate, ids);
+      });
+
+      let updatedSessionCount = 0;
+      for (const [operatingRatePercent, ids] of byOperatingRate) {
+        const result = await tx.session.updateMany({
+          where: { id: { in: ids } },
+          data: {
+            teacherTaxDeductionRatePercent: teacherTaxRatePercent,
+            teacherOperatingDeductionRatePercent: operatingRatePercent,
+            teacherPaymentStatus: 'paid',
+          },
+        });
+        updatedSessionCount += result.count;
+      }
+      sourceResults.push({
+        sourceType: 'teacher_session',
+        sourceLabel: 'Buổi dạy',
+        updatedCount: updatedSessionCount,
+      });
+    }
+
+    if (customerCareAttendanceIds.length > 0) {
+      const updateResult = await tx.attendance.updateMany({
+        where: {
+          id: {
+            in: customerCareAttendanceIds,
+          },
+        },
+        data: {
+          customerCareTaxDeductionRatePercent: customerCareTaxRatePercent,
+          customerCarePaymentStatus: PaymentStatus.paid,
+        },
+      });
+      sourceResults.push({
+        sourceType: 'customer_care',
+        sourceLabel: 'Hoa hồng CSKH',
+        updatedCount: updateResult.count,
+      });
+    }
+
+    if (assistantAttendanceIds.length > 0) {
+      const updateResult = await tx.attendance.updateMany({
+        where: {
+          id: {
+            in: assistantAttendanceIds,
+          },
+        },
+        data: {
+          assistantTaxDeductionRatePercent: assistantTaxRatePercent,
+          assistantPaymentStatus: PaymentStatus.paid,
+        },
+      });
+      sourceResults.push({
+        sourceType: 'assistant_share',
+        sourceLabel: 'Phần chia trợ lí 3%',
+        updatedCount: updateResult.count,
+      });
+    }
+
+    if (lessonOutputIds.length > 0) {
+      const updateResult = await tx.lessonOutput.updateMany({
+        where: {
+          id: {
+            in: lessonOutputIds,
+          },
+        },
+        data: {
+          taxDeductionRatePercent: lessonOutputTaxRatePercent,
+          paymentStatus: PaymentStatus.paid,
+        },
+      });
+      sourceResults.push({
+        sourceType: 'lesson_output',
+        sourceLabel: 'Lesson output',
+        updatedCount: updateResult.count,
+      });
+    }
+
+    if (extraAllowanceIds.length > 0) {
+      let updatedCount = 0;
+
+      for (const { ids, taxRatePercent } of extraAllowanceIdsByRole.values()) {
+        const updateResult = await tx.extraAllowance.updateMany({
+          where: {
+            id: {
+              in: ids,
+            },
+          },
+          data: {
+            taxDeductionRatePercent: taxRatePercent,
+            status: PaymentStatus.paid,
+          },
+        });
+        updatedCount += updateResult.count;
       }
 
-      const auditDescriptions = {
-        teacher_session:
-          auditScope === 'all'
-            ? 'Thanh toán toàn bộ khoản dạy học'
-            : 'Thanh toán khoản dạy học đã chọn',
-        customer_care:
-          auditScope === 'all'
-            ? 'Thanh toán toàn bộ hoa hồng CSKH'
-            : 'Thanh toán hoa hồng CSKH đã chọn',
-        assistant_share:
-          auditScope === 'all'
-            ? 'Thanh toán toàn bộ phần chia trợ lí'
-            : 'Thanh toán phần chia trợ lí đã chọn',
-        lesson_output:
-          auditScope === 'all'
-            ? 'Thanh toán toàn bộ lesson output'
-            : 'Thanh toán lesson output đã chọn',
-        extra_allowance:
-          auditScope === 'all'
-            ? 'Thanh toán toàn bộ trợ cấp thêm'
-            : 'Thanh toán trợ cấp thêm đã chọn',
-        bonus:
-          auditScope === 'all'
-            ? 'Thanh toán toàn bộ khoản thưởng'
-            : 'Thanh toán khoản thưởng đã chọn',
-      } as const;
+      sourceResults.push({
+        sourceType: 'extra_allowance',
+        sourceLabel: 'Trợ cấp thêm',
+        updatedCount,
+      });
+    }
 
+    if (bonusIds.length > 0) {
+      const updateResult = await tx.bonus.updateMany({
+        where: {
+          id: {
+            in: bonusIds,
+          },
+        },
+        data: {
+          status: PaymentStatus.paid,
+        },
+      });
+      sourceResults.push({
+        sourceType: 'bonus',
+        sourceLabel: 'Thưởng',
+        updatedCount: updateResult.count,
+      });
+    }
+
+    if (auditActor) {
       const [
-        sessionBeforeSnapshots,
-        customerCareBeforeSnapshots,
-        assistantBeforeSnapshots,
-        lessonOutputBeforeSnapshots,
-        extraAllowanceBeforeSnapshots,
-        bonusBeforeSnapshots,
+        sessionAfterSnapshots,
+        customerCareAfterSnapshots,
+        assistantAfterSnapshots,
+        lessonOutputAfterSnapshots,
+        extraAllowanceAfterSnapshots,
+        bonusAfterSnapshots,
       ] = await Promise.all([
         this.getSessionPaymentSnapshots(tx, teacherSessionIds),
         this.getAttendancePaymentSnapshots(tx, customerCareAttendanceIds),
@@ -3517,239 +3669,85 @@ export class StaffService {
         this.getBonusSnapshots(tx, bonusIds),
       ]);
 
-      const sourceResults: StaffPaymentSourceResult[] = [];
-
-      if (teacherSessionIds.length > 0) {
-        // Group by operatingRatePercent (per-class; teacher tax rate is the same across all sessions)
-        const teacherSessionRecords = records.filter(
-          (record) => record.sourceType === 'teacher_session',
-        );
-        const byOperatingRate = new Map<number, string[]>();
-        teacherSessionRecords.forEach((record) => {
-          const rate = record.operatingRatePercent;
-          const ids = byOperatingRate.get(rate) ?? [];
-          ids.push(record.id);
-          byOperatingRate.set(rate, ids);
-        });
-
-        let updatedSessionCount = 0;
-        for (const [operatingRatePercent, ids] of byOperatingRate) {
-          const result = await tx.session.updateMany({
-            where: { id: { in: ids } },
-            data: {
-              teacherTaxDeductionRatePercent: teacherTaxRatePercent,
-              teacherOperatingDeductionRatePercent: operatingRatePercent,
-              teacherPaymentStatus: 'paid',
-            },
-          });
-          updatedSessionCount += result.count;
-        }
-        sourceResults.push({
-          sourceType: 'teacher_session',
-          sourceLabel: 'Buổi dạy',
-          updatedCount: updatedSessionCount,
+      for (const sessionId of teacherSessionIds) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'session',
+          entityId: sessionId,
+          description: auditDescriptions.teacher_session,
+          beforeValue: sessionBeforeSnapshots.get(sessionId) ?? null,
+          afterValue: sessionAfterSnapshots.get(sessionId) ?? null,
         });
       }
 
-      if (customerCareAttendanceIds.length > 0) {
-        const updateResult = await tx.attendance.updateMany({
-          where: {
-            id: {
-              in: customerCareAttendanceIds,
-            },
-          },
-          data: {
-            customerCareTaxDeductionRatePercent: customerCareTaxRatePercent,
-            customerCarePaymentStatus: PaymentStatus.paid,
-          },
-        });
-        sourceResults.push({
-          sourceType: 'customer_care',
-          sourceLabel: 'Hoa hồng CSKH',
-          updatedCount: updateResult.count,
+      for (const attendanceId of customerCareAttendanceIds) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'attendance',
+          entityId: attendanceId,
+          description: auditDescriptions.customer_care,
+          beforeValue: customerCareBeforeSnapshots.get(attendanceId) ?? null,
+          afterValue: customerCareAfterSnapshots.get(attendanceId) ?? null,
         });
       }
 
-      if (assistantAttendanceIds.length > 0) {
-        const updateResult = await tx.attendance.updateMany({
-          where: {
-            id: {
-              in: assistantAttendanceIds,
-            },
-          },
-          data: {
-            assistantTaxDeductionRatePercent: assistantTaxRatePercent,
-            assistantPaymentStatus: PaymentStatus.paid,
-          },
-        });
-        sourceResults.push({
-          sourceType: 'assistant_share',
-          sourceLabel: 'Phần chia trợ lí 3%',
-          updatedCount: updateResult.count,
+      for (const attendanceId of assistantAttendanceIds) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'attendance',
+          entityId: attendanceId,
+          description: auditDescriptions.assistant_share,
+          beforeValue: assistantBeforeSnapshots.get(attendanceId) ?? null,
+          afterValue: assistantAfterSnapshots.get(attendanceId) ?? null,
         });
       }
 
-      if (lessonOutputIds.length > 0) {
-        const updateResult = await tx.lessonOutput.updateMany({
-          where: {
-            id: {
-              in: lessonOutputIds,
-            },
-          },
-          data: {
-            taxDeductionRatePercent: lessonOutputTaxRatePercent,
-            paymentStatus: PaymentStatus.paid,
-          },
-        });
-        sourceResults.push({
-          sourceType: 'lesson_output',
-          sourceLabel: 'Lesson output',
-          updatedCount: updateResult.count,
+      for (const outputId of lessonOutputIds) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'lesson_output',
+          entityId: outputId,
+          description: auditDescriptions.lesson_output,
+          beforeValue: lessonOutputBeforeSnapshots.get(outputId) ?? null,
+          afterValue: lessonOutputAfterSnapshots.get(outputId) ?? null,
         });
       }
 
-      if (extraAllowanceIds.length > 0) {
-        let updatedCount = 0;
-
-        for (const {
-          ids,
-          taxRatePercent,
-        } of extraAllowanceIdsByRole.values()) {
-          const updateResult = await tx.extraAllowance.updateMany({
-            where: {
-              id: {
-                in: ids,
-              },
-            },
-            data: {
-              taxDeductionRatePercent: taxRatePercent,
-              status: PaymentStatus.paid,
-            },
-          });
-          updatedCount += updateResult.count;
-        }
-
-        sourceResults.push({
-          sourceType: 'extra_allowance',
-          sourceLabel: 'Trợ cấp thêm',
-          updatedCount,
+      for (const allowanceId of extraAllowanceIds) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'extra_allowance',
+          entityId: allowanceId,
+          description: auditDescriptions.extra_allowance,
+          beforeValue: extraAllowanceBeforeSnapshots.get(allowanceId) ?? null,
+          afterValue: extraAllowanceAfterSnapshots.get(allowanceId) ?? null,
         });
       }
 
-      if (bonusIds.length > 0) {
-        const updateResult = await tx.bonus.updateMany({
-          where: {
-            id: {
-              in: bonusIds,
-            },
-          },
-          data: {
-            status: PaymentStatus.paid,
-          },
-        });
-        sourceResults.push({
-          sourceType: 'bonus',
-          sourceLabel: 'Thưởng',
-          updatedCount: updateResult.count,
+      for (const bonusId of bonusIds) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'bonus',
+          entityId: bonusId,
+          description: auditDescriptions.bonus,
+          beforeValue: bonusBeforeSnapshots.get(bonusId) ?? null,
+          afterValue: bonusAfterSnapshots.get(bonusId) ?? null,
         });
       }
+    }
 
-      if (auditActor) {
-        const [
-          sessionAfterSnapshots,
-          customerCareAfterSnapshots,
-          assistantAfterSnapshots,
-          lessonOutputAfterSnapshots,
-          extraAllowanceAfterSnapshots,
-          bonusAfterSnapshots,
-        ] = await Promise.all([
-          this.getSessionPaymentSnapshots(tx, teacherSessionIds),
-          this.getAttendancePaymentSnapshots(tx, customerCareAttendanceIds),
-          this.getAttendancePaymentSnapshots(tx, assistantAttendanceIds),
-          this.getLessonOutputSnapshots(tx, lessonOutputIds),
-          this.getExtraAllowanceSnapshots(tx, extraAllowanceIds),
-          this.getBonusSnapshots(tx, bonusIds),
-        ]);
-
-        for (const sessionId of teacherSessionIds) {
-          await this.actionHistoryService.recordUpdate(tx, {
-            actor: auditActor,
-            entityType: 'session',
-            entityId: sessionId,
-            description: auditDescriptions.teacher_session,
-            beforeValue: sessionBeforeSnapshots.get(sessionId) ?? null,
-            afterValue: sessionAfterSnapshots.get(sessionId) ?? null,
-          });
-        }
-
-        for (const attendanceId of customerCareAttendanceIds) {
-          await this.actionHistoryService.recordUpdate(tx, {
-            actor: auditActor,
-            entityType: 'attendance',
-            entityId: attendanceId,
-            description: auditDescriptions.customer_care,
-            beforeValue: customerCareBeforeSnapshots.get(attendanceId) ?? null,
-            afterValue: customerCareAfterSnapshots.get(attendanceId) ?? null,
-          });
-        }
-
-        for (const attendanceId of assistantAttendanceIds) {
-          await this.actionHistoryService.recordUpdate(tx, {
-            actor: auditActor,
-            entityType: 'attendance',
-            entityId: attendanceId,
-            description: auditDescriptions.assistant_share,
-            beforeValue: assistantBeforeSnapshots.get(attendanceId) ?? null,
-            afterValue: assistantAfterSnapshots.get(attendanceId) ?? null,
-          });
-        }
-
-        for (const outputId of lessonOutputIds) {
-          await this.actionHistoryService.recordUpdate(tx, {
-            actor: auditActor,
-            entityType: 'lesson_output',
-            entityId: outputId,
-            description: auditDescriptions.lesson_output,
-            beforeValue: lessonOutputBeforeSnapshots.get(outputId) ?? null,
-            afterValue: lessonOutputAfterSnapshots.get(outputId) ?? null,
-          });
-        }
-
-        for (const allowanceId of extraAllowanceIds) {
-          await this.actionHistoryService.recordUpdate(tx, {
-            actor: auditActor,
-            entityType: 'extra_allowance',
-            entityId: allowanceId,
-            description: auditDescriptions.extra_allowance,
-            beforeValue: extraAllowanceBeforeSnapshots.get(allowanceId) ?? null,
-            afterValue: extraAllowanceAfterSnapshots.get(allowanceId) ?? null,
-          });
-        }
-
-        for (const bonusId of bonusIds) {
-          await this.actionHistoryService.recordUpdate(tx, {
-            actor: auditActor,
-            entityType: 'bonus',
-            entityId: bonusId,
-            description: auditDescriptions.bonus,
-            beforeValue: bonusBeforeSnapshots.get(bonusId) ?? null,
-            afterValue: bonusAfterSnapshots.get(bonusId) ?? null,
-          });
-        }
-      }
-
-      return {
-        staffId: id,
-        month: monthKey,
-        requestedItemCount,
-        updatedCount: sourceResults.reduce(
-          (sum, sourceResult) => sum + sourceResult.updatedCount,
-          0,
-        ),
-        updatedBySource: sourceResults.filter(
-          (sourceResult) => sourceResult.updatedCount > 0,
-        ),
-      };
+    return {
+      staffId: id,
+      month: monthKey,
+      requestedItemCount,
+      updatedCount: sourceResults.reduce(
+        (sum, sourceResult) => sum + sourceResult.updatedCount,
+        0,
+      ),
+      updatedBySource: sourceResults.filter(
+        (sourceResult) => sourceResult.updatedCount > 0,
+      ),
+    };
   }
 
   /**
@@ -4576,13 +4574,12 @@ export class StaffService {
       const staffWithDisplayFields =
         await this.attachStaffUserDisplayFields(staff);
 
-      const sanitizedManagedByStaffId =
-        isSelfManagedCustomerCareStaff({
-          staffId: staff.id,
-          customerCareManagedByStaffId: staff.customerCareManagedByStaffId,
-        })
-          ? null
-          : staff.customerCareManagedByStaffId;
+      const sanitizedManagedByStaffId = isSelfManagedCustomerCareStaff({
+        staffId: staff.id,
+        customerCareManagedByStaffId: staff.customerCareManagedByStaffId,
+      })
+        ? null
+        : staff.customerCareManagedByStaffId;
 
       return {
         ...staffWithDisplayFields,
@@ -4860,8 +4857,7 @@ export class StaffService {
     if (data.user_id != null) payload.userId = data.user_id;
     if (data.status != null) payload.status = data.status;
 
-    const nextRoles = ((data.roles ?? existingStaff.roles) ??
-      []) as StaffRole[];
+    const nextRoles = data.roles ?? existingStaff.roles ?? [];
     const resolvedManagedByStaffId =
       this.resolveCustomerCareManagedByStaffIdForWrite({
         staffId: data.id,

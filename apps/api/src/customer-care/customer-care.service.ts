@@ -43,7 +43,10 @@ type CustomerCareCommissionAggregateRow = {
   paidCommission: unknown;
 };
 
-function parseMonthRange(monthKey: string): { start: Date; endExclusive: Date } {
+function parseMonthRange(monthKey: string): {
+  start: Date;
+  endExclusive: Date;
+} {
   const matched = /^(\d{4})-(\d{2})$/.exec(monthKey.trim());
   if (!matched) {
     throw new BadRequestException('month must use YYYY-MM format.');
@@ -382,9 +385,7 @@ export class CustomerCareService {
   } {
     if (scope === 'month') {
       if (!query.month?.trim()) {
-        throw new BadRequestException(
-          'month is required when scope is month.',
-        );
+        throw new BadRequestException('month is required when scope is month.');
       }
 
       const { start, endExclusive } = parseMonthRange(query.month);

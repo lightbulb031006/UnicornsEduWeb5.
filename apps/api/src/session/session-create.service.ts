@@ -203,13 +203,12 @@ export class SessionCreateService {
           this.sessionValidationService.normalizeCoefficient(
             data.coefficient,
           ) ?? 1.0;
-        const snapshotPerStudentAllowance = resolveSnapshotPerStudentAllowanceVnd(
-          {
+        const snapshotPerStudentAllowance =
+          resolveSnapshotPerStudentAllowanceVnd({
             customAllowance: classTeacher.customAllowance,
             classDefaultPerStudent:
               classTeacher.class.allowancePerSessionPerStudent,
-          },
-        );
+          });
         const snapshotScaleAmount = resolveSnapshotScaleAmountVnd(
           classTeacher.class.scaleAmount,
         );

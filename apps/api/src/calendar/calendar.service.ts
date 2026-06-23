@@ -300,9 +300,7 @@ export class CalendarService {
     }
 
     if (!normalizedEntryId || !normalizedOriginalDate) {
-      throw new BadRequestException(
-        'Vui lòng nhập ngày gốc cần học bù.',
-      );
+      throw new BadRequestException('Vui lòng nhập ngày gốc cần học bù.');
     }
 
     const cls = await this.prisma.class.findUnique({
@@ -2594,10 +2592,7 @@ export class CalendarService {
       dto.originalDate,
     );
 
-    if (
-      baseline.baselineScheduleEntryId &&
-      baseline.originalDate
-    ) {
+    if (baseline.baselineScheduleEntryId && baseline.originalDate) {
       await this.missedTeachingExplanationService.assertExplanationExists(
         dto.classId,
         baseline.baselineScheduleEntryId,

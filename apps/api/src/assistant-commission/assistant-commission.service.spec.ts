@@ -272,11 +272,7 @@ describe('AssistantCommissionService', () => {
     });
 
     await expect(
-      service.getManagedCustomerCare(
-        'admin-user',
-        UserRole.admin,
-        'staff-1',
-      ),
+      service.getManagedCustomerCare('admin-user', UserRole.admin, 'staff-1'),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 

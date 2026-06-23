@@ -391,49 +391,51 @@ describe('DashboardService CSKH dashboard clarity', () => {
         student: { id: 'student-self', status: 'active' },
       },
     ]);
-    prisma.$queryRaw.mockImplementation(async (query: { strings: string[] }) => {
-      const sql = query.strings.join('');
+    prisma.$queryRaw.mockImplementation(
+      async (query: { strings: string[] }) => {
+        const sql = query.strings.join('');
 
-      if (sql.includes('scoped_students')) {
-        return [
-          {
-            activeStudentsCount: 2,
-            newStudentsThisMonth: 0,
-            droppedStudentsThisMonth: 0,
-          },
-        ];
-      }
+        if (sql.includes('scoped_students')) {
+          return [
+            {
+              activeStudentsCount: 2,
+              newStudentsThisMonth: 0,
+              droppedStudentsThisMonth: 0,
+            },
+          ];
+        }
 
-      if (sql.includes('"monthlyRevenue"')) {
-        return [
-          {
-            staffId: 'managed-cskh-1',
-            monthlyRevenue: 5000000,
-          },
-          {
-            staffId: 'assistant-1',
-            monthlyRevenue: 1500000,
-          },
-        ];
-      }
+        if (sql.includes('"monthlyRevenue"')) {
+          return [
+            {
+              staffId: 'managed-cskh-1',
+              monthlyRevenue: 5000000,
+            },
+            {
+              staffId: 'assistant-1',
+              monthlyRevenue: 1500000,
+            },
+          ];
+        }
 
-      if (sql.includes('"debtStudentCount"')) {
-        return [
-          {
-            staffId: 'managed-cskh-1',
-            debtStudentCount: 1,
-            totalDebtAmount: 300000,
-          },
-          {
-            staffId: 'assistant-1',
-            debtStudentCount: 0,
-            totalDebtAmount: 0,
-          },
-        ];
-      }
+        if (sql.includes('"debtStudentCount"')) {
+          return [
+            {
+              staffId: 'managed-cskh-1',
+              debtStudentCount: 1,
+              totalDebtAmount: 300000,
+            },
+            {
+              staffId: 'assistant-1',
+              debtStudentCount: 0,
+              totalDebtAmount: 0,
+            },
+          ];
+        }
 
-      return [];
-    });
+        return [];
+      },
+    );
 
     const dashboard = await service.getStaffDashboard({
       staffId: 'assistant-1',

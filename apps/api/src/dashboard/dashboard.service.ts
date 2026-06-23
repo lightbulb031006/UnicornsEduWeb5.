@@ -2560,9 +2560,8 @@ export class DashboardService {
     assistantStaffId: string,
     range: { monthStart: Date; monthEnd: Date },
   ): Promise<StaffDashboardCustomerCarePortfolioItemDto[]> {
-    const managedStaff = await this.getManagedCustomerCareStaffRecords(
-      assistantStaffId,
-    );
+    const managedStaff =
+      await this.getManagedCustomerCareStaffRecords(assistantStaffId);
 
     if (managedStaff.length === 0) {
       return [];
@@ -2611,7 +2610,9 @@ export class DashboardService {
       >();
     }
 
-    const rows = await this.prisma.$queryRaw<CustomerCareStaffDebtAggregateRow[]>(
+    const rows = await this.prisma.$queryRaw<
+      CustomerCareStaffDebtAggregateRow[]
+    >(
       Prisma.sql`
         WITH student_debt AS (
           SELECT
@@ -2655,7 +2656,9 @@ export class DashboardService {
       return new Map<string, number>();
     }
 
-    const rows = await this.prisma.$queryRaw<CustomerCareStaffMonthlyTopupRow[]>(
+    const rows = await this.prisma.$queryRaw<
+      CustomerCareStaffMonthlyTopupRow[]
+    >(
       Prisma.sql`
         SELECT
           customer_care_service.staff_id AS "staffId",
@@ -2699,9 +2702,8 @@ export class DashboardService {
       };
     }
 
-    const { periodStartStr, periodEndExclusiveStr } = buildCalendarPeriodStrings(
-      range.monthKey,
-    );
+    const { periodStartStr, periodEndExclusiveStr } =
+      buildCalendarPeriodStrings(range.monthKey);
 
     const rows = await this.prisma.$queryRaw<CustomerCareStudentMetricsRow[]>(
       Prisma.sql`
@@ -2752,9 +2754,8 @@ export class DashboardService {
     summary: StaffDashboardSalesCsSummaryDto;
     staffBreakdown: StaffDashboardSalesCsStaffItemDto[];
   }> {
-    const managedStaff = await this.getManagedCustomerCareStaffRecords(
-      assistantStaffId,
-    );
+    const managedStaff =
+      await this.getManagedCustomerCareStaffRecords(assistantStaffId);
     const managedStaffIds = managedStaff.map((staff) => staff.id);
     const staffIdsForMetrics = context.includeOwnCustomerCarePortfolio
       ? Array.from(new Set([...managedStaffIds, assistantStaffId]))
@@ -2775,10 +2776,7 @@ export class DashboardService {
 
     const [studentMetrics, debtByStaffId, monthlyTopupByStaffId] =
       await Promise.all([
-        this.getCustomerCareStudentMetricsByStaffIds(
-          staffIdsForMetrics,
-          range,
-        ),
+        this.getCustomerCareStudentMetricsByStaffIds(staffIdsForMetrics, range),
         this.getDebtAggregateByCustomerCareStaffIds(staffIdsForMetrics),
         this.getMonthlyTopupByCustomerCareStaffIds(
           context.includeOwnCustomerCarePortfolio
@@ -2818,8 +2816,7 @@ export class DashboardService {
             {
               staffId: assistantStaffId,
               staffName: '(Tôi)',
-              monthlyRevenue:
-                monthlyTopupByStaffId.get(assistantStaffId) ?? 0,
+              monthlyRevenue: monthlyTopupByStaffId.get(assistantStaffId) ?? 0,
               debtStudentCount:
                 debtByStaffId.get(assistantStaffId)?.debtStudentCount ?? 0,
               totalDebtAmount:
@@ -2828,16 +2825,16 @@ export class DashboardService {
           ]
         : []),
     ].sort((left, right) => {
-        if (right.monthlyRevenue !== left.monthlyRevenue) {
-          return right.monthlyRevenue - left.monthlyRevenue;
-        }
+      if (right.monthlyRevenue !== left.monthlyRevenue) {
+        return right.monthlyRevenue - left.monthlyRevenue;
+      }
 
-        if (right.totalDebtAmount !== left.totalDebtAmount) {
-          return right.totalDebtAmount - left.totalDebtAmount;
-        }
+      if (right.totalDebtAmount !== left.totalDebtAmount) {
+        return right.totalDebtAmount - left.totalDebtAmount;
+      }
 
-        return left.staffName.localeCompare(right.staffName);
-      });
+      return left.staffName.localeCompare(right.staffName);
+    });
 
     return {
       summary,
@@ -3555,7 +3552,9 @@ export class DashboardService {
             debtStudents[0]?.totalCount,
           );
           const unpaidStaffCount = normalizeInteger(unpaidStaff[0]?.totalCount);
-          const classAlertCount = normalizeInteger(classAlertRows[0]?.totalCount);
+          const classAlertCount = normalizeInteger(
+            classAlertRows[0]?.totalCount,
+          );
           const pendingCollectionTotal = normalizeMoneyAmount(
             debtStudents[0]?.totalAmount,
           );
@@ -3892,11 +3891,7 @@ export class DashboardService {
         };
       }
       case 'debt': {
-        const rows = await this.getDebtStudents(
-          limit,
-          dashboardPeriod,
-          offset,
-        );
+        const rows = await this.getDebtStudents(limit, dashboardPeriod, offset);
         const total = normalizeInteger(rows[0]?.totalCount);
 
         return {
@@ -3905,11 +3900,7 @@ export class DashboardService {
         };
       }
       case 'payroll': {
-        const rows = await this.getUnpaidStaff(
-          limit,
-          dashboardPeriod,
-          offset,
-        );
+        const rows = await this.getUnpaidStaff(limit, dashboardPeriod, offset);
         const total = normalizeInteger(rows[0]?.totalCount);
 
         return {

@@ -834,9 +834,7 @@ export class UserService {
 
   async deleteUser(id: string, auditActor?: ActionHistoryActor) {
     if (auditActor?.userId === id) {
-      throw new BadRequestException(
-        'Không thể xóa tài khoản đang đăng nhập.',
-      );
+      throw new BadRequestException('Không thể xóa tài khoản đang đăng nhập.');
     }
 
     const user = await this.prisma.user.findUnique({

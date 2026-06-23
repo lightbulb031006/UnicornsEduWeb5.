@@ -81,7 +81,10 @@ function parsePagination(query: AssistantCommissionListQuery) {
   return { page, limit };
 }
 
-function parseMonthRange(monthKey: string): { start: Date; endExclusive: Date } {
+function parseMonthRange(monthKey: string): {
+  start: Date;
+  endExclusive: Date;
+} {
   const matched = /^(\d{4})-(\d{2})$/.exec(monthKey.trim());
   if (!matched) {
     throw new BadRequestException('month must use YYYY-MM format.');
@@ -89,7 +92,12 @@ function parseMonthRange(monthKey: string): { start: Date; endExclusive: Date } 
 
   const year = Number(matched[1]);
   const month = Number(matched[2]);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12
+  ) {
     throw new BadRequestException('month must use YYYY-MM format.');
   }
 
@@ -260,9 +268,7 @@ export class AssistantCommissionService {
   } {
     if (scope === 'month') {
       if (!monthKey?.trim()) {
-        throw new BadRequestException(
-          'month is required when scope is month.',
-        );
+        throw new BadRequestException('month is required when scope is month.');
       }
 
       const { start, endExclusive } = parseMonthRange(monthKey);
@@ -299,7 +305,9 @@ export class AssistantCommissionService {
       >();
     }
 
-    const rows = await this.prisma.$queryRaw<CustomerCareStaffDebtAggregateRow[]>(
+    const rows = await this.prisma.$queryRaw<
+      CustomerCareStaffDebtAggregateRow[]
+    >(
       Prisma.sql`
         WITH student_debt AS (
           SELECT
@@ -631,9 +639,7 @@ export class AssistantCommissionService {
     });
 
     if (scope === 'month' && !query.month?.trim()) {
-      throw new BadRequestException(
-        'month is required when scope is month.',
-      );
+      throw new BadRequestException('month is required when scope is month.');
     }
 
     // Prisma where doesn't combine raw sessionDateFilter for month in findMany above - already handled

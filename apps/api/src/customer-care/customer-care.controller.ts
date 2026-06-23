@@ -152,9 +152,7 @@ export class CustomerCareController {
   ): Promise<CustomerCareCommissionDto[]> {
     const parsedDays = days ? parseInt(days, 10) : undefined;
     const safeDays =
-      parsedDays != null &&
-      Number.isFinite(parsedDays) &&
-      parsedDays >= 1
+      parsedDays != null && Number.isFinite(parsedDays) && parsedDays >= 1
         ? Math.min(parsedDays, 365)
         : undefined;
 
@@ -218,9 +216,7 @@ export class CustomerCareController {
   ): Promise<CustomerCareSessionCommissionDto[]> {
     const parsedDays = days ? parseInt(days, 10) : undefined;
     const safeDays =
-      parsedDays != null &&
-      Number.isFinite(parsedDays) &&
-      parsedDays >= 1
+      parsedDays != null && Number.isFinite(parsedDays) && parsedDays >= 1
         ? Math.min(parsedDays, 365)
         : undefined;
 

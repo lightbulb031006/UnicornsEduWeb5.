@@ -34,7 +34,9 @@ export interface UpdateMissedTeachingExplanationInput {
   reason: string;
 }
 
-function isActiveClassTeacherStatus(status: string | null | undefined): boolean {
+function isActiveClassTeacherStatus(
+  status: string | null | undefined,
+): boolean {
   return status == null || status === 'active';
 }
 
@@ -79,9 +81,7 @@ export class MissedTeachingExplanationService {
       },
     });
     if (existing) {
-      throw new BadRequestException(
-        'Buổi học gốc này đã có giải trình vắng.',
-      );
+      throw new BadRequestException('Buổi học gốc này đã có giải trình vắng.');
     }
 
     const explainedByStaffId = options?.restrictTeacherId ?? null;
@@ -304,7 +304,9 @@ export class MissedTeachingExplanationService {
           .map((part) => part?.trim())
           .filter(Boolean)
           .join(' ')
-          .trim() || user.email || null,
+          .trim() ||
+          user.email ||
+          null,
       ]),
     );
 
@@ -352,7 +354,10 @@ export class MissedTeachingExplanationService {
     ].join(':');
   }
 
-  private async assertClassAndTeacherActive(classId: string, teacherId: string) {
+  private async assertClassAndTeacherActive(
+    classId: string,
+    teacherId: string,
+  ) {
     const cls = await this.prisma.class.findUnique({
       where: { id: classId },
       select: { status: true },
@@ -361,7 +366,9 @@ export class MissedTeachingExplanationService {
       throw new NotFoundException('Class not found');
     }
     if (cls.status !== ClassStatus.running) {
-      throw new BadRequestException('Lớp đã kết thúc, không thể giải trình vắng.');
+      throw new BadRequestException(
+        'Lớp đã kết thúc, không thể giải trình vắng.',
+      );
     }
 
     const assignment = await this.prisma.classTeacher.findUnique({
@@ -420,30 +427,30 @@ export class MissedTeachingExplanationService {
     }
   }
 
-  private serializeExplanation(
-    record: {
-      id: string;
-      classId: string;
-      teacherId: string;
-      baselineScheduleEntryId: string;
-      originalDate: Date;
-      reason: string;
-      createdAt: Date;
-      teacher?: {
-        user?: {
-          first_name?: string | null;
-          last_name?: string | null;
-          email?: string | null;
-        } | null;
+  private serializeExplanation(record: {
+    id: string;
+    classId: string;
+    teacherId: string;
+    baselineScheduleEntryId: string;
+    originalDate: Date;
+    reason: string;
+    createdAt: Date;
+    teacher?: {
+      user?: {
+        first_name?: string | null;
+        last_name?: string | null;
+        email?: string | null;
       } | null;
-    },
-  ): MissedTeachingExplanationRecord {
+    } | null;
+  }): MissedTeachingExplanationRecord {
     const explainedByName = record.teacher?.user
       ? [record.teacher.user.first_name, record.teacher.user.last_name]
           .map((part) => part?.trim())
           .filter(Boolean)
           .join(' ')
-          .trim() || record.teacher.user.email || null
+          .trim() ||
+        record.teacher.user.email ||
+        null
       : null;
 
     return {
@@ -461,7 +468,9 @@ export class MissedTeachingExplanationService {
   private parseDateOnly(value: string): Date {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
     if (!match) {
-      throw new BadRequestException('originalDate phải có định dạng YYYY-MM-DD.');
+      throw new BadRequestException(
+        'originalDate phải có định dạng YYYY-MM-DD.',
+      );
     }
     return new Date(
       Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
@@ -481,7 +490,9 @@ export class MissedTeachingExplanationService {
         .map((part) => part?.trim())
         .filter(Boolean)
         .join(' ')
-        .trim() || user.email || null
+        .trim() ||
+      user.email ||
+      null
     );
   }
 

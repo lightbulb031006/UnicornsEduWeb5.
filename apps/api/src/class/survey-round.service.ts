@@ -117,11 +117,14 @@ export class SurveyRoundService {
         null,
       );
 
-      const lastReportDate = item.surveys.reduce<Date | null>((latest, survey) => {
-        if (!survey.reportDate) return latest;
-        if (!latest || survey.reportDate > latest) return survey.reportDate;
-        return latest;
-      }, null);
+      const lastReportDate = item.surveys.reduce<Date | null>(
+        (latest, survey) => {
+          if (!survey.reportDate) return latest;
+          if (!latest || survey.reportDate > latest) return survey.reportDate;
+          return latest;
+        },
+        null,
+      );
 
       return {
         classId: item.id,

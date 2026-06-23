@@ -815,7 +815,10 @@ describe('UserService', () => {
       staffInfo: { id: 'staff-1' },
       studentInfo: null,
     });
-    mockPrisma.staffInfo.update.mockResolvedValue({ id: 'staff-1', userId: null });
+    mockPrisma.staffInfo.update.mockResolvedValue({
+      id: 'staff-1',
+      userId: null,
+    });
     mockPrisma.user.delete.mockResolvedValue({
       id: 'user-1',
       email: 'staff@example.com',
@@ -842,7 +845,9 @@ describe('UserService', () => {
     expect(mockPrisma.user.delete).toHaveBeenCalledWith({
       where: { id: 'user-1' },
     });
-    expect(authService.invalidateAuthIdentityCache).toHaveBeenCalledWith('user-1');
+    expect(authService.invalidateAuthIdentityCache).toHaveBeenCalledWith(
+      'user-1',
+    );
   });
 
   it('rejects deleteUser for the currently signed-in account', async () => {

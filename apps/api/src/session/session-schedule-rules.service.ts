@@ -53,7 +53,9 @@ type AlertClassRecord = {
   }>;
 };
 
-function isActiveClassTeacherStatus(status: string | null | undefined): boolean {
+function isActiveClassTeacherStatus(
+  status: string | null | undefined,
+): boolean {
   return status == null || status === 'active';
 }
 
@@ -473,7 +475,7 @@ export class SessionScheduleRulesService {
 
           const occurrenceKey = this.buildOccurrenceKey({
             classId: cls.id,
-            teacherId: entry.teacherId!,
+            teacherId: entry.teacherId,
             scheduleEntryId: entry.id!,
             dateKey,
           });
@@ -500,8 +502,8 @@ export class SessionScheduleRulesService {
             id: occurrenceKey,
             classId: cls.id,
             className: cls.name,
-            teacherId: entry.teacherId!,
-            teacherName: teacherNameById.get(entry.teacherId!) ?? null,
+            teacherId: entry.teacherId,
+            teacherName: teacherNameById.get(entry.teacherId) ?? null,
             scheduleEntryId: entry.id!,
             originalDate: dateKey,
             scheduledStartTime: this.normalizeTimeString(entry.from)!,
@@ -703,10 +705,7 @@ export class SessionScheduleRulesService {
           })
         : [];
     const userNameById = new Map(
-      users.map((user) => [
-        user.id,
-        this.getTeacherName(user),
-      ]),
+      users.map((user) => [user.id, this.getTeacherName(user)]),
     );
 
     const explanationByOccurrenceKey = new Map(

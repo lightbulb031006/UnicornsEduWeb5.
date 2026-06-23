@@ -5,7 +5,10 @@ jest.mock('./auth.service', () => ({
 import { ForbiddenException } from '@nestjs/common';
 import { UserRole } from '../../generated/enums';
 import { AuthController } from './auth.controller';
-import { IS_PUBLIC_KEY, PUBLIC_REGISTRATION_DISABLED_MESSAGE } from './constants';
+import {
+  IS_PUBLIC_KEY,
+  PUBLIC_REGISTRATION_DISABLED_MESSAGE,
+} from './constants';
 
 describe('AuthController', () => {
   const originalNodeEnv = process.env.NODE_ENV;

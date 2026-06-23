@@ -508,10 +508,14 @@ describe('ClassService', () => {
       ]);
 
       await expect(
-        service.endClass('class-1', {}, {
-          userId: 'admin-1',
-          roleType: UserRole.admin,
-        }),
+        service.endClass(
+          'class-1',
+          {},
+          {
+            userId: 'admin-1',
+            roleType: UserRole.admin,
+          },
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
 
       expect(mockPrisma.$transaction).not.toHaveBeenCalled();
