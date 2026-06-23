@@ -72,3 +72,14 @@ export const classKeys = {
     [...classKeys.lists(), createStableFilterKey(filters)] as const,
   detail: (id: string) => [...classKeys.all, "detail", id] as const,
 };
+
+export const uniojKeys = {
+  all: ["unioj"] as const,
+  report: (name: string, days?: number) =>
+    [...uniojKeys.all, "report", name, days] as const,
+  reportPdf: (name: string, days?: number) =>
+    [...uniojKeys.all, "report-pdf", name, days] as const,
+  classesLevels: (classIds: string[]) =>
+    [...uniojKeys.all, "classes-levels", classIds] as const,
+};
+
