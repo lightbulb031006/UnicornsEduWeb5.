@@ -22,6 +22,7 @@ Mục lục tài liệu trong `docs/`, cộng với snapshot ngắn về trạng
 | [Workplan.md](Workplan.md)                                   | Kế hoạch 8 tuần, phase, DoD, route-to-domain, risk, launch checklist.                         |
 | [UI-Schema.md](UI-Schema.md)                                 | Design tokens, theme (light/dark/pink), semantic naming, component mapping.                   |
 | [Database Schema.md](Database%20Schema.md)                   | Prisma schema tại `apps/api/prisma/schema/`, bảng theo domain, quan hệ, source of truth.      |
+| [api/unioj-integration.md](api/unioj-integration.md)         | Hướng dẫn tích hợp API chấm bài UNIOJ (Online Judge) cho học sinh.                            |
 | **adr/**                                                     | Architecture Decision Records, gồm quyết định mã định danh hệ thống ngắn.                    |
 | **pages/**                                                   | Spec từng route frontend (admin, student, mentor, assistant, landing, auth).                  |
 | [pages/README.md](pages/README.md)                           | Route index, workplan phase mapping, conventions.                                             |

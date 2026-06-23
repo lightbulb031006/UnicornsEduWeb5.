@@ -16,6 +16,7 @@ import { ExtraAllowanceModule } from './extra-allowance/extra-allowance.module';
 import { CodeforcesModule } from './codeforces/codeforces.module';
 import { CfProblemTutorialModule } from './cf-problem-tutorial/cf-problem-tutorial.module';
 import { SessionModule } from './session/session.module';
+import { UniojModule } from './unioj/unioj.module';
 import { CustomerCareModule } from './customer-care/customer-care.module';
 import { AssistantCommissionModule } from './assistant-commission/assistant-commission.module';
 import { ActionHistoryModule } from './action-history/action-history.module';
@@ -67,6 +68,7 @@ function parsePositiveIntegerEnv(
     CodeforcesModule,
     CfProblemTutorialModule,
     SessionModule,
+    UniojModule,
     CustomerCareModule,
     AssistantCommissionModule,
     ActionHistoryModule,

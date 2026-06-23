@@ -318,6 +318,9 @@ importers:
       react:
         specifier: 19.2.3
         version: 19.2.3
+      react-circular-progressbar:
+        specifier: ^2.2.0
+        version: 2.2.0(react@19.2.3)
       react-dom:
         specifier: 19.2.3
         version: 19.2.3(react@19.2.3)
@@ -6106,6 +6109,11 @@ packages:
   rc@1.2.8:
     resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
     hasBin: true
+
+  react-circular-progressbar@2.2.0:
+    resolution: {integrity: sha512-cgyqEHOzB0nWMZjKfWN3MfSa1LV3OatcDjPz68lchXQUEiBD5O1WsAtoVK4/DSL0B4USR//cTdok4zCBkq8X5g==}
+    peerDependencies:
+      react: '>=0.14.0'
 
   react-dom@19.2.3:
     resolution: {integrity: sha512-yELu4WmLPw5Mr/lmeEpox5rw3RETacE++JgHqQzd2dg+YbJuat3jH4ingc+WPZhxaoFzdv9y33G+F7Nl5O0GBg==}
@@ -14172,6 +14180,10 @@ snapshots:
       minimist: 1.2.8
       strip-json-comments: 2.0.1
     optional: true
+
+  react-circular-progressbar@2.2.0(react@19.2.3):
+    dependencies:
+      react: 19.2.3
 
   react-dom@19.2.3(react@19.2.3):
     dependencies:
