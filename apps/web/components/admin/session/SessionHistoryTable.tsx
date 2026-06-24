@@ -2717,7 +2717,7 @@ export default function SessionHistoryTable({
                       <section className="space-y-3">
                         <div className="space-y-1">
                           <h3 className="text-sm font-semibold text-text-primary">
-                            Điểm danh học sinh <RequiredMark />
+                            Nhận xét từng học sinh <RequiredMark />
                           </h3>
                           {canEditAttendanceTuition ? (
                             <div className="flex flex-wrap gap-2 rounded-lg border border-border-default bg-bg-secondary/40 p-3 text-xs">

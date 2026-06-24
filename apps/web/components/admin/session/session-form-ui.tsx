@@ -499,7 +499,7 @@ type SessionAttendanceEditorProps = {
   onTuitionChange?: (studentId: string, value: string) => void;
 };
 
-/** Bảng điểm danh cổ điển: mobile card + desktop table (Trạng thái | Tên | Ghi chú | Học phí). */
+/** Điểm danh: mobile card; từ md+ bảng 3 cột (Học sinh | Nhận xét | Học phí). */
 export function SessionAttendanceEditor({
   items,
   namePrefix,
@@ -511,69 +511,29 @@ export function SessionAttendanceEditor({
 }: SessionAttendanceEditorProps) {
   return (
     <>
-      <div className="space-y-3 lg:hidden">
+      <div className="space-y-3 md:hidden">
         {items.map((item) => (
-          <article
+          <SessionStudentAttendanceCommentRow
             key={item.studentId}
-            className="rounded-xl border border-border-default bg-bg-surface p-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-                <p className="min-w-0 truncate text-sm font-semibold text-text-primary">
-                  {item.fullName}
-                </p>
-                {canEditTuition ? (
-                  <p className="shrink-0 text-xs text-text-muted">
-                    Mặc định:{" "}
-                    <span className="font-medium tabular-nums text-text-primary">
-                      {item.defaultTuitionFee != null
-                        ? formatCurrency(item.defaultTuitionFee)
-                        : "Chưa cấu hình"}
-                    </span>
-                  </p>
-                ) : null}
-              </div>
-              <AttendanceStatusQuickPick
-                namePrefix={`${namePrefix}-${item.studentId}`}
-                value={item.status}
-                disabled={disabled}
-                onChange={(next) => onStatusChange(item.studentId, next)}
-              />
-            </div>
-            {canEditTuition ? (
-              <label className="mt-3 flex flex-col gap-1 text-xs text-text-secondary">
-                <span>Học phí buổi</span>
-                <input
-                  name={`${namePrefix}-tuition-${item.studentId}`}
-                  type="number"
-                  min={0}
-                  value={item.tuitionFee}
-                  autoComplete="off"
-                  disabled={disabled}
-                  onChange={(event) =>
-                    onTuitionChange?.(item.studentId, event.target.value)
-                  }
-                  className="min-h-10 w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary"
-                  placeholder={
-                    item.defaultTuitionFee != null
-                      ? String(item.defaultTuitionFee)
-                      : "Theo học sinh"
-                  }
-                />
-              </label>
-            ) : null}
-            <div className="mt-3 flex flex-col gap-1 text-xs text-text-secondary">
-              <span>Ghi chú</span>
-              <RichTextEditor
-                value={item.notes}
-                onChange={(html) => onNotesChange(item.studentId, html)}
-                disabled={disabled}
-                minHeight="min-h-[120px]"
-                placeholder={sessionStudentCommentPlaceholder(item.fullName)}
-                ariaLabel={`Ghi chú học sinh ${item.fullName}`}
-              />
-            </div>
-          </article>
+            studentId={item.studentId}
+            fullName={item.fullName}
+            status={item.status}
+            notes={item.notes}
+            namePrefix={`${namePrefix}-${item.studentId}`}
+            disabled={disabled}
+            onStatusChange={(next) => onStatusChange(item.studentId, next)}
+            onNotesChange={(html) => onNotesChange(item.studentId, html)}
+            showTuitionField={canEditTuition}
+            tuitionFee={item.tuitionFee}
+            tuitionPlaceholder={
+              item.defaultTuitionFee != null
+                ? String(item.defaultTuitionFee)
+                : "Theo học sinh"
+            }
+            tuitionInputName={`${namePrefix}-tuition-${item.studentId}`}
+            defaultTuitionFee={item.defaultTuitionFee}
+            onTuitionChange={(value) => onTuitionChange?.(item.studentId, value)}
+          />
         ))}
       </div>
 
@@ -581,31 +541,25 @@ export function SessionAttendanceEditor({
         <table
           className={`w-full border-collapse text-left text-sm ${canEditTuition ? "min-w-[720px]" : "min-w-[520px]"}`}
         >
-          <caption className="sr-only">Điểm danh học sinh</caption>
+          <caption className="sr-only">Nhận xét từng học sinh</caption>
           <thead>
             <tr className="border-b border-border-default bg-bg-secondary/80">
               <th
                 scope="col"
-                className="w-28 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
+                className="w-40 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
               >
-                Trạng thái
-              </th>
-              <th
-                scope="col"
-                className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
-              >
-                Tên học sinh
+                Học sinh
               </th>
               <th
                 scope="col"
                 className="min-w-[18rem] px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
               >
-                Ghi chú
+                Nhận xét
               </th>
               {canEditTuition ? (
                 <th
                   scope="col"
-                  className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
+                  className="w-44 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
                 >
                   Học phí buổi
                 </th>
@@ -618,29 +572,31 @@ export function SessionAttendanceEditor({
                 key={item.studentId}
                 className="border-b border-border-default/80 bg-bg-surface last:border-0"
               >
-                <td className="px-3 py-2.5 align-middle">
-                  <AttendanceStatusQuickPick
-                    namePrefix={`${namePrefix}-d-${item.studentId}`}
-                    value={item.status}
-                    disabled={disabled}
-                    onChange={(next) => onStatusChange(item.studentId, next)}
-                  />
+                <td className="px-3 py-2.5 align-top">
+                  <div className="space-y-2">
+                    <p className="text-center text-sm font-semibold text-text-primary">
+                      {item.fullName}
+                    </p>
+                    <AttendanceStatusQuickPick
+                      namePrefix={`${namePrefix}-d-${item.studentId}`}
+                      value={item.status}
+                      disabled={disabled}
+                      onChange={(next) => onStatusChange(item.studentId, next)}
+                    />
+                  </div>
                 </td>
-                <td className="px-3 py-2.5 align-middle text-sm font-medium text-text-primary">
-                  {item.fullName}
-                </td>
-                <td className="px-3 py-2.5 align-middle">
+                <td className="px-3 py-2.5 align-top">
                   <RichTextEditor
                     value={item.notes}
                     onChange={(html) => onNotesChange(item.studentId, html)}
                     disabled={disabled}
                     minHeight="min-h-[96px]"
                     placeholder={sessionStudentCommentPlaceholder(item.fullName)}
-                    ariaLabel={`Ghi chú học sinh ${item.fullName}`}
+                    ariaLabel={`Nhận xét học sinh ${item.fullName}`}
                   />
                 </td>
                 {canEditTuition ? (
-                  <td className="px-3 py-2.5 align-middle">
+                  <td className="px-3 py-2.5 align-top">
                     <div className="space-y-1">
                       <input
                         name={`${namePrefix}-tuition-desktop-${item.studentId}`}
@@ -720,17 +676,17 @@ type SessionStudentAttendanceCommentRowProps = {
   notes: string;
   namePrefix: string;
   disabled?: boolean;
-  defaultCommentOpen?: boolean;
   onStatusChange: (next: SessionAttendanceStatus) => void;
   onNotesChange: (html: string) => void;
   showTuitionField?: boolean;
   tuitionFee?: string;
   tuitionPlaceholder?: string;
   tuitionInputName?: string;
+  defaultTuitionFee?: number | null;
   onTuitionChange?: (value: string) => void;
 };
 
-/** Một học sinh: tên + điểm danh (dòng 1), học phí (tuỳ chọn), nhận xét accordion. */
+/** Card mobile: tên + quick-pick → nhận xét → học phí (tuỳ chọn). */
 export function SessionStudentAttendanceCommentRow({
   studentId,
   fullName,
@@ -738,25 +694,21 @@ export function SessionStudentAttendanceCommentRow({
   notes,
   namePrefix,
   disabled = false,
-  defaultCommentOpen = false,
   onStatusChange,
   onNotesChange,
   showTuitionField = false,
   tuitionFee = "",
   tuitionPlaceholder,
   tuitionInputName,
+  defaultTuitionFee = null,
   onTuitionChange,
 }: SessionStudentAttendanceCommentRowProps) {
-  const [commentOpen, setCommentOpen] = useState(defaultCommentOpen);
   const panelId = `session-student-comment-${studentId}`;
-  const hasNotes = notes.replace(/<[^>]*>/g, "").trim().length > 0;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border-default bg-bg-surface">
-      <div className="flex items-center justify-between gap-3 px-3 py-2.5">
-        <p className="min-w-0 truncate text-sm font-medium text-text-primary">
-          {fullName}
-        </p>
+    <article className="overflow-hidden rounded-xl border border-border-default bg-bg-surface p-4">
+      <div className="space-y-2">
+        <p className="min-w-0 text-center text-sm font-semibold text-text-primary">{fullName}</p>
         <AttendanceStatusQuickPick
           namePrefix={namePrefix}
           value={status}
@@ -765,67 +717,44 @@ export function SessionStudentAttendanceCommentRow({
         />
       </div>
 
-      {showTuitionField ? (
-        <div className="border-t border-border-default/60 px-3 py-2">
-          <label className="flex flex-col gap-1 text-xs text-text-secondary">
-            <span>Học phí buổi</span>
-            <input
-              name={tuitionInputName}
-              type="number"
-              min={0}
-              value={tuitionFee}
-              autoComplete="off"
-              disabled={disabled}
-              onChange={(event) => onTuitionChange?.(event.target.value)}
-              className="min-h-10 w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
-              placeholder={tuitionPlaceholder ?? "Theo học sinh"}
-            />
-          </label>
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={() => setCommentOpen((current) => !current)}
-        className="flex w-full items-center justify-between gap-3 border-t border-border-default/80 px-3 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus"
-        aria-expanded={commentOpen}
-        aria-controls={panelId}
+      <div
+        id={panelId}
+        className="mt-3 flex flex-col gap-1 text-xs text-text-secondary"
       >
-        <span className="text-xs font-medium text-text-secondary">
-          Nhận xét
-          {hasNotes ? (
-            <span className="ml-1.5 text-text-muted">· đã nhập</span>
-          ) : null}
-        </span>
-        <svg
-          className={`size-4 shrink-0 text-text-muted transition-transform ${commentOpen ? "rotate-180" : ""}`}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          aria-hidden
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
-        </svg>
-      </button>
+        <span>Nhận xét</span>
+        <RichTextEditor
+          value={notes}
+          onChange={onNotesChange}
+          disabled={disabled}
+          minHeight="min-h-[120px]"
+          placeholder={sessionStudentCommentPlaceholder(fullName)}
+          ariaLabel={`Nhận xét học sinh ${fullName}`}
+        />
+      </div>
 
-      {commentOpen ? (
-        <div id={panelId} className="border-t border-border-default/80 px-3 pb-3 pt-2">
-          <RichTextEditor
-            value={notes}
-            onChange={onNotesChange}
+      {showTuitionField ? (
+        <label className="mt-3 flex flex-col gap-1 text-xs text-text-secondary">
+          <span>Học phí buổi</span>
+          <input
+            name={tuitionInputName}
+            type="number"
+            min={0}
+            value={tuitionFee}
+            autoComplete="off"
             disabled={disabled}
-            minHeight="min-h-[120px]"
-            placeholder={sessionStudentCommentPlaceholder(fullName)}
-            ariaLabel={`Nhận xét học sinh ${fullName}`}
+            onChange={(event) => onTuitionChange?.(event.target.value)}
+            className="min-h-10 w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
+            placeholder={tuitionPlaceholder ?? "Theo học sinh"}
           />
-        </div>
+          <span className="text-[11px] text-text-muted">
+            Mặc định:{" "}
+            {defaultTuitionFee != null
+              ? formatCurrency(defaultTuitionFee)
+              : "Chưa cấu hình"}
+          </span>
+        </label>
       ) : null}
-    </div>
+    </article>
   );
 }
 

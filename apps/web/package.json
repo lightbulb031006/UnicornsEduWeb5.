@@ -8,6 +8,7 @@
     "start": "node node_modules/next/dist/bin/next start",
     "prod": "node node_modules/next/dist/bin/next start",
     "lint": "eslint",
+    "test": "vitest run",
     "favicon:ico": "node scripts/png-to-favicon-ico.mjs",
     "optimize:logo": "node scripts/optimize-ui-logo.mjs",
     "optimize:assets": "node scripts/optimize-ui-logo.mjs && node scripts/png-to-favicon-ico.mjs",
@@ -60,6 +61,7 @@
     "png2icons": "^2.0.1",
     "sharp": "^0.34.5",
     "tailwindcss": "^4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
   }
 }

@@ -23,6 +23,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Added
 
+- FE `apps/web`: script `pnpm --filter web test` (Vitest) + unit tests cho `session-comment-zalo.helpers.ts`.
 - BE: bảng single-row `survey_round` (`current_round`, seed = 6) + `SurveyRoundService` quản lý **lần khảo sát hiện tại** toàn cục; `SurveysController` strict-admin (`GET /surveys/round`, `GET /surveys/missing-classes`, `PATCH /surveys/round`) với Swagger đầy đủ, audit `action_history` entity `survey_round`.
 - FE: trang admin-only `/admin/surveys` (Khảo sát) — header KPI lần khảo sát + ô **Đặt lần khảo sát** (nhập trực tiếp số N), danh sách lớp `running` chưa báo cáo lần N (track-only, link `/admin/classes/:id`), TanStack Query + Sonner, mobile-first; thêm mục sidebar **Khảo sát** (adminOnly) và `/admin/surveys` vào `STRICT_ADMIN_ROUTE_PREFIXES`.
 
@@ -34,6 +35,9 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed
 
+- FE session form: đổi tiêu đề section **Điểm danh học sinh** → **Nhận xét từng học sinh** (`AddSessionPopup`, `SessionHistoryTable`, caption bảng a11y).
+- FE session form (`AddSessionPopup`, `SessionHistoryTable`): **Nhận xét từng học sinh** — từ `md+` bảng **Học sinh** (tên + quick-pick dưới tên) | **Nhận xét** | **Học phí buổi** (admin/trợ lí); gia sư chỉ 2 cột; mobile card stack cùng thứ tự.
+- FE template Zalo (`session-comment-zalo.helpers`): mục `3️⃣ Nhận xét từng học sinh` liệt kê mọi HS dạng `Tên (học|nghỉ phép|vắng)`; nhận xét thụt vào với gạch đầu dòng; `excused` luôn có thêm `Vắng có phép`, `present` trống → `—`.
 - FE `/admin/classes/[id]` (và mirror `/staff/classes/[id]` cho trợ lí): mở quyền quản lý roster học sinh (`canManageClassStudents`) cho `assistant` — popup **Chỉnh sửa** ở mode `roster`, nút **Nghỉ học**, thêm/xóa học sinh khớp backend `PATCH /class/:id/students`.
 - BE/FE admin dashboard: thẻ cảnh báo lớp đổi sang **"Lớp chưa báo cáo lần {N}"** (tiêu đề động theo `summary.currentSurveyRound`), nguồn dữ liệu = lớp `running` thiếu `class_surveys.test_number = N` (bỏ wiring rủi ro công nợ cũ); action alert thêm trường `detail` ("Mới nhất: lần X") render thay số tiền.
 - BE staff dashboard `getTeacherSection`: khối "Lớp chưa điền lịch / khảo sát" dùng lần khảo sát hiện tại N chung (semantics `test_number == N`) thay cho `max(test_number)` toàn cục.
