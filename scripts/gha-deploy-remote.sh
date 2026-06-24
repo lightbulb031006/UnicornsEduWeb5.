@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Remote commands for GitHub Actions deploy (VPS). Sourced via stdin by ssh / appleboy.
 set -euo pipefail
-cd /root/UnicornsEdu
+DEPLOY_DIR="${DEPLOY_DIR:-/opt/unicorns-edu}"
+cd "$DEPLOY_DIR"
 
 git fetch --prune origin main
 git checkout main

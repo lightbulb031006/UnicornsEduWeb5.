@@ -1,9 +1,6 @@
 # .github/workflows/deploy.yml
-# Build Docker images → push GHCR → deploy VPS (push main only).
-#
-# Optional Tailscale: set repo variable TAILSCALE_ENABLED=true so the runner joins
-# your tailnet before SSH (see docs/Cách làm việc.md). Use OAuth (recommended) or
-# auth key mode via TAILSCALE_AUTH_MODE.
+# Build Docker images (linux/amd64) → push GHCR → deploy VPS via public SSH (push main only).
+# Ingress: Cloudflare Tunnel → nginx on 127.0.0.1:80. See docs/runbooks/vps-cd-deploy.md.
 name: Build and Deploy
 
 on:
@@ -21,7 +18,7 @@ env:
 jobs:
   build-api:
     name: Build & push API image
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -46,7 +43,7 @@ jobs:
           context: .
           file: apps/api/Dockerfile
           push: true
-          platforms: linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/unicorns-api:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/unicorns-api:${{ github.sha }}
@@ -55,7 +52,7 @@ jobs:
 
   build-web:
     name: Build & push Web image
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -80,7 +77,7 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: true
-          platforms: linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/unicorns-web:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/unicorns-web:${{ github.sha }}
@@ -120,6 +117,7 @@ jobs:
     env:
       GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || vars.GHCR_USERNAME }}
       GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+      DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/unicorns-edu' }}
 
     steps:
       - name: Checkout
@@ -127,64 +125,17 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Tailscale: ephemeral node on the tailnet (OAuth preferred over long-lived auth keys).
-      # Set VPS_HOST to the VPS MagicDNS name or Tailscale IP when this is enabled.
-      # ping: wait until VPS is reachable on tailnet (eventual consistency); empty VPS_TAILSCALE_PING → ping same host as SSH.
-      - name: Connect Tailscale (OAuth)
-        if: ${{ vars.TAILSCALE_ENABLED == 'true' && vars.TAILSCALE_AUTH_MODE != 'authkey' }}
-        uses: tailscale/github-action@v4
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: ${{ vars.TAILSCALE_TAGS || 'tag:cicd' }}
-          hostname: unicorns-gha-${{ github.run_id }}-${{ github.run_attempt }}
-          version: latest
-          ping: ${{ vars.VPS_TAILSCALE_PING || secrets.VPS_HOST }}
-
-      - name: Connect Tailscale (auth key)
-        if: ${{ vars.TAILSCALE_ENABLED == 'true' && vars.TAILSCALE_AUTH_MODE == 'authkey' }}
-        uses: tailscale/github-action@v4
-        with:
-          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          tags: ${{ vars.TAILSCALE_TAGS || 'tag:cicd' }}
-          hostname: unicorns-gha-${{ github.run_id }}-${{ github.run_attempt }}
-          version: latest
-          ping: ${{ vars.VPS_TAILSCALE_PING || secrets.VPS_HOST }}
-
-      # Without Tailscale: plain TCP SSH (appleboy). With Tailscale: GitHub runner often uses userspace
-      # networking — regular SSH must use ProxyCommand through tailscaled (see Tailscale CLI docs: tailscale ssh / tailscale nc).
       - name: Deploy via SSH
-        if: ${{ vars.TAILSCALE_ENABLED != 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           GHCR_USERNAME: ${{ env.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ env.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: GHCR_USERNAME,GHCR_TOKEN
+          port: ${{ vars.VPS_SSH_PORT || 22 }}
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR
           command_timeout: 45m
           script_path: scripts/gha-deploy-remote.sh
-
-      - name: Deploy via SSH (Tailscale ProxyCommand)
-        if: ${{ vars.TAILSCALE_ENABLED == 'true' }}
-        timeout-minutes: 50
-        env:
-          GHCR_USERNAME: ${{ env.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ env.GHCR_TOKEN }}
-        run: |
-          set -euo pipefail
-          KEY="${RUNNER_TEMP}/gha_ts_deploy_key"
-          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" >"$KEY"
-          chmod 600 "$KEY"
-          TS="/usr/local/bin/tailscale"
-          REMOTE="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
-          {
-            printf 'export GHCR_USERNAME=%q\n' "${GHCR_USERNAME:-}"
-            printf 'export GHCR_TOKEN=%q\n' "${GHCR_TOKEN:-}"
-            cat scripts/gha-deploy-remote.sh
-          } | timeout 45m ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-            -o "ProxyCommand=sudo -E $TS nc %h %p" \
-            -i "$KEY" \
-            "$REMOTE" bash -s
