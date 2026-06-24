@@ -170,7 +170,7 @@ VPS cần đăng nhập GHCR để kéo image private.
 
 ```bash
 echo '<GHCR_TOKEN>' | docker login ghcr.io -u '<GHCR_USERNAME>' --password-stdin
-docker pull ghcr.io/unicorns-prj-dev/unicorns-api:latest
+docker pull ghcr.io/lightbulb031006/unicorns-api:latest
 ```
 
 ---
@@ -305,7 +305,7 @@ docker builder prune -af
 VPS amd64 cần image `linux/amd64`. Kiểm tra:
 
 ```bash
-docker inspect ghcr.io/unicorns-prj-dev/unicorns-api:latest --format '{{.Architecture}}'
+docker inspect ghcr.io/lightbulb031006/unicorns-api:latest --format '{{.Architecture}}'
 ```
 
 Kỳ vọng: `amd64`.
@@ -349,5 +349,5 @@ Xem [mục troubleshooting trong `docs/Cách làm việc.md`](../Cách%20làm%20
 | Deploy path | `/opt/unicorns-edu` |
 | Compose file | `docker-compose.prod.yml` |
 | Nginx bind | `127.0.0.1:80` |
-| Image registry | `ghcr.io/unicorns-prj-dev/*` |
+| Image registry | `ghcr.io/lightbulb031006/*` (hoặc `GHCR_IMAGE_OWNER` trong `.env`) |
 | Build platform | `linux/amd64` |

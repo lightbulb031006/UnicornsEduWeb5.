@@ -1,7 +1,7 @@
 # docker-compose.prod.yml
 services:
   api:
-    image: ghcr.io/unicorns-prj-dev/unicorns-api:latest
+    image: ghcr.io/${GHCR_IMAGE_OWNER:-lightbulb031006}/unicorns-api:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -19,7 +19,7 @@ services:
       start_period: 20s
 
   web:
-    image: ghcr.io/unicorns-prj-dev/unicorns-web:latest
+    image: ghcr.io/${GHCR_IMAGE_OWNER:-lightbulb031006}/unicorns-web:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -39,7 +39,7 @@ services:
 
   nginx:
     # Mirrored from Docker Hub in CI → GHCR so VPS pull avoids registry-1.docker.io (TLS / rate limits).
-    image: ghcr.io/unicorns-prj-dev/nginx:1.27-alpine
+    image: ghcr.io/${GHCR_IMAGE_OWNER:-lightbulb031006}/nginx:1.27-alpine
     restart: unless-stopped
     ports:
       - "127.0.0.1:80:80"
