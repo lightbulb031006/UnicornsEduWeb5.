@@ -23,6 +23,7 @@ import {
   formatMissingStudentCommentsToast,
   isChargeableAttendanceStatus,
   isRichTextNonEmpty,
+  stripRichTextToPlainText,
   SESSION_HOMEWORK_PLACEHOLDER,
   SESSION_LESSON_CONTENT_PLACEHOLDER,
   SESSION_TUTORIAL_PLACEHOLDER,
@@ -609,7 +610,7 @@ export default function AddSessionPopup({
     }
 
     const hasAttendanceNotesTooLong = attendanceItems.some(
-      (item) => item.notes.trim().length > MAX_ATTENDANCE_NOTES_LENGTH,
+      (item) => stripRichTextToPlainText(item.notes).length > MAX_ATTENDANCE_NOTES_LENGTH,
     );
 
     if (hasAttendanceNotesTooLong) {

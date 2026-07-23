@@ -94,7 +94,7 @@ export function richTextToPlainTextPreservingStructure(
   );
 }
 
-function stripRichTextToPlainText(value: string | null | undefined): string {
+export function stripRichTextToPlainText(value: string | null | undefined): string {
   return richTextToPlainTextPreservingStructure(value);
 }
 

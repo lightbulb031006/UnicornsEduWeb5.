@@ -37,6 +37,7 @@ import {
   formatMissingStudentCommentsToast,
   isChargeableAttendanceStatus,
   isRichTextNonEmpty,
+  stripRichTextToPlainText,
   resolveSessionCommentDisplayContent,
   SESSION_HOMEWORK_PLACEHOLDER,
   SESSION_LESSON_CONTENT_PLACEHOLDER,
@@ -1306,7 +1307,7 @@ export default function SessionHistoryTable({
       return;
     }
     const hasAttendanceNotesTooLong = attendanceItems.some(
-      (item) => item.notes.length > MAX_ATTENDANCE_NOTES_LENGTH,
+      (item) => stripRichTextToPlainText(item.notes).length > MAX_ATTENDANCE_NOTES_LENGTH,
     );
     if (hasAttendanceNotesTooLong) {
       toast.error(
