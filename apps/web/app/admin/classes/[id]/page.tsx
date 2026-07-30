@@ -27,6 +27,7 @@ import * as sessionApi from "@/lib/apis/session.api";
 import { formatCurrency } from "@/lib/class.helpers";
 import {
   ClassCard,
+  ClassStudentCaretakerCell,
   ClassStudentWalletBalance,
   EditClassBasicInfoPopup,
   EditClassSchedulePopup,
@@ -63,6 +64,7 @@ import {
   resolveAdminLikeRouteBase,
 } from "@/lib/admin-shell-paths";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
+import { resolveClassStudentCaretakerHref } from "@/lib/class-student-caretaker";
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import { classKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -226,6 +228,17 @@ export default function AdminClassDetailPage() {
   const canOpenClassStudentsPopup =
     canManageClassStudents || canManageStudentTuition;
   const canOpenStudentDetails = true;
+  const viewerStaffId = fullProfile?.staffInfo?.id ?? null;
+  const resolveCaretakerHref = useCallback(
+    (student: ClassStudent) =>
+      resolveClassStudentCaretakerHref({
+        routeBase,
+        caretaker: student.customerCareStaff,
+        access: adminAccess,
+        viewerStaffId,
+      }),
+    [adminAccess, routeBase, viewerStaffId],
+  );
   const canManageMakeupSchedule = adminAccess.isAdmin || adminAccess.isAssistant;
   const canEditSessionPaymentStatus =
     isAdmin || isAssistant || adminAccess.isAccountantExpense || adminAccess.isAccountantIncome;
@@ -1012,6 +1025,11 @@ export default function AdminClassDetailPage() {
                           <p className="text-sm font-semibold text-text-primary">
                             {student.fullName}
                           </p>
+                          <ClassStudentCaretakerCell
+                            caretaker={student.customerCareStaff}
+                            href={resolveCaretakerHref(student)}
+                            layout="mobile"
+                          />
                           {showStudentTuitionColumn && packageSummary ? (
                             <p className="mt-1 text-xs font-medium text-primary">
                               {packageSummary}
@@ -1087,6 +1105,9 @@ export default function AdminClassDetailPage() {
                   <th scope="col" className="px-3 py-2 text-xs font-medium text-text-primary">
                     Họ tên
                   </th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-text-primary">
+                    Người chăm sóc
+                  </th>
                   {showStudentTuitionColumn ? (
                     <th scope="col" className="px-3 py-2 text-xs font-medium text-text-primary">
                       Gói học phí
@@ -1113,7 +1134,7 @@ export default function AdminClassDetailPage() {
                     <td
                       className="px-3 py-4 text-center text-xs text-text-muted"
                       colSpan={
-                        2 +
+                        3 +
                         (showStudentTuitionColumn ? 1 : 0) +
                         (showStudentBalanceColumn ? 1 : 0) +
                         (showStudentActionColumn ? 1 : 0)
@@ -1165,6 +1186,12 @@ export default function AdminClassDetailPage() {
                         className={`border-b border-border-default bg-bg-surface transition-colors duration-200 ${canOpenStudentDetails ? "cursor-pointer hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus" : ""}`}
                       >
                         <td className="px-3 py-2 text-text-primary">{student.fullName}</td>
+                        <td className="px-3 py-2">
+                          <ClassStudentCaretakerCell
+                            caretaker={student.customerCareStaff}
+                            href={resolveCaretakerHref(student)}
+                          />
+                        </td>
                         {showStudentTuitionColumn ? (
                           <td className="px-3 py-2 text-text-secondary">
                             {packageSummary ? (

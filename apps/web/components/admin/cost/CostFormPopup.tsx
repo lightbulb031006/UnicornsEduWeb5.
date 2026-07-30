@@ -4,8 +4,13 @@ import { useState, type SyntheticEvent } from "react";
 import { toast } from "sonner";
 import { COST_STATUS_OPTIONS } from "@/components/admin/cost/costStatusPresentation";
 import { DateInput } from "@/components/ui/DateInput";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import type { CostBaseFields, CostStatus, CostUpsertMode } from "@/dtos/cost.dto";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
 
 export interface CostFormSubmitPayload {
   month?: string;
@@ -50,9 +55,7 @@ function getInitialStatus(initialData?: CostBaseFields | null): CostStatus {
 }
 
 function getInitialAmountInput(initialData?: CostBaseFields | null): string {
-  return initialData?.amount == null || Number.isNaN(initialData.amount)
-    ? ""
-    : String(initialData.amount);
+  return moneyInputInitialFromNumber(initialData?.amount ?? null);
 }
 
 export default function CostFormPopup({
@@ -79,8 +82,8 @@ export default function CostFormPopup({
     }
 
     const trimmedAmount = amountInput.trim();
-    const parsedAmount = Number(trimmedAmount);
-    if (!trimmedAmount || !Number.isFinite(parsedAmount) || parsedAmount < 0) {
+    const parsedAmount = parseMoneyInput(trimmedAmount);
+    if (!trimmedAmount || parsedAmount == null || parsedAmount < 0) {
       toast.error("Số tiền phải là số hợp lệ và lớn hơn hoặc bằng 0.");
       return;
     }
@@ -177,13 +180,10 @@ export default function CostFormPopup({
 
             <label className="flex flex-col gap-1 text-sm text-text-secondary">
               <span>Số tiền</span>
-              <input
-                type="number"
-                min={0}
-                step={1}
+              <MoneyInput
                 value={amountInput}
-                onChange={(e) => setAmountInput(e.target.value)}
-                placeholder="Ví dụ: 500000"
+                onValueChange={setAmountInput}
+                placeholder="Ví dụ: 500.000"
                 className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 required
               />

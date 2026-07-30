@@ -13,6 +13,12 @@ import { getFullProfile } from "@/lib/apis/auth.api";
 import * as sessionApi from "@/lib/apis/session.api";
 import { formatCurrency } from "@/lib/class.helpers";
 import {
+  isNonNegativeMoneyInput,
+  moneyInputInitialFromNumber,
+  normalizeMoneyValue,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
+import {
   computeSessionAllowanceRawBaseVnd,
   computeTeacherSessionAllowanceGrossPreviewVnd,
   grossAllowanceToRawBaseVnd,
@@ -45,6 +51,7 @@ import {
 import { DateInput } from "@/components/ui/DateInput";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 import { TimeInput } from "@/components/ui/TimeInput";
+import { currentTimePrefillValue } from "@/components/ui/time-input.helpers";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 import { normalizeOptionalRichTextContent } from "@/lib/sanitize";
@@ -186,23 +193,9 @@ function toAttendancePayload(
     status: item.status,
     notes: normalizeOptionalRichTextContent(item.notes),
     ...(includeTuition && item.tuitionFee.trim() !== ""
-      ? { tuitionFee: Math.floor(Number(item.tuitionFee)) }
+      ? { tuitionFee: parseMoneyInput(item.tuitionFee) ?? 0 }
       : {}),
   }));
-}
-
-function normalizeMoneyValue(value: number | string | null | undefined): number | null {
-  if (value == null) return null;
-  const normalized = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(normalized)) return null;
-  return Math.floor(normalized);
-}
-
-function isNonNegativeMoneyInput(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return true;
-  const normalized = Number(trimmed);
-  return Number.isFinite(normalized) && normalized >= 0;
 }
 
 function resolveAttendanceTuitionValue(item: AttendanceFormItem): number {
@@ -267,8 +260,8 @@ export default function AddSessionPopup({
     allowAttendanceTuitionEdits ?? allowFinancialFields;
 
   const [date, setDate] = useState(() => getTodayDateInputValue());
-  const [startTime, setStartTime] = useState("18:00");
-  const [endTime, setEndTime] = useState("20:00");
+  const [startTime, setStartTime] = useState(() => currentTimePrefillValue());
+  const [endTime, setEndTime] = useState("");
   const [lessonContent, setLessonContent] = useState("");
   const [homework, setHomework] = useState("");
   const [tutorial, setTutorial] = useState("");

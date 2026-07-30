@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from 'generated/client';
 import {
+  AttendanceStatus,
   PaymentStatus,
   StaffRole,
   StaffStatus,
@@ -14,6 +15,7 @@ import {
 import type {
   TrainingManagerBulkPaymentStatusUpdateResultDto,
   TrainingManagerManagedClassListDto,
+  TrainingManagerSessionAllowanceDto,
   TrainingManagerStaffOptionDto,
   UpdateClassTrainingManagerDto,
 } from 'src/dtos/training-manager.dto';
@@ -321,6 +323,84 @@ export class TrainingManagerService {
     );
 
     return { data, summary };
+  }
+
+  async getSessionAllowancesByClass(
+    userId: string,
+    roleType: UserRole,
+    staffId: string,
+    classId: string,
+    monthKey: string,
+  ): Promise<TrainingManagerSessionAllowanceDto[]> {
+    const accessibleStaffId = await this.resolveAccessibleStaffId(
+      userId,
+      roleType,
+      staffId,
+    );
+
+    const classRecord = await this.prisma.class.findUnique({
+      where: { id: classId },
+      select: { id: true, trainingManagerStaffId: true },
+    });
+    if (!classRecord) {
+      throw new NotFoundException('Class not found');
+    }
+    if (classRecord.trainingManagerStaffId !== accessibleStaffId) {
+      throw new ForbiddenException(
+        'Lớp học không thuộc phạm vi quản lý của nhân sự này.',
+      );
+    }
+
+    const { start, endExclusive } = parseMonthRange(monthKey);
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        classId,
+        trainingManagerStaffId: accessibleStaffId,
+        date: {
+          gte: start,
+          lt: endExclusive,
+        },
+        OR: [
+          { trainingManagerAllowanceAmount: { gt: 0 } },
+          { trainingManagerRatePercent: { gt: 0 } },
+        ],
+      },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        date: true,
+        trainingManagerRatePercent: true,
+        trainingManagerAllowanceAmount: true,
+        trainingManagerPaymentStatus: true,
+        attendance: {
+          where: {
+            status: {
+              in: [AttendanceStatus.present, AttendanceStatus.excused],
+            },
+          },
+          select: { tuitionFee: true },
+        },
+      },
+    });
+
+    return sessions.map((session) => {
+      const sessionTuitionTotal = session.attendance.reduce(
+        (sum, row) => sum + (row.tuitionFee ?? 0),
+        0,
+      );
+      const ratePercent = toNumber(session.trainingManagerRatePercent);
+      const allowanceAmount = session.trainingManagerAllowanceAmount ?? 0;
+
+      return {
+        sessionId: session.id,
+        date: session.date.toISOString(),
+        sessionTuitionTotal,
+        trainingManagerRatePercent: ratePercent,
+        allowanceAmount,
+        paymentStatus:
+          session.trainingManagerPaymentStatus ?? PaymentStatus.pending,
+      };
+    });
   }
 
   async bulkUpdatePaymentStatus(

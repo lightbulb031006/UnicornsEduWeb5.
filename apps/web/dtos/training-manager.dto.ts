@@ -43,3 +43,12 @@ export interface TrainingManagerBulkPaymentStatusResult {
   requestedCount: number;
   updatedCount: number;
 }
+
+export interface TrainingManagerSessionAllowanceItem {
+  sessionId: string;
+  date: string;
+  sessionTuitionTotal: number;
+  trainingManagerRatePercent: number;
+  allowanceAmount: number;
+  paymentStatus: TrainingManagerPaymentStatus;
+}

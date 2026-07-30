@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { ClassDetail, ClassStatus, ClassType, CreateClassPayload } from "@/dtos/class.dto";
 import { TimeInput } from "@/components/ui/TimeInput";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import * as classApi from "@/lib/apis/class.api";
 import * as staffApi from "@/lib/apis/staff.api";
@@ -21,6 +22,11 @@ import {
   parseMaxAllowancePerSessionInput,
   parseTuitionPackageInputs,
 } from "@/lib/class.helpers";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+  parseOptionalMoneyInt,
+} from "@/lib/money-input.helpers";
 import { createClientId } from "@/lib/client-id";
 
 type ScheduleRangeForm = {
@@ -245,12 +251,12 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
       type,
       status,
       max_students: parseOptionalInt(maxStudentsInput),
-      allowance_per_session_per_student: parseOptionalInt(allowancePerSessionInput),
+      allowance_per_session_per_student: parseOptionalMoneyInt(allowancePerSessionInput),
       max_allowance_per_session: parseMaxAllowancePerSessionInput(
         maxAllowancePerSessionInput.trim(),
-        parseOptionalInt,
+        parseOptionalMoneyInt,
       ),
-      scale_amount: parseOptionalInt(scaleAmountInput),
+      scale_amount: parseOptionalMoneyInt(scaleAmountInput),
       student_tuition_per_session: studentTuitionPerSession,
       tuition_package_total: tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total,
       tuition_package_session: tuitionPkg.mode === "empty" ? undefined : tuitionPkg.sessions,
@@ -357,33 +363,27 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
               </label>
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Trợ cấp / HV / buổi</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={allowancePerSessionInput}
-                  onChange={(e) => setAllowancePerSessionInput(e.target.value)}
+                  onValueChange={setAllowancePerSessionInput}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   placeholder="VNĐ"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Trợ cấp tối đa / buổi</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={maxAllowancePerSessionInput}
-                  onChange={(e) => setMaxAllowancePerSessionInput(e.target.value)}
+                  onValueChange={setMaxAllowancePerSessionInput}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   placeholder="VNĐ"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Scales</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={scaleAmountInput}
-                  onChange={(e) => setScaleAmountInput(e.target.value)}
+                  onValueChange={setScaleAmountInput}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
@@ -404,12 +404,14 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
                     </span>
                     <label className="flex shrink-0 items-center gap-1.5 text-sm text-text-secondary">
                       <span className="whitespace-nowrap text-xs text-text-muted">Riêng</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={t.customAllowance ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value.trim();
+                      <MoneyInput
+                        value={
+                          t.customAllowance == null
+                            ? ""
+                            : moneyInputInitialFromNumber(t.customAllowance)
+                        }
+                        onValueChange={(nextValue) => {
+                          const v = nextValue.trim();
                           if (v === "") {
                             setSelectedTeachers((prev) =>
                               prev.map((x) =>
@@ -418,14 +420,14 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
                             );
                             return;
                           }
-                          const num = Number(v);
-                          if (!Number.isFinite(num) || num < 0) {
+                          const num = parseMoneyInput(v);
+                          if (num == null || num < 0) {
                             toast.error("Trợ cấp riêng phải là số không âm.");
                             return;
                           }
                           setSelectedTeachers((prev) =>
                             prev.map((x) =>
-                              x.id === t.id ? { ...x, customAllowance: Math.floor(num) } : x,
+                              x.id === t.id ? { ...x, customAllowance: num } : x,
                             ),
                           );
                         }}
@@ -626,11 +628,9 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
             <div className="grid gap-3 md:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Tổng gói</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={tuitionPackageTotalInput}
-                  onChange={(e) => setTuitionPackageTotalInput(e.target.value)}
+                  onValueChange={setTuitionPackageTotalInput}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   placeholder="VNĐ"
                 />

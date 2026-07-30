@@ -258,11 +258,18 @@ export interface StaffIncomeAmountSummaryDto {
 /**
  * Tổng hợp theo lớp (giáo viên) cho card "Lớp phụ trách".
  * `total` / `paid` / `unpaid` đều là gross allowance, chưa trừ CPVH/thuế.
+ *
+ * Visibility: luôn gồm phân công hiện tại (`class_teachers.status` null/`active`);
+ * lớp nghỉ dạy (`inactive` hoặc không còn phân công) chỉ có mặt khi còn trợ cấp
+ * trong tháng đang chọn và/hoặc còn `unpaid`/`pending` — khi đó `isCurrentTeacherAssignment=false`.
  */
 export interface StaffIncomeClassSummaryDto extends StaffIncomeAmountSummaryDto {
   classId: string;
   className: string;
-  /** True when the staff is still assigned to this class via `class_teachers`. */
+  /**
+   * True khi gia sư còn phân công hiện tại trên lớp (`class_teachers.status` null/`active`).
+   * False = nghỉ dạy theo lớp nhưng vẫn còn thu nhập/trợ cấp trong kỳ hoặc snapshot chưa nhận.
+   */
   isCurrentTeacherAssignment: boolean;
 }
 

@@ -21,6 +21,29 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ## [Unreleased]
 
+### Fixed
+
+- BE `GET /staff/:id/income-summary` card **Lớp phụ trách** (`classMonthlySummaries`): không còn seed mọi row `class_teachers` (kể cả `inactive`) thành dòng 0đ; chỉ luôn hiện phân công hiện tại (`status` null/`active`); lớp nghỉ dạy chỉ hiện khi tháng đang chọn còn trợ cấp và/hoặc còn `unpaid`/`pending`, với `isCurrentTeacherAssignment=false` (badge **NGHỈ DẠY**).
+- BE `GET /staff` (list `/admin/staffs` cột **Lớp**): `classTeachers` chỉ gồm phân công hiện tại hoặc lớp nghỉ dạy còn trợ cấp tháng hiện tại / còn `unpaid`/`pending` — cùng rule ẩn lớp nghỉ 0đ với card **Lớp phụ trách**.
+
+- Auth login/OAuth: sau đăng nhập redirect thẳng tới workspace/dashboard (`/auth/post-login` cho Google OAuth; login password bootstrap session an toàn hơn, bỏ fallback `canAccessRestrictedRoutes=false` gây kẹt homepage).
+
+- **Trợ cấp gia sư theo lớp:** `PATCH /class/:id/teachers` và popup trợ cấp không còn materialize `allowance_per_session_per_student` vào `class_teachers.custom_allowance` khi ô trống; omit preserve, `null` = kế thừa mặc định lớp. Migration repair các row `custom_allowance` trùng default lớp → `NULL`.
+
+### Added
+
+- FE/BE trang chi tiết lớp: cột **Người chăm sóc** trên danh sách học sinh đang học (`customerCareStaff` từ `GET /class/:id` / staff-ops mirror; chỉ họ tên; chưa gán → `—`). Link tới chi tiết CSKH cho admin / trợ lí / kế toán chi; CSKH thuần chỉ self-link; role khác chữ thường.
+
+### Added
+
+- BE/FE trợ cấp quản lý lớp (QLL): `GET /training-manager/staff/:staffId/classes/:classId/session-allowances?month=` trả chi tiết buổi (học phí buổi, % snapshot, trợ cấp, trạng thái); tab **Lớp học** trên `/admin/training_detail` và `/staff/training-detail` mở rộng từng lớp (pattern tab Hoa hồng CSKH), bulk `PATCH .../payment-status/bulk` cho admin/assistant/kế toán.
+
+### Fixed
+
+- BE dashboard popup **Trợ cấp chờ thanh toán**: thẻ **Trợ cấp quản lý lớp chưa thanh toán** hiển thị đúng tổng (`totalTrainingManagerAmount` được SELECT từ aggregate unpaid staff).
+
+- BE dashboard cảnh báo **Sắp hết tiền** (`getExpiringStudents`, admin dashboard + khối **Cảnh báo** trợ lí): chỉ còn học sinh đang học (active + membership active trên lớp `running`); học sinh nghỉ hoặc chỉ còn lớp đã kết thúc với số dư `>= 0` không còn hiện; số dư âm vẫn qua nhóm **Chưa thu**.
+
 ### Changed
 
 - BE/FE staff profile gate: `staffProfileComplete` bắt buộc `users.avatar_path` và `staff_info.personal_achievement_link` (cùng bộ field hồ sơ staff hiện có + data-consent). Staff vận hành thiếu hai field này bị redirect `/user-profile?profile_required=1`; admin full vẫn bypass. DB giữ nullable; form admin tạo/sửa không ép submit. FE `/user-profile` + `StaffSelfEditPopup` cập nhật bộ đếm, missing items và label (bỏ “tùy chọn”).
@@ -47,6 +70,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Fixed
 
+- FE `RichTextEditor` (nhận xét HS / nội dung bài học / BTVN / tutorial): khi focus ô trống, caret không còn nhảy cuối dòng đầu của placeholder — thêm `before:h-0` theo CSS TipTap Placeholder (`float` + `height: 0`); bỏ `data-placeholder` thừa trên editor root (TipTap gắn trên node trống).
 - FE popup nạp ví (`StudentBalancePopup` / `/admin/students/[id]`): tab **Nạp thẳng** của admin không còn mất tiêu đề và chữ nút xác nhận — `copyOverrides` không còn ghi đè default bằng `undefined`.
 - FE `RichTextEditor` (form thêm/sửa buổi học — nội dung bài học / BTVN / tutorial / nhận xét HS): paste/autolink URL không còn bị reset caret do controlled sync chạy DOMPurify rồi `setContent` khi TipTap Link HTML lệch (`target`/`rel`); sync chỉ áp dụng value ngoài (load/reset); Link `openOnClick: false`; preview `SessionCommentPreview` style `<a>`. Docs: `docs/pages/admin.md`, `docs/pages/staff.md`.
 - CD deploy: `scripts/gha-deploy-instance-remote.sh` CRLF → LF (fix `set: pipefail: invalid option name` on VPS bash).

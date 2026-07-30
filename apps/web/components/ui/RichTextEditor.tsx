@@ -55,8 +55,10 @@ export default function RichTextEditor({
         ? [
             Placeholder.configure({
               placeholder,
+              // TipTap requires float + height:0 so the ::before placeholder
+              // does not take layout space (otherwise caret lands mid/end of text).
               emptyEditorClass:
-                "before:content-[attr(data-placeholder)] before:float-left before:pointer-events-none before:text-text-muted before:opacity-70",
+                "before:content-[attr(data-placeholder)] before:float-left before:h-0 before:pointer-events-none before:text-text-muted before:opacity-70",
             }),
           ]
         : []),
@@ -66,7 +68,6 @@ export default function RichTextEditor({
       attributes: {
         class: `px-3 py-2 text-text-primary [&_a]:text-primary [&_a]:underline [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_strong]:font-bold [&_h1]:text-xl [&_h2]:text-lg [&_h3]:text-base ${minHeight}`,
         "aria-label": ariaLabel,
-        ...(placeholder ? { "data-placeholder": placeholder } : {}),
       },
     },
   });

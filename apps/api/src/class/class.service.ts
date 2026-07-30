@@ -48,6 +48,7 @@ import {
   resolveDerivedTuitionPerSession,
   resolveEffectiveTuitionPerSession,
 } from 'src/common/student-class-tuition.util';
+import { resolveClassTeacherCustomAllowanceOnWrite } from './class-teacher-allowance.util';
 import {
   redactClassForAccountantView,
   redactClassForTrainingManagerView,
@@ -573,7 +574,25 @@ export class ClassService {
     const classStudents = await db.studentClass.findMany({
       where: { classId: id },
       include: {
-        student: true,
+        student: {
+          include: {
+            customerCareServices: {
+              select: {
+                staff: {
+                  select: {
+                    id: true,
+                    user: {
+                      select: {
+                        first_name: true,
+                        last_name: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       orderBy: [{ createdAt: 'asc' }, { studentId: 'asc' }],
     });
@@ -605,11 +624,20 @@ export class ClassService {
           customTuitionPackageSession,
         }),
       });
+      const { customerCareServices, ...studentInfo } = student.student;
+      const customerCareStaff = customerCareServices?.staff
+        ? {
+            id: customerCareServices.staff.id,
+            fullName:
+              getUserFullNameFromParts(customerCareServices.staff.user) ?? '',
+          }
+        : null;
 
       return {
-        ...student.student,
+        ...studentInfo,
         status: student.status,
         accountBalance: student.student.accountBalance ?? 0,
+        customerCareStaff,
         customTuitionPerSession,
         customTuitionPackageTotal,
         customTuitionPackageSession,
@@ -855,7 +883,7 @@ export class ClassService {
   private getTeacherPayload(data: {
     teachers?: {
       teacher_id: string;
-      custom_allowance?: number;
+      custom_allowance?: number | null;
       operating_deduction_rate_percent?: number;
       tax_rate_percent?: number;
     }[];
@@ -1491,33 +1519,45 @@ export class ClassService {
       throw new NotFoundException('Class not found');
     }
 
-    const defaultAllowance = normalizeNullableMoney(
-      existing.allowancePerSessionPerStudent,
-    );
-    const teacherPayload = dto.teachers.map((teacher) => ({
-      teacherId: teacher.teacher_id,
-      customAllowance: teacher.custom_allowance ?? defaultAllowance,
-      operatingDeductionRatePercent: normalizeRatePercent(
-        teacher.operating_deduction_rate_percent ?? teacher.tax_rate_percent,
-      ),
-    }));
-
     const result = await this.prisma.$transaction(async (tx) => {
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, id)
         : null;
       await this.assertActiveStaffIds(
         tx,
-        teacherPayload.map((teacher) => teacher.teacherId),
+        dto.teachers.map((teacher) => teacher.teacher_id),
       );
 
       const existingTeachers = await tx.classTeacher.findMany({
         where: { classId: id },
         select: {
           teacherId: true,
+          customAllowance: true,
           operatingDeductionRatePercent: true,
         },
       });
+      const existingCustomAllowanceByTeacherId = new Map(
+        existingTeachers.map((teacher) => [
+          teacher.teacherId,
+          teacher.customAllowance,
+        ]),
+      );
+      const teacherPayload = dto.teachers.map((teacher) => ({
+        teacherId: teacher.teacher_id,
+        customAllowance: resolveClassTeacherCustomAllowanceOnWrite({
+          incoming: teacher.custom_allowance,
+          existingCustomAllowance: existingCustomAllowanceByTeacherId.get(
+            teacher.teacher_id,
+          ),
+          isExistingAssignment: existingCustomAllowanceByTeacherId.has(
+            teacher.teacher_id,
+          ),
+        }),
+        operatingDeductionRatePercent: normalizeRatePercent(
+          teacher.operating_deduction_rate_percent ?? teacher.tax_rate_percent,
+        ),
+      }));
+
       const nextTeacherIds = new Set(
         teacherPayload.map((teacher) => teacher.teacherId),
       );
@@ -1650,6 +1690,18 @@ export class ClassService {
                   teacher.tax_rate_percent,
               );
 
+        const data: {
+          customAllowance?: number | null;
+          operatingDeductionRatePercent: number;
+        } = {
+          operatingDeductionRatePercent: nextOperatingDeductionRatePercent,
+        };
+        if (teacher.custom_allowance !== undefined) {
+          data.customAllowance = normalizeNullableMoney(
+            teacher.custom_allowance,
+          );
+        }
+
         await tx.classTeacher.update({
           where: {
             classId_teacherId: {
@@ -1657,10 +1709,7 @@ export class ClassService {
               teacherId: teacher.teacher_id,
             },
           },
-          data: {
-            customAllowance: normalizeNullableMoney(teacher.custom_allowance),
-            operatingDeductionRatePercent: nextOperatingDeductionRatePercent,
-          },
+          data,
         });
       }
 

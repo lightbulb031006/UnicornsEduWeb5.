@@ -17,6 +17,7 @@ import {
   IsUUID,
   Max,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -35,15 +36,17 @@ export class ClassTeacherItemDto {
 
   @ApiPropertyOptional({
     description:
-      'Custom allowance for this teacher in this class (VNĐ). If omitted in PATCH /class/:id/teachers, backend fills it with the class default allowance.',
+      'Custom allowance for this teacher in this class (VNĐ). Omit to preserve an existing value or inherit the class default for new assignments. Send null to clear an override and inherit the class default.',
     example: 150000,
     minimum: 0,
+    nullable: true,
   })
   @IsOptional()
+  @ValidateIf((_obj, value) => value !== null && value !== undefined)
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  custom_allowance?: number;
+  custom_allowance?: number | null;
 
   @ApiPropertyOptional({
     description:
@@ -252,15 +255,19 @@ export class ClassTeacherCompensationItemDto {
   @IsStaffId()
   teacher_id: string;
 
-  @ApiProperty({
-    description: 'Custom allowance for this teacher in this class (VNĐ).',
+  @ApiPropertyOptional({
+    description:
+      'Custom allowance for this teacher in this class (VNĐ). Omit to leave unchanged. Send null to inherit the class default.',
     example: 150000,
     minimum: 0,
+    nullable: true,
   })
+  @IsOptional()
+  @ValidateIf((_obj, value) => value !== null && value !== undefined)
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  custom_allowance: number;
+  custom_allowance?: number | null;
 
   @ApiPropertyOptional({
     description:

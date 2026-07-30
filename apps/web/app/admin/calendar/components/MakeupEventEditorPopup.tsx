@@ -5,6 +5,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DateInput } from "@/components/ui/DateInput";
 import { TimeInput } from "@/components/ui/TimeInput";
+import {
+  currentTimePrefillValue,
+  toTimeDisplay,
+} from "@/components/ui/time-input.helpers";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { ClassScheduleEvent } from "@/dtos/class-schedule.dto";
 import * as classScheduleApi from "@/lib/apis/class-schedule.api";
@@ -28,6 +32,12 @@ type FormState = {
   note: string;
 };
 
+function normalizeTimePayload(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.length === 5 ? `${trimmed}:00` : trimmed;
+}
+
 const buildInitialState = (
   event: ClassScheduleEvent | null | undefined,
   defaultDate: string,
@@ -35,8 +45,8 @@ const buildInitialState = (
   classId: event?.classId ?? "",
   teacherId: event?.teacherIds?.[0] ?? "",
   date: event?.date ?? defaultDate,
-  startTime: event?.startTime?.slice(0, 5) ?? "18:00",
-  endTime: event?.endTime?.slice(0, 5) ?? "19:30",
+  startTime: event?.startTime?.slice(0, 5) ?? toTimeDisplay(currentTimePrefillValue()),
+  endTime: event?.endTime?.slice(0, 5) ?? "",
   note: event?.note ?? event?.description ?? "",
 });
 
@@ -97,8 +107,8 @@ export default function MakeupEventEditorPopup({
         classId: form.classId,
         teacherId: form.teacherId,
         date: form.date,
-        startTime: `${form.startTime}:00`,
-        endTime: `${form.endTime}:00`,
+        startTime: normalizeTimePayload(form.startTime),
+        endTime: normalizeTimePayload(form.endTime),
         ...(form.note.trim() ? { note: form.note.trim() } : {}),
       }),
     onSuccess: async () => {
@@ -118,8 +128,8 @@ export default function MakeupEventEditorPopup({
         classId: form.classId,
         teacherId: form.teacherId,
         date: form.date,
-        startTime: `${form.startTime}:00`,
-        endTime: `${form.endTime}:00`,
+        startTime: normalizeTimePayload(form.startTime),
+        endTime: normalizeTimePayload(form.endTime),
         note: form.note.trim(),
       }),
     onSuccess: async () => {

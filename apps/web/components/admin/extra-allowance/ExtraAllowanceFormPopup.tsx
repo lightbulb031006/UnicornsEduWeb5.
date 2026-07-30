@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import * as staffApi from "@/lib/apis/staff.api";
 import { ROLE_LABELS } from "@/lib/staff.constants";
 import { MonthInput } from "@/components/ui/MonthInput";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import type {
   ExtraAllowanceBaseFields,
@@ -21,6 +22,10 @@ import {
   getExtraAllowanceRoleLabel,
   getExtraAllowanceStatusLabel,
 } from "./extraAllowancePresentation";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
 
 export interface ExtraAllowanceFormSubmitPayload {
   staffId: string;
@@ -80,9 +85,7 @@ function getInitialRoleType(
 function getInitialAmountInput(
   initialData?: ExtraAllowanceBaseFields | null,
 ): string {
-  return initialData?.amount == null || Number.isNaN(initialData.amount)
-    ? ""
-    : String(initialData.amount);
+  return moneyInputInitialFromNumber(initialData?.amount ?? null);
 }
 
 function getInitialNote(initialData?: ExtraAllowanceBaseFields | null): string {
@@ -203,8 +206,8 @@ export default function ExtraAllowanceFormPopup({
     }
 
     const trimmedAmount = amountInput.trim();
-    const parsedAmount = Number(trimmedAmount);
-    if (!trimmedAmount || !Number.isFinite(parsedAmount) || parsedAmount < 0) {
+    const parsedAmount = parseMoneyInput(trimmedAmount);
+    if (!trimmedAmount || parsedAmount == null || parsedAmount < 0) {
       toast.error("Số tiền phải là số hợp lệ và lớn hơn hoặc bằng 0.");
       return;
     }
@@ -471,16 +474,12 @@ export default function ExtraAllowanceFormPopup({
 
             <label className="flex flex-col gap-1 text-sm text-text-secondary lg:col-span-2">
               <span>Số tiền</span>
-              <input
+              <MoneyInput
                 name="extra_allowance_amount"
                 autoComplete="off"
-                inputMode="numeric"
-                type="number"
-                min={0}
-                step={1}
                 value={amountInput}
-                onChange={(event) => setAmountInput(event.target.value)}
-                placeholder="Ví dụ: 500000…"
+                onValueChange={setAmountInput}
+                placeholder="Ví dụ: 500.000…"
                 className="min-h-11 rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 required
               />

@@ -1781,6 +1781,126 @@ describe('StaffService', () => {
     ]);
   });
 
+  it('hides inactive class_teachers with no monthly or unpaid allowance in income summary', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-1',
+      roles: [StaffRole.teacher],
+      classTeachers: [
+        {
+          status: 'active',
+          class: { id: 'class-active', name: 'Toán đang dạy' },
+        },
+        {
+          status: 'inactive',
+          class: { id: 'class-retired-zero', name: 'Toán nghỉ không trợ cấp' },
+        },
+      ],
+    });
+    mockPrisma.bonus.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mockPrisma.extraAllowance.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    jest
+      .spyOn(
+        service as any,
+        'getTeacherAllowanceSourceRowsByStatusAndTaxBucket',
+      )
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    jest
+      .spyOn(service as any, 'getTeacherAllowanceRowsByClassStatusAndTaxBucket')
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    jest.spyOn(service as any, 'getDepositSessionRows').mockResolvedValue([]);
+
+    const result = await service.getIncomeSummary('staff-1', {
+      month: '03',
+      year: '2026',
+      days: 14,
+    });
+
+    expect(result.classMonthlySummaries).toEqual([
+      {
+        classId: 'class-active',
+        className: 'Toán đang dạy',
+        isCurrentTeacherAssignment: true,
+        total: 0,
+        paid: 0,
+        unpaid: 0,
+      },
+    ]);
+  });
+
+  it('shows inactive class_teachers with unpaid allowance as retired teaching', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-1',
+      roles: [StaffRole.teacher],
+      classTeachers: [
+        {
+          status: 'inactive',
+          class: { id: 'class-retired', name: 'Toán nghỉ dạy' },
+        },
+      ],
+    });
+    mockPrisma.bonus.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mockPrisma.extraAllowance.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    jest
+      .spyOn(
+        service as any,
+        'getTeacherAllowanceSourceRowsByStatusAndTaxBucket',
+      )
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    jest
+      .spyOn(service as any, 'getTeacherAllowanceRowsByClassStatusAndTaxBucket')
+      .mockResolvedValueOnce([
+        {
+          classId: 'class-retired',
+          className: 'Toán nghỉ dạy',
+          teacherPaymentStatus: 'paid',
+          taxRatePercent: 10,
+          grossAllowance: 80000,
+          operatingAmount: 0,
+          taxableBaseAmount: 80000,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          classId: 'class-retired',
+          className: 'Toán nghỉ dạy',
+          teacherPaymentStatus: 'unpaid',
+          taxRatePercent: 10,
+          grossAllowance: 50000,
+          operatingAmount: 10000,
+          taxableBaseAmount: 40000,
+        },
+      ]);
+    jest.spyOn(service as any, 'getDepositSessionRows').mockResolvedValue([]);
+
+    const result = await service.getIncomeSummary('staff-1', {
+      month: '03',
+      year: '2026',
+      days: 14,
+    });
+
+    expect(result.classMonthlySummaries).toEqual([
+      {
+        classId: 'class-retired',
+        className: 'Toán nghỉ dạy',
+        isCurrentTeacherAssignment: false,
+        total: 80000,
+        paid: 80000,
+        unpaid: 50000,
+      },
+    ]);
+  });
+
   it('counts all unpaid teacher sessions in the current unpaid snapshot net', async () => {
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-1',
@@ -2488,7 +2608,10 @@ describe('StaffService', () => {
             },
           },
           classTeachers: {
-            include: { class: { select: { id: true, name: true } } },
+            select: {
+              status: true,
+              class: { select: { id: true, name: true } },
+            },
           },
         },
       }),
@@ -2503,6 +2626,59 @@ describe('StaffService', () => {
       }),
     ]);
     expect(result.data[0].user).not.toHaveProperty('avatarPath');
+  });
+
+  it('hides inactive class_teachers without remaining allowance on staff list', async () => {
+    mockPrisma.staffInfo.count.mockResolvedValue(1);
+    mockPrisma.staffInfo.findMany.mockResolvedValue([
+      {
+        id: 'staff-1',
+        fullName: 'Teacher A',
+        status: 'active',
+        roles: [StaffRole.teacher],
+        user: {
+          first_name: 'Teacher',
+          last_name: 'A',
+          accountHandle: 'teacher-a',
+          email: 'teacher@example.com',
+          province: 'Hanoi',
+          avatarPath: null,
+        },
+        classTeachers: [
+          {
+            status: 'active',
+            class: { id: 'class-active', name: 'BASIC 08' },
+          },
+          {
+            status: 'inactive',
+            class: { id: 'class-retired-zero', name: 'BASIC 07' },
+          },
+          {
+            status: 'inactive',
+            class: { id: 'class-retired-unpaid', name: 'ADVANCED 10' },
+          },
+        ],
+      },
+    ]);
+    jest
+      .spyOn(service as any, 'getUnpaidTotalsByStaffIds')
+      .mockResolvedValue(new Map([['staff-1', 380000]]));
+    jest
+      .spyOn(service as any, 'getListVisibleClassIdsByTeacherIds')
+      .mockResolvedValue(
+        new Map([['staff-1', new Set(['class-retired-unpaid'])]]),
+      );
+
+    const result = await service.getStaff({
+      page: 1,
+      limit: 20,
+    });
+
+    expect(result.data[0].classTeachers).toEqual([
+      { class: { id: 'class-active', name: 'BASIC 08' } },
+      { class: { id: 'class-retired-unpaid', name: 'ADVANCED 10' } },
+    ]);
+    expect(result.data[0].unpaidAmountTotal).toBe(380000);
   });
 
   it('attaches signed avatar URL to staff detail user without exposing storage path', async () => {

@@ -38,6 +38,11 @@ import {
   updateMyStaffBonus,
 } from "@/lib/apis/auth.api";
 import { formatCurrency } from "@/lib/class.helpers";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import * as staffOpsApi from "@/lib/apis/staff-ops.api";
 import { ROLE_LABELS } from "@/lib/staff.constants";
 import { pickAvatarUrl } from "@/lib/avatar";
@@ -620,7 +625,7 @@ export default function StaffSelfDetailPage() {
     setEditingBonusId(target.id);
     setBonusForm({
       workTypeOption: target.workType,
-      amount: String(target.amount),
+      amount: moneyInputInitialFromNumber(target.amount, true),
       status: target.status,
       note: target.note,
     });
@@ -669,8 +674,8 @@ export default function StaffSelfDetailPage() {
       return;
     }
 
-    const parsedAmount = Number(bonusForm.amount);
-    if (!Number.isFinite(parsedAmount)) {
+    const parsedAmount = parseMoneyInput(bonusForm.amount, { allowNegative: true });
+    if (parsedAmount == null) {
       toast.error("Số tiền không hợp lệ.");
       return;
     }
@@ -1632,17 +1637,17 @@ export default function StaffSelfDetailPage() {
                 <span className="mb-1 block text-sm font-medium text-text-secondary">
                   Số tiền thưởng/phạt
                 </span>
-                <input
-                  type="number"
+                <MoneyInput
+                  allowNegative
                   aria-label="Số tiền thưởng/phạt"
                   value={bonusForm.amount}
-                  onChange={(e) =>
+                  onValueChange={(value) =>
                     setBonusForm((prev) => ({
                       ...prev,
-                      amount: e.target.value,
+                      amount: value,
                     }))
                   }
-                  placeholder="Ví dụ: 500000 hoặc -100000"
+                  placeholder="Ví dụ: 500.000 hoặc -100.000"
                   className="w-full rounded-md border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>

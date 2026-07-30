@@ -4,6 +4,7 @@ import { useState, type SyntheticEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import type { ClassDetail, ClassStatus, ClassType, UpdateClassBasicInfoPayload } from "@/dtos/class.dto";
 import * as classApi from "@/lib/apis/class.api";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
@@ -14,6 +15,10 @@ import {
   parseMaxAllowancePerSessionInput,
   parseTuitionPackageInputs,
 } from "@/lib/class.helpers";
+import {
+  moneyInputInitialFromNumber,
+  parseOptionalMoneyInt,
+} from "@/lib/money-input.helpers";
 import {
   classEditorModalBodyClassName,
   classEditorModalClassName,
@@ -64,17 +69,18 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
   const [type, setType] = useState<ClassType>(classDetail.type);
   const [status, setStatus] = useState<ClassStatus>(classDetail.status);
   const [maxStudentsInput, setMaxStudentsInput] = useState(String(classDetail.maxStudents ?? ""));
-  const [allowancePerSessionInput, setAllowancePerSessionInput] = useState(
-    String(classDetail.allowancePerSessionPerStudent ?? ""),
+  const [allowancePerSessionInput, setAllowancePerSessionInput] = useState(() =>
+    moneyInputInitialFromNumber(classDetail.allowancePerSessionPerStudent),
   );
-  const [maxAllowancePerSessionInput, setMaxAllowancePerSessionInput] = useState(
-    maxAllowanceInputInitialFromServer(classDetail.maxAllowancePerSession),
+  const [maxAllowancePerSessionInput, setMaxAllowancePerSessionInput] = useState(() => {
+    const raw = maxAllowanceInputInitialFromServer(classDetail.maxAllowancePerSession);
+    return raw === "" ? "" : moneyInputInitialFromNumber(classDetail.maxAllowancePerSession);
+  });
+  const [scaleAmountInput, setScaleAmountInput] = useState(() =>
+    moneyInputInitialFromNumber(classDetail.scaleAmount),
   );
-  const [scaleAmountInput, setScaleAmountInput] = useState(
-    classDetail.scaleAmount == null ? "" : String(classDetail.scaleAmount),
-  );
-  const [tuitionPackageTotalInput, setTuitionPackageTotalInput] = useState(
-    classDetail.tuitionPackageTotal == null ? "" : String(classDetail.tuitionPackageTotal),
+  const [tuitionPackageTotalInput, setTuitionPackageTotalInput] = useState(() =>
+    moneyInputInitialFromNumber(classDetail.tuitionPackageTotal),
   );
   const [tuitionPackageSessionInput, setTuitionPackageSessionInput] = useState(
     classDetail.tuitionPackageSession == null ? "" : String(classDetail.tuitionPackageSession),
@@ -107,12 +113,12 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
       type,
       status,
       max_students: maxStudents,
-      allowance_per_session_per_student: parseOptionalInt(allowancePerSessionInput),
+      allowance_per_session_per_student: parseOptionalMoneyInt(allowancePerSessionInput),
       max_allowance_per_session: parseMaxAllowancePerSessionInput(
         maxAllowancePerSessionInput.trim(),
-        parseOptionalInt,
+        parseOptionalMoneyInt,
       ),
-      scale_amount: parseOptionalInt(scaleAmountInput),
+      scale_amount: parseOptionalMoneyInt(scaleAmountInput),
       student_tuition_per_session: studentTuitionPerSession,
       tuition_package_total: tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total,
       tuition_package_session: tuitionPkg.mode === "empty" ? undefined : tuitionPkg.sessions,
@@ -203,43 +209,35 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
               </label>
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Trợ cấp / HV / buổi</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={allowancePerSessionInput}
-                  onChange={(e) => setAllowancePerSessionInput(e.target.value)}
+                  onValueChange={setAllowancePerSessionInput}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   placeholder="VNĐ"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Trợ cấp tối đa / buổi</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={maxAllowancePerSessionInput}
-                  onChange={(e) => setMaxAllowancePerSessionInput(e.target.value)}
+                  onValueChange={setMaxAllowancePerSessionInput}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   placeholder="Để trống = không giới hạn"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Scales</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={scaleAmountInput}
-                  onChange={(e) => setScaleAmountInput(e.target.value)}
+                  onValueChange={setScaleAmountInput}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Tổng gói</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={tuitionPackageTotalInput}
-                  onChange={(e) => setTuitionPackageTotalInput(e.target.value)}
+                  onValueChange={setTuitionPackageTotalInput}
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   placeholder="VNĐ"
                 />

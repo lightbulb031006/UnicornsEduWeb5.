@@ -8,7 +8,9 @@ import type { StudentSePayStaticQrResponse } from "@/dtos/student.dto";
 import * as studentApi from "@/lib/apis/student.api";
 import { copyStudentWalletQrWithToast } from "@/lib/clipboard-qr";
 import { formatCurrency } from "@/lib/class.helpers";
+import { parseMoneyInput } from "@/lib/money-input.helpers";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 
 type BalanceMode = "topup" | "withdraw";
 type TopUpMethod = "sepay" | "direct";
@@ -127,9 +129,9 @@ export default function StudentBalancePopup({
   const directBalanceChangeSelected = mode === "withdraw" || directTopupSelected;
 
   const currentBalance = student.accountBalance ?? 0;
-  const rawAmount = amountInput.trim() === "" ? Number.NaN : Number(amountInput.trim());
+  const rawAmount = parseMoneyInput(amountInput.trim());
   const positiveAmount =
-    Number.isFinite(rawAmount) && Number.isInteger(rawAmount) && rawAmount > 0 ? rawAmount : 0;
+    rawAmount != null && rawAmount > 0 ? rawAmount : 0;
   const withdrawAmount = positiveAmount;
   const signedTopUpAmount = positiveAmount;
   const hasValidAmount = positiveAmount > 0;
@@ -502,17 +504,13 @@ export default function StudentBalancePopup({
                 {directBalanceChangeSelected ? (
                   <label className="mt-4 flex flex-col gap-1 text-sm text-text-secondary">
                     <span>Số tiền</span>
-                    <input
+                    <MoneyInput
                       name="amount"
-                      type="number"
-                      {...(mode === "withdraw" ? { min: 0 } : {})}
-                      step={1}
-                      inputMode="numeric"
                       autoComplete="off"
                       value={amountInput}
-                      onChange={(event) => setAmountInput(event.target.value)}
+                      onValueChange={setAmountInput}
                       className="rounded-md border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                      placeholder="Ví dụ: 500000…"
+                      placeholder="Ví dụ: 500.000…"
                     />
                   </label>
                 ) : null}

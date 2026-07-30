@@ -529,6 +529,7 @@ describe('ClassService', () => {
             id: 'student-1',
             fullName: 'Jane Student',
             status: StudentClassStatus.active,
+            customerCareStaff: null,
             effectiveTuitionPerSession: 250000,
             tuitionPackageSource: 'class',
           },
@@ -831,7 +832,7 @@ describe('ClassService', () => {
   });
 
   describe('updateClassTeachers', () => {
-    it('fills blank custom_allowance with the class default allowance', async () => {
+    it('persists null custom_allowance for new teachers when field is omitted', async () => {
       await service.updateClassTeachers('class-1', {
         teachers: [{ teacher_id: 'teacher-1' }],
       });
@@ -841,10 +842,56 @@ describe('ClassService', () => {
           {
             classId: 'class-1',
             teacherId: 'teacher-1',
-            customAllowance: 120000,
+            customAllowance: null,
             operatingDeductionRatePercent: 0,
             status: 'active',
           },
+        ],
+      });
+    });
+
+    it('preserves existing custom_allowance when field is omitted', async () => {
+      mockTx.classTeacher.findMany.mockResolvedValue([
+        {
+          teacherId: 'teacher-1',
+          customAllowance: 180000,
+          operatingDeductionRatePercent: 0,
+        },
+      ]);
+
+      await service.updateClassTeachers('class-1', {
+        teachers: [{ teacher_id: 'teacher-1' }],
+      });
+
+      expect(mockTx.classTeacher.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            teacherId: 'teacher-1',
+            customAllowance: 180000,
+          }),
+        ],
+      });
+    });
+
+    it('clears override when custom_allowance is null', async () => {
+      mockTx.classTeacher.findMany.mockResolvedValue([
+        {
+          teacherId: 'teacher-1',
+          customAllowance: 180000,
+          operatingDeductionRatePercent: 0,
+        },
+      ]);
+
+      await service.updateClassTeachers('class-1', {
+        teachers: [{ teacher_id: 'teacher-1', custom_allowance: null }],
+      });
+
+      expect(mockTx.classTeacher.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            teacherId: 'teacher-1',
+            customAllowance: null,
+          }),
         ],
       });
     });
@@ -903,10 +950,12 @@ describe('ClassService', () => {
       mockTx.classTeacher.findMany.mockResolvedValue([
         {
           teacherId: 'teacher-removed',
+          customAllowance: null,
           operatingDeductionRatePercent: 0,
         },
         {
           teacherId: 'teacher-kept',
+          customAllowance: null,
           operatingDeductionRatePercent: 5,
         },
       ]);
@@ -993,6 +1042,73 @@ describe('ClassService', () => {
         data: {
           customAllowance: 150000,
           operatingDeductionRatePercent: 7.5,
+        },
+      });
+    });
+
+    it('updates only compensation fields included in the payload', async () => {
+      mockPrisma.class.findUnique.mockResolvedValue({
+        id: 'class-1',
+        teachers: [
+          {
+            teacherId: 'teacher-1',
+            operatingDeductionRatePercent: 5,
+          },
+        ],
+      });
+
+      await service.updateClassTeacherCompensation('class-1', {
+        teachers: [
+          {
+            teacher_id: 'teacher-1',
+            operating_deduction_rate_percent: 7.5,
+          },
+        ],
+      });
+
+      expect(mockTx.classTeacher.update).toHaveBeenCalledWith({
+        where: {
+          classId_teacherId: {
+            classId: 'class-1',
+            teacherId: 'teacher-1',
+          },
+        },
+        data: {
+          operatingDeductionRatePercent: 7.5,
+        },
+      });
+    });
+
+    it('clears custom allowance when null is sent', async () => {
+      mockPrisma.class.findUnique.mockResolvedValue({
+        id: 'class-1',
+        teachers: [
+          {
+            teacherId: 'teacher-1',
+            operatingDeductionRatePercent: 5,
+          },
+        ],
+      });
+
+      await service.updateClassTeacherCompensation('class-1', {
+        teachers: [
+          {
+            teacher_id: 'teacher-1',
+            custom_allowance: null,
+          },
+        ],
+      });
+
+      expect(mockTx.classTeacher.update).toHaveBeenCalledWith({
+        where: {
+          classId_teacherId: {
+            classId: 'class-1',
+            teacherId: 'teacher-1',
+          },
+        },
+        data: {
+          customAllowance: null,
+          operatingDeductionRatePercent: 5,
         },
       });
     });

@@ -38,3 +38,12 @@ export interface TrainingManagerBulkPaymentStatusUpdateResultDto {
   requestedCount: number;
   updatedCount: number;
 }
+
+export interface TrainingManagerSessionAllowanceDto {
+  sessionId: string;
+  date: string;
+  sessionTuitionTotal: number;
+  trainingManagerRatePercent: number;
+  allowanceAmount: number;
+  paymentStatus: PaymentStatus;
+}

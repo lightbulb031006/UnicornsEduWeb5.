@@ -64,12 +64,20 @@ export interface ClassTrainingManagerRef {
 
 export type ClassStudentStatus = "active" | "inactive" | string;
 
+/** CSKH đang gán qua customer_care_service — chỉ id + họ tên trên response lớp. */
+export interface ClassStudentCaretaker {
+    id: string;
+    fullName: string;
+}
+
 export interface ClassStudent {
     id: string;
     fullName: string;
     status?: ClassStudentStatus;
     /** Present when viewer may see wallet balance; omitted when redacted. */
     accountBalance?: number | null;
+    /** Người chăm sóc (CSKH) đang gán; null/undefined khi chưa gán. */
+    customerCareStaff?: ClassStudentCaretaker | null;
     customTuitionPerSession?: number | null;
     customTuitionPackageTotal?: number | null;
     customTuitionPackageSession?: number | null;
@@ -156,7 +164,7 @@ export interface UpdateClassTeachersPayload {
 export interface UpdateClassTeacherCompensationPayload {
     teachers: Array<{
         teacher_id: string;
-        custom_allowance: number;
+        custom_allowance?: number | null;
         operating_deduction_rate_percent?: number;
     }>;
 }
@@ -167,7 +175,7 @@ export interface ClassStatusActionPayload {
 
 export interface ClassTeacherPayload {
     teacher_id: string;
-    custom_allowance?: number;
+    custom_allowance?: number | null;
     operating_deduction_rate_percent?: number;
 }
 

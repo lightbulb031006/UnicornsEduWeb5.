@@ -21,6 +21,12 @@ import {
 } from "@/lib/sanitize";
 import { formatCurrency } from "@/lib/class.helpers";
 import {
+  isNonNegativeMoneyInput,
+  moneyInputInitialFromNumber,
+  normalizeMoneyValue,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
+import {
   computeTeacherSessionAllowanceGrossPreviewVnd,
   formatSessionAllowanceBreakdownVnd,
   grossAllowanceToRawBaseVnd,
@@ -373,22 +379,6 @@ function resolveSessionTuitionFee(session: SessionItem): number {
         : Number(item.tuitionFee ?? 0);
     return sum + (Number.isFinite(tuitionRaw) ? tuitionRaw : 0);
   }, 0);
-}
-
-function normalizeMoneyValue(
-  value: number | string | null | undefined,
-): number | null {
-  if (value == null) return null;
-  const normalized = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(normalized)) return null;
-  return Math.floor(normalized);
-}
-
-function isNonNegativeMoneyInput(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return true;
-  const normalized = Number(trimmed);
-  return Number.isFinite(normalized) && normalized >= 0;
 }
 
 function resolveAttendanceTuitionValue(item: AttendanceFormItem): number {
@@ -984,7 +974,9 @@ export default function SessionHistoryTable({
           notes: attendanceItem.notes ?? "",
           tuitionFee:
             normalizeMoneyValue(attendanceItem.tuitionFee) != null
-              ? String(normalizeMoneyValue(attendanceItem.tuitionFee))
+              ? moneyInputInitialFromNumber(
+                  normalizeMoneyValue(attendanceItem.tuitionFee),
+                )
               : "",
           defaultTuitionFee: normalizeMoneyValue(attendanceItem.tuitionFee),
         }),
@@ -1024,7 +1016,7 @@ export default function SessionHistoryTable({
             notes: existing?.notes ?? "",
             tuitionFee:
               shouldShowOverride && existingTuitionFee != null
-                ? String(existingTuitionFee)
+                ? moneyInputInitialFromNumber(existingTuitionFee)
                 : "",
             defaultTuitionFee,
           };
@@ -1329,7 +1321,7 @@ export default function SessionHistoryTable({
             status: item.status,
             notes: normalizeOptionalRichTextContent(item.notes),
             ...(canEditAttendanceTuition && item.tuitionFee.trim() !== ""
-              ? { tuitionFee: Math.floor(Number(item.tuitionFee)) }
+              ? { tuitionFee: parseMoneyInput(item.tuitionFee) ?? 0 }
               : {}),
           }))
         : [];

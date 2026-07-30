@@ -60,7 +60,7 @@ If you change project workflow/conventions for agents (commands, required checks
 - **Mock data for UI-first work (preferred)**: if backend data is not required yet, create page-local mock data directly inside the relevant `apps/web/app/**/page.tsx` to render UI immediately. When switching to real data, replace the mock with TanStack Query + DTOs in `apps/web/dtos/`.
 - **Notifications**: use **Sonner** for success/error toasts (avoid inline alert blocks unless explicitly required).
 - **UI components**: prefer **shadcn/ui** components; compose/extend before hand-rolling new components.
-- **Native temporal inputs**: use shared `apps/web/components/ui/DateInput.tsx`, `MonthInput.tsx`, and `TimeInput.tsx` for native date/month/time fields so clicking the whole input opens the picker.
+- **Native temporal inputs**: use shared `apps/web/components/ui/DateInput.tsx` and `MonthInput.tsx` for native date/month fields so clicking the whole input opens the picker. Use shared `TimeInput.tsx` for time-of-day fields: **24h** UI (display `HH:mm`, value `HH:mm:ss` with seconds `00`, minute grid 15′); empty/create start prefills via `currentTimePrefillValue()` (minutes snapped to nearest 15′); picker commits update the field draft immediately; clicking the whole field or the clock button opens an `UpgradedSelect` hour/minute menu; see `docs/adr/2026-07-28-timeinput-24h-minute-precision.md`.
 - **Dropdowns**: for simple single-select dropdowns, use the shared upgraded dropdown at `apps/web/components/ui/UpgradedSelect.tsx` instead of native `<select>`.
   - Keep a custom combobox/listbox only when the UX truly needs search, multi-select, async suggestions, or richer option content.
 - **Mobile-first**: implement for small screens first, then add larger breakpoints.

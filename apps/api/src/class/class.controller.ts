@@ -210,7 +210,7 @@ export class ClassController {
   @ApiOperation({
     summary: 'Update class teachers',
     description:
-      'Replace the list of teachers for the class. If a teacher omits custom_allowance, backend persists the class default allowance_per_session_per_student. If a teacher omits operating_deduction_rate_percent, backend persists 0.',
+      'Replace the list of teachers for the class. Omit custom_allowance to preserve an existing override or inherit the class default for new teachers; send null to clear an override. If operating_deduction_rate_percent is omitted, backend persists 0 for new assignments.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassTeachersDto })
@@ -237,7 +237,7 @@ export class ClassController {
   @ApiOperation({
     summary: 'Update class teacher compensation',
     description:
-      'Update custom allowance and operating deduction rate for existing class teachers only. Does not change teacher roster.',
+      'Update custom allowance and/or operating deduction rate for existing class teachers only. Send only teachers and fields that changed; omit a field to leave it unchanged; send custom_allowance null to inherit the class default.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassTeacherCompensationDto })

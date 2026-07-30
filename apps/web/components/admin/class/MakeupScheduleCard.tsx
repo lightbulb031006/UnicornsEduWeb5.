@@ -19,6 +19,10 @@ import type {
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import { DateInput } from "@/components/ui/DateInput";
 import { TimeInput } from "@/components/ui/TimeInput";
+import {
+  currentTimePrefillValue,
+  toTimeDisplay,
+} from "@/components/ui/time-input.helpers";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import ClassCard from "./ClassCard";
 
@@ -247,8 +251,8 @@ function buildInitialEditorState(options: {
   return {
     teacherId: defaultTeacherId,
     date: options.event?.date ?? options.defaultDate,
-    startTime: options.event?.startTime?.slice(0, 5) ?? "18:00",
-    endTime: options.event?.endTime?.slice(0, 5) ?? "19:30",
+    startTime: options.event?.startTime?.slice(0, 5) ?? toTimeDisplay(currentTimePrefillValue()),
+    endTime: options.event?.endTime?.slice(0, 5) ?? "",
     note: options.event?.note ?? "",
     baselineScheduleEntryId,
     originalDate,

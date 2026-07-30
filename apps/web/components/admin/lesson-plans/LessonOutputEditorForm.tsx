@@ -9,6 +9,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { DateInput } from "@/components/ui/DateInput";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import type {
   CreateLessonOutputPayload,
@@ -19,6 +20,10 @@ import type {
   LessonUpsertMode,
 } from "@/dtos/lesson.dto";
 import * as lessonApi from "@/lib/apis/lesson.api";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
 import {
   LESSON_PAYMENT_STATUS_OPTIONS,
   LESSON_PAYMENT_STATUS_LABELS,
@@ -353,7 +358,9 @@ export default function LessonOutputEditorForm({
   const [paymentStatus, setPaymentStatus] = useState<LessonPaymentStatus>(
     () => initialData?.paymentStatus ?? "pending",
   );
-  const [cost, setCost] = useState(() => String(initialData?.cost ?? 0));
+  const [cost, setCost] = useState(() =>
+    moneyInputInitialFromNumber(initialData?.cost ?? 0),
+  );
   const [level, setLevel] = useState(() => initialData?.level ?? "");
   const [source, setSource] = useState(() => initialData?.source ?? "");
   const [originalTitle, setOriginalTitle] = useState(
@@ -465,7 +472,7 @@ export default function LessonOutputEditorForm({
       return;
     }
 
-    const parsedCost = Number(cost.trim() || "0");
+    const parsedCost = parseMoneyInput(cost.trim() || "0") ?? 0;
     if (allowCostEdit && (!Number.isInteger(parsedCost) || parsedCost < 0)) {
       toast.error("Chi phí phải là số nguyên không âm.");
       return;
@@ -505,7 +512,7 @@ export default function LessonOutputEditorForm({
   };
 
   if (useCompactTasklessLayout) {
-    const parsedCost = Number(cost.trim() || "0");
+    const parsedCost = parseMoneyInput(cost.trim() || "0") ?? 0;
     const displayCost = Number.isFinite(parsedCost) ? Math.max(0, parsedCost) : 0;
 
     return (
@@ -634,16 +641,12 @@ export default function LessonOutputEditorForm({
 
                 <label className="flex flex-col gap-1.5">
                   <span className="text-sm text-text-secondary">Chi phí</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
+                  <MoneyInput
                     value={cost}
-                    onChange={(event) => setCost(event.target.value)}
+                    onValueChange={setCost}
                     readOnly={!allowCostEdit}
                     aria-readonly={!allowCostEdit}
                     className={`${fieldInputClass()} ${allowCostEdit ? "" : "cursor-not-allowed bg-bg-secondary/55 text-text-muted"}`}
-                    inputMode="numeric"
                   />
                   <span className="text-sm font-semibold text-text-primary">
                     {formatCurrency(displayCost)} đ
@@ -850,12 +853,9 @@ export default function LessonOutputEditorForm({
 
             <label className="flex flex-col gap-1 text-sm text-text-secondary">
               <span>Chi phí</span>
-              <input
-                type="number"
-                min={0}
-                step={1}
+              <MoneyInput
                 value={cost}
-                onChange={(event) => setCost(event.target.value)}
+                onValueChange={setCost}
                 readOnly={!allowCostEdit}
                 aria-readonly={!allowCostEdit}
                 placeholder="0"

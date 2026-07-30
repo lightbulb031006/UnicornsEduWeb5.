@@ -8,6 +8,11 @@ import type { ClassDetail, UpdateClassStudentsPayload } from "@/dtos/class.dto";
 import * as classApi from "@/lib/apis/class.api";
 import * as studentApi from "@/lib/apis/student.api";
 import { formatCurrency } from "@/lib/class.helpers";
+import { MoneyInput } from "@/components/ui/MoneyInput";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 import {
   classEditorModalCloseButtonClassName,
@@ -200,7 +205,15 @@ function EditClassStudentsDialog({
     field: TuitionFieldKey,
     rawValue: string,
   ) => {
-    const parsedValue = parseOptionalIntegerInput(rawValue);
+    const parsedValue =
+      field === "customTuitionPackageTotal"
+        ? (() => {
+            const trimmed = rawValue.trim();
+            if (trimmed === "") return undefined;
+            const parsed = parseMoneyInput(trimmed);
+            return parsed == null || parsed < 0 ? null : parsed;
+          })()
+        : parseOptionalIntegerInput(rawValue);
     if (parsedValue === null) return;
 
     setSelectedStudents((prev) =>
@@ -478,18 +491,35 @@ function EditClassStudentsDialog({
                           <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">
                             {field.label}
                           </span>
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            inputMode="numeric"
-                            value={student[field.key] ?? ""}
-                            onChange={(e) =>
-                              handleTuitionFieldChange(student.id, field.key, e.target.value)
-                            }
-                            placeholder={field.placeholder}
-                            className="w-full rounded-md outline outline-1 outline-border-default outline-offset-0 bg-bg-primary px-3 py-2 text-right text-sm tabular-nums text-text-primary placeholder:text-text-muted focus:outline-2 focus:outline-border-focus focus:outline-offset-0"
-                          />
+                          {field.key === "customTuitionPackageTotal" ? (
+                            <MoneyInput
+                              value={
+                                student.customTuitionPackageTotal == null
+                                  ? ""
+                                  : moneyInputInitialFromNumber(
+                                      student.customTuitionPackageTotal,
+                                    )
+                              }
+                              onValueChange={(value) =>
+                                handleTuitionFieldChange(student.id, field.key, value)
+                              }
+                              placeholder={field.placeholder}
+                              className="w-full rounded-md outline outline-1 outline-border-default outline-offset-0 bg-bg-primary px-3 py-2 text-right text-sm tabular-nums text-text-primary placeholder:text-text-muted focus:outline-2 focus:outline-border-focus focus:outline-offset-0"
+                            />
+                          ) : (
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              inputMode="numeric"
+                              value={student[field.key] ?? ""}
+                              onChange={(e) =>
+                                handleTuitionFieldChange(student.id, field.key, e.target.value)
+                              }
+                              placeholder={field.placeholder}
+                              className="w-full rounded-md outline outline-1 outline-border-default outline-offset-0 bg-bg-primary px-3 py-2 text-right text-sm tabular-nums text-text-primary placeholder:text-text-muted focus:outline-2 focus:outline-border-focus focus:outline-offset-0"
+                            />
+                          )}
                           <span className="text-xs text-text-muted">{tuitionFieldHints[field.key]}</span>
                         </label>
                       ))}

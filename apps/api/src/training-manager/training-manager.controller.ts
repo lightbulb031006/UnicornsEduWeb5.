@@ -19,6 +19,7 @@ import type {
   TrainingManagerBulkPaymentStatusUpdateDto,
   TrainingManagerBulkPaymentStatusUpdateResultDto,
   TrainingManagerManagedClassListDto,
+  TrainingManagerSessionAllowanceDto,
   TrainingManagerStaffOptionDto,
   UpdateClassTrainingManagerDto,
 } from 'src/dtos/training-manager.dto';
@@ -77,6 +78,32 @@ export class TrainingManagerController {
       user.id,
       user.roleType,
       staffId,
+      month,
+    );
+  }
+
+  @Get('training-manager/staff/:staffId/classes/:classId/session-allowances')
+  @ApiOperation({
+    summary: 'List training manager session allowances for one managed class',
+  })
+  @ApiParam({ name: 'staffId', description: 'Training staff ID' })
+  @ApiParam({ name: 'classId', description: 'Class ID' })
+  @ApiQuery({ name: 'month', required: true, type: String })
+  @ApiResponse({
+    status: 200,
+    description: 'Session-level training manager allowances in month.',
+  })
+  async getSessionAllowancesByClass(
+    @CurrentUser() user: JwtPayload,
+    @Param('staffId', new ParseStaffIdPipe()) staffId: string,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Query('month') month: string,
+  ): Promise<TrainingManagerSessionAllowanceDto[]> {
+    return this.trainingManagerService.getSessionAllowancesByClass(
+      user.id,
+      user.roleType,
+      staffId,
+      classId,
       month,
     );
   }

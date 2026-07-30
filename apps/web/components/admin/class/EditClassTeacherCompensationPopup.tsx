@@ -1,11 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ClassDetail } from "@/dtos/class.dto";
 import * as classApi from "@/lib/apis/class.api";
 import { formatCurrency } from "@/lib/class.helpers";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
+import { MoneyInput } from "@/components/ui/MoneyInput";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 import {
   classEditorModalClassName,
@@ -24,14 +29,6 @@ type Props = {
   classDetail: ClassDetail;
 };
 
-function parseMoneyInput(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed < 0) return null;
-  return Math.floor(parsed);
-}
-
 function parseRateInput(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -44,7 +41,9 @@ function buildAllowanceDrafts(classDetail: ClassDetail) {
   return Object.fromEntries(
     (classDetail.teachers ?? []).map((teacher) => [
       teacher.id,
-      teacher.customAllowance == null ? "" : String(teacher.customAllowance),
+      teacher.customAllowance == null
+        ? ""
+        : moneyInputInitialFromNumber(teacher.customAllowance),
     ]),
   );
 }
@@ -71,6 +70,10 @@ function EditClassTeacherCompensationPopupContent({
   const [operatingDeductionRates, setOperatingDeductionRates] = useState<
     Record<string, string>
   >(() => buildOperatingDeductionDrafts(classDetail));
+  const initialAllowancesRef = useRef(buildAllowanceDrafts(classDetail));
+  const initialOperatingDeductionRatesRef = useRef(
+    buildOperatingDeductionDrafts(classDetail),
+  );
 
   const teachers = useMemo(() => classDetail.teachers ?? [], [classDetail.teachers]);
 
@@ -93,18 +96,54 @@ function EditClassTeacherCompensationPopupContent({
       return;
     }
 
+    const changedTeachers = teachers.filter((teacher) => {
+      const allowanceChanged =
+        (allowances[teacher.id] ?? "") !==
+        (initialAllowancesRef.current[teacher.id] ?? "");
+      const operatingDeductionChanged =
+        (operatingDeductionRates[teacher.id] ?? "") !==
+        (initialOperatingDeductionRatesRef.current[teacher.id] ?? "");
+      return allowanceChanged || operatingDeductionChanged;
+    });
+
+    if (changedTeachers.length === 0) {
+      onClose();
+      return;
+    }
+
     const payload = {
-      teachers: teachers.map((teacher) => ({
-        teacher_id: teacher.id,
-        custom_allowance:
-          parseMoneyInput(allowances[teacher.id] ?? "") ??
-          classDetail.allowancePerSessionPerStudent ??
-          0,
-        operating_deduction_rate_percent:
-          parseRateInput(operatingDeductionRates[teacher.id] ?? "") ??
-          teacher.operatingDeductionRatePercent ??
-          0,
-      })),
+      teachers: changedTeachers.map((teacher) => {
+        const allowanceValue = allowances[teacher.id] ?? "";
+        const operatingDeductionValue = operatingDeductionRates[teacher.id] ?? "";
+        const allowanceChanged =
+          allowanceValue !== (initialAllowancesRef.current[teacher.id] ?? "");
+        const operatingDeductionChanged =
+          operatingDeductionValue !==
+          (initialOperatingDeductionRatesRef.current[teacher.id] ?? "");
+
+        const item: {
+          teacher_id: string;
+          custom_allowance?: number | null;
+          operating_deduction_rate_percent?: number;
+        } = {
+          teacher_id: teacher.id,
+        };
+
+        if (allowanceChanged) {
+          const parsedAllowance = parseMoneyInput(allowanceValue);
+          item.custom_allowance =
+            parsedAllowance != null ? parsedAllowance : null;
+        }
+
+        if (operatingDeductionChanged) {
+          const parsedRate = parseRateInput(operatingDeductionValue);
+          if (parsedRate != null) {
+            item.operating_deduction_rate_percent = parsedRate;
+          }
+        }
+
+        return item;
+      }),
     };
 
     onClose();
@@ -178,14 +217,12 @@ function EditClassTeacherCompensationPopupContent({
                         <span className="block text-xs font-medium text-text-muted">
                           Trợ cấp riêng
                         </span>
-                        <input
-                          type="number"
-                          min={0}
+                        <MoneyInput
                           value={value}
-                          onChange={(event) =>
+                          onValueChange={(nextValue) =>
                             setAllowances((current) => ({
                               ...current,
-                              [teacher.id]: event.target.value,
+                              [teacher.id]: nextValue,
                             }))
                           }
                           className="mt-1 min-h-11 w-full rounded-md border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"

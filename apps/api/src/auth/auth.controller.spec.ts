@@ -258,6 +258,12 @@ describe('AuthController', () => {
     expect(authService.acceptDataConsent).toHaveBeenCalledWith('user-1');
   });
 
+  it('allows logout to reach controller without the global JWT guard', () => {
+    expect(
+      Reflect.getMetadata(IS_PUBLIC_KEY, getControllerHandler('logout')),
+    ).toBe(true);
+  });
+
   it('allows resend verification to reach controller without the global JWT guard', () => {
     expect(
       Reflect.getMetadata(

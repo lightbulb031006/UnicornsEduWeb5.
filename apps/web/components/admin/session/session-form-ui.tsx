@@ -4,6 +4,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { SessionAttendanceStatus } from "@/dtos/session.dto";
 import { formatCurrency } from "@/lib/class.helpers";
+import { MoneyInput } from "@/components/ui/MoneyInput";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 import { sessionStudentCommentPlaceholder } from "@/lib/session-comment-zalo.helpers";
 import type { SessionCommentDisplayContent } from "@/lib/session-comment-zalo.helpers";
@@ -150,11 +155,11 @@ export function SessionTeacherAllowanceEstimateCard({
 
   useEffect(() => {
     if (!isEditing) return;
-    setDraftValue(amount != null ? String(amount) : "");
+    setDraftValue(amount != null ? moneyInputInitialFromNumber(amount) : "");
   }, [amount, isEditing]);
 
   const handleStartEdit = () => {
-    setDraftValue(amount != null ? String(amount) : "");
+    setDraftValue(amount != null ? moneyInputInitialFromNumber(amount) : "");
     setIsEditing(true);
   };
 
@@ -165,8 +170,8 @@ export function SessionTeacherAllowanceEstimateCard({
 
   const handleDraftInput = (value: string) => {
     setDraftValue(value);
-    const parsed = Number(value.trim());
-    if (!Number.isFinite(parsed) || parsed < 0) return;
+    const parsed = parseMoneyInput(value);
+    if (parsed == null || parsed < 0) return;
     onManualGrossChange?.(Math.floor(parsed));
   };
 
@@ -191,12 +196,10 @@ export function SessionTeacherAllowanceEstimateCard({
           ) : isEditing ? (
             <div className="mt-2 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={draftValue}
                   autoComplete="off"
-                  onChange={(event) => handleDraftInput(event.target.value)}
+                  onValueChange={handleDraftInput}
                   className="min-h-11 w-full min-w-[8rem] flex-1 rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm font-semibold tabular-nums text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:max-w-[12rem]"
                   aria-label="Trợ cấp buổi trước phí vận hành và thuế"
                 />
@@ -712,20 +715,18 @@ export function SessionAttendanceEditor({
                 {canEditTuition ? (
                   <td className="px-3 py-2.5 align-top">
                     <div className="space-y-1">
-                      <input
+                      <MoneyInput
                         name={`${namePrefix}-tuition-desktop-${item.studentId}`}
-                        type="number"
-                        min={0}
                         value={item.tuitionFee}
                         autoComplete="off"
                         disabled={disabled}
-                        onChange={(event) =>
-                          onTuitionChange?.(item.studentId, event.target.value)
+                        onValueChange={(value) =>
+                          onTuitionChange?.(item.studentId, value)
                         }
-                        className="w-full rounded-lg border border-border-default bg-bg-surface px-2.5 py-1.5 text-sm tabular-nums text-text-primary"
+                        className="w-full rounded-lg border border-border-default bg-bg-surface px-2.5 py-1.5 text-sm tabular-nums text-text-primary disabled:opacity-60"
                         placeholder={
                           item.defaultTuitionFee != null
-                            ? String(item.defaultTuitionFee)
+                            ? moneyInputInitialFromNumber(item.defaultTuitionFee)
                             : "Theo học sinh"
                         }
                       />
@@ -849,14 +850,12 @@ export function SessionStudentAttendanceCommentRow({
       {showTuitionField ? (
         <label className="mt-3 flex flex-col gap-1 text-xs text-text-secondary">
           <span>Học phí buổi</span>
-          <input
+          <MoneyInput
             name={tuitionInputName}
-            type="number"
-            min={0}
             value={tuitionFee}
             autoComplete="off"
             disabled={disabled}
-            onChange={(event) => onTuitionChange?.(event.target.value)}
+            onValueChange={(value) => onTuitionChange?.(value)}
             className="min-h-10 w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
             placeholder={tuitionPlaceholder ?? "Theo học sinh"}
           />

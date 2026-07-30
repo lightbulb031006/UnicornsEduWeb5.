@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import {
   ClassCard,
+  ClassStudentCaretakerCell,
   ClassStudentWalletBalance,
   ClassSurveyPanel,
   EditClassSchedulePopup,
@@ -31,6 +32,7 @@ import type {
   ClassDetail,
   ClassScheduleItem,
   ClassStatus,
+  ClassStudent,
   ClassType,
 } from "@/dtos/class.dto";
 import type {
@@ -50,6 +52,8 @@ import type {
 import { getFullProfile } from "@/lib/apis/auth.api";
 import * as staffOpsApi from "@/lib/apis/staff-ops.api";
 import { formatCurrency } from "@/lib/class.helpers";
+import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
+import { resolveClassStudentCaretakerHref } from "@/lib/class-student-caretaker";
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import { cn } from "@/lib/utils";
 
@@ -374,6 +378,17 @@ export default function StaffClassDetailPage() {
     !shouldUseAdminClassDetailPage &&
     (isAdmin || isTeacher || isCustomerCare || isTraining);
   const actorStaffId = profile?.staffInfo?.id ?? "";
+  const adminAccess = resolveAdminShellAccess(profile);
+  const resolveCaretakerHref = useCallback(
+    (student: ClassStudent) =>
+      resolveClassStudentCaretakerHref({
+        routeBase: "/staff",
+        caretaker: student.customerCareStaff,
+        access: adminAccess,
+        viewerStaffId: actorStaffId || null,
+      }),
+    [actorStaffId, adminAccess],
+  );
 
   const {
     data: classDetail,
@@ -951,6 +966,11 @@ export default function StaffClassDetailPage() {
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="text-sm font-semibold text-text-primary">{student.fullName}</p>
+                          <ClassStudentCaretakerCell
+                            caretaker={student.customerCareStaff}
+                            href={resolveCaretakerHref(student)}
+                            layout="mobile"
+                          />
                           {showStudentBalanceColumn ? (
                             <p className="mt-1 text-xs">
                               <ClassStudentWalletBalance
@@ -981,6 +1001,9 @@ export default function StaffClassDetailPage() {
                   <th scope="col" className="px-3 py-2 text-xs font-medium text-text-primary">
                     Họ tên
                   </th>
+                  <th scope="col" className="px-3 py-2 text-xs font-medium text-text-primary">
+                    Người chăm sóc
+                  </th>
                   {showStudentBalanceColumn ? (
                     <th scope="col" className="px-3 py-2 text-xs font-medium text-text-primary">
                       Số dư
@@ -996,7 +1019,7 @@ export default function StaffClassDetailPage() {
                   <tr className="border-b border-border-default bg-bg-surface">
                     <td
                       className="px-3 py-4 text-center text-xs text-text-muted"
-                      colSpan={2 + (showStudentBalanceColumn ? 1 : 0)}
+                      colSpan={3 + (showStudentBalanceColumn ? 1 : 0)}
                     >
                       Lớp chưa có học sinh đang học.
                     </td>
@@ -1013,6 +1036,12 @@ export default function StaffClassDetailPage() {
                         className="border-b border-border-default bg-bg-surface transition-colors duration-200 hover:bg-bg-secondary"
                       >
                         <td className="px-3 py-2 text-text-primary">{student.fullName}</td>
+                        <td className="px-3 py-2">
+                          <ClassStudentCaretakerCell
+                            caretaker={student.customerCareStaff}
+                            href={resolveCaretakerHref(student)}
+                          />
+                        </td>
                         {showStudentBalanceColumn ? (
                           <td className="px-3 py-2 text-sm">
                             <ClassStudentWalletBalance

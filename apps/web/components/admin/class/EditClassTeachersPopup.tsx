@@ -9,6 +9,11 @@ import type { ClassDetail } from "@/dtos/class.dto";
 import * as classApi from "@/lib/apis/class.api";
 import * as staffApi from "@/lib/apis/staff.api";
 import * as trainingManagerApi from "@/lib/apis/training-manager.api";
+import { MoneyInput } from "@/components/ui/MoneyInput";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 import { cn } from "@/lib/utils";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
@@ -102,7 +107,13 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
     defaultAllowance != null ? `${defaultAllowance.toLocaleString("vi-VN")} VNĐ` : null;
 
   const [selectedTeachers, setSelectedTeachers] = useState<
-    Array<{ id: string; name: string; customAllowance?: number; operatingDeductionRatePercent?: number }>
+    Array<{
+      id: string;
+      name: string;
+      customAllowance?: number;
+      allowanceTouched?: boolean;
+      operatingDeductionRatePercent?: number;
+    }>
   >(() =>
     (classDetail.teachers ?? [])
       .filter((t) => t?.id)
@@ -110,6 +121,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
         id: t.id,
         name: t.fullName?.trim() ?? "—",
         customAllowance: t.customAllowance ?? undefined,
+        allowanceTouched: false,
         operatingDeductionRatePercent:
           t.operatingDeductionRatePercent ?? undefined,
       })),
@@ -181,17 +193,25 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
   }, []);
 
   const handleSubmit = () => {
-    const teachers = selectedTeachers.map((t) => ({
-      teacher_id: t.id,
-      ...(t.customAllowance != null
-        ? { custom_allowance: t.customAllowance }
-        : defaultAllowance != null
-          ? { custom_allowance: defaultAllowance }
-          : {}),
-      operating_deduction_rate_percent: normalizeOperatingDeductionRatePercent(
-        t.operatingDeductionRatePercent,
-      ),
-    }));
+    const teachers = selectedTeachers.map((t) => {
+      const payload: {
+        teacher_id: string;
+        custom_allowance?: number | null;
+        operating_deduction_rate_percent: number;
+      } = {
+        teacher_id: t.id,
+        operating_deduction_rate_percent: normalizeOperatingDeductionRatePercent(
+          t.operatingDeductionRatePercent,
+        ),
+      };
+
+      if (t.allowanceTouched) {
+        payload.custom_allowance =
+          t.customAllowance != null ? t.customAllowance : null;
+      }
+
+      return payload;
+    });
     const parsedTrainingManagerRate =
       trainingManagerRateInput.trim() === ""
         ? null
@@ -295,32 +315,44 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                     </p>
                     <div className="min-h-11 rounded-xl border border-border-default bg-bg-primary px-3 py-2">
                       <div className="flex items-center gap-1.5">
-                        <input
-                          type="number"
-                          min={0}
-                          value={t.customAllowance ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value.trim();
+                        <MoneyInput
+                          value={
+                            t.customAllowance == null
+                              ? ""
+                              : moneyInputInitialFromNumber(t.customAllowance)
+                          }
+                          onValueChange={(nextValue) => {
+                            const v = nextValue.trim();
                             if (v === "") {
                               setSelectedTeachers((prev) =>
                                 prev.map((x) =>
-                                  x.id === t.id ? { ...x, customAllowance: undefined } : x,
+                                  x.id === t.id
+                                    ? { ...x, customAllowance: undefined, allowanceTouched: true }
+                                    : x,
                                 ),
                               );
                               return;
                             }
-                            const num = Number(v);
-                            if (!Number.isFinite(num) || num < 0) {
+                            const num = parseMoneyInput(v);
+                            if (num == null || num < 0) {
                               toast.error("Trợ cấp riêng phải là số không âm.");
                               return;
                             }
                             setSelectedTeachers((prev) =>
                               prev.map((x) =>
-                                x.id === t.id ? { ...x, customAllowance: Math.floor(num) } : x,
+                                x.id === t.id
+                                  ? { ...x, customAllowance: num, allowanceTouched: true }
+                                  : x,
                               ),
                             );
                           }}
-                          placeholder={String(classDetail.allowancePerSessionPerStudent ?? "")}
+                          placeholder={
+                            classDetail.allowancePerSessionPerStudent == null
+                              ? ""
+                              : moneyInputInitialFromNumber(
+                                  classDetail.allowancePerSessionPerStudent,
+                                )
+                          }
                           className="min-w-0 flex-1 bg-transparent text-right text-sm font-semibold tabular-nums text-text-primary outline-none placeholder:text-text-muted"
                         />
                         <span className="shrink-0 text-xs font-medium text-text-muted">VNĐ</span>
@@ -505,6 +537,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                               id: s.id,
                               name: s.fullName?.trim() ?? s.id,
                               customAllowance: undefined,
+                              allowanceTouched: false,
                               operatingDeductionRatePercent: undefined,
                             },
                           ]);

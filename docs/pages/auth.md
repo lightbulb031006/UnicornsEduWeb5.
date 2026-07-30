@@ -2,7 +2,7 @@
 
 ## Tổng quan
 
-- **Paths:** `/auth/login`, `/auth/forgot-password`, `/auth/reset-password`, `/auth/setup-password`, `/verify-email`.
+- **Paths:** `/auth/login`, `/auth/post-login`, `/auth/forgot-password`, `/auth/reset-password`, `/auth/setup-password`, `/verify-email`.
 - **Disabled:** `/auth/register` redirect về `/auth/login`; `POST /auth/register` trả `403`. Đăng ký công khai (email/password + Google OAuth tạo user mới) đã tắt; admin vẫn tạo user qua `POST /users`.
 - **State layer:** TanStack Query (`useMutation`) cho toàn bộ submit flow auth.
 - **Global providers:** `QueryClientProvider` + Sonner `Toaster` được mount tại `apps/web/app/providers.tsx`.
@@ -31,7 +31,7 @@
   - linked `studentInfo` -> `/student` khi user không có linked staff profile
   - `guest -> /`
 - Google OAuth thành công (chỉ khi email **đã tồn tại** trong hệ thống):
-  - nếu user đã có `passwordHash`: backend set cookie và redirect về `FRONTEND_URL` như flow cũ
+  - nếu user đã có `passwordHash`: backend set cookie và redirect về `/auth/post-login`; trang này gọi `GET /auth/session` rồi chuyển tiếp theo cùng rule login thường (`preferredRedirect`, role workspace entrypoint, hoặc `next` hợp lệ)
   - nếu user chưa có `passwordHash`: backend set cookie và redirect tới `/auth/setup-password?source=google`
   - trường hợp account mới vẫn có `roleType = guest` vẫn được coi là session hợp lệ để hoàn tất setup password, không bị đá về login chỉ vì role là `guest`
 - Google OAuth với email **chưa có** trong DB: redirect `/auth/login?error=registration_disabled`; frontend hiển thị toast hướng dẫn liên hệ quản trị viên.
@@ -95,6 +95,7 @@ export default async function SomePage() {
   - `POST /auth/refresh` dùng `refresh_token` cookie
     - backend verify chữ ký refresh JWT **và** đối chiếu hash token đang trình bày với `user.refreshToken` đã lưu; refresh token cũ/đã rotate sẽ bị từ chối.
     - rate limit: `120` request / `1 phút` / IP.
+  - `POST /auth/logout` — public (`@Public()`), không yêu cầu JWT guard; luôn xóa cookie `access_token` và `refresh_token`. Nếu request mang cookie auth hợp lệ, backend revoke refresh session tương ứng trước khi clear cookie.
 - `GET /auth/session` — contract auth nhẹ cho frontend/server (`id`, `email`, `emailVerified`, `canAccessRestrictedRoutes`, `accountHandle`, `roleType`, `requiresPasswordSetup`, `avatarUrl`, `staffRoles`, `hasStaffProfile`, `hasStudentProfile`, `effectiveRoleTypes`, `staffProfileComplete`, `availableWorkspaces`, `defaultWorkspace`, `preferredRedirect`, `access.{admin,staff,student}`); guest trả về object cùng shape với default rỗng. `effectiveRoleTypes` là union của `users.role_type`, linked `staffInfo`, linked `studentInfo`, và full-admin staff role; FE/proxy phải dùng contract này thay vì chỉ so sánh `roleType`.
   - `GET /auth/profile` — backward-compatible alias của session resolver.
   - `GET /auth/me` — thông tin auth hiện tại từ DB theo `access_token`, trả cùng session shape.

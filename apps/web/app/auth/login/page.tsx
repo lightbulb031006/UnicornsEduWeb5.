@@ -8,14 +8,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { toast } from "sonner";
 import * as authApi from "@/lib/apis/auth.api";
-import type { LoginDto, UserInfoDto } from "@/dtos/Auth.dto";
+import type { LoginDto } from "@/dtos/Auth.dto";
 import { useAuth } from "@/context/AuthContext";
 import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 import { AuthCardSkeleton } from "@/components/auth/AuthCardSkeleton";
 import {
   buildSetupPasswordHref,
-  resolvePostLoginRedirect,
+  readSafeNextPath,
 } from "@/lib/auth-redirect";
+import {
+  bootstrapPostLoginSession,
+  buildLoginFallbackSession,
+} from "@/lib/post-login-session";
 import { getClientApiBaseUrl } from "@/lib/api-base-url";
 
 function nestMessageFromResponseData(data: unknown): string | null {
@@ -65,6 +69,10 @@ function getLoginErrorToastMessage(error: unknown): string {
   return "Đăng nhập thất bại.";
 }
 
+function hasAuthenticatedSession(user: { id: string; accountHandle: string }) {
+  return Boolean(user.id && user.accountHandle);
+}
+
 function LoginPageContent() {
   const { replace } = useRouter();
   const queryClient = useQueryClient();
@@ -74,7 +82,7 @@ function LoginPageContent() {
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const { setUser } = useAuth();
+  const { setUser, user, isAuthReady } = useAuth();
 
   useEffect(() => {
     const err = getSearchParam("error");
@@ -94,31 +102,17 @@ function LoginPageContent() {
       setIsRedirecting(true);
       toast.success("Đăng nhập thành công.");
 
-      let session: UserInfoDto = {
-        id: loginResponse.id,
-        email: "",
-        emailVerified: false,
-        canAccessRestrictedRoutes: false,
-        accountHandle: loginResponse.accountHandle,
-        roleType: loginResponse.roleType,
-        requiresPasswordSetup: false,
-        avatarUrl: loginResponse.avatarUrl ?? null,
-        staffRoles: [],
-        hasStaffProfile: false,
-        hasStudentProfile: false,
-      };
-      try {
-        session = await authApi.getSession();
-      } catch {
-        // Fall back to the login payload if the session bootstrap request fails.
-      }
+      const fallbackSession = buildLoginFallbackSession(loginResponse);
+      setUser(fallbackSession);
+      queryClient.setQueryData(["auth", "session"], fallbackSession);
 
-      setUser(session);
-      queryClient.setQueryData(["auth", "session"], session);
-      const redirectHref = resolvePostLoginRedirect(
-        session,
-        getSearchParam("next"),
-      );
+      const { session, redirectHref } = await bootstrapPostLoginSession({
+        fallbackUser: fallbackSession,
+        queryClient,
+        setUser,
+        requestedNextPath: getSearchParam("next"),
+      });
+
       replace(
         session.requiresPasswordSetup
           ? buildSetupPasswordHref(redirectHref)
@@ -130,6 +124,36 @@ function LoginPageContent() {
       toast.error(getLoginErrorToastMessage(error));
     },
   });
+
+  useEffect(() => {
+    if (!isAuthReady || loginMutation.isPending || isRedirecting) {
+      return;
+    }
+
+    if (!hasAuthenticatedSession(user) || user.requiresPasswordSetup) {
+      return;
+    }
+
+    setIsRedirecting(true);
+    const nextPath = readSafeNextPath(getSearchParam("next"));
+    void bootstrapPostLoginSession({
+      fallbackUser: user,
+      queryClient,
+      setUser,
+      requestedNextPath: nextPath,
+    }).then(({ redirectHref }) => {
+      replace(redirectHref);
+    });
+  }, [
+    getSearchParam,
+    isAuthReady,
+    isRedirecting,
+    loginMutation.isPending,
+    queryClient,
+    replace,
+    setUser,
+    user,
+  ]);
 
   const handleSubmit = (e: SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();

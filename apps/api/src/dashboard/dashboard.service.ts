@@ -1220,12 +1220,15 @@ export class DashboardService {
           ) AS "ownerName",
           COALESCE(student_info.account_balance, 0) AS "accountBalance"
         FROM student_info
-        LEFT JOIN student_classes ON student_classes.student_id = student_info.id
-        LEFT JOIN classes ON classes.id = student_classes.class_id
+        INNER JOIN student_classes ON student_classes.student_id = student_info.id
+          AND student_classes.status = 'active'
+        INNER JOIN classes ON classes.id = student_classes.class_id
+          AND classes.status = 'running'
         LEFT JOIN customer_care_service ON customer_care_service.student_id = student_info.id
         LEFT JOIN staff_info ON staff_info.id = customer_care_service.staff_id
         LEFT JOIN users owner_user ON owner_user.id = staff_info.user_id
-        WHERE COALESCE(student_info.account_balance, 0) >= 0
+        WHERE student_info.status = 'active'
+          AND COALESCE(student_info.account_balance, 0) >= 0
           AND COALESCE(student_info.account_balance, 0) <= ${DASHBOARD_EXPIRING_BALANCE_MAX}
         GROUP BY
           student_info.id,
@@ -1587,7 +1590,8 @@ export class DashboardService {
         "totalCustomerCareAmount",
         "totalLessonAmount",
         "totalExtraAllowanceAmount",
-        "totalAssistantAmount"
+        "totalAssistantAmount",
+        "totalTrainingManagerAmount"
       FROM counted
       ORDER BY "totalUnpaid" DESC, "staffName" ASC
       LIMIT ${limit}

@@ -127,7 +127,9 @@ export interface StaffIncomeAmountSummary {
     unpaid: number;
 }
 
-/** GV theo lớp: số tiền gross trước CPVH và thuế. */
+/** GV theo lớp: số tiền gross trước CPVH và thuế.
+ * `isCurrentTeacherAssignment=false` = nghỉ dạy nhưng còn trợ cấp tháng/`unpaid`.
+ */
 export interface StaffIncomeClassSummary extends StaffIncomeAmountSummary {
     classId: string;
     className: string;

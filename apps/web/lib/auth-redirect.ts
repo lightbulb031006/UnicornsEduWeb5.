@@ -86,7 +86,11 @@ export function resolvePostLoginRedirect(
   }
 
   const preferredRedirect = readSafeNextPath(session.preferredRedirect ?? null);
-  if (preferredRedirect && canAccessRequestedPath(session, preferredRedirect)) {
+  if (
+    preferredRedirect &&
+    preferredRedirect !== "/" &&
+    canAccessRequestedPath(session, preferredRedirect)
+  ) {
     return preferredRedirect;
   }
 

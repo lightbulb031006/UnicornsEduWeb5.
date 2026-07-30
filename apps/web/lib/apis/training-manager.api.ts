@@ -2,6 +2,7 @@ import type {
   TrainingManagerBulkPaymentStatusPayload,
   TrainingManagerBulkPaymentStatusResult,
   TrainingManagerManagedClassListResponse,
+  TrainingManagerSessionAllowanceItem,
   TrainingManagerStaffOption,
   UpdateClassTrainingManagerPayload,
 } from "@/dtos/training-manager.dto";
@@ -46,6 +47,18 @@ export async function getTrainingManagerManagedClasses(
       totalPending: payload?.summary?.totalPending ?? 0,
     },
   };
+}
+
+export async function getTrainingManagerSessionAllowances(
+  staffId: string,
+  classId: string,
+  month: string,
+): Promise<TrainingManagerSessionAllowanceItem[]> {
+  const res = await api.get<TrainingManagerSessionAllowanceItem[]>(
+    `/training-manager/staff/${encodeURIComponent(staffId)}/classes/${encodeURIComponent(classId)}/session-allowances`,
+    { params: { month } },
+  );
+  return Array.isArray(res.data) ? res.data : [];
 }
 
 export async function bulkUpdateTrainingManagerPaymentStatus(

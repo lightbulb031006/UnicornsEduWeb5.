@@ -7,7 +7,8 @@ Cho phép người dùng đăng nhập bằng email/password hoặc Google OAuth
 ## Hành vi chính
 
 - Submit login gọi `authApi.logIn`.
-- Backend set `access_token` + `refresh_token` qua HTTP-only cookies; frontend chỉ cập nhật auth state và gọi `authApi.getSession()` để resolve redirect.
+- Backend set `access_token` + `refresh_token` qua HTTP-only cookies; frontend bootstrap session bằng `authApi.getSession()` (helper `bootstrapPostLoginSession`) rồi resolve redirect.
+- User đã có session hợp lệ mở `/auth/login` sẽ được tự chuyển tiếp sang workspace entrypoint tương ứng (trừ khi còn `requiresPasswordSetup`).
 - Tài khoản **chưa xác minh email** vẫn đăng nhập thành công (nếu đúng mật khẩu + handle/email) để tạo cảm giác đã đăng nhập.
 - Nếu session trả về `canAccessRestrictedRoutes=false`, frontend giữ user ở `/` (Home-only mode). Admin đầy đủ (`roleType=admin` hoặc `staff.admin`) được backend trả `canAccessRestrictedRoutes=true` kể cả khi email chưa verify.
 - Nếu URL có query `next` hợp lệ (internal path, không phải `/auth/*`) và route đó khớp shell đăng nhập của role chính, login thành công ưu tiên redirect về `next`; nếu không khớp (ví dụ staff kế toán có `next=/admin/*` nhưng session chỉ nên vào staff shell mặc định) thì bỏ `next` và dùng `preferredRedirect`/workspace entrypoint. Primary admin được giữ `next=/staff/**` để bypass vào staff workspace khi cần kiểm tra/hỗ trợ.
@@ -21,6 +22,7 @@ Cho phép người dùng đăng nhập bằng email/password hoặc Google OAuth
 - Trường hợp query `error=google_no_user`: hiển thị `toast.error`.
 - Trường hợp query `error=registration_disabled`: hiển thị toast *"Tài khoản chưa tồn tại trong hệ thống. Vui lòng liên hệ quản trị viên để được cấp tài khoản."* (Google OAuth với email chưa được admin tạo).
 - Nếu user bấm Google OAuth và backend phát hiện tài khoản tương ứng chưa có `passwordHash`, flow sẽ bị chuyển sang `/auth/setup-password?source=google` thay vì cho vào app ngay.
+- Google OAuth thành công (đã có mật khẩu): backend redirect `/auth/post-login` để FE resolve dashboard/workspace entrypoint; không dừng ở homepage.
 
 ## Feedback UI
 

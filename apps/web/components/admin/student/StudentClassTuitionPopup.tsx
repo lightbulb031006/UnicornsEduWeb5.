@@ -5,6 +5,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import * as classApi from "@/lib/apis/class.api";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
+import { MoneyInput } from "@/components/ui/MoneyInput";
+import {
+  moneyInputInitialFromNumber,
+  parseMoneyInput,
+} from "@/lib/money-input.helpers";
 
 type Props = {
   open: boolean;
@@ -20,6 +25,7 @@ type Props = {
 
 function toNum(v: unknown): number | null {
   if (v == null) return null;
+  if (typeof v === "string") return parseMoneyInput(v);
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -34,8 +40,8 @@ function StudentClassTuitionPopupContent({
   onSuccess,
 }: Omit<Props, "open">) {
   const queryClient = useQueryClient();
-  const [packageTotal, setPackageTotal] = useState(
-    () => (initialPackageTotal != null ? String(initialPackageTotal) : ""),
+  const [packageTotal, setPackageTotal] = useState(() =>
+    moneyInputInitialFromNumber(initialPackageTotal),
   );
   const [packageSession, setPackageSession] = useState(
     () => (initialPackageSession != null ? String(initialPackageSession) : ""),
@@ -119,11 +125,9 @@ function StudentClassTuitionPopupContent({
             <form onSubmit={handleSubmit} className="space-y-4">
               <label className="block">
                 <span className="mb-1 block text-sm font-medium text-text-secondary">Tổng gói (VNĐ)</span>
-                <input
-                  type="number"
-                  min={0}
+                <MoneyInput
                   value={packageTotal}
-                  onChange={(e) => setPackageTotal(e.target.value)}
+                  onValueChange={setPackageTotal}
                   placeholder="Để trống = theo lớp"
                   className="w-full rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />

@@ -1,4 +1,5 @@
 import type { ClassStatus, ClassType } from "@/dtos/class.dto";
+import { parseMoneyInput } from "@/lib/money-input.helpers";
 
 export const CLASS_SCHEDULE_DAY_OPTIONS = [
   { value: "1", label: "Thứ Hai", selectedLabel: "T2" },
@@ -142,7 +143,8 @@ export function parseTuitionPackageInputs(totalInput: string, sessionsInput: str
   if (tt === "" || st === "") {
     return { ok: false, message: "Gói học phí cần nhập đủ tổng tiền và số buổi." };
   }
-  const total = Math.floor(Number(tt));
+  const totalParsed = parseMoneyInput(tt);
+  const total = totalParsed ?? Number.NaN;
   const sessions = Math.floor(Number(st));
   if (!Number.isFinite(total) || !Number.isFinite(sessions)) {
     return { ok: false, message: "Giá trị gói học phí không hợp lệ." };
@@ -161,7 +163,8 @@ export function compactTuitionPerSessionLine(totalInput: string, sessionsInput: 
   const tt = totalInput.trim();
   const st = sessionsInput.trim();
   if (tt === "" || st === "") return null;
-  const total = Math.floor(Number(tt));
+  const totalParsed = parseMoneyInput(tt);
+  const total = totalParsed ?? Number.NaN;
   const sessions = Math.floor(Number(st));
   const per = computeStudentTuitionPerSessionFromPackage(total, sessions);
   if (per == null) return null;
