@@ -11,6 +11,10 @@ out
 
 # Environment
 .env
+.env.migration
+
+# Dump/backup dữ liệu do script db-sync tạo ra (chứa dữ liệu thật)
+apps/api/scripts/db-sync/out/
 
 # OS
 .DS_Store

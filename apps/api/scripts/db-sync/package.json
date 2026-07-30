@@ -1,0 +1,16 @@
+{
+  "name": "db-sync",
+  "private": true,
+  "type": "module",
+  "description": "Bộ script đồng bộ dữ liệu DB cũ -> DB mới (chẩn đoán, backup, backfill, rollback, verify)",
+  "scripts": {
+    "diagnose": "node 01-diagnose.mjs",
+    "backup": "node 02-backup.mjs",
+    "backfill:dry": "node 03-backfill.mjs",
+    "backfill:apply": "node 03-backfill.mjs --apply",
+    "verify": "node 05-verify.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.22.0"
+  }
+}
