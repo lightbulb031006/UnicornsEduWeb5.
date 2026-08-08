@@ -44,6 +44,7 @@ import {
 } from "@/components/admin/class";
 import AddSessionPopup from "@/components/admin/class/AddSessionPopup";
 import SessionHistoryTable from "@/components/admin/session/SessionHistoryTable";
+import SessionStatisticsPopup from "@/components/admin/session/SessionStatisticsPopup";
 import StudentClassTuitionPopup from "@/components/admin/student/StudentClassTuitionPopup";
 import MonthNav from "@/components/admin/MonthNav";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
@@ -176,6 +177,7 @@ export default function AdminClassDetailPage() {
   });
   const [monthPopupOpen, setMonthPopupOpen] = useState(false);
   const [addSessionPopupOpen, setAddSessionPopupOpen] = useState(false);
+  const [statsPopupOpen, setStatsPopupOpen] = useState(false);
   const [pastMakeupPopupOpen, setPastMakeupPopupOpen] = useState(false);
   const [addSurveyPopupOpen, setAddSurveyPopupOpen] = useState(false);
   const [stopTeachingPendingTeacherId, setStopTeachingPendingTeacherId] = useState<string | null>(null);
@@ -244,6 +246,7 @@ export default function AdminClassDetailPage() {
     isAdmin || isAssistant || adminAccess.isAccountantExpense || adminAccess.isAccountantIncome;
   const canEditSessions = isAdmin || isAssistant;
   const canManageClassStatus = isAdmin || isAssistant;
+  const canViewSessionStatistics = isAdmin || isAssistant || adminAccess.isCustomerCare;
 
   const [selectedYear, selectedMonthValue] = selectedMonth.split("-");
   const indicatorTransition = prefersReducedMotion
@@ -1432,26 +1435,42 @@ export default function AdminClassDetailPage() {
                     : `Tổng khảo sát: ${surveysInMonth.length}`
                 }
                 actionButton={
-                  (activeTab === "sessions" ? canCreateSession : canManageSurveys) ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (activeTab === "sessions") {
-                          handleOpenAddSessionPopup();
-                          return;
-                        }
-                        setAddSurveyPopupOpen(true);
-                      }}
-                      aria-label={activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
-                      title={activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
-                    >
-                      <PlusIcon className="size-4" aria-hidden />
-                      <span className="sr-only">
-                        {activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
-                      </span>
-                    </button>
-                  ) : null
+                  <div className="flex items-center gap-2">
+                    {activeTab === "sessions" && canViewSessionStatistics ? (
+                      <button
+                        type="button"
+                        onClick={() => setStatsPopupOpen(true)}
+                        aria-label="Thống kê buổi học tháng"
+                        title="Thống kê"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary shadow-sm transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                      >
+                        <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18M3 6h18M3 18h18M10 3v18M14 3v18" />
+                        </svg>
+                        Thống kê
+                      </button>
+                    ) : null}
+                    {(activeTab === "sessions" ? canCreateSession : canManageSurveys) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (activeTab === "sessions") {
+                            handleOpenAddSessionPopup();
+                            return;
+                          }
+                          setAddSurveyPopupOpen(true);
+                        }}
+                        aria-label={activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
+                        title={activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
+                        className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
+                      >
+                        <PlusIcon className="size-4" aria-hidden />
+                        <span className="sr-only">
+                          {activeTab === "sessions" ? "Thêm buổi học" : "Thêm khảo sát"}
+                        </span>
+                      </button>
+                    ) : null}
+                  </div>
                 }
               />
             </div>
@@ -1525,6 +1544,15 @@ export default function AdminClassDetailPage() {
                 <p className="mt-3 text-sm text-error" role="alert">
                   Không tải được lịch sử buổi học.
                 </p>
+              ) : null}
+              {canViewSessionStatistics && classDetail ? (
+                <SessionStatisticsPopup
+                  open={statsPopupOpen}
+                  onClose={() => setStatsPopupOpen(false)}
+                  sessions={sessionsInMonth}
+                  classDetail={classDetail}
+                  monthLabel={`Tháng ${parseInt(selectedMonthValue, 10)}/${selectedYear}`}
+                />
               ) : null}
             </motion.section>
           ) : (
