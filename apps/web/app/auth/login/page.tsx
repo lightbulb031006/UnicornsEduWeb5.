@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { isAxiosError } from "axios";
 import { toast } from "sonner";
 import * as authApi from "@/lib/apis/auth.api";
 import type { LoginDto } from "@/dtos/Auth.dto";
@@ -21,53 +20,7 @@ import {
   buildLoginFallbackSession,
 } from "@/lib/post-login-session";
 import { getClientApiBaseUrl } from "@/lib/api-base-url";
-
-function nestMessageFromResponseData(data: unknown): string | null {
-  if (!data || typeof data !== "object") {
-    return null;
-  }
-  const raw = (data as { message?: unknown }).message;
-  if (typeof raw === "string" && raw.trim()) {
-    return raw.trim();
-  }
-  if (
-    Array.isArray(raw) &&
-    raw.every((m): m is string => typeof m === "string")
-  ) {
-    return raw.join(" ");
-  }
-  return null;
-}
-
-function getLoginErrorToastMessage(error: unknown): string {
-  if (!isAxiosError(error)) {
-    return "Đăng nhập thất bại.";
-  }
-
-  const status = error.response?.status;
-  const data = error.response?.data;
-  const serverMsg = nestMessageFromResponseData(data);
-
-  if (status === 400) {
-    return (
-      serverMsg ??
-      "Dữ liệu không hợp lệ. Mật khẩu cần ít nhất 6 ký tự (theo quy định server)."
-    );
-  }
-
-  if (status === 401) {
-    return serverMsg ?? "Sai tài khoản hoặc mật khẩu.";
-  }
-
-  if (status === 429) {
-    return (
-      serverMsg ??
-      "Too many requests. Bạn thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại."
-    );
-  }
-
-  return "Đăng nhập thất bại.";
-}
+import { getLoginErrorToastMessage } from "@/lib/auth-error-message.helpers";
 
 function hasAuthenticatedSession(user: { id: string; accountHandle: string }) {
   return Boolean(user.id && user.accountHandle);

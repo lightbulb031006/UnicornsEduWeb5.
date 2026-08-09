@@ -1,11 +1,11 @@
 # docker-compose.prod.yml
 # Multi-instance VPS: set per deploy directory (see deploy/instances.json):
 #   COMPOSE_PROJECT_NAME, NGINX_PUBLISH
-name: ${COMPOSE_PROJECT_NAME:-unicorns}
+name: ${COMPOSE_PROJECT_NAME:-unicornseduweb5}
 
 services:
   api:
-    image: ghcr.io/unicorns-prj-dev/unicorns-api:latest
+    image: ghcr.io/lightbulb031006/unicorns-api:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -23,7 +23,7 @@ services:
       start_period: 20s
 
   web:
-    image: ghcr.io/unicorns-prj-dev/unicorns-web:latest
+    image: ghcr.io/lightbulb031006/unicorns-web:latest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -44,7 +44,7 @@ services:
 
   nginx:
     # Mirrored from Docker Hub in CI → GHCR so VPS pull avoids registry-1.docker.io (TLS / rate limits).
-    image: ghcr.io/unicorns-prj-dev/nginx:1.27-alpine
+    image: ghcr.io/lightbulb031006/nginx:1.27-alpine
     restart: unless-stopped
     ports:
       - "${NGINX_PUBLISH:-127.0.0.1:80:80}"

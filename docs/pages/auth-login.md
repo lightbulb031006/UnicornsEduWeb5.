@@ -26,11 +26,30 @@ Cho phép người dùng đăng nhập bằng email/password hoặc Google OAuth
 
 ## Feedback UI
 
-- Error network/API: `toast.error(...)`.
-- Login fail thông thường: `toast.error("Đăng nhập thất bại.")`.
-- Nếu backend trả `429 Too Many Requests`, màn login ưu tiên hiện toast rate-limit thay vì toast thất bại chung.
 - Success login: `toast.success("Đăng nhập thành công.")`.
+- Mọi lỗi login đi qua `getLoginErrorToastMessage` trong [`apps/web/lib/auth-error-message.helpers.ts`](../../apps/web/lib/auth-error-message.helpers.ts) rồi hiển thị bằng `toast.error(...)`.
 - Không render alert box inline trong form.
+
+### Bảng ánh xạ lỗi login → toast
+
+| Tình huống | Toast |
+|---|---|
+| Không có `error.response` (mất mạng, CORS, API container chết) | *"Không kết nối được tới máy chủ. Kiểm tra kết nối mạng hoặc thử lại sau ít phút."* |
+| `code = ECONNABORTED / ETIMEDOUT` | *"Máy chủ phản hồi quá lâu…"* |
+| `400` | Message của server, fallback hint mật khẩu tối thiểu 6 ký tự |
+| `401` | Message của server, fallback *"Sai tài khoản hoặc mật khẩu."* |
+| `403` | Message của server, fallback *"Tài khoản không có quyền đăng nhập."* |
+| `429` | Message của server, fallback toast rate-limit |
+| `502 / 503 / 504` | *"Máy chủ đang tạm thời không phản hồi (`status`)… không phải sai mật khẩu."* |
+| `5xx` còn lại | *"Máy chủ gặp lỗi khi xử lý đăng nhập (`status`)… không phải sai mật khẩu."* |
+| Còn lại / không phải AxiosError | *"Đăng nhập thất bại."* |
+
+### Quy tắc bắt buộc
+
+- **4xx**: ưu tiên `message` từ NestJS vì đó là lỗi do người dùng nhập/thao tác.
+- **5xx**: **không** hiển thị `message` của server. Nest trả `"Internal server error"`, vô nghĩa với người dùng cuối. Toast phải kèm status code và nói rõ đây là sự cố phía hệ thống.
+- Lý do: sự cố production ngày 2026-08-05 — API trả `500` cho `POST /auth/login` vì không kết nối được database, nhưng người dùng chỉ thấy *"Đăng nhập thất bại."* nên tưởng mình gõ sai mật khẩu và không báo sự cố hạ tầng. Xem [`docs/ops/troubleshoot-login-500.md`](../ops/troubleshoot-login-500.md).
+- Test hồi quy: [`apps/web/lib/auth-error-message.helpers.test.ts`](../../apps/web/lib/auth-error-message.helpers.test.ts) (`pnpm --filter web test`).
 
 ## Email vs account handle (login)
 

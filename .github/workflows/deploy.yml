@@ -1,7 +1,7 @@
 # .github/workflows/deploy.yml
 # Build Docker images → push GHCR → deploy all enabled VPS instances (push main only).
 #
-# Multi-instance: see deploy/instances.json and docs/ops/vps-multi-instance-runbook.md
+# Instance registry: deploy/instances.json — runbook: docs/ops/vps-single-instance-runbook.md
 #
 # Optional Tailscale: set repo variable TAILSCALE_ENABLED=true so the runner joins
 # your tailnet before SSH (see docs/Cách làm việc.md). Use OAuth (recommended) or
@@ -18,12 +18,12 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_OWNER: unicorns-prj-dev
+  IMAGE_OWNER: lightbulb031006
 
 jobs:
   build-api:
     name: Build & push API image
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -48,7 +48,7 @@ jobs:
           context: .
           file: apps/api/Dockerfile
           push: true
-          platforms: linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/unicorns-api:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/unicorns-api:${{ github.sha }}
@@ -57,7 +57,7 @@ jobs:
 
   build-web:
     name: Build & push Web image
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -82,7 +82,7 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: true
-          platforms: linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/unicorns-web:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/unicorns-web:${{ github.sha }}

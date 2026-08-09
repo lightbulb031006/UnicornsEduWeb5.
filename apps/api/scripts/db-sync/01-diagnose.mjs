@@ -278,6 +278,8 @@ async function main() {
     // -----------------------------------------------------------------------
     heading("5. Đào sâu bảng sessions (buổi học)");
     // -----------------------------------------------------------------------
+    // Bọc try/catch: hai schema có thể khác cột nhau, không để cả script chết
+    try {
     if (shared.includes("sessions")) {
       const histogramSql = `
         SELECT to_char(date, 'YYYY-MM') AS month, count(*)::bigint AS c
@@ -374,6 +376,10 @@ async function main() {
     } else {
       console.log("  ⚠️  Không có bảng sessions ở cả 2 DB.");
     }
+    } catch (err) {
+      console.log(`  ⚠️  Bỏ qua phần đào sâu sessions (hai schema lệch cột): ${err.message}`);
+      report.warnings.push(`Không phân tích được sessions: ${err.message}`);
+    }
 
     // -----------------------------------------------------------------------
     heading("6. Phát hiện bản ghi TRÙNG TÊN nhưng KHÁC ID (cạm bẫy chính)");
@@ -391,7 +397,16 @@ async function main() {
       clashChecks.push(findNaturalKeyClashes(oldDb, newDb, "users", "email", "Tài khoản (email)"));
     }
 
-    const clashResults = await Promise.all(clashChecks);
+    const clashResults = (
+      await Promise.all(
+        clashChecks.map((p) =>
+          p.catch((err) => {
+            console.log(`  ⚠️  Bỏ qua một phép kiểm trùng tên: ${err.message}`);
+            return null;
+          })
+        )
+      )
+    ).filter(Boolean);
     for (const result of clashResults) {
       if (result.clashes.length === 0) {
         console.log(`  ✅ ${result.label}: không có trùng tên khác ID.`);

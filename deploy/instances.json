@@ -1,34 +1,14 @@
 {
   "instances": [
     {
-      "id": "it",
-      "label": "Unicorns IT",
+      "id": "math",
+      "label": "Unicorns Math (math.uniedu.vn)",
       "enabled": true,
-      "deploy_dir": "/root/UnicornsEdu",
-      "compose_project": "unicorns-it",
+      "deploy_dir": "/root/UnicornsEduWeb5.",
+      "compose_project": "unicornseduweb5",
       "nginx_publish": "127.0.0.1:80:80",
-      "example_hostname": "it.unicornsedu.com",
-      "notes": "Instance IT. Dùng chung web image :latest với ENG và JP."
-    },
-    {
-      "id": "eng",
-      "label": "Unicorns ENG (Tiếng Anh)",
-      "enabled": true,
-      "deploy_dir": "/root/UnicornsEduEng",
-      "compose_project": "unicorns-eng",
-      "nginx_publish": "127.0.0.1:8080:80",
-      "example_hostname": "eng.unicornsedu.com",
-      "notes": "Instance ENG. Cùng web/api image; khác .env (DB, FRONTEND_URL, JWT)."
-    },
-    {
-      "id": "jp",
-      "label": "Unicorns JP (Tiếng Nhật)",
-      "enabled": true,
-      "deploy_dir": "/root/UnicornsEduJP",
-      "compose_project": "unicorns-jp",
-      "nginx_publish": "127.0.0.1:8081:80",
-      "example_hostname": "jp.unicornsedu.com",
-      "notes": "Instance JP. CD deploy sau khi bootstrap /root/UnicornsEduJP + migrate DB."
+      "example_hostname": "math.uniedu.vn",
+      "notes": "Instance duy nhất trên VPS. Thư mục deploy trùng với repo clone; compose project bắt buộc là unicornseduweb5 (khớp stack đang chạy). Cloudflared trỏ về http://127.0.0.1:80."
     }
   ]
 }

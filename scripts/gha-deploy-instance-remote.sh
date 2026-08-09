@@ -3,7 +3,7 @@
 # Called by gha-deploy-all-remote.sh or directly with DEPLOY_INSTANCE=<id>.
 set -euo pipefail
 
-INSTANCE_ID="${DEPLOY_INSTANCE:-it}"
+INSTANCE_ID="${DEPLOY_INSTANCE:-math}"
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 INSTANCES_FILE="${INSTANCES_FILE:-${REPO_ROOT}/deploy/instances.json}"
 
@@ -51,7 +51,7 @@ echo "  nginx=${NGINX_PUBLISH}"
 
 if [ ! -d "${DEPLOY_DIR}" ]; then
   echo "Deploy directory does not exist: ${DEPLOY_DIR}"
-  echo "Bootstrap this instance first — see docs/ops/vps-multi-instance-runbook.md"
+  echo "Bootstrap this instance first — see docs/ops/vps-single-instance-runbook.md"
   exit 1
 fi
 
@@ -77,8 +77,9 @@ compose() {
   docker compose -f docker-compose.prod.yml -p "${COMPOSE_PROJECT_NAME}" "$@"
 }
 
-# Default compose project for /root/UnicornsEdu before COMPOSE_PROJECT_NAME=unicorns-it.
-LEGACY_IT_COMPOSE_PROJECTS=(unicorns unicornsedu)
+# Compose project mặc định cũ (khi chạy `docker compose up` không kèm -p) tạo ra
+# stack "unicorns" song song với stack thật "unicornseduweb5" → phải dọn trước khi deploy.
+LEGACY_IT_COMPOSE_PROJECTS=(unicorns unicornsedu unicorns-it)
 
 stop_legacy_compose_project() {
   local legacy_project="$1"
@@ -103,7 +104,7 @@ stop_docker_containers_on_port() {
 }
 
 migrate_it_from_legacy_compose() {
-  if [ "${INSTANCE_ID}" != "it" ]; then
+  if [ "${INSTANCE_ID}" != "math" ]; then
     return 0
   fi
   local legacy
@@ -115,7 +116,7 @@ migrate_it_from_legacy_compose() {
 
 prepare_nginx_host_port() {
   echo "Preparing host port ${NGINX_LOOPBACK_PORT} for nginx (${COMPOSE_PROJECT_NAME})..."
-  if [ "${INSTANCE_ID}" = "it" ]; then
+  if [ "${INSTANCE_ID}" = "math" ]; then
     local legacy
     for legacy in "${LEGACY_IT_COMPOSE_PROJECTS[@]}"; do
       stop_legacy_compose_project "${legacy}"

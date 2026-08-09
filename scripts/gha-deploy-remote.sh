@@ -2,7 +2,7 @@
 # Remote commands for GitHub Actions deploy (VPS). Deploys every enabled instance.
 set -euo pipefail
 
-CANONICAL_REPO="${CANONICAL_REPO:-/root/UnicornsEdu}"
+CANONICAL_REPO="${CANONICAL_REPO:-/root/UnicornsEduWeb5.}"
 INSTANCES_FILE="${INSTANCES_FILE:-${CANONICAL_REPO}/deploy/instances.json}"
 DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-${CANONICAL_REPO}/scripts/gha-deploy-instance-remote.sh}"
 

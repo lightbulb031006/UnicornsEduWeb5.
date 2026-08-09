@@ -6,12 +6,18 @@ Nhiều bản UnicornsEduWeb5 trên **cùng một VPS** — mỗi môn học / d
 
 | Tài liệu | Nội dung |
 |----------|----------|
-| [vps-multi-instance-runbook.md](vps-multi-instance-runbook.md) | **Runbook triển khai** — bootstrap IT/ENG/JP, Cloudflare Tunnel, secrets GitHub |
+| [vps-single-instance-runbook.md](vps-single-instance-runbook.md) | **Runbook triển khai** — instance `math`, Cloudflare Tunnel, secrets GitHub, xử lý sự cố deploy |
 | [`deploy/instances.json`](../../deploy/instances.json) | Registry instance (`it`, `eng`, `jp`, …) |
 | [`.env.production.eng.example`](../../.env.production.eng.example) | Mẫu `.env` cho instance ENG |
 | [`.env.production.jp.example`](../../.env.production.jp.example) | Mẫu `.env` cho instance JP (`/root/UnicornsEduJP`) |
 
 Bật CD cho instance mới: bootstrap VPS theo runbook, rồi `"enabled": true` trong `deploy/instances.json`. Mọi instance **dùng chung** `unicorns-api:latest` và `unicorns-web:latest`.
+
+## Troubleshooting
+
+| Tài liệu | Triệu chứng |
+|----------|-------------|
+| [troubleshoot-login-500.md](troubleshoot-login-500.md) | Web mở được nhưng đăng nhập luôn thất bại (API trả `500`/`502`, thường do database) |
 
 ---
 

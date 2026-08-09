@@ -308,25 +308,30 @@ pnpm --filter web add @unicorns/shared --workspace
 
 ## Deploy VPS (GitHub Actions)
 
-Pipeline: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) — khi **push `main`**: `build-api` + **`build-web`** (một image, `NEXT_PUBLIC_BACKEND_URL=/api`) + `mirror-nginx` → `deploy` SSH chạy [`scripts/gha-deploy-remote.sh`](../scripts/gha-deploy-remote.sh) deploy tuần tự instance `enabled` trong [`deploy/instances.json`](../deploy/instances.json). **Runbook:** [`docs/ops/vps-multi-instance-runbook.md`](ops/vps-multi-instance-runbook.md).
+Pipeline: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) — khi **push `main`**: `build-api` + **`build-web`** (một image, `NEXT_PUBLIC_BACKEND_URL=/api`) + `mirror-nginx` → `deploy` SSH chạy [`scripts/gha-deploy-remote.sh`](../scripts/gha-deploy-remote.sh) deploy tuần tự instance `enabled` trong [`deploy/instances.json`](../deploy/instances.json). **Runbook:** [`docs/ops/vps-single-instance-runbook.md`](ops/vps-single-instance-runbook.md).
 
-**IT + ENG + JP — cùng VPS, cùng Docker images:**
+**Instance đang chạy — một instance duy nhất trên VPS:**
 
-| ID | Thư mục | Nginx loopback | Images |
-|----|---------|----------------|--------|
-| `it` | `/root/UnicornsEdu` | `127.0.0.1:80` | `unicorns-api:latest` + `unicorns-web:latest` |
-| `eng` | `/root/UnicornsEduEng` | `127.0.0.1:8080` | cùng images; khác `.env` (DB, domain, JWT) |
-| `jp` | `/root/UnicornsEduJP` | `127.0.0.1:8081` | cùng images; khác `.env` (DB, domain, JWT) |
+| ID | Thư mục | Compose project | Nginx loopback | Domain |
+|----|---------|-----------------|----------------|--------|
+| `math` | `/root/UnicornsEduWeb5.` | `unicornseduweb5` | `127.0.0.1:80` | `math.uniedu.vn` |
+
+> **Bắt buộc dùng `-p unicornseduweb5` cho mọi lệnh compose thủ công trên VPS.** Thiếu `-p`, Compose lấy project mặc định trong `docker-compose.prod.yml` và tạo ra một stack **song song** không ai truy cập được — triệu chứng điển hình: build xong, container "Started", nhưng site vẫn phục vụ code cũ và `/_next/static/chunks/<hash>.js` trả 404.
+>
+> ```bash
+> cd /root/UnicornsEduWeb5.
+> docker compose -p unicornseduweb5 -f docker-compose.prod.yml ps
+> ```
 
 Web browser gọi `/api` same-origin; server-side dùng `INTERNAL_API_URL=http://api:4000` trong compose. `FRONTEND_URL` / `BACKEND_URL` trong `.env` mỗi instance vẫn phải khớp domain public (CORS, OAuth, email).
 
-**Kiến trúc VPS:** VPS production là **ARM64** (`uname -m` thường là `aarch64`), nên image `unicorns-api` / `unicorns-web` build **arm64-only** trên runner `ubuntu-24.04-arm`. Không build ARM64 qua QEMU trên runner x86 vì step `pnpm install --frozen-lockfile` có thể treo rất lâu. Nếu chuyển VPS sang amd64 (`x86_64`), đổi workflow về `runs-on: ubuntu-latest` và `platforms: linux/amd64`.
+**Kiến trúc VPS:** VPS production là **amd64** (`uname -m` = `x86_64`), nên image `unicorns-api` / `unicorns-web` build **amd64-only** trên runner `ubuntu-latest` (`platforms: linux/amd64`). Kiểm tra bằng `docker compose -p unicornseduweb5 -f docker-compose.prod.yml images`. Nếu sau này chuyển sang VPS ARM (`aarch64`), đổi workflow về `runs-on: ubuntu-24.04-arm` và `platforms: linux/arm64` — build ARM64 qua QEMU trên runner x86 dễ treo ở step `pnpm install --frozen-lockfile`.
 
-**Docker Hub / `docker compose pull`:** service **`nginx`** trong [`docker-compose.prod.yml`](../docker-compose.prod.yml) dùng image **`ghcr.io/unicorns-prj-dev/nginx:1.27-alpine`** — được job CI **`mirror-nginx`** đồng bộ manifest đa kiến trúc từ `docker.io/library/nginx:1.27-alpine` lên GHCR mỗi lần push `main`, nên VPS sau `docker login ghcr.io` **chỉ cần** kéo từ GHCR (tránh `registry-1.docker.io` / TLS timeout). Script deploy vẫn **retry** `docker compose pull` cho lỗi mạng tạm thời khác.
+**Docker Hub / `docker compose pull`:** service **`nginx`** trong [`docker-compose.prod.yml`](../docker-compose.prod.yml) dùng image **`ghcr.io/lightbulb031006/nginx:1.27-alpine`** — được job CI **`mirror-nginx`** đồng bộ manifest đa kiến trúc từ `docker.io/library/nginx:1.27-alpine` lên GHCR mỗi lần push `main`, nên VPS sau `docker login ghcr.io` **chỉ cần** kéo từ GHCR (tránh `registry-1.docker.io` / TLS timeout). Script deploy vẫn **retry** `docker compose pull` cho lỗi mạng tạm thời khác.
 
-**Cloudflared / NGINX production:** mỗi instance bind Nginx loopback riêng (`80` IT, `8080` ENG, `8081` JP — xem [`deploy/instances.json`](../deploy/instances.json)). Cloudflare Tunnel khai báo **một ingress rule / hostname** trỏ tới đúng cổng loopback; TLS/domain kết thúc ở Cloudflare. `nginx/conf.d/app.conf` là catch-all local vhost; `nginx/nginx.conf` giữ `X-Forwarded-Proto` từ cloudflared.
+**Cloudflared / NGINX production:** instance `math` bind Nginx loopback `127.0.0.1:80` (xem [`deploy/instances.json`](../deploy/instances.json)). Cloudflare Tunnel khai báo **một ingress rule / hostname** trỏ tới đúng cổng loopback; TLS/domain kết thúc ở Cloudflare. `nginx/conf.d/app.conf` là catch-all local vhost; `nginx/nginx.conf` giữ `X-Forwarded-Proto` từ cloudflared.
 
-**Secrets / variables GitHub (CD):** `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `GHCR_TOKEN`, `GHCR_USERNAME`. Web image dùng chung — **không** cần secret build theo từng domain. Bootstrap instance mới (ENG/JP): [`docs/ops/vps-multi-instance-runbook.md`](ops/vps-multi-instance-runbook.md).
+**Secrets / variables GitHub (CD):** `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `GHCR_TOKEN`, `GHCR_USERNAME`. Web image dùng chung — **không** cần secret build theo từng domain. Bootstrap instance mới (ENG/JP): [`docs/ops/vps-single-instance-runbook.md`](ops/vps-single-instance-runbook.md).
 
 ### Tailscale trong job `deploy` (tuỳ chọn)
 
