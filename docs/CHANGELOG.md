@@ -23,6 +23,8 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Fixed
 
+- BE tạo buổi học: tài khoản `admin` được bỏ qua kiểm tra ngày/giờ phải khớp lịch cố định hoặc lịch bù; assistant, gia sư và mọi tài khoản khác vẫn bị kiểm tra như cũ.
+
 - BE `GET /staff/:id/income-summary` card **Lớp phụ trách** (`classMonthlySummaries`): không còn seed mọi row `class_teachers` (kể cả `inactive`) thành dòng 0đ; chỉ luôn hiện phân công hiện tại (`status` null/`active`); lớp nghỉ dạy chỉ hiện khi tháng đang chọn còn trợ cấp và/hoặc còn `unpaid`/`pending`, với `isCurrentTeacherAssignment=false` (badge **NGHỈ DẠY**).
 - BE `GET /staff` (list `/admin/staffs` cột **Lớp**): `classTeachers` chỉ gồm phân công hiện tại hoặc lớp nghỉ dạy còn trợ cấp tháng hiện tại / còn `unpaid`/`pending` — cùng rule ẩn lớp nghỉ 0đ với card **Lớp phụ trách**.
 

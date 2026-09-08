@@ -36,6 +36,12 @@ import {
 const SESSION_CREATE_TRANSACTION_MAX_WAIT_MS = 10_000;
 const SESSION_CREATE_TRANSACTION_TIMEOUT_MS = 20_000;
 
+export function shouldEnforceDeclaredSchedule(
+  actor?: ActionHistoryActor,
+): boolean {
+  return actor?.roleType !== UserRole.admin;
+}
+
 @Injectable()
 export class SessionCreateService {
   private readonly activeSessionCreations = new Set<string>();
@@ -207,16 +213,17 @@ export class SessionCreateService {
             );
           }
 
-          const scheduleMatch =
-            await this.sessionScheduleRulesService.assertSessionMatchesDeclaredSchedule(
-              tx,
-              {
-                classId: data.classId,
-                teacherId: data.teacherId,
-                date: sessionDate,
-                startTime: data.startTime,
-              },
-            );
+          const scheduleMatch = shouldEnforceDeclaredSchedule(actor)
+            ? await this.sessionScheduleRulesService.assertSessionMatchesDeclaredSchedule(
+                tx,
+                {
+                  classId: data.classId,
+                  teacherId: data.teacherId,
+                  date: sessionDate,
+                  startTime: data.startTime,
+                },
+              )
+            : {};
 
           const uniqueAttendanceStudentIds = new Set(attendanceStudentIds);
           if (studentClasses.length !== uniqueAttendanceStudentIds.size) {

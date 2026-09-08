@@ -6,7 +6,22 @@ jest.mock('./session-student-balance.service', () => ({
 }));
 
 import { AttendanceStatus, StaffRole, UserRole } from '../../generated/enums';
-import { SessionCreateService } from './session-create.service';
+import {
+  SessionCreateService,
+  shouldEnforceDeclaredSchedule,
+} from './session-create.service';
+
+describe('shouldEnforceDeclaredSchedule', () => {
+  it('bypasses declared schedule rules only for admin accounts', () => {
+    expect(shouldEnforceDeclaredSchedule({ roleType: UserRole.admin })).toBe(
+      false,
+    );
+    expect(shouldEnforceDeclaredSchedule({ roleType: UserRole.staff })).toBe(
+      true,
+    );
+    expect(shouldEnforceDeclaredSchedule()).toBe(true);
+  });
+});
 
 describe('SessionCreateService', () => {
   const mockPrisma = {
