@@ -331,7 +331,7 @@ Web browser gọi `/api` same-origin; server-side dùng `INTERNAL_API_URL=http:/
 
 **Cloudflared / NGINX production:** instance `math` bind Nginx loopback `127.0.0.1:80` (xem [`deploy/instances.json`](../deploy/instances.json)). Cloudflare Tunnel khai báo **một ingress rule / hostname** trỏ tới đúng cổng loopback; TLS/domain kết thúc ở Cloudflare. `nginx/conf.d/app.conf` là catch-all local vhost; `nginx/nginx.conf` giữ `X-Forwarded-Proto` từ cloudflared.
 
-**Secrets / variables GitHub (CD):** `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `GHCR_TOKEN`, `GHCR_USERNAME`. Web image dùng chung — **không** cần secret build theo từng domain. Bootstrap instance mới (ENG/JP): [`docs/ops/vps-single-instance-runbook.md`](ops/vps-single-instance-runbook.md).
+**Secrets / variables GitHub (CD):** `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`. Job deploy dùng `github.token` tạm thời với quyền `packages: read` và `github.actor` để VPS đăng nhập/pull GHCR, nên không cần duy trì PAT `GHCR_TOKEN` / `GHCR_USERNAME`. Web image dùng chung — **không** cần secret build theo từng domain. Bootstrap instance mới (ENG/JP): [`docs/ops/vps-single-instance-runbook.md`](ops/vps-single-instance-runbook.md).
 
 ### Tailscale trong job `deploy` (tuỳ chọn)
 

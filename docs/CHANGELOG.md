@@ -23,6 +23,8 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Fixed
 
+- CD deploy: job VPS dùng `github.token` tạm thời với quyền `packages: read` thay cho PAT `GHCR_TOKEN` lâu dài, tránh deploy thất bại khi PAT hết hạn và GHCR trả `denied`.
+
 - BE tạo buổi học: tài khoản `admin` được bỏ qua kiểm tra ngày/giờ phải khớp lịch cố định hoặc lịch bù; assistant, gia sư và mọi tài khoản khác vẫn bị kiểm tra như cũ.
 
 - BE `GET /staff/:id/income-summary` card **Lớp phụ trách** (`classMonthlySummaries`): không còn seed mọi row `class_teachers` (kể cả `inactive`) thành dòng 0đ; chỉ luôn hiện phân công hiện tại (`status` null/`active`); lớp nghỉ dạy chỉ hiện khi tháng đang chọn còn trợ cấp và/hoặc còn `unpaid`/`pending`, với `isCurrentTeacherAssignment=false` (badge **NGHỈ DẠY**).

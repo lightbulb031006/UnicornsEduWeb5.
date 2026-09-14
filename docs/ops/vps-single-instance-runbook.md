@@ -64,10 +64,10 @@ kèm healthcheck.
 | Tên | Mô tả |
 |-----|-------|
 | `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` | SSH vào VPS |
-| `GHCR_USERNAME` | GitHub username sở hữu PAT (`lightbulb031006`) |
-| `GHCR_TOKEN` | PAT có scope `read:packages` để VPS pull image |
+| `GHCR_USERNAME` | Tự lấy từ `github.actor` trong job deploy |
+| `GHCR_TOKEN` | Tự lấy từ `github.token` tạm thời; job có quyền `packages: read` |
 
-Thiếu `GHCR_TOKEN` / `GHCR_USERNAME`, script dừng ngay với thông báo rõ ràng.
+Không cần tạo secret GHCR thủ công. Workflow truyền `GHCR_TOKEN` / `GHCR_USERNAME` tạm thời vào VPS; nếu thiếu, script dừng ngay với thông báo rõ ràng.
 
 ---
 

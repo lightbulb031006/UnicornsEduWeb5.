@@ -62,11 +62,11 @@ git checkout main
 git pull --ff-only origin main
 
 if [ -z "${GHCR_TOKEN:-}" ]; then
-  echo "Missing GHCR_TOKEN: VPS cannot pull private images from ghcr.io. Add repo secret GHCR_TOKEN (PAT with read:packages)."
+  echo "Missing GHCR_TOKEN: the deploy workflow must pass its GitHub token with packages: read permission."
   exit 1
 fi
 if [ -z "${GHCR_USERNAME:-}" ]; then
-  echo "Missing GHCR_USERNAME: set repo secret or variable GHCR_USERNAME (GitHub username that owns the PAT)."
+  echo "Missing GHCR_USERNAME: the deploy workflow must pass github.actor."
   exit 1
 fi
 
