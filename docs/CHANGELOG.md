@@ -23,6 +23,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed — Math upstream sync 2026-10-02
 
+- Release Toán hoàn tất ngày 03/10/2026: workflow `37037290547` (attempt 4), API/web image từ `6e823e1a`. Đã sao lưu, thử và áp dụng 53 migration; không còn migration chờ. Checksum tài chính và tổng ví giữ nguyên; ba tài khoản và ba hồ sơ bổ sung khớp dự báo backfill. Trang đăng nhập, API và tệp web mới đã được kiểm tra qua domain production.
 - Preflight dự báo chính xác số tài khoản/hồ sơ thiếu được hai migration backfill bổ sung; vẫn bắt buộc giữ nguyên bản ghi lớp/buổi/điểm danh/giao dịch, tổng ví và checksum các trường tài chính điểm danh/giao dịch.
 - Dựng schema `extensions` và các extension PostgreSQL trước khi khôi phục bản sao Supabase để giữ các default ID gọi `extensions.gen_random_bytes`.
 - Preflight đọc biến môi trường qua Compose như API runtime (xử lý đúng dấu nháy trong `.env`), dùng digest bất biến của image API vừa pull cho bản sao kiểm thử.
@@ -30,7 +31,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 - Triển khai bản đồng bộ theo yêu cầu: pipeline kiểm tra ID sửa dữ liệu Tin, sao lưu schema public tại VPS và chạy thử migration trên PostgreSQL riêng trước khi cập nhật database thật. Dừng triển khai nếu lỗi, số bản ghi chính hoặc tổng ví thay đổi; nginx hiện tại tiếp tục phục vụ trong bước kiểm tra.
 - Đồng bộ repo Tin tới 451f60d: khoá học/chuyên đề/tiết học, bài làm trực tuyến, khảo sát, thiết bị đăng nhập, lịch hiệu lực, dashboard, học phí theo block và lương cứng. Giữ quyền admin tạo buổi ngoài lịch, biên lai/logo Toán, popup thống kê và cấu hình deploy Math.
 - Watermark public mới dùng logo Toán; nguồn khách đổi nhãn sang Toán, giữ enum gốc. Nhận xét điểm danh vẫn giới hạn 500 ký tự văn bản thuần.
-- Sửa import PrismaService trùng trong UNIOJ spec để API typecheck pass. Chưa chạy migration hoặc cập nhật website live; hướng dẫn database và khôi phục tại docs/ops/upstream-sync-math-2026-10-02.md.
+- Sửa import PrismaService trùng trong UNIOJ spec để API typecheck pass. Hướng dẫn database, kết quả triển khai và khôi phục tại docs/ops/upstream-sync-math-2026-10-02.md.
 
 
 ### Changed

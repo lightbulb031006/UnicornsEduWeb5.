@@ -2,7 +2,15 @@
 
 ## Phạm vi
 
-Tích hợp upstream/main tại 451f60d1537fad395a349ca0d126babf245f5665 vào bản Toán fa56472. Chỉ cập nhật mã nguồn trong máy; không push, triển khai, chạy seed hoặc migration vào database.
+Tích hợp upstream/main tại 451f60d1537fad395a349ca0d126babf245f5665 vào bản Toán fa56472. Bước đầu chỉ đồng bộ mã nguồn tại máy. Sau yêu cầu xuất bản của người dùng, đã push và triển khai lên math.uniedu.vn ngày 03/10/2026, không chạy seed.
+
+## Kết quả triển khai 03/10/2026
+
+- GitHub Actions: [37037290547, attempt 4](https://github.com/lightbulb031006/UnicornsEduWeb5./actions/runs/37037290547) — build API, build web, mirror nginx và deploy đều success. Image ứng dụng từ commit `6e823e1a`; script vận hành từ `5527fe9a`.
+- Backup schema public đã khôi phục được trên PostgreSQL 17 riêng: `/root/unicorns-math-predeploy-AIV8pr5X/public.dump`, kèm checksum và báo cáo trong cùng thư mục.
+- Không có ID Tin bị trùng với học sinh Toán. Cả 53 migration đã thử thành công, sau đó áp dụng production; kiểm tra read-only xác nhận 0 migration chờ.
+- Tạo thêm đúng ba tài khoản và ba hồ sơ thiếu theo dự báo hai migration backfill. Số lớp, buổi, điểm danh, giao dịch ví và tổng số dư giữ nguyên; checksum trường tài chính của điểm danh/giao dịch khớp trước và sau trên production.
+- Healthcheck API, web và nginx pass; trang đăng nhập/API qua domain trả HTTP 200 và hash tệp web thay đổi so với bản cũ. Kiểm tra public không thay thế kiểm tra thao tác có đăng nhập bằng tài khoản người dùng.
 
 ## Các phần riêng của Toán
 
@@ -22,7 +30,7 @@ Chạy thử lần đầu đã qua 53 migration và phát hiện backfill tạo 
 
 Người dùng đã yêu cầu push và triển khai website. CD gọi `scripts/math-release-preflight.sh` trước `prisma migrate deploy`: đối chiếu các ID Tin bằng transaction read-only, lưu backup schema `public` (bao gồm lịch sử migration) trong thư mục riêng `/root/unicorns-math-predeploy-*`, rồi khôi phục và chạy thử toàn bộ migration trên PostgreSQL riêng không có mạng ngoài. Pipeline kiểm tra số học sinh, tài khoản, lớp, buổi, điểm danh, giao dịch ví và tổng số dư trước/sau bản sao. Lỗi hoặc khác biệt làm dừng rollout. File chứa thông tin kết nối tạm bị xoá khi kết thúc; backup và checksum được giữ lại với quyền riêng tư. Không chạy server API/cron trong bản sao.
 
-Có 53 migration mới so với mốc đồng bộ dd5c6c3. Giữ nguyên lịch sử migration upstream; chưa chạy ở môi trường Toán. Trước deploy cần backup database và kiểm tra read-only dữ liệu bị tác động.
+Có 53 migration mới so với mốc đồng bộ dd5c6c3. Giữ nguyên lịch sử migration upstream; đã áp dụng ở môi trường Toán trong lượt triển khai nêu trên. Mỗi lần deploy vẫn cần backup database và kiểm tra read-only dữ liệu bị tác động.
 
 Đặc biệt hai migration dữ liệu của Tin:
 
@@ -48,4 +56,4 @@ Không reset checkout đang có công việc chưa commit. Nếu cần quay lạ
 - Frontend: 21 suites / 191 tests pass (gồm các test thống kê local có sẵn); lint các file xử lý xung đột và tuỳ biến Math pass.
 - Không còn conflict marker. Tất cả file migration trong index có blob hash trùng upstream; cấu hình deploy Math có blob hash trùng nhánh dự phòng.
 - Các chỉnh sửa thống kê/vitest và footer AGENTS có sẵn trước sync vẫn ở working tree, không gộp vào merge commit.
-- Chưa kiểm tra UI với database đã migrate, chưa chạy migration, chưa push/deploy.
+- Lượt triển khai sau đã thử migration trên bản sao, cập nhật production và xác minh healthcheck/public assets như ghi ở phần Kết quả triển khai. Chưa kiểm tra thao tác có đăng nhập bằng tài khoản người dùng.
