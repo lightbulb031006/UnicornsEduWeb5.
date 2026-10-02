@@ -91,6 +91,8 @@ If you change project workflow/conventions for agents (commands, required checks
 - **Prisma migrations on shared DBs**: do **not** run `prisma migrate dev` against shared/staging/production Supabase databases. Use `pnpm --filter api db:migrate` only on a disposable local dev database, and use `pnpm --filter api db:deploy` to apply committed migrations to shared environments without reset prompts.
 - **Prisma drift fixes**: treat committed Prisma schema + migrations as the only supported database shape. If an environment has manual/legacy drift (for example stray legacy columns/tables), fix it with a committed migration and run `pnpm --filter api db:deploy` before rolling the API code; do **not** add runtime compatibility writes just to tolerate drift.
 
+- **Math CD preflight**: before production migrations, `scripts/math-release-preflight.sh` checks Tin repair IDs read-only, saves a private public-schema backup on the VPS and rehearses the release migrations in a disposable PostgreSQL container with no external network. A failed check stops rollout while the current nginx remains running. Never bypass this gate without investigating its output; see `docs/ops/upstream-sync-math-2026-10-02.md`.
+
 ## Quality & safety checklist
 
 - Keep changes focused on the requested scope.

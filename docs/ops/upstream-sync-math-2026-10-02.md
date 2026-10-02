@@ -16,6 +16,8 @@ Tích hợp upstream/main tại 451f60d1537fad395a349ca0d126babf245f5665 vào b�
 
 ## Database trước lần triển khai sau
 
+Người dùng đã yêu cầu push và triển khai website. CD gọi `scripts/math-release-preflight.sh` trước `prisma migrate deploy`: đối chiếu các ID Tin bằng transaction read-only, lưu backup schema `public` (bao gồm lịch sử migration) trong thư mục riêng `/root/unicorns-math-predeploy-*`, rồi khôi phục và chạy thử toàn bộ migration trên PostgreSQL riêng không có mạng ngoài. Pipeline kiểm tra số học sinh, tài khoản, lớp, buổi, điểm danh, giao dịch ví và tổng số dư trước/sau bản sao. Lỗi hoặc khác biệt làm dừng rollout. File chứa thông tin kết nối tạm bị xoá khi kết thúc; backup và checksum được giữ lại với quyền riêng tư. Không chạy server API/cron trong bản sao.
+
 Có 53 migration mới so với mốc đồng bộ dd5c6c3. Giữ nguyên lịch sử migration upstream; chưa chạy ở môi trường Toán. Trước deploy cần backup database và kiểm tra read-only dữ liệu bị tác động.
 
 Đặc biệt hai migration dữ liệu của Tin:

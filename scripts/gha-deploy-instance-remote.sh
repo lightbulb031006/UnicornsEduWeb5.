@@ -126,8 +126,6 @@ prepare_nginx_host_port() {
   compose rm -sf nginx 2>/dev/null || true
 }
 
-migrate_it_from_legacy_compose
-
 docker_disk_report() {
   echo "Docker disk usage:"
   docker system df || true
@@ -221,6 +219,12 @@ wait_for_container_running() {
 }
 
 compose_pull_service_with_retry api
+
+if [ "${INSTANCE_ID}" = "math" ]; then
+  echo "Backing up Math database and rehearsing migrations before rollout..."
+  DEPLOY_DIR="${DEPLOY_DIR}" REPO_ROOT="${REPO_ROOT}" \
+    bash "${REPO_ROOT}/scripts/math-release-preflight.sh"
+fi
 
 echo "Applying database migrations..."
 compose run --rm --no-deps -T api \
