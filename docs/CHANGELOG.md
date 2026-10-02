@@ -21,6 +21,10 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ## [Unreleased]
 
+### Changed
+
+- Biên lai nạp ví (email HTML, nội dung text và PDF): dùng thương hiệu **Học Toán Cùng Chuyên Toán**, một logo Toán của trung tâm (`logo_math_sm.png`), thay con dấu Unicorns cũ bằng dòng **Đã nhận thanh toán**. Thông tin học sinh, giao dịch và tài khoản nhận tiền tiếp tục lấy từ dữ liệu/cấu hình hiện có.
+
 ### Fixed
 
 - CD deploy: job VPS dùng `github.token` tạm thời với quyền `packages: read` thay cho PAT `GHCR_TOKEN` lâu dài, tránh deploy thất bại khi PAT hết hạn và GHCR trả `denied`.

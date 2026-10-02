@@ -11,6 +11,8 @@
 
 ## Features
 
+- **Thương hiệu biên lai:** email (HTML/text/subject) và PDF dùng tên **Học Toán Cùng Chuyên Toán**, logo Toán do trung tâm cung cấp; cuối biên lai có dòng **Đã nhận thanh toán** thay con dấu Unicorns cũ. Mẫu backend dùng chung cho nạp ví từ admin/staff/student; số tiền, mã giao dịch và tài khoản nhận tiền vẫn lấy từ dữ liệu/cấu hình hiện có.
+
 - **Loading:** `/student/loading.tsx` uses `StudentDashboardSkeleton`; this stays route-specific because `/student` is a single self-service dashboard rather than a broad segment with many child layouts.
 
 - **Sidebar (`StudentSidebar`):** như staff: chuông trong sidebar, **panel/popup thông báo portal** ra `document.body`, mobile full màn hình; realtime toast hiển thị dạng tóm tắt và bấm vào toast mở đúng popup chi tiết thông báo tương ứng.

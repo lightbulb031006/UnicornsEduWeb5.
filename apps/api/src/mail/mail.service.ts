@@ -12,6 +12,7 @@ import {
   type ReceiptImageDataUris,
 } from './receipt-assets.service';
 import { ReceiptPdfService } from './receipt-pdf.service';
+import { RECEIPT_CENTER_NAME } from './receipt.types';
 import type {
   ReceiptLineItem,
   TuitionReceiptEmailProps,
@@ -91,30 +92,15 @@ interface StudentWalletTopUpReceiptEmailWebhookPayload {
 
 const RECEIPT_INLINE_IMAGES = [
   {
-    key: 'logoMain',
-    prop: 'logoMainSrc',
-    filename: 'logo-main.png',
-    cid: 'receipt-logo-main@unicorns-edu',
-  },
-  {
-    key: 'logoTin',
-    prop: 'logoTinSrc',
-    filename: 'logo-tin.png',
-    cid: 'receipt-logo-tin@unicorns-edu',
-  },
-  {
-    key: 'stamp',
-    prop: 'stampSrc',
-    filename: 'receipt-stamp.png',
-    cid: 'receipt-stamp@unicorns-edu',
+    key: 'logoMath',
+    prop: 'logoMathSrc',
+    filename: 'hoc-toan-cung-chuyen-toan.png',
+    cid: 'receipt-logo-math@unicorns-edu',
   },
 ] as const;
 const AUTH_BRAND_LOGO_CID = 'auth-brand-logo@unicorns-edu';
 
-type ReceiptImageSourceProps = Pick<
-  TuitionReceiptEmailProps,
-  'logoMainSrc' | 'logoTinSrc' | 'stampSrc'
->;
+type ReceiptImageSourceProps = Pick<TuitionReceiptEmailProps, 'logoMathSrc'>;
 
 @Injectable()
 export class MailService {
@@ -339,9 +325,7 @@ export class MailService {
     const imageDataUris = this.receiptAssetsService.getReceiptImageDataUris();
     const pdfProps: TuitionReceiptEmailProps = {
       ...receiptProps,
-      logoMainSrc: imageDataUris?.logoMain ?? null,
-      logoTinSrc: imageDataUris?.logoTin ?? null,
-      stampSrc: imageDataUris?.stamp ?? null,
+      logoMathSrc: imageDataUris?.logoMath ?? null,
     };
 
     const pdfHtml = await this.renderReceiptHtml(pdfProps);
@@ -373,7 +357,7 @@ export class MailService {
     await this.sendMailOrThrow({
       from: this.mailFrom,
       to,
-      subject: `[Unicorns Edu] Biên lai nạp ví — ${studentName} — ${orderCode}`,
+      subject: `[${RECEIPT_CENTER_NAME}] Biên lai nạp ví — ${studentName} — ${orderCode}`,
       text: plainText,
       html,
       ...(attachments.length ? { attachments } : {}),
@@ -409,7 +393,7 @@ export class MailService {
     const receiverName =
       this.configService.get<string>('RECEIPT_RECEIVER_NAME')?.trim() ||
       this.configService.get<string>('SEPAY_TRANSFER_ACCOUNT_NAME')?.trim() ||
-      'Unicorns Edu';
+      RECEIPT_CENTER_NAME;
 
     const receiverBankName =
       this.configService.get<string>('RECEIPT_RECEIVER_BANK_NAME')?.trim() ||
@@ -567,7 +551,7 @@ export class MailService {
       'Nếu Quý phụ huynh không thực hiện giao dịch này, vui lòng liên hệ trung tâm ngay.',
       '',
       'Trân trọng,',
-      'Unicorns Edu',
+      RECEIPT_CENTER_NAME,
     ]
       .filter((x) => x !== null)
       .join('\n');
@@ -579,9 +563,7 @@ export class MailService {
     attachments: NonNullable<SendMailOptions['attachments']>;
   } {
     const props: ReceiptImageSourceProps = {
-      logoMainSrc: null,
-      logoTinSrc: null,
-      stampSrc: null,
+      logoMathSrc: null,
     };
     const attachments: NonNullable<SendMailOptions['attachments']> = [];
     if (!images) {

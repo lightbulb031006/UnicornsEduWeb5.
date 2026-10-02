@@ -1,3 +1,5 @@
+export const RECEIPT_CENTER_NAME = 'Học Toán Cùng Chuyên Toán';
+
 export interface ReceiptLineItem {
   date: string;
   memo: string;
@@ -19,7 +21,5 @@ export interface TuitionReceiptEmailProps {
   lineItems: ReceiptLineItem[];
   totalAmount: number;
   /** `data:image/png;base64,...` cho PDF hoặc `cid:...` cho HTML email. */
-  logoMainSrc?: string | null;
-  logoTinSrc?: string | null;
-  stampSrc?: string | null;
+  logoMathSrc?: string | null;
 }

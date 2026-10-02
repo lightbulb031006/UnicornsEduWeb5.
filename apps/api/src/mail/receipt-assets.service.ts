@@ -4,12 +4,11 @@ import { join } from 'path';
 
 export type ReceiptImageDataUris = {
   logoMain: string;
-  logoTin: string;
-  stamp: string;
+  logoMath: string;
 };
 
 /**
- * Ảnh biên lai thu nhỏ (logo_main_sm, logo_tin_sm, stamp_sm) trong `src/mail/assets/`.
+ * Logo Toán dùng cho biên lai; logo_main_sm vẫn dùng riêng cho email xác thực.
  * Tái tạo bằng pipeline xử lý ảnh nội bộ khi cần cập nhật asset.
  */
 @Injectable()
@@ -24,8 +23,7 @@ export class ReceiptAssetsService {
       };
       return {
         logoMain: read('logo_main_sm.png'),
-        logoTin: read('logo_tin_sm.png'),
-        stamp: read('stamp_sm.png'),
+        logoMath: read('logo_math_sm.png'),
       };
     } catch (error) {
       this.logger.warn(

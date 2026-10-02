@@ -12,7 +12,10 @@ import {
   Section,
   Text,
 } from '@react-email/components';
-import type { TuitionReceiptEmailProps } from '../receipt.types';
+import {
+  RECEIPT_CENTER_NAME,
+  type TuitionReceiptEmailProps,
+} from '../receipt.types';
 
 const BORDER = '#1e40af';
 const BLUE950 = '#172554';
@@ -42,9 +45,7 @@ export function TuitionReceiptEmail({
   receiptSummary,
   lineItems,
   totalAmount,
-  logoMainSrc,
-  logoTinSrc,
-  stampSrc,
+  logoMathSrc,
 }: TuitionReceiptEmailProps) {
   return (
     <Html lang="vi">
@@ -85,59 +86,16 @@ export function TuitionReceiptEmail({
               boxShadow: '0 12px 40px rgba(30, 64, 175, 0.12)',
             }}
           >
-            {/* Bảng presentation: email client không chia 50% như Row/Column → logo giữa + gap */}
             <Section style={{ marginBottom: '8px', textAlign: 'center' }}>
-              <table
-                role="presentation"
-                cellPadding={0}
-                cellSpacing={0}
-                align="center"
-                style={{
-                  margin: '0 auto',
-                  borderCollapse: 'collapse',
-                }}
-              >
-                <tbody>
-                  <tr>
-                    {logoMainSrc ? (
-                      <td
-                        style={{
-                          padding: '0 12px 0 0',
-                          verticalAlign: 'middle',
-                          textAlign: 'center',
-                        }}
-                      >
-                        <Img
-                          src={logoMainSrc}
-                          alt="Unicorns Edu"
-                          height={56}
-                          style={{ display: 'block', margin: '0 auto' }}
-                        />
-                      </td>
-                    ) : null}
-                    {logoTinSrc ? (
-                      <td
-                        style={{
-                          padding: logoMainSrc ? '0 0 0 12px' : 0,
-                          verticalAlign: 'middle',
-                          textAlign: 'center',
-                        }}
-                      >
-                        <Img
-                          src={logoTinSrc}
-                          alt="Học tin học"
-                          height={52}
-                          style={{
-                            display: 'block',
-                            margin: '0 auto',
-                            borderRadius: '6px',
-                          }}
-                        />
-                      </td>
-                    ) : null}
-                  </tr>
-                </tbody>
-              </table>
+              {logoMathSrc ? (
+                <Img
+                  src={logoMathSrc}
+                  alt={RECEIPT_CENTER_NAME}
+                  width={96}
+                  height={96}
+                  style={{ display: 'block', margin: '0 auto' }}
+                />
+              ) : null}
               <Text
                 style={{
                   margin: '6px 0 0',
@@ -147,7 +105,7 @@ export function TuitionReceiptEmail({
                   letterSpacing: '0.02em',
                 }}
               >
-                Unicorns Edu — Học Tin cùng Chuyên tin
+                {RECEIPT_CENTER_NAME}
               </Text>
             </Section>
 
@@ -443,14 +401,17 @@ export function TuitionReceiptEmail({
                       width: '42%',
                     }}
                   >
-                    {stampSrc ? (
-                      <Img
-                        src={stampSrc}
-                        alt="Con dấu xác nhận"
-                        width={100}
-                        style={{ display: 'inline-block' }}
-                      />
-                    ) : null}
+                    <Text
+                      style={{
+                        margin: 0,
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        color: BLUE900,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      Đã nhận thanh toán
+                    </Text>
                   </td>
                 </tr>
               </tbody>
@@ -459,7 +420,8 @@ export function TuitionReceiptEmail({
 
           <Hr style={{ borderColor: SLATE200, margin: '20px 0' }} />
           <Text style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>
-            Unicorns Edu — email tự động, vui lòng không trả lời trực tiếp.
+            {RECEIPT_CENTER_NAME} — email tự động, vui lòng không trả lời trực
+            tiếp.
           </Text>
         </Container>
       </Body>

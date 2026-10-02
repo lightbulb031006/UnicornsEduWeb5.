@@ -227,6 +227,11 @@ describe('MailService', () => {
     expect(sent.from).toBe('Unicorns Edu <sender@gmail.com>');
     expect(sent.to).toBe('parent@example.com');
     expect(sent.subject).toContain('UEDU-20260511-001');
+    expect(sent.subject).toContain('Học Toán Cùng Chuyên Toán');
+    expect(sent.html).toContain('Học Toán Cùng Chuyên Toán');
+    expect(sent.html).toContain('Đã nhận thanh toán');
+    expect(sent.html).not.toContain('Học Tin');
+    expect(sent.text).toContain('Học Toán Cùng Chuyên Toán');
     expect(sent.text).toContain('Nguyễn Minh');
     expect(sent.html).toContain('Nguyễn Minh');
     expect(sent.text).toContain('150.000');
@@ -247,8 +252,7 @@ describe('MailService', () => {
     sendMail.mockResolvedValueOnce(undefined);
     receiptAssetsService.getReceiptImageDataUris.mockReturnValueOnce({
       logoMain: `data:image/png;base64,${Buffer.from('main-logo').toString('base64')}`,
-      logoTin: `data:image/png;base64,${Buffer.from('tin-logo').toString('base64')}`,
-      stamp: `data:image/png;base64,${Buffer.from('stamp').toString('base64')}`,
+      logoMath: `data:image/png;base64,${Buffer.from('math-logo').toString('base64')}`,
     });
     const service = new MailService(
       configService as never,
@@ -264,19 +268,21 @@ describe('MailService', () => {
     });
 
     const sent = getLastSendMailOptions(sendMail);
-    expect(sent.html).toContain('src="cid:receipt-logo-main@unicorns-edu"');
-    expect(sent.html).toContain('src="cid:receipt-logo-tin@unicorns-edu"');
-    expect(sent.html).toContain('src="cid:receipt-stamp@unicorns-edu"');
+    expect(sent.html).toContain('src="cid:receipt-logo-math@unicorns-edu"');
+    expect(sent.html).not.toContain('receipt-logo-main@unicorns-edu');
+    expect(sent.html).not.toContain('receipt-logo-tin@unicorns-edu');
+    expect(sent.html).not.toContain('receipt-stamp@unicorns-edu');
     expect(sent.html).not.toContain('data:image/png;base64');
-    expect(sent.attachments).toHaveLength(3);
+    expect(sent.attachments).toHaveLength(1);
     expect(sent.attachments?.map((a) => a.cid)).toEqual([
-      'receipt-logo-main@unicorns-edu',
-      'receipt-logo-tin@unicorns-edu',
-      'receipt-stamp@unicorns-edu',
+      'receipt-logo-math@unicorns-edu',
     ]);
     expect(Buffer.isBuffer(sent.attachments?.[0].content)).toBe(true);
+    expect(sent.attachments?.[0].content).toEqual(Buffer.from('math-logo'));
     expect(receiptPdfService.renderToPdf).toHaveBeenCalledWith(
-      expect.stringContaining('data:image/png;base64'),
+      expect.stringContaining(
+        `data:image/png;base64,${Buffer.from('math-logo').toString('base64')}`,
+      ),
     );
   });
 
