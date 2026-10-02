@@ -65,7 +65,7 @@ docker run --rm -i --network "container:${CHECK_CONTAINER}" \
   -e "DATABASE_URL=${CHECK_URL}" -e "DIRECT_URL=${CHECK_URL}" \
   --entrypoint node "${API_IMAGE}" - inspect \
   < "${REPO_ROOT}/scripts/math-release-preflight.cjs" > "${BACKUP_DIR}/after-rehearsal.json"
-BEFORE_COUNTS="$(jq -Sc '.counts' "${BACKUP_DIR}/before-rehearsal.json")"
+BEFORE_COUNTS="$(jq -Sc '.expectedCounts' "${BACKUP_DIR}/before-rehearsal.json")"
 AFTER_COUNTS="$(jq -Sc '.counts' "${BACKUP_DIR}/after-rehearsal.json")"
 if [ "${BEFORE_COUNTS}" != "${AFTER_COUNTS}" ]; then
   printf 'Before rehearsal: %s\nAfter rehearsal: %s\n' "${BEFORE_COUNTS}" "${AFTER_COUNTS}"
@@ -73,4 +73,4 @@ if [ "${BEFORE_COUNTS}" != "${AFTER_COUNTS}" ]; then
   exit 1
 fi
 test "$(jq -r '.pendingCount' "${BACKUP_DIR}/after-rehearsal.json")" = 0
-echo 'Math migration rehearsal passed; core records and wallet balance preserved.'
+echo 'Math migration rehearsal passed; only predicted account/profile additions, financial records and wallet balance preserved.'

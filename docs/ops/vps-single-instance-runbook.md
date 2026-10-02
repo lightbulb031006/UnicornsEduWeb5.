@@ -64,6 +64,8 @@ Preflight chạy `scripts/math-release-preflight.sh`: backup schema public trong
 
 ### Secrets / variables GitHub bắt buộc
 
+Preflight cho phép đúng số tài khoản/hồ sơ thiếu được tính trước theo hai migration backfill; các số bản ghi khác, tổng ví và checksum trường tài chính điểm danh/giao dịch phải giữ nguyên.
+
 | Tên | Mô tả |
 |-----|-------|
 | `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` | SSH vào VPS |

@@ -23,6 +23,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed — Math upstream sync 2026-10-02
 
+- Preflight dự báo chính xác số tài khoản/hồ sơ thiếu được hai migration backfill bổ sung; vẫn bắt buộc giữ nguyên bản ghi lớp/buổi/điểm danh/giao dịch, tổng ví và checksum các trường tài chính điểm danh/giao dịch.
 - Dựng schema `extensions` và các extension PostgreSQL trước khi khôi phục bản sao Supabase để giữ các default ID gọi `extensions.gen_random_bytes`.
 - Preflight đọc biến môi trường qua Compose như API runtime (xử lý đúng dấu nháy trong `.env`), dùng digest bất biến của image API vừa pull cho bản sao kiểm thử.
 - Sửa đăng ký `ScheduleModule.forRoot()` trùng từ upstream để tác vụ định kỳ chỉ được khởi tạo một lần; vẫn tắt cron trong môi trường test.
