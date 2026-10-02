@@ -5,8 +5,8 @@ umask 077
 
 cd "${DEPLOY_DIR:?}"
 # Use the immutable image for this release, without starting the application.
-API_IMAGE="ghcr.io/lightbulb031006/unicorns-api:$(git rev-parse HEAD)"
-docker pull "${API_IMAGE}"
+API_IMAGE="$(docker image inspect --format '{{index .RepoDigests 0}}' ghcr.io/lightbulb031006/unicorns-api:latest)"
+test -n "${API_IMAGE}"
 BACKUP_DIR="$(mktemp -d /root/unicorns-math-predeploy-XXXXXXXX)"
 CHECK_CONTAINER="math-migration-check-$(basename "${BACKUP_DIR}")"
 CHECK_PASSWORD="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
@@ -16,8 +16,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker run --rm -i --env-file .env --user root \
-  -v "${BACKUP_DIR}:/preflight" --entrypoint node "${API_IMAGE}" \
+docker compose -p "${COMPOSE_PROJECT_NAME:?}" -f docker-compose.prod.yml \
+  run --rm --no-deps -T --user root \
+  -v "${BACKUP_DIR}:/preflight" --entrypoint node api \
   - prepare < "${REPO_ROOT}/scripts/math-release-preflight.cjs"
 PG_MAJOR="$(cat "${BACKUP_DIR}/postgres-major")"
 case "${PG_MAJOR}" in

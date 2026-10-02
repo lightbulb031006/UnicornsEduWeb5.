@@ -23,6 +23,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed — Math upstream sync 2026-10-02
 
+- Preflight đọc biến môi trường qua Compose như API runtime (xử lý đúng dấu nháy trong `.env`), dùng digest bất biến của image API vừa pull cho bản sao kiểm thử.
 - Sửa đăng ký `ScheduleModule.forRoot()` trùng từ upstream để tác vụ định kỳ chỉ được khởi tạo một lần; vẫn tắt cron trong môi trường test.
 - Triển khai bản đồng bộ theo yêu cầu: pipeline kiểm tra ID sửa dữ liệu Tin, sao lưu schema public tại VPS và chạy thử migration trên PostgreSQL riêng trước khi cập nhật database thật. Dừng triển khai nếu lỗi, số bản ghi chính hoặc tổng ví thay đổi; nginx hiện tại tiếp tục phục vụ trong bước kiểm tra.
 - Đồng bộ repo Tin tới 451f60d: khoá học/chuyên đề/tiết học, bài làm trực tuyến, khảo sát, thiết bị đăng nhập, lịch hiệu lực, dashboard, học phí theo block và lương cứng. Giữ quyền admin tạo buổi ngoài lịch, biên lai/logo Toán, popup thống kê và cấu hình deploy Math.
