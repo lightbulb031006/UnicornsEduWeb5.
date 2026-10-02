@@ -67,6 +67,7 @@ docker run --rm -i --network "container:${CHECK_CONTAINER}" \
 BEFORE_COUNTS="$(jq -Sc '.counts' "${BACKUP_DIR}/before-rehearsal.json")"
 AFTER_COUNTS="$(jq -Sc '.counts' "${BACKUP_DIR}/after-rehearsal.json")"
 if [ "${BEFORE_COUNTS}" != "${AFTER_COUNTS}" ]; then
+  printf 'Before rehearsal: %s\nAfter rehearsal: %s\n' "${BEFORE_COUNTS}" "${AFTER_COUNTS}"
   echo 'Migration rehearsal changed core record counts or wallet totals; rollout stopped.' >&2
   exit 1
 fi

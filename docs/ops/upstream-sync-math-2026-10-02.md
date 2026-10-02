@@ -37,6 +37,7 @@ Không reset checkout đang có công việc chưa commit. Nếu cần quay lạ
 
 ## Kiểm tra đã hoàn tất
 
+- Kiểm tra chuẩn bị triển khai phát hiện upstream gọi `ScheduleModule.forRoot()` hai lần; bỏ lời gọi dư để tránh đăng ký tác vụ định kỳ trùng và giữ cấu hình tắt cron trong test.
 - pnpm install --frozen-lockfile; Prisma generate bằng script của workspace.
 - Typecheck web/API pass; build Next.js 16.2.6 và NestJS pass.
 - Backend: 91 suites / 1.008 tests pass; kiểm tra tập trung tạo buổi, nhận xét và UNIOJ: 52 tests pass.

@@ -232,6 +232,12 @@ compose run --rm --no-deps -T api \
   sh -c 'if [ -n "${DIRECT_URL:-}" ]; then export DATABASE_URL="$DIRECT_URL"; elif printf "%s" "$DATABASE_URL" | grep -q "pgbouncer=true"; then echo "DIRECT_URL is required when DATABASE_URL uses PgBouncer (pgbouncer=true)" >&2; exit 1; fi; ./node_modules/.bin/prisma migrate deploy --schema=./prisma/schema/' </dev/null
 
 echo "Verifying Prisma client generation..."
+if [ "${INSTANCE_ID}" = "math" ]; then
+  echo "Verifying production migration status read-only..."
+  compose run --rm --no-deps -T --entrypoint node api - inspect \
+    < "${REPO_ROOT}/scripts/math-release-preflight.cjs"
+fi
+
 compose run --rm --no-deps -T api \
   ./node_modules/.bin/prisma generate --schema=./prisma/schema/ </dev/null
 

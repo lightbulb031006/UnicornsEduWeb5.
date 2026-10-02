@@ -71,7 +71,6 @@ function parsePositiveIntegerEnv(
         ),
       },
     ]),
-    ScheduleModule.forRoot(),
     AuthModule,
     UserModule,
     StudentModule,
