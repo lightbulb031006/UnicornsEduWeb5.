@@ -48,10 +48,10 @@ for attempt in $(seq 1 30); do
   sleep 2
 done
 if [ "${READY}" != true ]; then echo 'Disposable database did not start.' >&2; exit 1; fi
-docker exec "${CHECK_CONTAINER}" pg_restore -U postgres -d math_release_check \
-  --clean --if-exists --no-owner --no-acl --exit-on-error /backup/public.dump
 docker exec "${CHECK_CONTAINER}" psql -U postgres -d math_release_check \
   -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA IF NOT EXISTS extensions; CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions; CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions; ALTER DATABASE math_release_check SET search_path = public, extensions;'
+docker exec "${CHECK_CONTAINER}" pg_restore -U postgres -d math_release_check \
+  --clean --if-exists --no-owner --no-acl --exit-on-error /backup/public.dump
 CHECK_URL="postgresql://postgres:${CHECK_PASSWORD}@127.0.0.1:5432/math_release_check"
 docker run --rm -i --network "container:${CHECK_CONTAINER}" \
   -e "DATABASE_URL=${CHECK_URL}" -e "DIRECT_URL=${CHECK_URL}" \
