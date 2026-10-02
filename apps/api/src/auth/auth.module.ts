@@ -14,6 +14,7 @@ import { GoogleStrategy } from './strategies/google-oauth.strategy';
 import { AuthAccessService } from './auth-access.service';
 import { GoogleAuthExceptionFilter } from './filters/google-auth.exception-filter';
 import { ApiKeyGuard } from './guards/api-key.guard';
+import { UserDeviceService } from './user-device.service';
 
 @Module({
   imports: [
@@ -41,12 +42,14 @@ import { ApiKeyGuard } from './guards/api-key.guard';
     GoogleStrategy,
     GoogleAuthExceptionFilter,
     ApiKeyGuard,
+    UserDeviceService,
   ],
   exports: [
     AuthService,
     AuthAccessService,
     AuthIdentityCacheService,
     ApiKeyGuard,
+    UserDeviceService,
   ],
 })
 export class AuthModule {}

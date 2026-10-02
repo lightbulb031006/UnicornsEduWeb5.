@@ -20,7 +20,7 @@ export default function AdminLayout({
         <AdminSidebar />
         <main
           id="admin-main-content"
-          className="min-w-0 flex-1 overflow-auto pt-16 md:pt-0"
+          className="flex min-w-0 flex-1 flex-col overflow-auto pt-16 md:pt-0"
         >
           {children}
         </main>

@@ -1,3 +1,4 @@
+import { formatVnInteger } from "@/lib/formatters";
 /** VND integer money fields: display uses vi-VN thousand separators (e.g. 14.000). */
 
 export function sanitizeMoneyInputDigits(
@@ -24,9 +25,7 @@ export function formatMoneyInputDigits(sanitized: string): string {
   const digits = negative ? sanitized.slice(1) : sanitized;
   if (!digits) return negative ? "-" : "";
 
-  const formatted = new Intl.NumberFormat("vi-VN", {
-    maximumFractionDigits: 0,
-  }).format(Number(digits));
+  const formatted = formatVnInteger(Number(digits));
 
   return negative ? `-${formatted}` : formatted;
 }

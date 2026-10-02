@@ -9,6 +9,32 @@ describe('SessionValidationService', () => {
     service = new SessionValidationService();
   });
 
+  it('accepts rich text longer than 500 HTML characters with short plain text', () => {
+    expect(() =>
+      service.validateAttendanceNotes(
+        [
+          {
+            status: AttendanceStatus.present,
+            notes: '<p>' + '<strong>ok</strong>'.repeat(30) + '</p>',
+          },
+        ],
+        { required: true },
+      ),
+    ).not.toThrow();
+  });
+
+  it.each([AttendanceStatus.present, AttendanceStatus.absent])(
+    'rejects notes above 500 plain-text characters for %s',
+    (status) => {
+      expect(() =>
+        service.validateAttendanceNotes(
+          [{ status, notes: '<p>' + 'x'.repeat(501) + '</p>' }],
+          { required: true },
+        ),
+      ).toThrow('Ghi chú điểm danh tối đa 500 ký tự.');
+    },
+  );
+
   it('requires attendance when the caller marks it as required', () => {
     expect(() =>
       service.validateAttendanceItems(undefined, { required: true }),
@@ -97,6 +123,59 @@ describe('SessionValidationService', () => {
     ).toBe(180000);
   });
 
+  it('charges retail default tuition as per-block × session blocks', () => {
+    expect(
+      service.resolveDefaultStudentTuitionPerSession({
+        pricingMode: 'per_block',
+        customTuitionPerSession: null,
+        customTuitionPerBlock: null,
+        classTuitionPerSession: 180000,
+        classTuitionPerBlock: 60000,
+        classTuitionPackageTotal: null,
+        classTuitionPackageSession: null,
+        blockCount: 4,
+      }),
+    ).toBe(240000);
+  });
+
+  it('keeps per-session retail charge when mode is theo buổi even if block columns exist', () => {
+    expect(
+      service.resolveDefaultStudentTuitionPerSession({
+        pricingMode: 'per_session',
+        customTuitionPerSession: null,
+        customTuitionPerBlock: 70000,
+        classTuitionPerSession: 180000,
+        classTuitionPerBlock: 60000,
+        classTuitionPackageTotal: null,
+        classTuitionPackageSession: null,
+        blockCount: 4,
+      }),
+    ).toBe(180000);
+  });
+
+  it('keeps package default tuition per-session when session has more blocks', () => {
+    expect(
+      service.resolveDefaultStudentTuitionPerSession({
+        customTuitionPerSession: null,
+        classTuitionPerSession: null,
+        classTuitionPerBlock: 60000,
+        classTuitionPackageTotal: 3600000,
+        classTuitionPackageSession: 12,
+        blockCount: 4,
+      }),
+    ).toBe(300000);
+  });
+
+  it('keeps an existing attendance tuition override instead of the new default', () => {
+    expect(
+      service.resolveChargeableAttendanceTuitionFee(
+        AttendanceStatus.present,
+        175000,
+        240000,
+      ),
+    ).toBe(175000);
+  });
+
   it('drops tuition when attendance is absent', () => {
     expect(
       service.resolveChargeableAttendanceTuitionFee(
@@ -183,5 +262,91 @@ describe('SessionValidationService', () => {
     ).toThrow(
       new BadRequestException('Nhận xét học sinh Nguyễn Văn A là bắt buộc.'),
     );
+  });
+
+  it('requires startTime and endTime', () => {
+    expect(() =>
+      service.assertRequiredSessionTimes(undefined, '20:00:00'),
+    ).toThrow(new BadRequestException('Giờ bắt đầu là bắt buộc.'));
+    expect(() => service.assertRequiredSessionTimes('19:00:00', '   ')).toThrow(
+      new BadRequestException('Giờ kết thúc là bắt buộc.'),
+    );
+  });
+
+  it('allows missing times when the class is not in block pricing mode', () => {
+    expect(() =>
+      service.assertRequiredSessionTimes(undefined, undefined, {
+        required: false,
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects endTime that is not after startTime', () => {
+    expect(() =>
+      service.assertSessionEndAfterStart('19:00:00', '19:00:00'),
+    ).toThrow(new BadRequestException('Giờ kết thúc phải sau giờ bắt đầu.'));
+    expect(() =>
+      service.assertSessionEndAfterStart('20:00:00', '19:00:00'),
+    ).toThrow(new BadRequestException('Giờ kết thúc phải sau giờ bắt đầu.'));
+  });
+
+  it('allows endTime after startTime', () => {
+    expect(() =>
+      service.assertSessionEndAfterStart('19:00:00', '20:30:00'),
+    ).not.toThrow();
+  });
+
+  it('rejects time changes when the session is paid or deposit', () => {
+    const existingStart = new Date('1970-01-01T19:00:00.000Z');
+    const existingEnd = new Date('1970-01-01T20:30:00.000Z');
+
+    expect(() =>
+      service.assertSessionTimesUnlockedForPayment({
+        paymentStatus: 'paid',
+        existingStartTime: existingStart,
+        existingEndTime: existingEnd,
+        nextStartTime: '18:00:00',
+        nextEndTime: '19:30:00',
+        payloadIncludesStart: true,
+        payloadIncludesEnd: true,
+      }),
+    ).toThrow(
+      new BadRequestException(
+        'Không thể sửa giờ buổi đã thanh toán hoặc ghi cọc.',
+      ),
+    );
+
+    expect(() =>
+      service.assertSessionTimesUnlockedForPayment({
+        paymentStatus: 'deposit',
+        existingStartTime: existingStart,
+        existingEndTime: existingEnd,
+        nextStartTime: '18:00:00',
+        nextEndTime: '19:30:00',
+        payloadIncludesStart: true,
+        payloadIncludesEnd: true,
+      }),
+    ).toThrow(
+      new BadRequestException(
+        'Không thể sửa giờ buổi đã thanh toán hoặc ghi cọc.',
+      ),
+    );
+  });
+
+  it('allows sending the same times on a paid session', () => {
+    const existingStart = new Date('1970-01-01T19:00:00.000Z');
+    const existingEnd = new Date('1970-01-01T20:30:00.000Z');
+
+    expect(() =>
+      service.assertSessionTimesUnlockedForPayment({
+        paymentStatus: 'paid',
+        existingStartTime: existingStart,
+        existingEndTime: existingEnd,
+        nextStartTime: '19:00:00',
+        nextEndTime: '20:30:00',
+        payloadIncludesStart: true,
+        payloadIncludesEnd: true,
+      }),
+    ).not.toThrow();
   });
 });

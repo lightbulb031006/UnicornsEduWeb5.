@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { getUser } from "@/lib/auth-server";
 import { THEME_STORAGE_KEY } from "@/dtos/theme.dto";
 import "./globals.css";
+import "katex/dist/katex.min.css";
 import { Providers } from "./providers";
 
 const themeBootScript = `(function(){try{var k=${JSON.stringify(THEME_STORAGE_KEY)};var t=localStorage.getItem(k);if(t==="dark"||t==="light"||t==="pink"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();`;
@@ -17,6 +18,14 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+};
 
 export const metadata: Metadata = {
   title: "Unicorns Edu – Nền tảng quản lý giáo dục & luyện thi",

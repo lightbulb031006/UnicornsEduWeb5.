@@ -1,8 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -20,10 +23,16 @@ import { AuthAccessService } from './auth-access.service';
 import { CreateUserDto } from '../dtos/user.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import {
+  resolvePublicFrontendUrl,
+  type PublicRequestOrigin,
+} from '../mail/public-frontend-url';
 import { AuthProfileDto, LoginResponseDto } from 'src/dtos/auth.dto';
 import type { RequestWithResolvedAuthContext } from './auth-request-context';
 import { createSignedStorageUrl } from 'src/storage/supabase-storage';
 import { STAFF_DATA_CONSENT_VERSION } from './constants';
+import { UserDeviceService } from './user-device.service';
+import type { DeviceInfo } from './user-device.service';
 
 type JwtSignOptions = Parameters<JwtService['signAsync']>[1];
 type UserAuditClient = Prisma.TransactionClient | PrismaService;
@@ -47,6 +56,8 @@ interface ProvisionUserOptions {
   createDescription?: string;
   updateDescription?: string;
   successMessage?: string;
+  emailVerified?: boolean;
+  emailLinkOrigin?: PublicRequestOrigin;
 }
 
 type ProvisionUserInput = Pick<
@@ -79,6 +90,7 @@ export class AuthService {
     private readonly actionHistoryService: ActionHistoryService,
     private readonly authIdentityCacheService: AuthIdentityCacheService,
     private readonly authAccessService: AuthAccessService,
+    private readonly userDeviceService: UserDeviceService,
   ) {
     this.accessTokenOptions = {
       expiresIn: this.accessTokenExpiresIn,
@@ -207,7 +219,7 @@ export class AuthService {
       accountHandle: user.accountHandle,
       id: user.id,
       avatarUrl: await this.createAvatarSignedUrl(user.avatarPath),
-      tokenPair: await this.generateTokenPairAndSave(
+      tokenPair: await this.issueTokenPairForUser(
         user.id,
         user.accountHandle,
         user.roleType,
@@ -220,6 +232,7 @@ export class AuthService {
     userId: string,
     _usedRefreshToken: string,
     rememberMe = false,
+    deviceId: string,
   ): Promise<TokenPair> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -239,6 +252,7 @@ export class AuthService {
       user.accountHandle,
       user.roleType,
       rememberMe,
+      deviceId,
     );
   }
 
@@ -342,6 +356,7 @@ export class AuthService {
   async resendVerificationEmail(
     userId: string,
     nextEmail?: string,
+    emailLinkOrigin?: PublicRequestOrigin,
   ): Promise<{ message: string; email: string }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -390,7 +405,11 @@ export class AuthService {
       'email-verify',
     );
 
-    await this.sendVerificationEmailOrThrow(targetEmail, verificationToken);
+    await this.sendVerificationEmailOrThrow(
+      targetEmail,
+      verificationToken,
+      emailLinkOrigin,
+    );
 
     return {
       message: 'Verification email sent successfully.',
@@ -407,6 +426,15 @@ export class AuthService {
     }
 
     const payload = await this.verifyRefreshToken(refreshToken);
+    const device = await this.userDeviceService.assertLiveRefreshDevice({
+      refreshToken,
+      userId: payload.id,
+      deviceId: payload.deviceId,
+      roleType: payload.roleType,
+    });
+    if (!device) {
+      return null;
+    }
 
     return this.getAuthProfile(payload.id, request);
   }
@@ -415,6 +443,35 @@ export class AuthService {
     refreshToken?: string;
     accessToken?: string;
   }): Promise<void> {
+    if (params.refreshToken) {
+      const device = await this.userDeviceService.findDeviceByRefreshToken(
+        params.refreshToken,
+      );
+      if (device) {
+        await this.userDeviceService.removeDeviceById(device.id);
+        this.authIdentityCacheService.invalidateHasActiveDevice(device.userId);
+        this.invalidateAuthIdentityCache(device.userId);
+        return;
+      }
+    }
+
+    const accessDeviceId = await this.resolveDeviceIdFromAccessToken(
+      params.accessToken,
+    );
+    if (accessDeviceId) {
+      const device =
+        await this.userDeviceService.findLiveDeviceById(accessDeviceId);
+      await this.userDeviceService.removeDeviceById(accessDeviceId);
+      const userId =
+        device?.userId ??
+        (await this.resolveUserIdFromSessionTokens(params));
+      if (userId) {
+        this.authIdentityCacheService.invalidateHasActiveDevice(userId);
+        this.invalidateAuthIdentityCache(userId);
+      }
+      return;
+    }
+
     const userId = await this.resolveUserIdFromSessionTokens(params);
     if (!userId) {
       return;
@@ -455,6 +512,9 @@ export class AuthService {
             roleType: UserRole.guest,
             province: data.province,
             accountHandle: data.accountHandle,
+            ...(options.emailVerified !== undefined
+              ? { emailVerified: options.emailVerified }
+              : {}),
           },
           update: {
             email: data.email,
@@ -465,6 +525,9 @@ export class AuthService {
             roleType: UserRole.guest,
             province: data.province,
             accountHandle: data.accountHandle,
+            ...(options.emailVerified !== undefined
+              ? { emailVerified: options.emailVerified }
+              : {}),
           },
         });
         persistedUserId = persistedUser.id;
@@ -511,17 +574,25 @@ export class AuthService {
       this.invalidateAuthIdentityCache(persistedUserId);
     }
 
-    const verificationToken = await this.generateEmailVerificationToken(
-      data.email,
-      'email-verify',
-    );
+    if (!options.emailVerified) {
+      const verificationToken = await this.generateEmailVerificationToken(
+        data.email,
+        'email-verify',
+      );
 
-    await this.sendVerificationEmailOrThrow(data.email, verificationToken);
+      await this.sendVerificationEmailOrThrow(
+        data.email,
+        verificationToken,
+        options.emailLinkOrigin,
+      );
+    }
 
     return {
       message:
         options.successMessage ??
-        'User created successfully. Please verify your email.',
+        (options.emailVerified
+          ? 'User created successfully.'
+          : 'User created successfully. Please verify your email.'),
     };
   }
 
@@ -598,7 +669,10 @@ export class AuthService {
     return { message: 'Email verified successfully' };
   }
 
-  async forgotPassword(email: string): Promise<{ message: string }> {
+  async forgotPassword(
+    email: string,
+    emailLinkOrigin?: PublicRequestOrigin,
+  ): Promise<{ message: string }> {
     const genericResponse = {
       message:
         'If the account exists and is verified, a password reset email will be sent.',
@@ -625,6 +699,7 @@ export class AuthService {
       await this.mailService.sendForgotPasswordEmail(
         user.email,
         forgotPasswordToken,
+        emailLinkOrigin,
       );
     } catch {
       throw new InternalServerErrorException(
@@ -635,13 +710,51 @@ export class AuthService {
     return genericResponse;
   }
 
+  async issueTokenPairForUser(
+    userId: string,
+    accountHandle: string,
+    roleType: UserRole,
+    rememberMe = false,
+    options?: {
+      deviceId?: string;
+      deviceInfo?: DeviceInfo;
+      ipAddress?: string;
+    },
+  ): Promise<TokenPair> {
+    const deviceId =
+      options?.deviceId ??
+      (
+        await this.userDeviceService.createDevice({
+          userId,
+          token: this.userDeviceService.generateDeviceToken(),
+          deviceInfo: options?.deviceInfo,
+          ipAddress: options?.ipAddress,
+        })
+      ).id;
+
+    return this.generateTokenPairAndSave(
+      userId,
+      accountHandle,
+      roleType,
+      rememberMe,
+      deviceId,
+    );
+  }
+
   async generateTokenPairAndSave(
     userId: string,
     accountHandle: string,
     roleType: UserRole,
     rememberMe = false,
+    deviceId: string,
   ): Promise<TokenPair> {
-    const payload = { id: userId, accountHandle, roleType, rememberMe };
+    const payload = {
+      id: userId,
+      accountHandle,
+      roleType,
+      rememberMe,
+      deviceId,
+    };
     const refreshTokenOptions: JwtSignOptions = {
       expiresIn: rememberMe
         ? this.refreshTokenRememberExpiresIn
@@ -653,6 +766,9 @@ export class AuthService {
       this.jwtService.signAsync(payload, this.accessTokenOptions),
       this.jwtService.signAsync(payload, refreshTokenOptions),
     ]);
+
+    await this.userDeviceService.bindRefreshToken(deviceId, refreshToken);
+
     return {
       accessToken,
       refreshToken,
@@ -695,6 +811,9 @@ export class AuthService {
     ) {
       throw new BadRequestException('Invalid or expired reset password token');
     }
+
+    await this.userDeviceService.removeAllDevicesForUser(user.id);
+    this.authIdentityCacheService.invalidateHasActiveDevice(user.id);
 
     await this.prisma.$transaction(async (tx) => {
       const beforeValue = await this.getUserAuditSnapshot(tx, user.id);
@@ -753,6 +872,9 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('Mật khẩu hiện tại không đúng');
     }
+
+    await this.userDeviceService.removeAllDevicesForUser(userId);
+    this.authIdentityCacheService.invalidateHasActiveDevice(userId);
 
     await this.prisma.$transaction(async (tx) => {
       const beforeValue = await this.getUserAuditSnapshot(tx, userId);
@@ -875,9 +997,14 @@ export class AuthService {
   private async sendVerificationEmailOrThrow(
     email: string,
     token: string,
+    emailLinkOrigin?: PublicRequestOrigin,
   ): Promise<void> {
     try {
-      await this.mailService.sendVerificationEmail(email, token);
+      await this.mailService.sendVerificationEmail(
+        email,
+        token,
+        emailLinkOrigin,
+      );
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -895,11 +1022,31 @@ export class AuthService {
         id: string;
         accountHandle: string;
         roleType: UserRole;
+        deviceId?: string;
       }>(refreshToken, {
         secret: this.refreshTokenSecret,
       });
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+  }
+
+  private async resolveDeviceIdFromAccessToken(
+    accessToken?: string,
+  ): Promise<string | null> {
+    if (!accessToken) {
+      return null;
+    }
+
+    try {
+      const accessPayload = await this.jwtService.verifyAsync<{
+        deviceId?: string;
+      }>(accessToken, {
+        secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      });
+      return accessPayload.deviceId ?? null;
+    } catch {
+      return null;
     }
   }
 
@@ -934,4 +1081,340 @@ export class AuthService {
       return null;
     }
   }
+
+  // ─── Student single-device login ─────────────────────────────────────
+
+  async studentLoginInit(
+    accountHandle: string,
+    password: string,
+    deviceInfo?: DeviceInfo,
+    ipAddress?: string,
+    emailLinkOrigin?: PublicRequestOrigin,
+  ): Promise<{ requestId: string; activateSecret: string; message: string }> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ accountHandle }, { email: accountHandle }],
+      },
+      select: {
+        id: true,
+        email: true,
+        passwordHash: true,
+        roleType: true,
+        emailVerified: true,
+      },
+    });
+
+    if (!user || !user.passwordHash) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Verify password before revealing account type (prevents enumeration)
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (user.roleType !== UserRole.student) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'NOT_STUDENT_ACCOUNT',
+        message: 'Tài khoản này không phải tài khoản học sinh.',
+      });
+    }
+
+    if (!user.emailVerified) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'EMAIL_NOT_VERIFIED',
+        message:
+          'Email chưa được xác minh. Vui lòng xác minh email trước khi đăng nhập.',
+      });
+    }
+
+    // Lazy cleanup: remove expired login requests and inactive devices
+    await Promise.all([
+      this.userDeviceService.cleanupExpiredLoginRequests(),
+      this.userDeviceService.cleanupInactiveDevices(),
+    ]);
+
+    // Check if student already has an active device
+    const hasActive = await this.userDeviceService.hasActiveDevice(user.id);
+    if (hasActive) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'DEVICE_ACTIVE',
+        message:
+          'Tài khoản đang đăng nhập ở thiết bị khác. Vui lòng đăng xuất thiết bị cũ hoặc liên hệ quản trị viên.',
+      });
+    }
+
+    // Create login request
+    const loginRequestToken =
+      this.userDeviceService.generateLoginRequestToken();
+    const activateSecret = this.userDeviceService.generateActivateSecret();
+    const loginRequest = await this.userDeviceService.createLoginRequest({
+      userId: user.id,
+      token: loginRequestToken,
+      activateSecret,
+      deviceInfo,
+      ipAddress,
+    });
+
+    const frontendUrl = resolvePublicFrontendUrl({
+      configuredUrl: this.configService.get<string>('FRONTEND_URL'),
+      backendUrl: this.configService.get<string>('BACKEND_URL'),
+      publicHost: this.configService.get<string>('VPS_PUBLIC_HOST'),
+      requestHost: emailLinkOrigin?.host,
+      requestProtocol: emailLinkOrigin?.protocol,
+      nodeEnv: process.env.NODE_ENV,
+    });
+    const verifyUrl = `${frontendUrl}/auth/verify-login?token=${encodeURIComponent(loginRequestToken)}`;
+
+    try {
+      await this.mailService.sendLoginVerificationEmail(user.email, verifyUrl);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send login verification email to ${user.email}`,
+        error instanceof Error ? error.stack : error,
+      );
+      // Don't fail the request — email sending is best-effort
+    }
+
+    return {
+      requestId: loginRequest.id,
+      activateSecret,
+      message:
+        'Đã gửi email xác minh. Vui lòng kiểm tra hộp thư và bấm liên kết để hoàn tất đăng nhập.',
+    };
+  }
+
+  async studentLoginPoll(requestId: string): Promise<{ verified: boolean }> {
+    const request = await this.prisma.loginRequest.findUnique({
+      where: { id: requestId },
+      select: { verified: true, expiresAt: true },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Login request not found');
+    }
+
+    if (new Date() > request.expiresAt) {
+      throw new BadRequestException('Login request expired');
+    }
+
+    return { verified: request.verified };
+  }
+
+  async activateStudentDevice(
+    requestId: string,
+    activateSecret: string,
+    rememberMe = false,
+  ): Promise<TokenPair> {
+    const request = await this.prisma.loginRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        userId: true,
+        verified: true,
+        expiresAt: true,
+        activateSecretHash: true,
+        deviceInfo: true,
+        ipAddress: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Login request not found');
+    }
+
+    if (!request.verified) {
+      throw new BadRequestException('Login request not verified yet');
+    }
+
+    if (new Date() > request.expiresAt) {
+      throw new BadRequestException('Login request expired');
+    }
+
+    // Verify activate secret
+    if (
+      !request.activateSecretHash ||
+      this.userDeviceService.hashToken(activateSecret) !==
+        request.activateSecretHash
+    ) {
+      throw new UnauthorizedException('Invalid activation secret');
+    }
+
+    // Remove any existing devices for this student (single-device rule)
+    await this.userDeviceService.removeAllDevicesForUser(request.userId);
+    this.authIdentityCacheService.invalidateHasActiveDevice(request.userId);
+
+    // Create the device
+    const deviceToken = this.userDeviceService.generateDeviceToken();
+    const device = await this.userDeviceService.createDevice({
+      userId: request.userId,
+      token: deviceToken,
+      deviceInfo: request.deviceInfo as DeviceInfo | undefined,
+      ipAddress: request.ipAddress ?? undefined,
+    });
+
+    // Get user info for token generation
+    const user = await this.prisma.user.findUnique({
+      where: { id: request.userId },
+      select: {
+        id: true,
+        accountHandle: true,
+        roleType: true,
+      },
+    });
+
+    if (!user) {
+      throw new InternalServerErrorException(
+        'User not found after verification',
+      );
+    }
+
+    // Generate JWT tokens
+    const tokenPair = await this.generateTokenPairAndSave(
+      user.id,
+      user.accountHandle,
+      user.roleType,
+      rememberMe,
+      device.id,
+    );
+
+    // Cleanup the login request
+    await this.prisma.loginRequest.delete({ where: { id: request.id } });
+
+    return tokenPair;
+  }
+
+  /**
+   * Máy bấm magic link trong email. KHÔNG set cookie hay tạo phiên trên máy
+   * này — thiết bị được kích hoạt luôn là máy khởi tạo (màn "Chờ xác minh").
+   * Trả `status` để FE hiển thị thông báo riêng cho từng case:
+   * `verified` / `used` (link đã được bấm trước đó) / `expired` / `invalid`.
+   */
+  async verifyLoginMagicLink(token: string): Promise<{
+    status: 'verified' | 'used' | 'expired' | 'invalid';
+    message: string;
+    verified: boolean;
+  }> {
+    if (!token) {
+      return {
+        status: 'invalid',
+        message: 'Liên kết không hợp lệ.',
+        verified: false,
+      };
+    }
+
+    const tokenHash = this.userDeviceService.hashToken(token);
+    const request =
+      await this.userDeviceService.findLoginRequestByTokenHash(tokenHash);
+
+    if (!request) {
+      return {
+        status: 'invalid',
+        message:
+          'Liên kết không hợp lệ hoặc đã bị cắt mất phần token. Vui lòng đăng nhập lại.',
+        verified: false,
+      };
+    }
+
+    if (new Date() > request.expiresAt) {
+      return {
+        status: 'expired',
+        message:
+          'Liên kết xác minh đã hết hạn. Vui lòng đăng nhập lại để nhận liên kết mới.',
+        verified: false,
+      };
+    }
+
+    if (request.verified) {
+      return {
+        status: 'used',
+        message:
+          'Liên kết này đã được sử dụng. Quay lại thiết bị vừa đăng nhập để hoàn tất.',
+        verified: true,
+      };
+    }
+
+    await this.userDeviceService.verifyLoginRequest(tokenHash);
+    return {
+      status: 'verified',
+      message:
+        'Đã xác minh thành công. Quay lại thiết bị vừa đăng nhập để hoàn tất.',
+      verified: true,
+    };
+  }
+
+  async forceLogoutStudent(
+    studentId: string,
+    actorId: string,
+  ): Promise<{ message: string }> {
+    const student = await this.prisma.user.findUnique({
+      where: { id: studentId },
+      select: { id: true, email: true, roleType: true },
+    });
+
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    if (student.roleType !== UserRole.student) {
+      throw new BadRequestException('Target must be a student account');
+    }
+
+    const actor = await this.prisma.user.findUnique({
+      where: { id: actorId },
+      select: { id: true, email: true, roleType: true },
+    });
+
+    if (!actor) {
+      throw new UnauthorizedException('Actor not found');
+    }
+
+    // Remove all devices
+    await this.userDeviceService.removeAllDevicesForUser(studentId);
+    this.authIdentityCacheService.invalidateHasActiveDevice(studentId);
+
+    // Invalidate refresh token
+    await this.prisma.user.update({
+      where: { id: studentId },
+      data: { refreshToken: null },
+    });
+    this.invalidateAuthIdentityCache(studentId);
+
+    // Audit trail
+    await this.actionHistoryService.recordUpdate(this.prisma, {
+      actor: this.buildUserActor(actor),
+      entityType: 'user_device',
+      entityId: studentId,
+      description: `Buộc đăng xuất học sinh ${student.email}`,
+      beforeValue: { studentId },
+      afterValue: { forceLogout: true },
+    });
+
+    return { message: 'Đã buộc đăng xuất học sinh' };
+  }
+
+  async studentSelfLogout(userId: string): Promise<{ message: string }> {
+    // Remove all devices
+    await this.userDeviceService.removeAllDevicesForUser(userId);
+    this.authIdentityCacheService.invalidateHasActiveDevice(userId);
+
+    // Also invalidate refresh token
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { refreshToken: null },
+    });
+    this.invalidateAuthIdentityCache(userId);
+
+    return { message: 'Đã đăng xuất' };
+  }
+
+  async touchStudentDevice(deviceTokenHash: string) {
+    await this.userDeviceService.touchDevice(deviceTokenHash);
+  }
+
+  private readonly logger = new Logger(AuthService.name);
 }

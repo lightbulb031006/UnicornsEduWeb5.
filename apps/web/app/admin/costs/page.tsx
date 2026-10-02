@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -20,6 +20,10 @@ import SelectionCheckbox from "@/components/ui/SelectionCheckbox";
 import { CostListItem, CostListResponse, CostStatus, CostUpsertMode } from "@/dtos/cost.dto";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
+import {
+  formatVnCurrency,
+  formatVnDate,
+} from "@/lib/formatters";
 
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 1000;
@@ -32,25 +36,17 @@ function normalizePage(rawPage: string | null): number {
 
 function formatCurrency(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
+  return formatVnCurrency(value);
 }
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return formatVnDate(date);
 }
 
-export default function AdminCostsPage() {
+function AdminCostsPageContent() {
   const { replace } = useRouter();
   const queryClient = useQueryClient();
   const pathname = usePathname();
@@ -514,7 +510,7 @@ export default function AdminCostsPage() {
                   type="button"
                   onClick={openBulkEditPopup}
                   disabled={bulkStatusMutation.isPending}
-                  className="touch-manipulation inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-text-inverse shadow-[0_14px_30px_-18px_color-mix(in_srgb,var(--ue-primary)_55%,transparent)] transition-all hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
+                  className="touch-manipulation inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-text-inverse shadow-[0_14px_30px_-18px_color-mix(in_srgb,var(--ue-primary)_55%,transparent)] transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label={`Sửa trạng thái thanh toán cho ${totalSelectedCount} khoản chi đã chọn`}
                 >
                   <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -954,5 +950,14 @@ export default function AdminCostsPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+export default function AdminCostsPage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <AdminCostsPageContent />
+    </Suspense>
   );
 }

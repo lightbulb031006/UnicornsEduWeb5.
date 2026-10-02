@@ -12,6 +12,7 @@ import {
   GoogleCalendarAuthError,
   GoogleCalendarInvalidConfigurationError,
   GoogleCalendarApiError,
+  GoogleCalendarTimeoutError,
 } from './errors/google-calendar.errors';
 
 interface ServiceAccountCredentials {
@@ -55,6 +56,8 @@ export class GoogleCalendarService implements OnModuleInit {
   private readonly STUDENT_EXAM_ITEM_ID_KEY = 'unicornsStudentExamScheduleId';
   private readonly GOOGLE_CALENDAR_LIMIT_RETRY_DELAYS_MS =
     process.env.NODE_ENV === 'test' ? [1, 1] : [1000, 3000];
+  private readonly GOOGLE_CALENDAR_REQUEST_TIMEOUT_MS =
+    process.env.NODE_ENV === 'test' ? 50 : 20000;
 
   constructor(private readonly configService: ConfigService) {
     this.config = this.loadConfig();
@@ -206,6 +209,7 @@ export class GoogleCalendarService implements OnModuleInit {
         this.calendar = google.calendar({
           version: 'v3',
           auth: oauth2Client,
+          timeout: this.GOOGLE_CALENDAR_REQUEST_TIMEOUT_MS,
         });
         this.oauth2Client = oauth2Client;
 
@@ -248,6 +252,7 @@ export class GoogleCalendarService implements OnModuleInit {
         this.calendar = google.calendar({
           version: 'v3',
           auth,
+          timeout: this.GOOGLE_CALENDAR_REQUEST_TIMEOUT_MS,
         });
         this.oauth2Client = null;
 
@@ -286,6 +291,17 @@ export class GoogleCalendarService implements OnModuleInit {
     }
 
     return this.oauth2Client;
+  }
+
+  private isTimeoutError(error: unknown): boolean {
+    // gaxios wraps an aborted (timed-out) fetch as a DOMException and copies
+    // its `.name` ("TimeoutError") onto `GaxiosError.code`.
+    const err = error as { code?: number | string; message?: string };
+    if (err.code === 'TimeoutError') {
+      return true;
+    }
+    const message = err.message?.toLowerCase() ?? '';
+    return message.includes('timeout') || message.includes('timed out');
   }
 
   private isRetryableAuthError(error: unknown): boolean {
@@ -372,6 +388,15 @@ export class GoogleCalendarService implements OnModuleInit {
       try {
         return await operation();
       } catch (error) {
+        if (this.isTimeoutError(error)) {
+          this.logger.error(
+            `[Calendar Timeout] context=${context} timed out after ${this.GOOGLE_CALENDAR_REQUEST_TIMEOUT_MS}ms`,
+          );
+          throw new GoogleCalendarTimeoutError(
+            `${context} timed out after ${this.GOOGLE_CALENDAR_REQUEST_TIMEOUT_MS}ms`,
+          );
+        }
+
         if (!authRetried && this.isRetryableAuthError(error)) {
           authRetried = true;
           this.logger.warn(

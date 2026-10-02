@@ -1,7 +1,9 @@
 "use client";
 
+import { Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AdminLessonPlansWorkspace } from "@/components/admin/lesson-plans";
+import { LessonWorkspaceLoadingSkeleton } from "@/components/admin/lesson-plans/LessonOverviewSkeleton";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
 
@@ -24,9 +26,11 @@ export default function AdminLessonPlansPage() {
           : "admin";
 
   return (
-    <AdminLessonPlansWorkspace
-      workspacePolicy={workspacePolicy}
-      currentUserId={fullProfile?.id ?? null}
-    />
+    <Suspense fallback={<LessonWorkspaceLoadingSkeleton />}>
+      <AdminLessonPlansWorkspace
+        workspacePolicy={workspacePolicy}
+        currentUserId={fullProfile?.id ?? null}
+      />
+    </Suspense>
   );
 }

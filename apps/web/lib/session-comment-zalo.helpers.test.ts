@@ -34,6 +34,31 @@ describe("richTextToPlainTextPreservingStructure", () => {
       "- Làm tốt bài tập\n- Cần luyện thêm vòng lặp",
     );
   });
+
+  it("keeps the URL when link label differs from href", () => {
+    const html = '<p>Xem tài liệu <a href="https://example.com/tutorial">tại đây</a></p>';
+
+    expect(richTextToPlainTextPreservingStructure(html)).toBe(
+      "Xem tài liệu tại đây (https://example.com/tutorial)",
+    );
+  });
+
+  it("does not duplicate the URL when link label equals href", () => {
+    const html = '<p><a href="https://example.com/tutorial">https://example.com/tutorial</a></p>';
+
+    expect(richTextToPlainTextPreservingStructure(html)).toBe(
+      "https://example.com/tutorial",
+    );
+  });
+
+  it("keeps links inside list items", () => {
+    const html =
+      '<ul><li><p>Tài liệu: <a href="https://example.com/doc">đọc thêm</a></p></li></ul>';
+
+    expect(richTextToPlainTextPreservingStructure(html)).toBe(
+      "- Tài liệu: đọc thêm (https://example.com/doc)",
+    );
+  });
 });
 
 describe("resolveStudentCommentLines", () => {

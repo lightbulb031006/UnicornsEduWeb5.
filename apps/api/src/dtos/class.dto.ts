@@ -4,10 +4,11 @@ import {
   PartialType,
   PickType,
 } from '@nestjs/swagger';
-import { ClassStatus, ClassType } from 'generated/enums';
+import { ClassPricingMode, ClassStatus } from 'generated/enums';
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -15,6 +16,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   Min,
   ValidateIf,
@@ -83,10 +85,13 @@ export class CreateClassDto {
   @IsString()
   name: string;
 
-  @ApiPropertyOptional({ enum: ClassType, default: ClassType.basic })
+  @ApiPropertyOptional({
+    description: 'Course id (see GET /courses).',
+    example: 'a1b2c3d4-...-uuid',
+  })
   @IsOptional()
-  @IsEnum(ClassType)
-  type?: ClassType;
+  @IsString()
+  course_id?: string;
 
   @ApiPropertyOptional({ enum: ClassStatus, default: ClassStatus.running })
   @IsOptional()
@@ -147,6 +152,30 @@ export class CreateClassDto {
   @Min(0)
   student_tuition_per_session?: number;
 
+  @ApiPropertyOptional({
+    example: 100000,
+    minimum: 0,
+    nullable: true,
+    description:
+      'Đơn giá học phí / học viên / 30 phút. Số dương: giữ nguyên, không suy từ gói. null hoặc bỏ trống: suy ROUND(học phí mỗi buổi ÷ số block chuẩn) như trước. Không ghi đè student_tuition_per_session.',
+  })
+  @IsOptional()
+  @ValidateIf((_obj, value) => value !== null && value !== undefined)
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  student_tuition_per_block?: number | null;
+
+  @ApiPropertyOptional({
+    enum: ClassPricingMode,
+    default: ClassPricingMode.per_session,
+    description:
+      'Chế độ tính tiền của lớp. Mặc định theo buổi. Theo block 30 phút chỉ khi lịch chuẩn suy được số block.',
+  })
+  @IsOptional()
+  @IsEnum(ClassPricingMode)
+  pricing_mode?: ClassPricingMode;
+
   @ApiPropertyOptional({ example: 3600000, minimum: 0 })
   @IsOptional()
   @Type(() => Number)
@@ -160,6 +189,15 @@ export class CreateClassDto {
   @IsInt()
   @Min(0)
   tuition_package_session?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Lớp không cần điểm danh (lớp quá đông). Hệ thống tự sinh Attendance present cho mọi học sinh đang học.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  no_attendance?: boolean;
 
   @ApiPropertyOptional({
     description:
@@ -205,17 +243,44 @@ export class CreateClassDto {
 export class UpdateClassBasicInfoDto extends PartialType(
   PickType(CreateClassDto, [
     'name',
-    'type',
+    'course_id',
     'status',
     'max_students',
     'allowance_per_session_per_student',
     'max_allowance_per_session',
     'scale_amount',
     'student_tuition_per_session',
+    'student_tuition_per_block',
     'tuition_package_total',
     'tuition_package_session',
+    'no_attendance',
   ]),
-) {}
+) {
+  @ApiPropertyOptional({
+    description:
+      'Ngày hết hạn xem nội dung của lớp (YYYY-MM-DD). Gửi null để xoá hạn (vô hạn).',
+    example: '2026-12-31',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_obj, value) => value !== null && value !== undefined)
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'content_access_expires_at must be in YYYY-MM-DD format',
+  })
+  content_access_expires_at?: string | null;
+}
+
+export class UpdateClassPricingModeDto {
+  @ApiProperty({
+    enum: ClassPricingMode,
+    description:
+      'Đổi chế độ tính tiền. Buổi unpaid được tính lại; buổi paid/deposit/cọc giữ nguyên.',
+    example: ClassPricingMode.per_session,
+  })
+  @IsEnum(ClassPricingMode)
+  pricing_mode: ClassPricingMode;
+}
 
 /** DTO for PATCH /class/:id/teachers – replace teachers list */
 export class UpdateClassTeachersDto {
@@ -392,12 +457,24 @@ export class ScheduleSlotDto {
   @IsOptional()
   @IsString()
   deletedAt?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Ngày slot này thực sự bắt đầu có hiệu lực (YYYY-MM-DD). Dùng để backdate khi admin sửa lịch trễ so với ngày đổi thực tế. Mặc định là hôm nay nếu bỏ trống.',
+    example: '2026-08-01',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'effectiveFrom must be in YYYY-MM-DD format',
+  })
+  effectiveFrom?: string;
 }
 
-/** DTO for PATCH /class/:id/schedule – replace schedule */
+/** DTO for PATCH /class/:id/schedule – upsert schedule slots */
 export class UpdateClassScheduleDto {
   @ApiProperty({
-    description: 'Class schedule array { from, to } in HH:mm:ss',
+    description:
+      'Danh sách slot lịch cần thêm mới/cập nhật. Slot đang active nhưng KHÔNG có mặt ở đây sẽ được GIỮ NGUYÊN (không tự xoá) — muốn xoá phải liệt kê id trong `removedEntryIds`.',
     type: [ScheduleSlotDto],
     example: [{ from: '19:00:00', to: '20:30:00' }],
   })
@@ -405,12 +482,31 @@ export class UpdateClassScheduleDto {
   @ValidateNested({ each: true })
   @Type(() => ScheduleSlotDto)
   schedule: ScheduleSlotDto[];
+
+  @ApiPropertyOptional({
+    description: 'Id các slot cần xoá tường minh (soft-delete).',
+    type: [String],
+    example: ['550e8400-e29b-41d4-a716-446655440000'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  removedEntryIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'ISO timestamp `updatedAt` của lớp lúc client tải dữ liệu — dùng để phát hiện xung đột (optimistic lock). Nếu lớp đã bị người khác cập nhật sau thời điểm này, request bị từ chối với 409.',
+    example: '2026-08-18T14:50:43.600Z',
+  })
+  @IsOptional()
+  @IsString()
+  expectedUpdatedAt?: string;
 }
 
 /** DTO for POST /staff-ops/classes – minimal class metadata only */
 export class CreateStaffOpsClassDto extends PickType(CreateClassDto, [
   'name',
-  'type',
+  'course_id',
   'status',
 ] as const) {
   @ApiPropertyOptional({

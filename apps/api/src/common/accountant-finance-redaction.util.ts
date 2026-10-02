@@ -50,12 +50,15 @@ function omitFields<T extends Record<string, unknown>>(
 
 const CLASS_INCOME_HIDDEN_FIELDS = [
   'allowancePerSessionPerStudent',
+  'allowancePerBlockPerStudent',
   'maxAllowancePerSession',
+  'maxAllowancePerBlock',
   'scaleAmount',
 ] as const;
 
 const CLASS_EXPENSE_HIDDEN_FIELDS = [
   'studentTuitionPerSession',
+  'studentTuitionPerBlock',
   'tuitionPackageTotal',
   'tuitionPackageSession',
   'sessionTuitionTotal',
@@ -70,6 +73,7 @@ const TEACHER_INCOME_HIDDEN_FIELDS = [
 const STUDENT_EXPENSE_HIDDEN_FIELDS = [
   'customTuitionPerSession',
   'customStudentTuitionPerSession',
+  'customTuitionPerBlock',
   'customTuitionPackageTotal',
   'customTuitionPackageSession',
   'effectiveTuitionPerSession',
@@ -297,7 +301,7 @@ export function redactClassForTrainingManagerView<T>(classRecord: T): T {
     return classRecord;
   }
 
-  let next = omitFields(
+  const next = omitFields(
     classRecord as Record<string, unknown>,
     CLASS_TRAINING_MANAGER_HIDDEN_FIELDS,
   );
@@ -332,7 +336,7 @@ export function redactSessionForTrainingManagerView<T>(session: T): T {
     return session;
   }
 
-  let next = omitFields(
+  const next = omitFields(
     session as Record<string, unknown>,
     SESSION_TRAINING_MANAGER_HIDDEN_FIELDS,
   );

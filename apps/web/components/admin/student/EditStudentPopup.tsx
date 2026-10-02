@@ -7,7 +7,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DateInput } from "@/components/ui/DateInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import AchievementListEditor from "@/components/shared/achievement/AchievementListEditor";
+import StudentGalleryEditor from "@/components/shared/student-gallery/StudentGalleryEditor";
+import { CustomerSourceFields } from "@/components/admin/student/CustomerSourceFields";
 import type {
+  StudentCustomerSource,
   StudentDetail,
   StudentExamScheduleItem,
   StudentGender,
@@ -33,6 +37,8 @@ type Props = {
   onSuccess?: () => void | Promise<void>;
   /** Admin/assistant only; CSKH can edit profile but not profit %. */
   canEditCustomerCareProfitPercent?: boolean;
+  /** Admin/assistant only; CSKH can view achievements/gallery but not edit. Default true. */
+  canEditAchievementsAndGallery?: boolean;
 };
 
 const STATUS_OPTIONS: Array<{ value: StudentStatus; label: string }> = [
@@ -111,6 +117,7 @@ export default function EditStudentPopup({
   student,
   onSuccess,
   canEditCustomerCareProfitPercent = true,
+  canEditAchievementsAndGallery = true,
 }: Props) {
   const queryClient = useQueryClient();
   const customerCareSearchRef = useRef<HTMLDivElement>(null);
@@ -132,12 +139,16 @@ export default function EditStudentPopup({
   const [status, setStatus] = useState<StudentStatus>(student.status ?? "active");
   const [statusReason, setStatusReason] = useState("");
   const [goal, setGoal] = useState(student.goal ?? "");
+  const [customerSource, setCustomerSource] = useState<StudentCustomerSource | "">(
+    student.customerSource ?? "",
+  );
+  const [customerSourceNote, setCustomerSourceNote] = useState(student.customerSourceNote ?? "");
   const [dropOutDate, setDropOutDate] = useState(student.dropOutDate ?? "");
   const [selectedCustomerCare, setSelectedCustomerCare] = useState<CustomerCareStaffOption | null>(
-    getInitialCustomerCareSelection(student),
+    () => getInitialCustomerCareSelection(student),
   );
   const [customerCareProfitPercentInput, setCustomerCareProfitPercentInput] = useState(
-    toPercentInputValue(student.customerCare?.profitPercent),
+    () => toPercentInputValue(student.customerCare?.profitPercent),
   );
   const [customerCareSearchInput, setCustomerCareSearchInput] = useState("");
   const [customerCareSearchFocused, setCustomerCareSearchFocused] = useState(false);
@@ -233,6 +244,12 @@ export default function EditStudentPopup({
       return;
     }
 
+    const trimmedSourceNote = customerSourceNote.trim();
+    if (customerSource === "other" && !trimmedSourceNote) {
+      toast.error("Chú thích nguồn là bắt buộc khi chọn Khác.");
+      return;
+    }
+
     const hasInvalidExamItem = examItems.some((item) => {
       const hasAnyContent = Boolean(item.examDate?.trim() || item.note?.trim());
       if (!hasAnyContent) return false;
@@ -320,6 +337,12 @@ export default function EditStudentPopup({
           gender,
           goal: goal.trim() || undefined,
           drop_out_date: dropOutDate.trim() || undefined,
+          ...(customerSource
+            ? {
+                customer_source: customerSource,
+                customer_source_note: customerSource === "other" ? trimmedSourceNote : null,
+              }
+            : {}),
           customer_care_staff_id: selectedCustomerCare?.id ?? null,
           ...(canEditCustomerCareProfitPercent
             ? {
@@ -447,8 +470,20 @@ export default function EditStudentPopup({
                   />
                 </label>
 
-                <label className="flex flex-col gap-1 text-sm text-text-secondary">
-                  <span>Trường</span>
+                    <CustomerSourceFields
+                      idPrefix="edit-student"
+                      source={customerSource}
+                      note={customerSourceNote}
+                      emptyLabel="Chưa gán"
+                      onSourceChange={(nextSource) => {
+                        setCustomerSource(nextSource);
+                        if (nextSource !== "other") setCustomerSourceNote("");
+                      }}
+                      onNoteChange={setCustomerSourceNote}
+                    />
+
+                    <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                      <span>Trường</span>
                   <input
                     name="school"
                     autoComplete="off"
@@ -562,6 +597,26 @@ export default function EditStudentPopup({
                     placeholder="Ví dụ: Hoàn thành chương trình IELTS Foundation trong quý này…"
                   />
                 </label>
+
+                <div className="sm:col-span-2">
+                  <AchievementListEditor
+                    owner={{
+                      kind: "student",
+                      mode: "admin",
+                      studentId: student.id,
+                    }}
+                    editable={canEditAchievementsAndGallery}
+                    heading="Thành tích"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <StudentGalleryEditor
+                    studentId={student.id}
+                    editable={canEditAchievementsAndGallery}
+                    heading="Feedback"
+                  />
+                </div>
 
                 <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
                   <span>Ngày ngừng theo dõi</span>

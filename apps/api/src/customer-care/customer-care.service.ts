@@ -6,20 +6,24 @@ import {
 } from '@nestjs/common';
 import { Prisma } from 'generated/client';
 import {
+  AttendanceStatus,
   PaymentStatus,
   StaffRole,
   StudentClassStatus,
+  StudentStatus,
   UserRole,
   WalletTransactionType,
 } from 'generated/enums';
 import type {
   CustomerCareBulkPaymentStatusUpdateResultDto,
+  CustomerCareBulkProfitPercentUpdateResultDto,
   CustomerCareCommissionDto,
   CustomerCareCommissionListDto,
   CustomerCareCommissionListQueryDto,
   CustomerCareCommissionScope,
   CustomerCareSessionCommissionDto,
   CustomerCareStudentListDto,
+  CustomerCareStudentSummaryDto,
   CustomerCareTopUpHistoryListDto,
 } from 'src/dtos/customer-care.dto';
 import { resolveTaxDeductionRate } from 'src/payroll/deduction-rates';
@@ -178,6 +182,26 @@ export class CustomerCareService {
     );
   }
 
+  private async canEditProfitPercent(userId: string, roleType: UserRole) {
+    if (roleType === UserRole.admin) {
+      return true;
+    }
+
+    if (roleType !== UserRole.staff) {
+      return false;
+    }
+
+    const staff = await this.resolveStaffProfile(userId);
+    if (!staff) {
+      return false;
+    }
+
+    return (
+      staff.roles.includes(StaffRole.admin) ||
+      staff.roles.includes(StaffRole.assistant)
+    );
+  }
+
   /** List students assigned to this staff in customer_care_service, sorted by accountBalance asc. */
   async getStudentsByStaffId(
     userId: string,
@@ -205,18 +229,23 @@ export class CustomerCareService {
       Number.isInteger(parsedLimit) && parsedLimit >= 1
         ? Math.min(parsedLimit, 100)
         : 20;
+    const activeStudentWhere = {
+      staffId: accessibleStaffId,
+      student: { status: StudentStatus.active },
+    };
     const total = await this.prisma.customerCareService.count({
-      where: { staffId: accessibleStaffId },
+      where: activeStudentWhere,
     });
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const safePage = Math.min(page, totalPages);
     const skip = (safePage - 1) * limit;
 
     const list = await this.prisma.customerCareService.findMany({
-      where: { staffId: accessibleStaffId },
+      where: activeStudentWhere,
       skip,
       take: limit,
       select: {
+        profitPercent: true,
         student: {
           select: {
             id: true,
@@ -267,6 +296,8 @@ export class CustomerCareService {
           recentTopUpTotalLast21Days: recentTopUpTotal,
           recentTopUpMeetsThreshold:
             recentTopUpTotal >= RECENT_TOP_UP_THRESHOLD,
+          profitPercent:
+            row.profitPercent == null ? null : Number(row.profitPercent),
         };
       }),
       meta: {
@@ -274,6 +305,78 @@ export class CustomerCareService {
         page: safePage,
         limit,
       },
+    };
+  }
+
+  /** Học sinh đang học / nghỉ trong tháng / tổng học phí đã học (doanh thu) trong tháng, cho toàn bộ portfolio CSKH của staff này. */
+  async getStudentSummaryByStaffId(
+    userId: string,
+    roleType: UserRole,
+    staffId: string,
+    monthKey?: string,
+  ): Promise<CustomerCareStudentSummaryDto> {
+    const accessibleStaffId = await this.resolveAccessibleStaffId(
+      userId,
+      roleType,
+      staffId,
+    );
+
+    const staff = await this.prisma.staffInfo.findUnique({
+      where: { id: accessibleStaffId },
+      select: { id: true },
+    });
+    if (!staff) throw new NotFoundException('Staff not found');
+
+    const now = new Date();
+    const match = monthKey?.match(/^(\d{4})-(\d{2})$/);
+    const year = match ? Number(match[1]) : now.getUTCFullYear();
+    const month = match ? Number(match[2]) : now.getUTCMonth() + 1;
+    const monthStart = new Date(Date.UTC(year, month - 1, 1));
+    const monthEnd = new Date(Date.UTC(year, month, 1));
+    const resolvedMonthKey = `${year}-${String(month).padStart(2, '0')}`;
+
+    const assignments = await this.prisma.customerCareService.findMany({
+      where: { staffId: accessibleStaffId },
+      select: {
+        student: {
+          select: { id: true, status: true, dropOutDate: true },
+        },
+      },
+    });
+    const assignedStudents = assignments.map((row) => row.student);
+    const studentIds = assignedStudents.map((student) => student.id);
+
+    const revenueRows =
+      studentIds.length === 0
+        ? []
+        : await this.prisma.attendance.groupBy({
+            by: ['studentId'],
+            where: {
+              studentId: { in: studentIds },
+              status: {
+                in: [AttendanceStatus.present, AttendanceStatus.excused],
+              },
+              session: { date: { gte: monthStart, lt: monthEnd } },
+            },
+            _sum: { tuitionFee: true },
+          });
+    const revenueThisMonth = revenueRows.reduce(
+      (sum, row) => sum + Number(row._sum.tuitionFee ?? 0),
+      0,
+    );
+
+    return {
+      monthKey: resolvedMonthKey,
+      activeStudentsCount: assignedStudents.filter(
+        (student) => student.status === StudentStatus.active,
+      ).length,
+      droppedStudentsThisMonth: assignedStudents.filter(
+        (student) =>
+          student.dropOutDate != null &&
+          student.dropOutDate >= monthStart &&
+          student.dropOutDate < monthEnd,
+      ).length,
+      revenueThisMonth,
     };
   }
 
@@ -641,7 +744,8 @@ export class CustomerCareService {
       (acc, row) => ({
         studentCount: acc.studentCount + 1,
         totalPending: acc.totalPending + row.pendingCommission,
-        totalMonthCommission: acc.totalMonthCommission + (row.monthCommission ?? 0),
+        totalMonthCommission:
+          acc.totalMonthCommission + (row.monthCommission ?? 0),
       }),
       {
         studentCount: 0,
@@ -934,5 +1038,102 @@ export class CustomerCareService {
         updatedCount,
       };
     });
+  }
+
+  /**
+   * Bulk overwrite profitPercent for selected students, scoped to this staff's
+   * own customer_care_service rows only. Not retroactive: only affects future
+   * session snapshots, matching the single-student edit semantics.
+   */
+  async bulkUpdateProfitPercent(
+    userId: string,
+    roleType: UserRole,
+    staffId: string,
+    studentIds: string[],
+    profitPercent: number,
+  ): Promise<CustomerCareBulkProfitPercentUpdateResultDto> {
+    const canEdit = await this.canEditProfitPercent(userId, roleType);
+    if (!canEdit) {
+      throw new ForbiddenException(
+        'Tài khoản hiện tại không có quyền chỉnh % CSKH.',
+      );
+    }
+
+    const accessibleStaffId = await this.resolveAccessibleStaffId(
+      userId,
+      roleType,
+      staffId,
+    );
+
+    const uniqueStudentIds = Array.from(
+      new Set(
+        studentIds.filter(
+          (studentId): studentId is string =>
+            typeof studentId === 'string' && studentId.trim().length > 0,
+        ),
+      ),
+    );
+
+    if (uniqueStudentIds.length === 0) {
+      throw new BadRequestException('studentIds must contain at least one id.');
+    }
+
+    if (
+      typeof profitPercent !== 'number' ||
+      !Number.isFinite(profitPercent) ||
+      profitPercent < 0 ||
+      profitPercent > 0.99
+    ) {
+      throw new BadRequestException(
+        'profitPercent must be between 0 and 0.99.',
+      );
+    }
+
+    const staff = await this.prisma.staffInfo.findUnique({
+      where: { id: accessibleStaffId },
+      select: { id: true },
+    });
+    if (!staff) {
+      throw new NotFoundException('Staff not found');
+    }
+
+    const existingServices = await this.prisma.customerCareService.findMany({
+      where: {
+        staffId: accessibleStaffId,
+        studentId: { in: uniqueStudentIds },
+      },
+      select: { studentId: true },
+    });
+
+    if (existingServices.length !== uniqueStudentIds.length) {
+      const existingStudentIds = new Set(
+        existingServices.map((service) => service.studentId),
+      );
+      const missingStudentId = uniqueStudentIds.find(
+        (studentId) => !existingStudentIds.has(studentId),
+      );
+
+      throw new NotFoundException(
+        missingStudentId
+          ? `Student not found for customer-care staff: ${missingStudentId}`
+          : 'Student not found for customer-care staff',
+      );
+    }
+
+    const updateResult = await this.prisma.customerCareService.updateMany({
+      where: {
+        staffId: accessibleStaffId,
+        studentId: { in: uniqueStudentIds },
+      },
+      data: {
+        profitPercent,
+      },
+    });
+
+    return {
+      staffId: accessibleStaffId,
+      requestedCount: uniqueStudentIds.length,
+      updatedCount: updateResult.count,
+    };
   }
 }

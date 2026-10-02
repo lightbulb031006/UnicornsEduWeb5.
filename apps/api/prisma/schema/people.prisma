@@ -2,47 +2,57 @@
 /// `INCLUDE (id, roles)` for index-only scans (auth/session); Prisma has no INCLUDE syntax — see
 /// migration `20260506140000_staff_info_user_id_covering_index`.
 model StaffInfo {
-  id                                  String                               @id
-  cccdNumber                          String?                              @unique @map("cccd_number")
-  cccdIssuedDate                      DateTime?                            @map("cccd_issued_date") @db.Date
-  cccdIssuedPlace                     String?                              @map("cccd_issued_place")
-  ethnicity                           String?
-  gender                              Gender?
-  currentAddress                      String?                              @map("current_address")
-  birthDate                           DateTime?                            @map("birth_date") @db.Date
-  university                          String?
-  highSchool                          String?                              @map("high_school")
-  specialization                      String?
-  bankAccount                         String?                              @map("bank_account")
-  bankQrLink                          String?                              @map("bank_qr_link")
-  googleMeetLink                      String?                              @map("google_meet_link")
-  status                              StaffStatus                          @default(active)
-  createdAt                           DateTime                             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                           DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(6)
-  userId                              String?                              @map("user_id")
-  roles                               StaffRole[]                          @default([])
-  personalAchievementLink             String?                              @map("personal_achievement_link")
-  customerCareManagedByStaffId        String?                              @map("customer_care_managed_by_staff_id")
-  assistantStudentSession             Attendance[]                         @relation("AttendanceAssistant")
-  customerCareStudentSession          Attendance[]                         @relation("AttendanceCustomerCare")
-  bonuses                             Bonus[]
-  classSurveys                        ClassSurvey[]
-  classTeachers                       ClassTeacher[]
-  customerCareServices                CustomerCareService[]
-  extraAllowances                     ExtraAllowance[]
-  lessonOutputs                       LessonOutput[]
-  makeupScheduleEvents                MakeupScheduleEvent[]
-  missedTeachingExplanations          MissedTeachingExplanation[]
-  staffTaxDeductionOverrides          StaffTaxDeductionOverride[]
-  tasksCreated                        LessonTask[]
-  sessions                            Session[]                            @relation("SessionTeacher")
-  trainingManagerSessions             Session[]                            @relation("SessionTrainingManager")
-  managedTrainingClasses              Class[]                              @relation("ClassTrainingManager")
-  customerCareManagedBy               StaffInfo?                           @relation("AssistantManagesCustomerCare", fields: [customerCareManagedByStaffId], references: [id])
-  managedCustomerCareStaff            StaffInfo[]                          @relation("AssistantManagesCustomerCare")
-  user                                User?                                @relation(fields: [userId], references: [id])
-  staffLessonTasks                    StaffLessonTask[]
-  monthlyStats                        StaffMonthlyStat[]
+  id                           String                      @id
+  cccdNumber                   String?                     @unique @map("cccd_number")
+  cccdIssuedDate               DateTime?                   @map("cccd_issued_date") @db.Date
+  cccdIssuedPlace              String?                     @map("cccd_issued_place")
+  ethnicity                    String?
+  gender                       Gender?
+  currentAddress               String?                     @map("current_address")
+  birthDate                    DateTime?                   @map("birth_date") @db.Date
+  university                   String?
+  highSchool                   String?                     @map("high_school")
+  specialization               String?
+  bankAccount                  String?                     @map("bank_account")
+  bankQrLink                   String?                     @map("bank_qr_link")
+  googleMeetLink               String?                     @map("google_meet_link")
+  status                       StaffStatus                 @default(active)
+  createdAt                    DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                    DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId                       String?                     @map("user_id")
+  roles                        StaffRole[]                 @default([])
+  personalAchievementLink      String?                     @map("personal_achievement_link")
+  customerCareManagedByStaffId String?                     @map("customer_care_managed_by_staff_id")
+  revenueSharePercent          Decimal?                    @map("revenue_share_percent") @db.Decimal(5, 2)
+  assistantStudentSession      Attendance[]                @relation("AttendanceAssistant")
+  customerCareStudentSession   Attendance[]                @relation("AttendanceCustomerCare")
+  bonuses                      Bonus[]
+  classSurveys                 ClassSurvey[]
+  classTeachers                ClassTeacher[]
+  classScheduleEntries         ClassScheduleEntry[]
+  customerCareServices         CustomerCareService[]
+  extraAllowances              ExtraAllowance[]
+  staffFixedSalaryOverrides    StaffFixedSalaryOverride[]
+  staffFixedSalaryOperatingRateOverrides StaffFixedSalaryOperatingRateOverride[]
+  staffFixedSalaryPayables     StaffFixedSalaryPayable[]
+  lessonOutputs                LessonOutput[]
+  makeupScheduleEvents         MakeupScheduleEvent[]
+  missedTeachingExplanations   MissedTeachingExplanation[]
+  staffTaxDeductionOverrides   StaffTaxDeductionOverride[]
+  tasksCreated                 LessonTask[]
+  sessions                     Session[]                   @relation("SessionTeacher")
+  trainingManagerSessions      Session[]                   @relation("SessionTrainingManager")
+  managedTrainingClasses       Class[]                     @relation("ClassTrainingManager")
+  customerCareManagedBy        StaffInfo?                  @relation("AssistantManagesCustomerCare", fields: [customerCareManagedByStaffId], references: [id])
+  managedCustomerCareStaff     StaffInfo[]                 @relation("AssistantManagesCustomerCare")
+  user                         User?                       @relation(fields: [userId], references: [id])
+  staffLessonTasks             StaffLessonTask[]
+  monthlyStats                 StaffMonthlyStat[]
+  lessonPlanHeadCommissions    LessonPlanHeadCommission[]
+  achievements                 StaffAchievement[]
+  courseLessonPlanMembers      CourseLessonPlanMember[]
+  hiddenClassContentItems      ClassContentItem[]          @relation("ClassContentHiddenBy")
+  hiddenClassTimelineItems     ClassTimelineItem[]         @relation("ClassTimelineHiddenBy")
 
   @@unique([userId], map: "staff_info_user_id_key")
   @@index([customerCareManagedByStaffId])
@@ -50,34 +60,97 @@ model StaffInfo {
 }
 
 model StudentInfo {
-  id                   String                            @id
-  fullName             String                            @map("full_name")
-  email                String?
-  school               String?
-  province             String?
-  birthYear            Int?                              @map("birth_year")
-  parentName           String?                           @map("parent_name")
-  parentPhone          String?                           @map("parent_phone")
-  parentEmail                String?                           @map("parent_email")
-  parentReceiptEmailEnabled  Boolean                           @default(true) @map("parent_receipt_email_enabled")
-  status                     StudentStatus                     @default(active)
-  gender               Gender                            @default(male)
-  goal                 String?
-  dropOutDate          DateTime?                         @map("drop_out_date") @db.Date
-  createdAt            DateTime                          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime                          @updatedAt @map("updated_at") @db.Timestamptz(6)
-  userId               String?                           @unique @map("user_id")
-  accountBalance       Int?                              @default(0) @map("account_balance")
-  attendanceRecords    Attendance[]
-  customerCareServices CustomerCareService?
-  examSchedules        StudentExamSchedule[]
-  studentClasses       StudentClass[]
-  user                 User?                             @relation(fields: [userId], references: [id])
-  walletTransactions   WalletTransactionsHistory[]
-  sepayWalletOrders    StudentWalletSepayOrder[]
-  directTopUpRequests  StudentWalletDirectTopUpRequest[]
+  id                        String                            @id
+  fullName                  String                            @map("full_name")
+  email                     String?
+  school                    String?
+  province                  String?
+  birthYear                 Int?                              @map("birth_year")
+  parentName                String?                           @map("parent_name")
+  parentPhone               String?                           @map("parent_phone")
+  parentEmail               String?                           @map("parent_email")
+  parentReceiptEmailEnabled Boolean                           @default(true) @map("parent_receipt_email_enabled")
+  status                    StudentStatus                     @default(active)
+  gender                    Gender                            @default(male)
+  goal                      String?
+  customerSource            StudentCustomerSource?            @map("customer_source")
+  customerSourceNote        String?                           @map("customer_source_note") @db.VarChar(200)
+  dropOutDate               DateTime?                         @map("drop_out_date") @db.Date
+  createdAt                 DateTime                          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime                          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userId                    String?                           @unique @map("user_id")
+  accountBalance            Int?                              @default(0) @map("account_balance")
+  attendanceRecords         Attendance[]
+  customerCareServices      CustomerCareService?
+  examSchedules             StudentExamSchedule[]
+  studentClasses            StudentClass[]
+  user                      User?                             @relation(fields: [userId], references: [id])
+  walletTransactions        WalletTransactionsHistory[]
+  sepayWalletOrders         StudentWalletSepayOrder[]
+  directTopUpRequests       StudentWalletDirectTopUpRequest[]
+  achievements              StudentAchievement[]
+  galleryItems              StudentGalleryItem[]
+  surveyAssessments         ClassSurveyStudentAssessment[]
+  lessonQuizAnswers         LessonQuizAnswer[]
+  attempts                  Attempt[]
+  theoryLessonViews         ClassTheoryLessonView[]
 
   @@map("student_info")
+}
+
+/// Achievements owned by a staff member (title + optional proof image).
+/// Legacy `StaffInfo.specialization` / `personalAchievementLink` stay deprecated until a later drop PR.
+model StaffAchievement {
+  id                   String    @id @default(uuid())
+  staffId              String    @map("staff_id")
+  title                String    @db.Text
+  imagePath            String?   @map("image_path")
+  imageWatermarkedPath String?   @map("image_watermarked_path")
+  sortOrder            Int       @default(0) @map("sort_order")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff                StaffInfo @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, sortOrder])
+  @@map("staff_achievements")
+}
+
+/// Achievements owned by a student (admin-managed only; no student self-service).
+/// Structured fields mirror landing CMS /thanh-tich (award, exam, year, level, courseLabel).
+model StudentAchievement {
+  id                   String           @id @default(uuid())
+  studentId            String           @map("student_id")
+  award                String           @db.Text
+  exam                 String           @db.Text
+  year                 Int
+  level                AchievementLevel
+  courseLabel          String?          @map("course_label") @db.Text
+  imagePath            String?          @map("image_path")
+  imageWatermarkedPath String?          @map("image_watermarked_path")
+  sortOrder            Int              @default(0) @map("sort_order")
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  student              StudentInfo      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, sortOrder])
+  @@index([year, level])
+  @@map("student_achievements")
+}
+
+/// Landing gallery photos for a student (admin-managed; caption = nhận xét).
+model StudentGalleryItem {
+  id                   String      @id @default(uuid())
+  studentId            String      @map("student_id")
+  caption              String?     @db.Text
+  imagePath            String?     @map("image_path")
+  imageWatermarkedPath String?     @map("image_watermarked_path")
+  sortOrder            Int         @default(0) @map("sort_order")
+  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  student              StudentInfo @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, sortOrder])
+  @@map("student_gallery_items")
 }
 
 model StudentExamSchedule {

@@ -9,7 +9,7 @@ import * as studentApi from "@/lib/apis/student.api";
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import StudentExamSchedulePopup from "./StudentExamSchedulePopup";
 import StudentInfoCard from "./StudentInfoCard";
-
+import { formatVnDate } from "@/lib/formatters";
 export type StudentExamItem = StudentExamScheduleItem;
 
 type Props = {
@@ -22,11 +22,7 @@ type Props = {
 function formatDateOnly(iso: string): string {
   if (!iso) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(iso));
+    return formatVnDate(new Date(iso));
   } catch {
     return iso;
   }

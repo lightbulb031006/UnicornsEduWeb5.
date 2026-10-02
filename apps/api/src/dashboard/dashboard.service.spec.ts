@@ -69,18 +69,18 @@ describe('DashboardService staff training dashboard', () => {
     prisma.class.findMany.mockResolvedValue([
       {
         id: 'class-1',
-        schedule: [
+        scheduleEntries: [
           { dayOfWeek: 5, from: '10:00:00', to: '11:00:00' },
           { dayOfWeek: 2, from: '10:00:00', to: '11:00:00' },
         ],
       },
       {
         id: 'class-2',
-        schedule: [{ dayOfWeek: 5, from: '14:00:00', end: '15:00:00' }],
+        scheduleEntries: [{ dayOfWeek: 5, from: '14:00:00', to: '15:00:00' }],
       },
       {
         id: 'class-3',
-        schedule: [{ dayOfWeek: 5, to: '17:00:00' }],
+        scheduleEntries: [{ dayOfWeek: 5, from: '', to: '17:00:00' }],
       },
     ]);
     prisma.makeupScheduleEvent.findMany.mockResolvedValue([
@@ -190,12 +190,15 @@ describe('DashboardService staff training dashboard', () => {
   });
 
   it('returns paginated missing-survey class action alerts with meta total', async () => {
-    surveyRoundService.getCurrentRound.mockResolvedValue(6);
     prisma.$queryRaw.mockResolvedValueOnce([
       {
         classId: 'class-1',
         name: 'Lớp chưa báo cáo',
-        latestReportedRound: 4,
+        surveyId: 'survey-1',
+        surveyName: 'Kiểm tra định kỳ lần 8',
+        startDate: new Date('2026-08-17T00:00:00.000Z'),
+        endDate: new Date('2026-08-24T00:00:00.000Z'),
+        teacherNames: 'Thầy Tuấn',
         totalCount: 2,
       },
     ]);
@@ -214,9 +217,10 @@ describe('DashboardService staff training dashboard', () => {
         type: 'Lớp cảnh báo',
         targetType: 'class',
         targetId: 'class-1',
+        owner: 'Gia sư: Thầy Tuấn',
         amount: 0,
-        due: 'Chưa báo cáo lần 6',
-        detail: 'Mới nhất: lần 4',
+        due: 'Kiểm tra định kỳ lần 8',
+        detail: 'Chưa báo cáo: Kiểm tra định kỳ lần 8',
       }),
     ]);
   });
@@ -457,5 +461,357 @@ describe('DashboardService CSKH dashboard clarity', () => {
         }),
       ]),
     );
+  });
+});
+
+describe('DashboardService financial export', () => {
+  const prisma = {
+    $queryRaw: jest.fn(),
+    costExtend: {
+      findMany: jest.fn(),
+    },
+  };
+  const dashboardCacheService = {
+    wrapJson: jest.fn(
+      async <T>(options: { loader: () => Promise<T> }): Promise<T> =>
+        options.loader(),
+    ),
+  };
+  const surveyRoundService = {
+    getCurrentRound: jest.fn(async () => 6),
+  };
+
+  let service: DashboardService;
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-03T05:30:00.000Z'));
+    jest.clearAllMocks();
+    prisma.$queryRaw.mockResolvedValue([]);
+    prisma.costExtend.findMany.mockResolvedValue([]);
+    service = new DashboardService(
+      prisma as never,
+      dashboardCacheService as never,
+      surveyRoundService as never,
+    );
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function mockFinancialExportQueries(options?: {
+    revenueRows?: Array<{
+      studentId: string;
+      studentName: string;
+      className: string;
+      totalAmount: number;
+      attendanceCount: number;
+    }>;
+    staffRows?: Array<{
+      staffId: string;
+      staffName: string;
+      sessionAmount: number;
+      bonusAmount: number;
+      customerCareAmount: number;
+      lessonAmount: number;
+      extraAllowanceAmount: number;
+      fixedSalaryAmount: number;
+      assistantAmount: number;
+      trainingManagerAmount: number;
+      totalCost: number;
+    }>;
+    topupTotal?: number;
+    revenueTotal?: number;
+    personnelCost?: number;
+    otherCost?: number;
+  }) {
+    const revenueRows = options?.revenueRows ?? [
+      {
+        studentId: 'st-1',
+        studentName: 'Nguyen Van A',
+        className: 'VIP-01',
+        totalAmount: 1_200_000,
+        attendanceCount: 4,
+      },
+    ];
+    const staffRows = options?.staffRows ?? [
+      {
+        staffId: 'staff-1',
+        staffName: 'Gia su B',
+        sessionAmount: 400_000,
+        bonusAmount: 0,
+        customerCareAmount: 0,
+        lessonAmount: 0,
+        extraAllowanceAmount: 0,
+        fixedSalaryAmount: 0,
+        assistantAmount: 0,
+        trainingManagerAmount: 0,
+        totalCost: 400_000,
+      },
+    ];
+    const topupTotal = options?.topupTotal ?? 2_000_000;
+    const revenueTotal = options?.revenueTotal ?? 1_200_000;
+    const personnelCost = options?.personnelCost ?? 400_000;
+    const otherCost = options?.otherCost ?? 100_000;
+
+    prisma.$queryRaw.mockImplementation(
+      async (query: { strings: string[] }) => {
+        const sql = query.strings.join('');
+
+        if (sql.includes("wallet_transactions_history.type::text = 'topup'")) {
+          return [{ totalAmount: topupTotal }];
+        }
+
+        if (sql.includes('STRING_AGG(DISTINCT classes.name')) {
+          return revenueRows;
+        }
+
+        if (sql.includes('active_staff AS')) {
+          return staffRows;
+        }
+
+        if (sql.includes('generate_series') || sql.includes('month_series')) {
+          return [
+            {
+              monthStart: new Date('2026-08-01T00:00:00.000Z'),
+              revenue: revenueTotal,
+              teacherCost: personnelCost,
+              customerCareCost: 0,
+              lessonCost: 0,
+              bonusCost: 0,
+              extraAllowanceCost: 0,
+              fixedSalaryCost: 0,
+              assistantCost: 0,
+              trainingManagerCost: 0,
+              operatingCost: otherCost,
+            },
+          ];
+        }
+
+        if (sql.includes('range_revenue')) {
+          return [
+            {
+              revenue: revenueTotal,
+              teacherCost: personnelCost,
+              customerCareCost: 0,
+              lessonCost: 0,
+              bonusCost: 0,
+              extraAllowanceCost: 0,
+              fixedSalaryCost: 0,
+              assistantCost: 0,
+              trainingManagerCost: 0,
+              operatingCost: otherCost,
+            },
+          ];
+        }
+
+        return [];
+      },
+    );
+
+    prisma.costExtend.findMany.mockResolvedValue([
+      {
+        id: 'cost-1',
+        description: 'Thue van phong',
+        category: 'van-hanh',
+        amount: otherCost,
+        date: new Date('2026-08-02T00:00:00.000Z'),
+        month: '2026-08',
+      },
+    ]);
+  }
+
+  it('returns per-student revenue items for month mode', async () => {
+    mockFinancialExportQueries();
+
+    const result = await service.getAdminFinancialExport({
+      month: '08',
+      year: '2026',
+    });
+
+    expect(result.period).toEqual(
+      expect.objectContaining({
+        month: '08',
+        year: '2026',
+        viewMode: 'month',
+      }),
+    );
+    expect(result.summary).toEqual(
+      expect.objectContaining({
+        topup: 2_000_000,
+        revenue: 1_200_000,
+        personnelCost: 400_000,
+        otherCost: 100_000,
+        profit: 700_000,
+        totalIn: 1_500_000,
+      }),
+    );
+    expect(result.revenueItems).toEqual([
+      {
+        studentId: 'st-1',
+        studentName: 'Nguyen Van A',
+        className: 'VIP-01',
+        amount: 1_200_000,
+        attendanceCount: 4,
+      },
+    ]);
+    expect(result.personnelItems[0]).toEqual(
+      expect.objectContaining({
+        staffId: 'staff-1',
+        staffName: 'Gia su B',
+        amount: 400_000,
+      }),
+    );
+    expect(result.otherCostItems).toEqual([
+      expect.objectContaining({
+        id: 'cost-1',
+        label: 'Thue van phong',
+        amount: 100_000,
+      }),
+    ]);
+    expect(result.meta.revenueTruncated).toBe(false);
+  });
+
+  it('includes closed-month fixed salary in personnel cost totals', async () => {
+    mockFinancialExportQueries({
+      personnelCost: 400_000,
+    });
+    prisma.$queryRaw.mockImplementation(
+      async (query: { strings: string[] }) => {
+        const sql = query.strings.join('');
+        if (sql.includes("wallet_transactions_history.type::text = 'topup'")) {
+          return [{ totalAmount: 2_000_000 }];
+        }
+        if (sql.includes('STRING_AGG(DISTINCT classes.name')) {
+          return [
+            {
+              studentId: 'st-1',
+              studentName: 'Nguyen Van A',
+              className: 'VIP-01',
+              totalAmount: 1_200_000,
+              attendanceCount: 4,
+            },
+          ];
+        }
+        if (sql.includes('active_staff AS')) {
+          return [
+            {
+              staffId: 'staff-1',
+              staffName: 'Gia su B',
+              sessionAmount: 400_000,
+              bonusAmount: 0,
+              customerCareAmount: 0,
+              lessonAmount: 0,
+              extraAllowanceAmount: 0,
+              fixedSalaryAmount: 150_000,
+              assistantAmount: 0,
+              trainingManagerAmount: 0,
+              totalCost: 550_000,
+            },
+          ];
+        }
+        if (sql.includes('generate_series') || sql.includes('month_series')) {
+          return [
+            {
+              monthStart: new Date('2026-08-01T00:00:00.000Z'),
+              revenue: 1_200_000,
+              teacherCost: 400_000,
+              customerCareCost: 0,
+              lessonCost: 0,
+              bonusCost: 0,
+              extraAllowanceCost: 0,
+              fixedSalaryCost: 150_000,
+              assistantCost: 0,
+              trainingManagerCost: 0,
+              operatingCost: 100_000,
+            },
+          ];
+        }
+        return [];
+      },
+    );
+
+    const result = await service.getAdminFinancialExport({
+      month: '08',
+      year: '2026',
+    });
+
+    expect(result.summary.personnelCost).toBe(550_000);
+    expect(result.summary.profit).toBe(550_000);
+    expect(result.personnelItems[0]?.note).toContain('Lương cứng');
+  });
+
+  it('returns per-student revenue items for date-range mode', async () => {
+    mockFinancialExportQueries({
+      revenueRows: [
+        {
+          studentId: 'st-2',
+          studentName: 'Tran Thi C',
+          className: 'BASIC-02',
+          totalAmount: 900_000,
+          attendanceCount: 3,
+        },
+      ],
+      revenueTotal: 900_000,
+      personnelCost: 200_000,
+      otherCost: 50_000,
+      topupTotal: 1_000_000,
+    });
+
+    const result = await service.getAdminFinancialExport({
+      dateFrom: '2026-01-01',
+      dateTo: '2026-08-03',
+    });
+
+    expect(result.period).toEqual(
+      expect.objectContaining({
+        viewMode: 'range',
+        dateFrom: '2026-01-01',
+        dateTo: '2026-08-03',
+      }),
+    );
+    expect(result.revenueItems).toEqual([
+      {
+        studentId: 'st-2',
+        studentName: 'Tran Thi C',
+        className: 'BASIC-02',
+        amount: 900_000,
+        attendanceCount: 3,
+      },
+    ]);
+    expect(result.summary.revenue).toBe(900_000);
+    expect(result.summary.profit).toBe(650_000);
+    expect(result.summary.totalIn).toBe(750_000);
+  });
+
+  it('marks revenueTruncated when more student rows than limit', async () => {
+    mockFinancialExportQueries({
+      revenueRows: [
+        {
+          studentId: 'st-1',
+          studentName: 'A',
+          className: 'C1',
+          totalAmount: 100,
+          attendanceCount: 1,
+        },
+        {
+          studentId: 'st-2',
+          studentName: 'B',
+          className: 'C2',
+          totalAmount: 90,
+          attendanceCount: 1,
+        },
+      ],
+    });
+
+    const result = await service.getAdminFinancialExport({
+      month: '08',
+      year: '2026',
+      limit: 1,
+    });
+
+    expect(result.revenueItems).toHaveLength(1);
+    expect(result.meta.revenueItemCount).toBe(1);
+    expect(result.meta.revenueTruncated).toBe(true);
   });
 });

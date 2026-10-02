@@ -8,6 +8,10 @@
       {
         "include": "mail/assets/**/*",
         "watchAssets": true
+      },
+      {
+        "include": "storage/assets/**/*",
+        "watchAssets": true
       }
     ]
   },

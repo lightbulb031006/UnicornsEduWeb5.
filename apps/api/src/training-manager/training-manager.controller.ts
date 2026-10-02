@@ -14,7 +14,10 @@ import {
   type JwtPayload,
 } from 'src/auth/decorators/current-user.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
-import { ParseClassIdPipe, ParseStaffIdPipe } from 'src/common/pipes/parse-entity-id.pipe';
+import {
+  ParseClassIdPipe,
+  ParseStaffIdPipe,
+} from 'src/common/pipes/parse-entity-id.pipe';
 import type {
   TrainingManagerBulkPaymentStatusUpdateDto,
   TrainingManagerBulkPaymentStatusUpdateResultDto,
@@ -30,10 +33,14 @@ import { TrainingManagerService } from './training-manager.service';
 @ApiCookieAuth('access_token')
 @Roles(UserRole.staff, UserRole.admin)
 export class TrainingManagerController {
-  constructor(private readonly trainingManagerService: TrainingManagerService) {}
+  constructor(
+    private readonly trainingManagerService: TrainingManagerService,
+  ) {}
 
   @Get('staff/training-manager-options')
-  @ApiOperation({ summary: 'Search active training staff for class manager assignment' })
+  @ApiOperation({
+    summary: 'Search active training staff for class manager assignment',
+  })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'Training staff options.' })
@@ -58,14 +65,20 @@ export class TrainingManagerController {
     @Param('id', new ParseClassIdPipe()) classId: string,
     @Body() body: UpdateClassTrainingManagerDto,
   ) {
-    return this.trainingManagerService.updateClassTrainingManager(classId, body, {
-      userId: user.id,
-      roleType: user.roleType,
-    });
+    return this.trainingManagerService.updateClassTrainingManager(
+      classId,
+      body,
+      {
+        userId: user.id,
+        roleType: user.roleType,
+      },
+    );
   }
 
   @Get('training-manager/staff/:staffId/managed-classes')
-  @ApiOperation({ summary: 'List classes managed by training staff with totals' })
+  @ApiOperation({
+    summary: 'List classes managed by training staff with totals',
+  })
   @ApiParam({ name: 'staffId', description: 'Training staff ID' })
   @ApiQuery({ name: 'month', required: true, type: String })
   @ApiResponse({ status: 200, description: 'Managed class list with summary.' })
@@ -109,7 +122,9 @@ export class TrainingManagerController {
   }
 
   @Patch('training-manager/staff/:staffId/payment-status/bulk')
-  @ApiOperation({ summary: 'Bulk update training manager session payment status' })
+  @ApiOperation({
+    summary: 'Bulk update training manager session payment status',
+  })
   @ApiParam({ name: 'staffId', description: 'Training staff ID' })
   @ApiBody({ description: 'Session ids and payment status' })
   @ApiResponse({ status: 200, description: 'Bulk update result.' })

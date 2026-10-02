@@ -267,9 +267,11 @@ export class CostService {
         };
       }
 
+      // Set: tra cứu O(1) thay vì Array.includes quét lại cả mảng mỗi phần tử.
+      const changedCostIdSet = new Set(changedCostIds);
       const beforeValueByCostId = new Map(
         existingCosts
-          .filter((cost) => changedCostIds.includes(cost.id))
+          .filter((cost) => changedCostIdSet.has(cost.id))
           .map((cost) => [cost.id, cost]),
       );
 

@@ -1,15 +1,19 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { DateInput } from "@/components/ui/DateInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  downloadAdminDashboardFinancialExportExcel,
+  downloadAdminDashboardFinancialExportPdf,
   getAdminDashboard,
   getAdminDashboardFinancialDetail,
+  getAdminStudentChurnDetails,
 } from "@/lib/apis/dashboard.api";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import { formatMonthPartsLabel } from "@/lib/month-format";
@@ -20,24 +24,30 @@ import {
 import AlertGroupCard from "@/components/admin/dashboard/AlertGroupCard";
 import DashboardAlertListDialog from "@/components/admin/dashboard/DashboardAlertListDialog";
 import {
-  AdminDashboardFinancialDetailSkeleton,
   AdminDashboardFinancialReportSkeleton,
   AdminDashboardRefreshStrip,
   AdminDashboardSkeleton,
+  CustomerSourceSectionSkeleton,
 } from "@/components/admin/dashboard/AdminDashboardSkeleton";
+import { DashboardIcon } from "@/components/admin/dashboard/DashboardIcon";
+import { CustomerSourceSection } from "@/components/admin/dashboard/CustomerSourceSection";
+import { ActiveClassBreakdownDialog } from "@/components/admin/dashboard/ActiveClassBreakdownDialog";
+import { FinancialDetailModal } from "@/components/admin/dashboard/FinancialDetailModal";
 import type { AlertGroupTone } from "@/components/admin/dashboard/alert-group-styles";
 import type {
   AdminDashboardActionAlert,
   AdminDashboardActionAlertGroup,
+  AdminDashboardCustomerSourceRow,
   AdminDashboardDto,
-  AdminDashboardFinancialDetail,
   AdminDashboardFinancialDetailRowKey,
-  AdminDashboardFinancialDetailSource,
+  AdminDashboardStudentChurnType,
   AdminDashboardSummary,
 } from "@/dtos/dashboard.dto";
+import { toast } from "sonner";
+import { formatVnInteger } from "@/lib/formatters";
 
 function formatCurrency(value: number) {
-  return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(value)} đ`;
+  return `${formatVnInteger(value)} đ`;
 }
 
 function getErrorMessage(error: unknown) {
@@ -53,14 +63,6 @@ function getErrorMessage(error: unknown) {
     return error.message;
   }
   return "Không thể tải dashboard từ dữ liệu thật.";
-}
-
-function DashboardIcon({ path }: { path: string }) {
-  return (
-    <svg className="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d={path} />
-    </svg>
-  );
 }
 
 function KpiCard({
@@ -128,131 +130,41 @@ function QuickViewCard({
   );
 }
 
-function formatFinancialSourceAmount(source: AdminDashboardFinancialDetailSource) {
-  if (source.tone === "negative" && source.amount !== 0) {
-    return `- ${formatCurrency(source.amount)}`;
-  }
 
-  if (source.tone === "positive" && source.amount !== 0) {
-    return `+ ${formatCurrency(source.amount)}`;
-  }
-
-  return formatCurrency(source.amount);
+function formatChurnDate(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("vi-VN");
 }
 
-function getFinancialSourceAccentClasses(tone: AdminDashboardFinancialDetailSource["tone"]) {
-  if (tone === "positive") {
-    return {
-      card: "border-success/25 bg-success/5",
-      value: "text-success",
-    };
-  }
-
-  if (tone === "negative") {
-    return {
-      card: "border-error/20 bg-error/5",
-      value: "text-error",
-    };
-  }
-
-  return {
-    card: "border-border-default bg-bg-secondary/35",
-    value: "text-text-primary",
-  };
-}
-
-function getAmountForSource(
-  item: { amount: number; note: string | null; secondaryLabel?: string | null },
-  sourceKey: string,
-  rowKey: string
-): { amount: number; note: string | null } {
-  // If rowKey is pending-payroll or personnel-cost, they use the note-prefix-split mapping:
-  if (rowKey === "pending-payroll" || rowKey === "personnel-cost") {
-    if (!item.note) return { amount: 0, note: null };
-    const prefixMap: Record<string, string> = {
-      "pending-session": "Buổi dạy",
-      "pending-customer-care": "CSKH",
-      "pending-lesson": "Giáo án",
-      "pending-bonus": "Bonus",
-      "pending-extra": "Trợ cấp",
-      "pending-assistant": "Trợ lí",
-      "pending-training-manager": "QL lớp",
-      "teacher-cost": "Dạy",
-      "customer-care-cost": "CSKH",
-      "lesson-cost": "Giáo án",
-      "bonus-cost": "Bonus",
-      "extra-allowance-cost": "Trợ cấp khác",
-      "assistant-cost": "Trợ lí",
-      "training-manager-cost": "QL lớp",
-    };
-    const prefix = prefixMap[sourceKey];
-    if (!prefix) return { amount: item.amount, note: item.note };
-
-    const parts = item.note.split(" • ");
-    const matchingPart = parts.find((p) => p.startsWith(prefix));
-    if (!matchingPart) return { amount: 0, note: null };
-
-    const digitStr = matchingPart.replace(/[^\d]/g, "");
-    const amount = parseInt(digitStr, 10) || 0;
-    // Keep sign of original item amount
-    const signedAmount = item.amount < 0 ? -amount : amount;
-    return { amount: signedAmount, note: matchingPart };
-  }
-
-  // If rowKey is other-cost, profit, or total-in, they filter by secondaryLabel:
-  if (rowKey === "other-cost" || rowKey === "profit" || rowKey === "total-in") {
-    const labelMap: Record<string, string> = {
-      "operating-cost": "Chi phí vận hành",
-      "extra-allowance-cost": "Trợ cấp khác",
-      "assistant-cost": "Trợ cấp trợ lí",
-      "training-manager-cost": "Trợ cấp quản lý lớp",
-      "profit-revenue": "Học phí đã học",
-      "profit-personnel": "Chi phí nhân sự",
-      "profit-other": "Chi phí khác",
-      "total-in-topup": "Dòng tiền vào",
-      "total-in-personnel": "Chi phí nhân sự",
-      "total-in-other": "Chi phí khác",
-    };
-    const targetLabel = labelMap[sourceKey];
-    if (!targetLabel) return { amount: item.amount, note: item.note };
-
-    if (item.secondaryLabel === targetLabel) {
-      return { amount: item.amount, note: item.note };
-    }
-    return { amount: 0, note: null };
-  }
-
-  // Default: no filtering
-  return { amount: item.amount, note: item.note };
-}
-
-function FinancialDetailModal({
-  rowLabel,
-  detail,
-  isLoading,
-  error,
+function StudentChurnDetailModal({
+  periodLabel,
+  newCount,
+  droppedCount,
+  activeCount,
+  activeTab,
+  onChangeTab,
   onClose,
+  month,
+  year,
 }: {
-  rowLabel: string;
-  detail?: AdminDashboardFinancialDetail;
-  isLoading: boolean;
-  error: unknown;
+  periodLabel: string;
+  newCount: number;
+  droppedCount: number;
+  activeCount: number;
+  activeTab: AdminDashboardStudentChurnType;
+  onChangeTab: (tab: AdminDashboardStudentChurnType) => void;
   onClose: () => void;
+  month: string;
+  year: string;
 }) {
   const dialogTitleId = useId();
-  const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
 
-  const filteredItems = useMemo(() => {
-    if (!detail) return [];
-    if (!selectedSourceKey) return detail.items;
-
-    return detail.items
-      .map((item) => {
-        const { amount, note } = getAmountForSource(item, selectedSourceKey, detail.rowKey);
-        return { ...item, amount, note };
-      })
-      .filter((item) => item.amount !== 0);
-  }, [detail, selectedSourceKey]);
+  const churnQuery = useQuery({
+    queryKey: ["dashboard", "admin", "student-churn-details", activeTab, month, year],
+    queryFn: () => getAdminStudentChurnDetails({ type: activeTab, month, year, limit: 500 }),
+    staleTime: 20_000,
+  });
 
   return (
     <>
@@ -262,7 +174,7 @@ function FinancialDetailModal({
         onClick={onClose}
       />
       <div className="fixed inset-0 z-50 p-3 sm:p-6">
-        <div className="mx-auto flex h-full w-full items-center max-w-6xl">
+        <div className="mx-auto flex h-full w-full items-center max-w-3xl">
           <div
             role="dialog"
             aria-modal="true"
@@ -272,17 +184,15 @@ function FinancialDetailModal({
             <div className="flex items-start justify-between gap-4 border-b border-border-default px-5 py-4">
               <div>
                 <h2 id={dialogTitleId} className="text-xl font-semibold text-balance text-text-primary">
-                  {detail?.title ?? `Chi tiết ${rowLabel}`}
+                  Biến động học sinh
                 </h2>
-                <p className="mt-1 text-sm text-text-secondary">
-                  {detail?.description ?? "Đang tải chi tiết số liệu từ backend…"}
-                </p>
+                <p className="mt-1 text-sm text-text-secondary">{periodLabel}</p>
               </div>
               <button
                 type="button"
                 onClick={onClose}
                 className="rounded-lg p-2 text-text-muted transition-colors hover:bg-bg-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                aria-label={`Đóng popup ${rowLabel}`}
+                aria-label="Đóng popup biến động học sinh"
               >
                 <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18 18 6M6 6l12 12" />
@@ -290,165 +200,115 @@ function FinancialDetailModal({
               </button>
             </div>
 
-            <div className="max-h-[72vh] overflow-auto px-4 py-4 sm:px-5">
-              {isLoading ? (
-                <AdminDashboardFinancialDetailSkeleton />
-              ) : error ? (
+            <div className="flex gap-2 border-b border-border-default px-5 py-3">
+              <button
+                type="button"
+                onClick={() => onChangeTab("new")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${
+                  activeTab === "new"
+                    ? "bg-success text-text-inverse"
+                    : "border border-border-default bg-bg-surface text-text-secondary hover:bg-bg-secondary"
+                }`}
+              >
+                Học sinh mới (+{newCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeTab("dropped")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${
+                  activeTab === "dropped"
+                    ? "bg-warning text-text-inverse"
+                    : "border border-border-default bg-bg-surface text-text-secondary hover:bg-bg-secondary"
+                }`}
+              >
+                Học sinh nghỉ (-{droppedCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => onChangeTab("active")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${
+                  activeTab === "active"
+                    ? "bg-primary text-text-inverse"
+                    : "border border-border-default bg-bg-surface text-text-secondary hover:bg-bg-secondary"
+                }`}
+              >
+                Học sinh hiện tại ({activeCount})
+              </button>
+            </div>
+
+            <div className="max-h-[65vh] overflow-auto px-4 py-4 sm:px-5">
+              {churnQuery.isLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="h-14 animate-pulse rounded-xl bg-bg-secondary/40" />
+                  ))}
+                </div>
+              ) : churnQuery.isError ? (
                 <Alert variant="destructive">
                   <DashboardIcon path="M12 9v4m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />
-                  <AlertTitle>Không tải được chi tiết số liệu</AlertTitle>
-                  <AlertDescription>{getErrorMessage(error)}</AlertDescription>
+                  <AlertTitle>Không tải được danh sách học sinh</AlertTitle>
+                  <AlertDescription>{getErrorMessage(churnQuery.error)}</AlertDescription>
                 </Alert>
-              ) : detail ? (
-                <div className="space-y-4">
-                  <section className="rounded-2xl border border-primary/15 bg-primary/8 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/80">
-                      Tổng hợp
-                    </p>
-                    <p className="mt-2 text-3xl font-semibold tabular-nums text-text-primary">
-                      {formatCurrency(detail.amount)}
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-text-secondary">
-                      {detail.description}
-                    </p>
-                  </section>
+              ) : churnQuery.data && churnQuery.data.length > 0 ? (
+                <>
+                  <div className="space-y-3 md:hidden">
+                    {churnQuery.data.map((item) => (
+                      <article
+                        key={item.studentId}
+                        className="rounded-xl border border-border-default bg-bg-surface p-4 shadow-sm"
+                      >
+                        <p className="text-sm font-semibold text-text-primary">{item.studentName}</p>
+                        <p className="mt-1 text-sm text-text-secondary">{item.className || "—"}</p>
+                        {activeTab !== "active" ? (
+                          <p className="mt-1 text-xs text-text-muted">
+                            {activeTab === "new" ? "Ngày vào học: " : "Ngày nghỉ: "}
+                            {formatChurnDate(item.eventDate)}
+                          </p>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
 
-                  {detail.sources.length > 0 ? (
-                    <section className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <DashboardIcon path="M3 12h18M12 3v18" />
-                        <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-text-primary">
-                          Nguồn cộng trừ (Nhấp thẻ để lọc chi tiết)
-                        </h3>
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {detail.sources.map((source) => {
-                          const isSelected = selectedSourceKey === source.key;
-                          const accent = getFinancialSourceAccentClasses(source.tone);
-                          
-                          // Interactive style bindings for selection
-                          const interactiveBorderClass = isSelected
-                            ? source.tone === "positive"
-                              ? "ring-2 ring-success border-success bg-success/10"
-                              : source.tone === "negative"
-                              ? "ring-2 ring-error border-error bg-error/10"
-                              : "ring-2 ring-primary border-primary bg-primary/5"
-                            : "hover:border-border-default/80 hover:bg-bg-secondary/50 cursor-pointer";
-
-                          return (
-                            <button
-                              key={source.key}
-                              type="button"
-                              onClick={() => setSelectedSourceKey(prev => prev === source.key ? null : source.key)}
-                              className={`rounded-xl border p-4 shadow-sm text-left transition-all duration-200 hover:scale-[1.01] active:scale-[0.995] select-none ${accent.card} ${interactiveBorderClass} w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus`}
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <p className="text-sm font-semibold text-text-primary">{source.label}</p>
-                                {isSelected && (
-                                  <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary animate-pulse">
-                                    Đang lọc
-                                  </span>
-                                )}
-                              </div>
-                              <p className={`mt-2 text-xl font-semibold tabular-nums ${accent.value}`}>
-                                {formatFinancialSourceAmount(source)}
-                              </p>
-                              <p className="mt-2 text-sm leading-6 text-text-secondary">{source.note}</p>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ) : null}
-
-                  <section className="space-y-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        <DashboardIcon path="M4 7h16M4 12h16M4 17h10" />
-                        <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-text-primary">
-                          Chi tiết đóng góp
-                        </h3>
-                      </div>
-                      {selectedSourceKey && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-text-secondary">
-                            Đang lọc theo: <span className="font-semibold text-primary">{detail.sources.find(s => s.key === selectedSourceKey)?.label}</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedSourceKey(null)}
-                            className="text-xs font-semibold text-primary hover:text-primary-hover hover:underline"
-                          >
-                            Xoá bộ lọc
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {filteredItems.length > 0 ? (
-                      <>
-                        <div className="space-y-3 md:hidden">
-                          {filteredItems.map((item) => (
-                            <article key={item.id} className="rounded-xl border border-border-default bg-bg-surface p-4 shadow-sm">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-sm font-semibold text-text-primary">{item.label}</p>
-                                  {item.secondaryLabel ? (
-                                    <p className="mt-1 text-sm text-text-secondary">{item.secondaryLabel}</p>
-                                  ) : null}
-                                </div>
-                                <p className="text-right text-sm font-semibold tabular-nums text-text-primary">
-                                  {formatCurrency(item.amount)}
-                                </p>
-                              </div>
-                              {item.note ? (
-                                <p className="mt-3 border-t border-border-default pt-3 text-sm leading-6 text-text-secondary">
-                                  {item.note}
-                                </p>
-                              ) : null}
-                            </article>
-                          ))}
-                        </div>
-
-                        <div className="hidden overflow-x-auto rounded-xl border border-border-default md:block">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="border-border-default hover:bg-transparent">
-                                <TableHead className="min-w-[220px]">Nội dung</TableHead>
-                                <TableHead className="min-w-[180px]">Nguồn</TableHead>
-                                <TableHead className="min-w-[180px] text-right">Giá trị</TableHead>
-                                <TableHead className="min-w-[260px]">Ghi chú</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {filteredItems.map((item) => (
-                                <TableRow key={item.id} className="border-border-default/80">
-                                  <TableCell className="align-top font-medium text-text-primary">{item.label}</TableCell>
-                                  <TableCell className="align-top text-text-secondary">
-                                    {item.secondaryLabel ?? "—"}
-                                  </TableCell>
-                                  <TableCell className="align-top text-right font-semibold tabular-nums text-text-primary">
-                                    {formatCurrency(item.amount)}
-                                  </TableCell>
-                                  <TableCell className="align-top text-text-secondary">
-                                    {item.note ?? "—"}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary/35 px-4 py-6 text-sm text-text-secondary">
-                        {selectedSourceKey
-                          ? "Không có khoản đóng góp nào phù hợp với bộ lọc."
-                          : detail.emptyState}
-                      </div>
-                    )}
-                  </section>
+                  <div className="hidden overflow-x-auto rounded-xl border border-border-default md:block">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-border-default hover:bg-transparent">
+                          <TableHead className="min-w-[220px]">Học sinh</TableHead>
+                          <TableHead className="min-w-[200px]">Lớp</TableHead>
+                          {activeTab !== "active" ? (
+                            <TableHead className="min-w-[140px]">
+                              {activeTab === "new" ? "Ngày vào học" : "Ngày nghỉ"}
+                            </TableHead>
+                          ) : null}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {churnQuery.data.map((item) => (
+                          <TableRow key={item.studentId} className="border-border-default/80">
+                            <TableCell className="align-top font-medium text-text-primary">
+                              {item.studentName}
+                            </TableCell>
+                            <TableCell className="align-top text-text-secondary">
+                              {item.className || "—"}
+                            </TableCell>
+                            {activeTab !== "active" ? (
+                              <TableCell className="align-top text-text-secondary">
+                                {formatChurnDate(item.eventDate)}
+                              </TableCell>
+                            ) : null}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary/35 px-4 py-6 text-sm text-text-secondary">
+                  {activeTab === "active"
+                    ? "Không có học sinh đang học."
+                    : "Không có học sinh nào trong kỳ đang chọn."}
                 </div>
-              ) : null}
+              )}
             </div>
           </div>
         </div>
@@ -456,7 +316,6 @@ function FinancialDetailModal({
     </>
   );
 }
-
 
 function stepMonth(month: string, year: string, delta: number) {
   const d = new Date(Number(year), Number(month) - 1 + delta, 1);
@@ -483,6 +342,7 @@ function getPersonnelCostFromBreakdown(dashboard: AdminDashboardDto) {
     getBreakdownAmount(dashboard, "lessonCost") +
     getBreakdownAmount(dashboard, "bonusCost") +
     getBreakdownAmount(dashboard, "extraAllowanceCost") +
+    getBreakdownAmount(dashboard, "fixedSalaryCost") +
     getBreakdownAmount(dashboard, "assistantCost") +
     getBreakdownAmount(dashboard, "trainingManagerCost")
   );
@@ -497,30 +357,15 @@ function formatPendingPayrollNote(
     lessonAmount: 0,
     bonusAmount: 0,
     extraAllowanceAmount: 0,
+    fixedSalaryAmount: 0,
     assistantAmount: 0,
     trainingManagerAmount: 0,
   };
-  return `Gia sư: ${formatCurrency(b.sessionAmount)} - Giáo án: ${formatCurrency(b.lessonAmount)} - SALE&CSKH: ${formatCurrency(b.customerCareAmount)} - Thưởng: ${formatCurrency(b.bonusAmount)} - Trợ cấp khác: ${formatCurrency(b.extraAllowanceAmount)} - Trợ lí: ${formatCurrency(b.assistantAmount)} - QL lớp: ${formatCurrency(b.trainingManagerAmount)} · Mọi khoản pending/unpaid mọi thời điểm (không lọc theo kỳ).`;
+  return `Gia sư: ${formatCurrency(b.sessionAmount)} - Giáo án: ${formatCurrency(b.lessonAmount)} - SALE&CSKH: ${formatCurrency(b.customerCareAmount)} - Thưởng: ${formatCurrency(b.bonusAmount)} - Trợ cấp khác: ${formatCurrency(b.extraAllowanceAmount)} - Lương cứng: ${formatCurrency(b.fixedSalaryAmount ?? 0)} - Trợ lí: ${formatCurrency(b.assistantAmount)} - QL lớp: ${formatCurrency(b.trainingManagerAmount)} · Mọi khoản pending/unpaid mọi thời điểm (không lọc theo kỳ).`;
 }
 
 function getOtherCostFromBreakdown(dashboard: AdminDashboardDto) {
   return getBreakdownAmount(dashboard, "operatingCost");
-}
-
-function exportCsv(filename: string, rows: Array<{ label: string; value: string; note: string }>) {
-  const header = "Danh mục,Giá trị,Ghi chú\n";
-  const body = rows
-    .map((row) =>
-      `"${row.label.replace(/"/g, '""')}","${row.value.replace(/"/g, '""')}","${row.note.replace(/"/g, '""')}"`,
-    )
-    .join("\n");
-  const blob = new Blob([header + body], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
 }
 
 type QuickViewKey = "finance" | "ops" | "students";
@@ -622,6 +467,9 @@ export default function AdminDashboardTabPage() {
   const [year, setYear] = useState(defaultPeriod.year);
   const [quickView, setQuickView] = useState<QuickViewKey>("finance");
   const [selectedFinancialRowKey, setSelectedFinancialRowKey] = useState<AdminDashboardFinancialDetailRowKey | null>(null);
+  const [selectedCustomerSourceKey, setSelectedCustomerSourceKey] = useState<AdminDashboardCustomerSourceRow["key"] | null>(null);
+  const [studentChurnTab, setStudentChurnTab] = useState<AdminDashboardStudentChurnType | null>(null);
+  const [classBreakdownOpen, setClassBreakdownOpen] = useState(false);
   const [openAlertGroup, setOpenAlertGroup] = useState<{
     group: AdminDashboardActionAlertGroup;
     title: string;
@@ -672,38 +520,88 @@ export default function AdminDashboardTabPage() {
 
   const financialDetailQuery = useQuery({
     queryKey: [
-      "dashboard", "admin", "financial-detail", selectedFinancialRowKey,
-      isRangeMode && selectedFinancialRowKey && !SNAPSHOT_FINANCIAL_ROW_KEYS.has(selectedFinancialRowKey)
+      "dashboard", "admin", "financial-detail", selectedFinancialRowKey, selectedCustomerSourceKey,
+      isRangeMode && (selectedCustomerSourceKey != null || (selectedFinancialRowKey != null && !SNAPSHOT_FINANCIAL_ROW_KEYS.has(selectedFinancialRowKey)))
         ? dateFrom
         : year,
-      isRangeMode && selectedFinancialRowKey && !SNAPSHOT_FINANCIAL_ROW_KEYS.has(selectedFinancialRowKey)
+      isRangeMode && (selectedCustomerSourceKey != null || (selectedFinancialRowKey != null && !SNAPSHOT_FINANCIAL_ROW_KEYS.has(selectedFinancialRowKey)))
         ? dateTo
         : month,
     ],
     queryFn: () => {
+      const rowKey = selectedCustomerSourceKey ? "customer-source" as const : selectedFinancialRowKey!;
       const useRangeDetail =
         isRangeMode &&
-        selectedFinancialRowKey != null &&
-        !SNAPSHOT_FINANCIAL_ROW_KEYS.has(selectedFinancialRowKey);
+        (selectedCustomerSourceKey != null ||
+          (selectedFinancialRowKey != null && !SNAPSHOT_FINANCIAL_ROW_KEYS.has(selectedFinancialRowKey)));
 
       if (useRangeDetail) {
         return getAdminDashboardFinancialDetail({
-          rowKey: selectedFinancialRowKey!,
+          rowKey,
           dateFrom,
           dateTo,
           limit: 500,
+          ...(selectedCustomerSourceKey ? { customerSource: selectedCustomerSourceKey } : {}),
         });
       }
 
       return getAdminDashboardFinancialDetail({
-        rowKey: selectedFinancialRowKey!,
+        rowKey,
         month,
         year,
         limit: 500,
+        ...(selectedCustomerSourceKey ? { customerSource: selectedCustomerSourceKey } : {}),
       });
     },
-    enabled: fullProfileQuery.isSuccess && !isAssistantStaff && selectedFinancialRowKey != null,
+    enabled: fullProfileQuery.isSuccess && !isAssistantStaff && (selectedFinancialRowKey != null || selectedCustomerSourceKey != null),
     staleTime: 20_000,
+  });
+
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportFinancialPdfMutation = useMutation({
+    mutationFn: () =>
+      downloadAdminDashboardFinancialExportPdf(
+        isRangeMode ? { dateFrom, dateTo } : { month, year },
+      ),
+    onMutate: () => ({ toastId: toast.loading("Đang chuẩn bị báo cáo PDF…") }),
+    onSuccess: ({ blob, filename }, _vars, context) => {
+      triggerBlobDownload(blob, filename);
+      toast.success("Đã tải báo cáo PDF.", { id: context?.toastId });
+    },
+    onError: (error, _vars, context) => {
+      const message =
+        error instanceof Error ? error.message : "Không xuất được báo cáo PDF.";
+      toast.error(message, { id: context?.toastId });
+    },
+  });
+
+  const exportFinancialExcelMutation = useMutation({
+    mutationFn: () =>
+      downloadAdminDashboardFinancialExportExcel(
+        isRangeMode ? { dateFrom, dateTo } : { month, year },
+      ),
+    onMutate: () => ({ toastId: toast.loading("Đang chuẩn bị báo cáo Excel…") }),
+    onSuccess: ({ blob, filename }, _vars, context) => {
+      triggerBlobDownload(blob, filename);
+      toast.success("Đã tải báo cáo Excel.", { id: context?.toastId });
+    },
+    onError: (error, _vars, context) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Không xuất được báo cáo Excel.";
+      toast.error(message, { id: context?.toastId });
+    },
   });
 
   if (fullProfileQuery.isLoading) {
@@ -841,11 +739,6 @@ export default function AdminDashboardTabPage() {
     },
   ];
 
-  const financialCsvRows = financialSummaryRows.map((row) => ({
-    label: row.label,
-    value: formatCurrency(row.value),
-    note: row.note,
-  }));
   const selectedFinancialRow = selectedFinancialRowKey
     ? financialSummaryRows.find((row) => row.key === selectedFinancialRowKey) ?? null
     : null;
@@ -884,7 +777,7 @@ export default function AdminDashboardTabPage() {
     },
     {
       group: "class",
-      title: `Lớp chưa báo cáo lần ${dashboard.summary.currentSurveyRound}`,
+      title: "Lớp chưa báo cáo khảo sát",
       alerts: classAlerts,
       totalCount: dashboard.summary.classAlertCount,
       tone: "class",
@@ -911,6 +804,7 @@ export default function AdminDashboardTabPage() {
   };
 
   const openFinancialDetail = (rowKey: AdminDashboardFinancialDetailRowKey) => {
+    setSelectedCustomerSourceKey(null);
     setSelectedFinancialRowKey(rowKey);
   };
 
@@ -1069,19 +963,33 @@ export default function AdminDashboardTabPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => window.print()}
+              <Link
+                href={buildAdminLikePath(routeBase, "dashboard/statistics")}
                 className="inline-flex min-h-10 items-center rounded-md border border-border-default bg-bg-surface px-3 text-sm font-medium text-text-primary transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
               >
-                Xuất PDF
+                Thống kê theo tháng
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  if (exportFinancialPdfMutation.isPending) return;
+                  exportFinancialPdfMutation.mutate();
+                }}
+                disabled={exportFinancialPdfMutation.isPending}
+                className="inline-flex min-h-10 items-center rounded-md border border-border-default bg-bg-surface px-3 text-sm font-medium text-text-primary transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {exportFinancialPdfMutation.isPending ? "Đang xuất…" : "Xuất PDF"}
               </button>
               <button
                 type="button"
-                onClick={() => exportCsv(isRangeMode ? `dashboard-${dateFrom}-${dateTo}.csv` : `dashboard-${year}-${month}.csv`, financialCsvRows)}
-                className="inline-flex min-h-10 items-center rounded-md bg-primary px-3 text-sm font-medium text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                onClick={() => {
+                  if (exportFinancialExcelMutation.isPending) return;
+                  exportFinancialExcelMutation.mutate();
+                }}
+                disabled={exportFinancialExcelMutation.isPending}
+                className="inline-flex min-h-10 items-center rounded-md bg-primary px-3 text-sm font-medium text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Xuất Excel
+                {exportFinancialExcelMutation.isPending ? "Đang xuất…" : "Xuất Excel"}
               </button>
             </div>
           </div>
@@ -1102,8 +1010,20 @@ export default function AdminDashboardTabPage() {
             isMonthDashboardRefreshing ? "opacity-70" : ""
           }`}
         >
-          <KpiCard title="Lớp học" value={String(dashboard.summary.activeClasses)} note={`${dashboard.summary.activeClasses} đang hoạt động`} tone="primary" />
-          <KpiCard title="Học sinh" value={String(dashboard.summary.activeStudents)} note={`${dashboard.summary.activeStudents} đang học`} tone="default" />
+          <KpiCard
+            title="Lớp học"
+            value={String(dashboard.summary.activeClasses)}
+            note={`${dashboard.summary.activeClasses} đang hoạt động`}
+            tone="primary"
+            onClick={() => setClassBreakdownOpen(true)}
+          />
+          <KpiCard
+            title="Học sinh"
+            value={String(dashboard.summary.activeStudents)}
+            note={`${dashboard.summary.activeStudents} đang học · +${dashboard.summary.newStudentsThisMonth} mới / -${dashboard.summary.droppedStudentsThisMonth} nghỉ trong kỳ`}
+            tone={dashboard.summary.droppedStudentsThisMonth > 0 ? "warning" : "default"}
+            onClick={() => setStudentChurnTab("new")}
+          />
           <KpiCard
             title="Lợi nhuận tháng"
             value={formatCurrency(periodFinancialDashboard?.summary.monthlyProfit ?? 0)}
@@ -1244,6 +1164,17 @@ export default function AdminDashboardTabPage() {
         </section>
         )}
 
+        {showFinancialReportSkeleton ? <CustomerSourceSectionSkeleton /> : (
+          <CustomerSourceSection
+            rows={periodFinancialDashboard?.customerSources ?? []}
+            dimmed={dimFinancialReport}
+            onOpen={(row) => {
+              setSelectedFinancialRowKey(null);
+              setSelectedCustomerSourceKey(row.key);
+            }}
+          />
+        )}
+
         <section className="rounded-xl border border-border-default bg-bg-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <DashboardIcon path="M12 9v4m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4c-.77-1.33-2.69-1.33-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />
@@ -1315,13 +1246,38 @@ export default function AdminDashboardTabPage() {
               </div>
         </section>
 
-        {selectedFinancialRow ? (
+        {selectedFinancialRow || selectedCustomerSourceKey ? (
           <FinancialDetailModal
-            rowLabel={selectedFinancialRow.label}
+            rowLabel={
+              selectedFinancialRow?.label ??
+              periodFinancialDashboard?.customerSources?.find((row) => row.key === selectedCustomerSourceKey)?.label ??
+              "Nguồn khách"
+            }
             detail={financialDetailQuery.data}
             isLoading={financialDetailQuery.isLoading}
             error={financialDetailQuery.error}
-            onClose={() => setSelectedFinancialRowKey(null)}
+            onClose={() => {
+              setSelectedFinancialRowKey(null);
+              setSelectedCustomerSourceKey(null);
+            }}
+          />
+        ) : null}
+
+        {classBreakdownOpen ? (
+          <ActiveClassBreakdownDialog onClose={() => setClassBreakdownOpen(false)} />
+        ) : null}
+
+        {studentChurnTab ? (
+          <StudentChurnDetailModal
+            periodLabel={dashboard.period.monthLabel}
+            newCount={dashboard.summary.newStudentsThisMonth}
+            droppedCount={dashboard.summary.droppedStudentsThisMonth}
+            activeCount={dashboard.summary.activeStudents}
+            activeTab={studentChurnTab}
+            onChangeTab={setStudentChurnTab}
+            onClose={() => setStudentChurnTab(null)}
+            month={month}
+            year={year}
           />
         ) : null}
 

@@ -87,6 +87,20 @@ export class CalendarService {
   private readonly logger = new Logger(CalendarService.name);
   private readonly GOOGLE_CALENDAR_RESYNC_WRITE_DELAY_MS =
     process.env.NODE_ENV === 'test' ? 0 : 250;
+  // Wall-clock budget for a single resync pass (create/update + delete loops
+  // combined), checked at loop-iteration boundaries only. Worst case adds one
+  // more in-flight call at GOOGLE_CALENDAR_REQUEST_TIMEOUT_MS (20s) on top of
+  // this budget (~65s total), which must stay under Cloudflare's default
+  // 100s gateway timeout.
+  private readonly RESYNC_WALL_CLOCK_BUDGET_MS =
+    process.env.NODE_ENV === 'test' ? 200 : 45000;
+  // Warning codes from resyncClassScheduleWithGoogleCalendarInternal that
+  // represent a real sync failure (not just an informational/harmless note).
+  private readonly RESYNC_HARD_FAILURE_WARNING_CODES = new Set([
+    'recurring_event_delete_failed',
+    'recurring_event_sync_failed',
+    'resync_deadline_exceeded',
+  ]);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -162,6 +176,34 @@ export class CalendarService {
       ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
       ...(entry.deletedAt ? { deletedAt: entry.deletedAt } : {}),
     })) as Prisma.InputJsonValue;
+  }
+
+  private toStoredScheduleEntry(row: {
+    id: string;
+    dayOfWeek: number;
+    from: string;
+    to: string;
+    teacherId?: string | null;
+    googleCalendarEventId?: string | null;
+    meetLink?: string | null;
+    effectiveFrom: Date;
+    effectiveTo?: Date | null;
+  }): StoredClassScheduleEntry {
+    return {
+      id: row.id,
+      dayOfWeek: row.dayOfWeek,
+      from: row.from,
+      to: row.to,
+      teacherId: row.teacherId ?? undefined,
+      googleCalendarEventId: row.googleCalendarEventId ?? undefined,
+      meetLink: row.meetLink ?? undefined,
+      createdAt: row.effectiveFrom.toISOString(),
+      deletedAt: row.effectiveTo ? row.effectiveTo.toISOString() : undefined,
+    };
+  }
+
+  private toDateOnly(dateValue: string): Date {
+    return new Date(`${dateValue}T00:00:00.000Z`);
   }
 
   private parseDateOnly(dateValue: string): Date {
@@ -304,18 +346,10 @@ export class CalendarService {
       throw new BadRequestException('Vui lòng nhập ngày gốc cần học bù.');
     }
 
-    const cls = await this.prisma.class.findUnique({
-      where: { id: classId },
-      select: { schedule: true },
+    const baselineEntry = await this.prisma.classScheduleEntry.findFirst({
+      where: { id: normalizedEntryId, classId },
+      select: { id: true, dayOfWeek: true },
     });
-
-    if (!cls) {
-      throw new NotFoundException('Class not found');
-    }
-
-    const baselineEntry = this.getStoredClassScheduleEntries(cls.schedule).find(
-      (entry) => entry.id === normalizedEntryId,
-    );
 
     if (!baselineEntry) {
       throw new BadRequestException(
@@ -531,9 +565,7 @@ export class CalendarService {
     return {
       status: 'running',
       ...(filters.classId ? { id: filters.classId } : {}),
-      ...(trainingManagerStaffId
-        ? { trainingManagerStaffId }
-        : {}),
+      ...(trainingManagerStaffId ? { trainingManagerStaffId } : {}),
       ...(teacherId
         ? {
             teachers: {
@@ -630,6 +662,7 @@ export class CalendarService {
               };
             };
           };
+          scheduleEntries: true;
         };
       }>
     >,
@@ -644,7 +677,9 @@ export class CalendarService {
     const events: ClassScheduleEventDto[] = [];
 
     for (const cls of classes) {
-      const rawSchedule = this.getStoredClassScheduleEntries(cls.schedule);
+      const rawSchedule = cls.scheduleEntries.map((row) =>
+        this.toStoredScheduleEntry(row),
+      );
 
       for (const entry of rawSchedule) {
         const dayOfWeek = entry.dayOfWeek;
@@ -846,7 +881,7 @@ export class CalendarService {
   private sortCalendarEvents(
     events: ClassScheduleEventDto[],
   ): ClassScheduleEventDto[] {
-    return [...events].sort((a, b) => {
+    return events.toSorted((a, b) => {
       if (a.date !== b.date) {
         return a.date.localeCompare(b.date);
       }
@@ -901,6 +936,7 @@ export class CalendarService {
               },
             },
           },
+          scheduleEntries: true,
         },
       }),
       this.prisma.makeupScheduleEvent.findMany({
@@ -1213,6 +1249,7 @@ export class CalendarService {
             },
           },
         },
+        scheduleEntries: true,
       },
     });
 
@@ -1227,21 +1264,23 @@ export class CalendarService {
   ): Promise<{ success: boolean; data: ClassScheduleEntryDto[] }> {
     const cls = await this.prisma.class.findUnique({
       where: { id: classId },
-      select: { schedule: true },
+      select: { id: true },
     });
     if (!cls) {
       throw new NotFoundException(`Class not found: ${classId}`);
     }
 
-    const entries = this.getStoredClassScheduleEntries(cls.schedule)
-      .filter((entry) => !entry.deletedAt)
-      .map((entry) => ({
-        id: entry.id,
-        dayOfWeek: entry.dayOfWeek ?? 0,
-        from: entry.from ?? '',
-        end: this.normalizeTimeValue(entry.to || entry.end) ?? '',
-        teacherId: entry.teacherId,
-      }));
+    const activeRows = await this.prisma.classScheduleEntry.findMany({
+      where: { classId, effectiveTo: null },
+    });
+
+    const entries = activeRows.map((row) => ({
+      id: row.id,
+      dayOfWeek: row.dayOfWeek,
+      from: row.from,
+      end: this.normalizeTimeValue(row.to) ?? '',
+      teacherId: row.teacherId ?? undefined,
+    }));
 
     return { success: true, data: entries };
   }
@@ -1420,9 +1459,21 @@ export class CalendarService {
     classId: string,
     oldSchedule?: StoredClassScheduleEntry[],
   ): Promise<void> {
-    await this.resyncClassScheduleWithGoogleCalendarInternal(classId, {
-      oldSchedule,
-    });
+    const summary = await this.resyncClassScheduleWithGoogleCalendarInternal(
+      classId,
+      { oldSchedule },
+    );
+
+    const hardFailures = summary.warnings.filter((warning) =>
+      this.RESYNC_HARD_FAILURE_WARNING_CODES.has(warning.code),
+    );
+    if (hardFailures.length > 0) {
+      throw new GoogleCalendarApiError(
+        `Class schedule sync for ${classId} had ${hardFailures.length} failed recurring event operation(s): ${hardFailures
+          .map((warning) => warning.message)
+          .join('; ')}`,
+      );
+    }
   }
 
   async resyncClassScheduleWithGoogleCalendar(
@@ -1491,9 +1542,21 @@ export class CalendarService {
       quotaLimited: false,
       warnings: [],
     };
-    const currentSchedule = this.getStoredClassScheduleEntries(
-      cls.schedule,
-    ).filter((entry) => !entry.deletedAt);
+    const resyncStartedAtMs = Date.now();
+    const isDeadlineExceeded = () =>
+      Date.now() - resyncStartedAtMs > this.RESYNC_WALL_CLOCK_BUDGET_MS;
+    const allScheduleRows = await this.prisma.classScheduleEntry.findMany({
+      where: { classId },
+    });
+    const allStoredScheduleEntries = allScheduleRows.map((row) =>
+      this.toStoredScheduleEntry(row),
+    );
+    const historicalDeletedEntries = allStoredScheduleEntries.filter((entry) =>
+      Boolean(entry.deletedAt),
+    );
+    const currentSchedule = allStoredScheduleEntries.filter(
+      (entry) => !entry.deletedAt,
+    );
     const targetEntryIds = new Set<string>();
     if (scopedTeacherId) {
       for (const entry of currentSchedule) {
@@ -1725,8 +1788,35 @@ export class CalendarService {
       );
     };
 
+    let deadlineExceededMarked = false;
+    const markDeadlineExceeded = () => {
+      if (deadlineExceededMarked) {
+        return;
+      }
+      deadlineExceededMarked = true;
+      summary.warnings.push({
+        code: 'resync_deadline_exceeded',
+        message:
+          'Google Calendar resync exceeded its wall-clock budget. Remaining recurring sync writes were stopped; retry resync later.',
+      });
+      stopRecurringWrites = true;
+      this.logger.error(
+        `[Calendar Resync:Recurring] state=deadline_exceeded ${this.formatCalendarSyncLog(
+          {
+            classId,
+            scope: summary.scope,
+            budgetMs: this.RESYNC_WALL_CLOCK_BUDGET_MS,
+          },
+        )}`,
+      );
+    };
+
     for (const entry of currentSchedule) {
       if (stopRecurringWrites) {
+        break;
+      }
+      if (isDeadlineExceeded()) {
+        markDeadlineExceeded();
         break;
       }
 
@@ -1986,6 +2076,13 @@ export class CalendarService {
 
     if (!stopRecurringWrites) {
       for (const event of deleteCandidates.values()) {
+        if (stopRecurringWrites) {
+          break;
+        }
+        if (isDeadlineExceeded()) {
+          markDeadlineExceeded();
+          break;
+        }
         if (protectedEventIds.has(event.eventId)) {
           continue;
         }
@@ -2036,7 +2133,13 @@ export class CalendarService {
               },
             )}`,
           );
-          throw error;
+          summary.failedRecurringEvents += 1;
+          summary.warnings.push({
+            code: 'recurring_event_delete_failed',
+            message: this.getCalendarSyncErrorMessage(error),
+            eventId: event.eventId,
+          });
+          continue;
         }
         summary.deletedRecurringEvents += 1;
         this.logger.log(
@@ -2053,22 +2156,28 @@ export class CalendarService {
       }
     }
 
-    await this.prisma.class.update({
-      where: { id: classId },
-      data: {
-        schedule: this.serializeStoredClassScheduleEntries(
-          currentSchedule.map((entry) => ({
-            id: entry.id,
-            dayOfWeek: entry.dayOfWeek,
-            from: this.normalizeTimeValue(entry.from),
-            to: this.normalizeTimeValue(entry.to || entry.end),
-            teacherId: entry.teacherId,
-            googleCalendarEventId: entry.googleCalendarEventId,
-            meetLink: entry.meetLink,
-          })),
-        ),
-      },
-    });
+    const allSyncedEntries = [
+      ...currentSchedule.map((entry) => ({
+        id: entry.id,
+        googleCalendarEventId: entry.googleCalendarEventId,
+        meetLink: entry.meetLink,
+      })),
+      ...historicalDeletedEntries.map((entry) => ({
+        id: entry.id,
+        googleCalendarEventId: entry.googleCalendarEventId,
+        meetLink: entry.meetLink,
+      })),
+    ];
+    for (const entry of allSyncedEntries) {
+      if (!entry.id) continue;
+      await this.prisma.classScheduleEntry.updateMany({
+        where: { id: entry.id, classId },
+        data: {
+          googleCalendarEventId: entry.googleCalendarEventId ?? null,
+          meetLink: entry.meetLink ?? null,
+        },
+      });
+    }
 
     this.logger.log(
       `[Calendar Resync:Recurring] state=summary ${this.formatCalendarSyncLog(summary as unknown as Record<string, unknown>)}`,

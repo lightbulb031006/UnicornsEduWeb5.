@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '../../generated/client';
 import {
+  LessonOutputDifficultyBand,
   LessonOutputStatus,
   LessonTaskPriority,
   LessonTaskStatus,
@@ -14,6 +15,7 @@ import {
   StaffStatus,
   UserRole,
 } from 'generated/enums';
+import { computeLessonOutputCost } from './lesson-output-pricing';
 import {
   ActionHistoryActor,
   ActionHistoryService,
@@ -83,6 +85,10 @@ type LessonOutputRecord = {
   source: string | null;
   originalLink: string | null;
   level: string | null;
+  difficultyBand?: LessonOutputDifficultyBand | null;
+  includesTest?: boolean;
+  includesSolution?: boolean;
+  includesLectureVideo?: boolean;
   tags: unknown;
   cost: number;
   paymentStatus: PaymentStatus;
@@ -969,7 +975,16 @@ export class LessonService {
     const originalLink = toTrimmedString(data.originalLink);
     const level = toTrimmedString(data.level);
     const tags = normalizeTags(data.tags);
-    const cost = this.resolveOutputCost(data.cost);
+    const difficultyBand = data.difficultyBand ?? null;
+    const includesTest = data.includesTest === true;
+    const includesSolution = data.includesSolution === true;
+    const includesLectureVideo = data.includesLectureVideo === true;
+    const cost =
+      computeLessonOutputCost(difficultyBand, {
+        includesTest,
+        includesSolution,
+        includesLectureVideo,
+      }) ?? 0;
     const paymentStatus =
       access?.canParticipate && !access.canManage
         ? PaymentStatus.pending
@@ -1009,6 +1024,10 @@ export class LessonService {
           source,
           originalLink,
           level,
+          difficultyBand,
+          includesTest,
+          includesSolution,
+          includesLectureVideo,
           tags,
           cost,
           paymentStatus,
@@ -1072,6 +1091,10 @@ export class LessonService {
         'source',
         'originalLink',
         'level',
+        'difficultyBand',
+        'includesTest',
+        'includesSolution',
+        'includesLectureVideo',
         'tags',
         'cost',
         'date',
@@ -1135,17 +1158,49 @@ export class LessonService {
       updateData.level = toTrimmedString(data.level);
     }
 
+    if (data.difficultyBand !== undefined) {
+      updateData.difficultyBand = data.difficultyBand ?? null;
+    }
+
+    if (data.includesTest !== undefined) {
+      updateData.includesTest = data.includesTest === true;
+    }
+
+    if (data.includesSolution !== undefined) {
+      updateData.includesSolution = data.includesSolution === true;
+    }
+
+    if (data.includesLectureVideo !== undefined) {
+      updateData.includesLectureVideo = data.includesLectureVideo === true;
+    }
+
     if (data.tags !== undefined) {
       updateData.tags = normalizeTags(data.tags);
     }
 
-    if (data.cost !== undefined) {
-      if (participantEditing) {
-        throw new ForbiddenException(
-          'Staff giáo án không được cập nhật chi phí output.',
-        );
-      }
-      updateData.cost = this.resolveOutputCost(data.cost);
+    const nextDifficultyBand =
+      data.difficultyBand !== undefined
+        ? (data.difficultyBand ?? null)
+        : (existingOutput.difficultyBand ?? null);
+    const nextIncludesTest =
+      data.includesTest !== undefined
+        ? data.includesTest === true
+        : Boolean(existingOutput.includesTest);
+    const nextIncludesSolution =
+      data.includesSolution !== undefined
+        ? data.includesSolution === true
+        : Boolean(existingOutput.includesSolution);
+    const nextIncludesLectureVideo =
+      data.includesLectureVideo !== undefined
+        ? data.includesLectureVideo === true
+        : Boolean(existingOutput.includesLectureVideo);
+    const computedCost = computeLessonOutputCost(nextDifficultyBand, {
+      includesTest: nextIncludesTest,
+      includesSolution: nextIncludesSolution,
+      includesLectureVideo: nextIncludesLectureVideo,
+    });
+    if (computedCost != null) {
+      updateData.cost = computedCost;
     }
 
     if (data.paymentStatus !== undefined) {
@@ -2082,6 +2137,10 @@ export class LessonService {
       source: output.source,
       originalLink: output.originalLink,
       level: output.level,
+      difficultyBand: output.difficultyBand ?? null,
+      includesTest: Boolean(output.includesTest),
+      includesSolution: Boolean(output.includesSolution),
+      includesLectureVideo: Boolean(output.includesLectureVideo),
       tags: parseJsonStringArray(output.tags),
       cost: output.cost,
       paymentStatus: output.paymentStatus,
@@ -2197,18 +2256,6 @@ export class LessonService {
     }
 
     return normalized;
-  }
-
-  private resolveOutputCost(value: number | null | undefined) {
-    if (value == null) {
-      return 0;
-    }
-
-    if (!Number.isInteger(value) || value < 0) {
-      throw new BadRequestException('cost không hợp lệ.');
-    }
-
-    return value;
   }
 
   private mapTask(task: {
@@ -2668,7 +2715,7 @@ export class LessonService {
   }
 
   private sortTaskAssignees(assignees: LessonTaskAssigneeDto[]) {
-    return [...assignees].sort((left, right) => {
+    return assignees.toSorted((left, right) => {
       if (left.status !== right.status) {
         return left.status.localeCompare(right.status);
       }

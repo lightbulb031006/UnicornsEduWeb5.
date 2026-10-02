@@ -46,6 +46,10 @@ import type {
 import type { StaffDetail, StaffOption } from "@/dtos/staff.dto";
 import * as extraAllowanceApi from "@/lib/apis/extra-allowance.api";
 import { formatMonthKeyLabel, getDefaultMonthKey } from "@/lib/month-format";
+import {
+  formatVnCurrency,
+  formatVnDateTime,
+} from "@/lib/formatters";
 
 const MAX_VISIBLE_ALLOWANCES = 20;
 const EMPTY_ALLOWANCES: ExtraAllowanceListItem[] = [];
@@ -176,25 +180,14 @@ function formatCurrency(value: number | null | undefined) {
     return "—";
   }
 
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
+  return formatVnCurrency(value);
 }
 
 function formatDateTime(iso?: string | null) {
   if (!iso) return "—";
   try {
     const date = new Date(iso);
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(date);
+    return formatVnDateTime(date);
   } catch {
     return "—";
   }

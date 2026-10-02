@@ -21,6 +21,13 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ## [Unreleased]
 
+### Changed — Math upstream sync 2026-10-02
+
+- Đồng bộ repo Tin tới 451f60d: khoá học/chuyên đề/tiết học, bài làm trực tuyến, khảo sát, thiết bị đăng nhập, lịch hiệu lực, dashboard, học phí theo block và lương cứng. Giữ quyền admin tạo buổi ngoài lịch, biên lai/logo Toán, popup thống kê và cấu hình deploy Math.
+- Watermark public mới dùng logo Toán; nguồn khách đổi nhãn sang Toán, giữ enum gốc. Nhận xét điểm danh vẫn giới hạn 500 ký tự văn bản thuần.
+- Sửa import PrismaService trùng trong UNIOJ spec để API typecheck pass. Chưa chạy migration hoặc cập nhật website live; hướng dẫn database và khôi phục tại docs/ops/upstream-sync-math-2026-10-02.md.
+
+
 ### Changed
 
 - Biên lai nạp ví (email HTML, nội dung text và PDF): dùng thương hiệu **Học Toán Cùng Chuyên Toán**, một logo Toán của trung tâm (`logo_math_sm.png`), thay con dấu Unicorns cũ bằng dòng **Đã nhận thanh toán**. Thông tin học sinh, giao dịch và tài khoản nhận tiền tiếp tục lấy từ dữ liệu/cấu hình hiện có.
@@ -31,6 +38,566 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 - BE tạo buổi học: tài khoản `admin` được bỏ qua kiểm tra ngày/giờ phải khớp lịch cố định hoặc lịch bù; assistant, gia sư và mọi tài khoản khác vẫn bị kiểm tra như cũ.
 
+### Added
+
+- **Dashboard — bấm KPI Lớp học xem phân loại:** `GET /dashboard/active-class-breakdown` nhóm lớp `running` theo khoá học, mỗi dòng có số lớp và số học sinh active của khoá đó. Popup trên `/admin/dashboard` hiện số loại lớp, tổng lớp (khớp card) và tổng học sinh không trùng. Snapshot, không theo tháng đang chọn.
+- **Nguồn khách trên hồ sơ học sinh:**
+  - Trường `customer_source` (Tiktok, Fanpage Học Tin Cùng Chuyên Tin, Fanpage Luyện Tin THPT, Giới thiệu từ người quen của khách, Nguồn riêng của bản thân, Khác) và `customer_source_note` khi chọn Khác. Tạo mới bắt buộc chọn nguồn.
+  - Dashboard admin có bảng số học sinh, học phí đã học và tỷ trọng theo kỳ; bấm một dòng mở chi tiết cùng cột với Học phí đã học (dòng Khác thêm chú thích). Đổi nguồn thì các kỳ đã qua tính lại theo giá trị hiện tại.
+  - **Migration:** `20260929140000_student_customer_source` thêm cột; `20260929220000_backfill_student_customer_source` gán hồ sơ còn trống thành Khác với chú thích `Nguồn cũ`.
+  - Docs: `CONTEXT.md`, `docs/Database Schema.md`, `docs/pages/admin.md`, `docs/pages/staff.md`, ADR `docs/adr/2026-09-29-customer-source-follows-current-value.md`.
+- **Timeline lớp admin ẩn tiết học mặc định (vé 10):** `/admin/classes/[id]` truyền `lessonVisibility="opt-in"` vào `ClassTimelineManager` — mặc định chỉ buổi học + khảo sát; switch **Hiện tiết học** (dễ bấm trên điện thoại) mới hiện tiết lý thuyết/thực hành. Staff không truyền prop (mặc định `always`), UI giữ nguyên. Component không đoán role. Docs: `docs/pages/admin.md`, `docs/pages/staff.md`.
+- **Thumbnail video buổi học trên timeline học sinh (vé 11):** Row buổi học có `recordingUrl` hiện ảnh poster YouTube tĩnh (lazy, `alt` theo ngày buổi), không nhúng trình phát cho tới khi bấm mở dialog. Buổi không có recording không chừa ô trống. Nội dung / bài tập / hướng dẫn / nhận xét riêng hiện đầy đủ, bỏ **Xem thêm**. Helper `apps/web/lib/youtube.ts`. Docs: `docs/pages/student.md`.
+- **Lớp không điểm danh (`noAttendance`) — Tự động điểm danh present khi tạo buổi học:**
+  - Thêm boolean `noAttendance` trên `Class` (default `false`); admin/assistant có thể bật/tắt qua `PATCH /class/:id/basic-info`.
+  - Khi `noAttendance = true`, tạo buổi học tự động tạo `Attendance.present` cho toàn bộ học sinh active, bỏ qua form điểm danh.
+  - Session snapshot giá trị `noAttendance` thành `snapshotNoAttendance` (không đọc lại từ Class sau khi tạo). Payload tạo/sửa buổi **không** nhận `noAttendance`.
+  - Tuition/allowance vẫn tính đúng — `tuitionFee` = tổng `present`/`excused` × học phí mỗi học sinh.
+  - **Migration:** `20260905100000_add_class_no_attendance` — thêm `no_attendance` vào `classes`, `snapshot_no_attendance` vào `sessions`.
+- **Lưu vai trò và lương cứng một lần bấm (hotfix):**
+  - Dialog **Chỉnh sửa thông tin nhân sự** đổi chip vai trò thành danh sách; bật một vai trò thì bung ô lương cứng và % vận hành của đúng vai trò đó. Để trống = mặc định vai trò; `0` / `0%` = cố ý loại.
+  - `PATCH /staff/:id/with-fixed-salary-overrides` ghi hồ sơ + `roles` + `roleFixedSalaryOverrides` trong một transaction (role trước, override sau) nên thêm vai trò mới kèm mức đè lần đầu không còn 400. Lỗi ở bất kỳ bước nào rollback hết. PUT từng trục `/fixed-salary-settings/staff-overrides/*` giữ nguyên.
+  - Card **Mức đè lương cứng theo nhân sự** gỡ khỏi `/admin/staffs/[id]` (mirror staff). Toast Sonner; invalidate cache staff + overrides.
+- **Tắt vai trò thì xóa mức đè, có cảnh báo (hotfix):**
+  - Trước khi lưu, tắt vai trò đang có mức đè mở `ConfirmDialog` (component xác nhận dùng chung, không overlay mới) nêu đúng số hai trục (ví dụ `12.000.000đ` và `15%`) và *Lương các tháng đã chốt không thay đổi*.
+  - Xác nhận → xóa vai trò + cả hai row override trong cùng transaction với lần lưu; hủy → không ghi gì, vai trò trở lại bật. Tắt vai trò không có mức đè thì không hỏi.
+  - `action_history` ghi `Xóa mức đè … vì tắt vai trò {role}`. Không đụng `staff_fixed_salary_payables`.
+
+### Changed
+
+- **Nghiệm thu đổi tên ba cấp (vé 08):** Toàn bộ đợt 05–07 nói Chuyên đề (`modules`) / Tiết học (`lessons`). Glossary ghi cặp dễ nhầm Tiết học vs Buổi học (cấm viết tắt) và danh sách tên đã khai tử. Hai ADR: mỗi Bài học cũ = một tiết (số mục lớp nhân lên) `docs/adr/2026-09-16-one-lecture-becomes-one-lesson.md`; tiết riêng lớp XOR chuyên đề `docs/adr/2026-09-16-class-owned-lesson-xor.md`. Docs schema/API/trang khớp code. Không sửa migration đã có.
+- **UI/URL nội dung ba cấp (vé 07):** Admin/staff/học sinh nhìn **Chuyên đề** và **Tiết học**; không còn chương/chủ đề/bài học/chuyên đề lý thuyết/chuyên đề luyện tập trên màn hình. Href `/courses/:id/modules/:moduleId/lessons/*`, học sinh `/student/classes/:id/lessons/:lessonId`. Timeline: Buổi học (CalendarDays + success) vs Tiết học (BookOpen + primary), nhãn đủ chữ; tiết lý thuyết/thực hành khác màu trong danh sách. Flatten lecture editor vào chính tiết (`PATCH /class/:id/lessons/:lessonId`). Docs: `docs/pages/admin.md`, `docs/pages/staff.md`, `docs/pages/student.md`, `docs/pages/README.md`. Nghiệm thu typecheck/test: vé 08.
+- **Buổi học không điểm danh (`noAttendance`) — backend guard khi cập nhật session:**
+  - `PUT /sessions/:id` và `PUT /staff-ops/sessions/:id`: Khi session có `snapshotNoAttendance = true`, field `attendance` trong payload bị bỏ qua (silent ignore) — buổi học tự quản danh sách điểm danh, không cho phép cập nhật từ bên ngoài.
+  - Tính năng này đã có ở `POST /sessions` (tự tạo `Attendance.present` cho toàn bộ học sinh active), nay được mở rộng sang cả luồng cập nhật.
+  - ADR `docs/adr/2026-09-05-class-without-attendance-still-charges.md`.
+- **Cài đặt lương cứng gọn hơn + cron không chốt lại tháng đã chốt sớm:**
+  - Tab **Lương cứng**: mô tả khối chính sách / chốt tháng rút còn một câu; gợi ý “trống khác 0” nằm dưới ô nhập. Một nút **Lưu chính sách** gọi lần lượt hai PUT; toast không báo đủ khi mới lưu một nửa, draft trục lỗi được giữ.
+  - Cron 01:00 ngày 28 bỏ qua cả tháng nếu `staff_fixed_salary_payables` tháng hiện tại đã có dòng. Nút **Chốt lương tháng này** vẫn chạy `closeMonth` (có thể sinh thêm nhân sự/role mới). Không migration; không đụng dữ liệu khoản đã chốt.
+- **Lương cứng một dòng + bỏ lương cứng giáo viên:**
+  - Dialog **Chỉnh sửa thông tin nhân sự**: mỗi vai trò ăn lương cứng hiện **lương cứng và % vận hành trên một dòng ngang**; dòng chữ dưới ô ghi mức đang áp dụng và nguồn (mặc định vai trò / mức đè / cố ý loại / cố ý 0%). Hẹp thì xuống dòng có kiểm soát, ô % giữ bề rộng cố định.
+  - Vai trò **giáo viên** không còn ô lương cứng / % vận hành (popup sửa nhân sự và tab Cài đặt hệ thống). Chốt tháng **không sinh** khoản lương cứng cho `teacher`. Trợ cấp buổi học không đổi.
+  - Nguồn sự thật dùng chung: `FIXED_SALARY_STAFF_ROLES` (FE DTO + API `fixed-salary-staff-roles.ts`) cho lúc đọc cấu hình và lúc chốt lương.
+  - Migration mới `20260916100000_remove_teacher_fixed_salary_config` xoá dòng `teacher` ở `role_fixed_salary_defaults` và `staff_fixed_salary_overrides` (no-op nếu trống). **Không** đụng `staff_fixed_salary_payables`.
+
+
+### Fixed
+
+- **Email học sinh trên production trỏ localhost:** Magic link đăng nhập, email xác thực và đặt lại mật khẩu không còn fallback `http://localhost:3000` khi `NODE_ENV=production`. Origin lấy từ `FRONTEND_URL` HTTPS public, rồi `VPS_PUBLIC_HOST`, rồi `BACKEND_URL` (bỏ `/api`), rồi host `*.uniedu.vn` hoặc `*.unicornsedu.com` của request qua Nginx. Host lạ bị từ chối.
+
+- **Tạo chuyên đề 400 `courseId must be a string`:** `POST /course/:courseId/modules` nhận body `{ title }` — `courseId` lấy từ path. `ModuleCreateDto.courseId` thành optional để ValidationPipe không từ chối trước khi controller gán param.
+
+- **CI web build fail trên `main`:** `toStaffCreateSessionPayload` còn map `noAttendance` dù `SessionCreatePayload` không còn field đó (Lớp không điểm danh luôn lấy từ Class). Gỡ dòng — Next typecheck `/staff/classes/[id]` pass.
+
+- **`migrate deploy` vỡ trên snapshot production vì thiếu bảng schema-only:** `user_devices` / `login_requests` và `questions` có model Prisma nhưng không có `CREATE TABLE`. Thêm `20260905120000_create_user_devices_and_login_requests` (trước ALTER `activate_secret_hash`) và `20260912500000_create_questions` (trước FK `attempt_answers` → `questions`; cột `chapter_id` để `20260921` rename thành `module_id`).
+
+- **`YouTubeEmbed` crash `playVideo is not a function`:** `new YT.Player()` trả stub trước `onReady`; lớp click shield gọi play/pause lúc đó. Chỉ gọi API player khi `playVideo` đã là function. Dialog recording học sinh không còn TypeError khi bấm phát sớm.
+
+- **QR thanh toán nhân sự luôn sinh từ link, bỏ nhúng ảnh (ticket 15):**
+  - Ô QR (`StaffQrCard` trên `/admin/staffs/:id` và mirror `/staff/staffs/:id` / `/staff/profile`) luôn xin mã `api.qrserver.com` mã hoá nguyên văn `bank_qr_link` — Drive / imgur / `.png` / link thanh toán đều là payload, không còn `<img>` trỏ máy chủ ảnh ngoài.
+  - Xoá helper Drive (`extractGoogleDriveFileId`, `toGoogleDriveDirectImageUrl`, `resolveStaffQrImageSrc`) khỏi `apps/web/lib/staff-qr-image.ts`. Overlay `ResponsiveDialog` vẫn xin 512px (không kéo giãn thumbnail); nút **Mở link gốc** giữ tab mới. Thông báo lỗi không còn nhắc chia sẻ công khai file Drive.
+  - Không đụng backend / schema / lương cứng. Docs: `docs/pages/admin.md`, `docs/pages/staff.md`.
+
+- **QR thanh toán nhân sự vỡ ảnh Drive + không quét được (ticket 14):**
+  - Ô QR (`StaffQrCard`, `size="minimal"` trên `/admin/staffs/:id` và mirror `/staff/staffs/:id` / `/staff/profile`) không còn nhét URL HTML Drive `/file/d/<ID>/view` vào `<img>`. Helper thuần `apps/web/lib/staff-qr-image.ts` bóc ID (`/view`, `/edit`, `open?id=`, `uc?id=`) rồi dựng `https://drive.google.com/uc?export=view&id=<ID>`.
+  - Bấm ô QR mở `ResponsiveDialog` với mã đủ lớn để quét điện thoại: ảnh upload phóng to; link không phải ảnh thì xin mã `api.qrserver.com` 512px (không kéo giãn thumbnail 64px). Nút **Mở link gốc** giữ tab mới. Ảnh 403/hỏng hiện thông báo, không để ô trống.
+  - Không đụng backend / schema / lương cứng. Giữ `unoptimized` trên Next `<Image>`. Docs: `docs/pages/admin.md`, `docs/pages/staff.md`.
+  - **Bị thay bởi ticket 15:** không nhúng ảnh Drive được vì CORP; hành vi hiện tại luôn sinh mã từ link.
+
+- **Typecheck `apps/api` vỡ sau khi bump axios 1.20:** `unioj.service.ts` đọc `pdfResponse.headers['content-type']` rồi gọi `.includes()` — axios 1.20 nới kiểu giá trị header thành `string | number | boolean | string[] | AxiosHeaders` nên `TS2339: Property 'includes' does not exist on type 'number'`. Bọc `String(... ?? '')` trước khi so khớp. `tsc --noEmit` sạch 0 lỗi.
+- **Lớp tính theo block 30 phút bị khoá không sửa được gì (hotfix):**
+  - **Triệu chứng:** lớp đang ở `pricing_mode = per_block` mà lịch cố định có các khung giờ lệch thời lượng thì **mọi** thao tác lưu trên popup **Thông tin lớp** đều bị chặn — đổi học phí, sĩ số tối đa, tên lớp, trạng thái — đều hiện cùng toast *"…các khung giờ không cùng một thời lượng chuẩn."* Phát hiện trên `UNICL-37f607c5df` (CN 2h, T7 4h, T4 1h).
+  - **Nguyên nhân 1 — ràng buộc quá chặt:** `standardBlockCountFromSlots` yêu cầu **mọi** khung giờ active cùng thời lượng, lệch một chút là trả `null`. Ràng buộc này không cần thiết: tiền thật lấy từ cột per-block × `sessions.snapshot_block_count` của **từng buổi**, nên lịch lệch vẫn tính đúng. Số block chuẩn chỉ là đơn vị quy đổi hiển thị, và vòng FE nhân K / BE chia K là bất biến với mọi `K > 0`.
+  - **Nguyên nhân 2 — guard đặt sai chỗ:** `EditClassBasicInfoPopup.handleSubmit` kiểm tra `pricingMode === "per_block"` (trạng thái form) thay vì "đang đổi sang per_block" (hành động), nên lớp đã ở chế độ block thì lần nào submit cũng bị chặn, không có đường thoát. Backend không hề chặn — `updateClassBasicInfo` không gọi `assertCanEnableBlockPricing`.
+  - **Sửa:** `standardBlockCountFromSlots` (cả `apps/api/src/common/block-pricing.util.ts` và `apps/web/lib/class-pricing-mode.ts`) lấy **GCD** số block của các khung giờ active thay vì đòi bằng nhau; chỉ còn trả `null` khi không có lịch active hoặc có khung giờ không chia hết 30 phút. Lịch đồng nhất ra kết quả **y hệt trước** (GCD của các số bằng nhau là chính nó) → không lớp nào đổi số tiền. Guard trong `EditClassBasicInfoPopup` chỉ chạy khi `pricingMode` thực sự đổi.
+  - **Copy:** bỏ thông báo *"không cùng một thời lượng chuẩn"*; `MISSING_STANDARD_BLOCKS_FALLBACK` và `assertCanEnableBlockPricing` đổi sang *"chưa có lịch cố định, hoặc có khung giờ với thời lượng không phải bội số 30 phút"*; `ClassPricingModeField` nói rõ các khung giờ không cần dài bằng nhau; "buổi chuẩn" → "mốc quy đổi" kèm ghi chú mỗi buổi tính theo block thực tế.
+  - **Verify:** `UNICL-37f607c5df` block counts `4, 8, 2, 4, 8` → số block chuẩn `2` (trước: `null`), đúng bằng K cũ (`225000 / 112500`) nên dữ liệu hiện có khớp liền, không cần backfill; round-trip `112500 → 225000 → 112500` bất biến; mỗi khung giờ vẫn ra `snapshot_block_count` riêng `4 / 8 / 2`. Toàn DB chỉ 1 lớp dính. Test: 233 backend + 97 frontend pass.
+  - Docs: `docs/adr/2026-09-09-expand-block-pricing.md`, `docs/pages/admin.md`, `docs/Database Schema.md`.
+
+### Changed
+
+- **Chi tiết học sinh (admin/staff): ưu tiên ví và lịch thi.** Trang `/admin/students/[id]` (mirror `/staff/students/[id]`) xếp **Tài khoản hiện tại** rồi **Lịch thi** lên đầu, sau đó **Thông tin cơ bản** → **Liên hệ phụ huynh** (thu gọn sẵn, mở bằng `Collapsible` shadcn, nhớ `localStorage`) → Thành tích → Feedback → danh sách lớp. Mobile 1 cột, từ `sm` 2 cột. Không đổi nhãn hai khối hồ sơ.
+- **API nội dung ba cấp (vé 06):** Nest `CourseContentModule` (`apps/api/src/course-content/`) thay `topic/`. HTTP: `/course/:id/modules`, `/course/:id/modules/:moduleId/lessons`, `/lessons/:id/quizzes|questions`, `/class/:id/lessons`, học sinh `/users/me/student-classes/:classId/lessons/:lessonId`. DTO/Swagger `LessonKind` lý thuyết|thực hành; tiết thực hành kèm video/nội dung → 400; xoá chuyên đề/tiết còn lớp tham chiếu (kể cả ẩn) → 409 kèm tên lớp. Không alias path cũ. Seed question-bank dùng `prisma.module`/`prisma.lesson`. `tsc` web còn đỏ (vé 07). Docs: `docs/api/courses.md`, `docs/Database Schema.md`.
+- **Schema nội dung ba cấp (vé 05):** `chapters` → `modules` (Chuyên đề), mỗi `lectures` cũ → một `lessons` lý thuyết riêng, `topics` practice → tiết thực hành, DROP `topics`/`lectures`. XOR tiết thuộc chuyên đề hoặc lớp (`lessons_owner_check`); tiết thực hành không có video/content. Lớp gán chuyên đề N bài có N mục nội dung + N mục timeline (ẩn copy nguyên); lượt xem lý thuyết cũ gắn tiết đầu. Migration mới `20260921000000_rename_three_level_content` — không sửa migration đã deploy. Call site web/API cố ý còn đỏ (vé 06–07). Docs: ADR `docs/adr/2026-09-15-three-level-content-model.md`, `docs/Database Schema.md`, `CONTEXT.md`.
+- **Prefactor đường dẫn cây nội dung:** mọi href trang (admin/staff/học sinh) đi qua `apps/web/lib/course-content-routes.ts`; mọi URL Axios chứa `/chapters` `/topics` `/lectures` đi qua `apps/web/lib/content-api-paths.ts`. Điều hướng và endpoint giữ nguyên; dọn đường cho đợt đổi tên module/lesson. Docs: ADR `docs/adr/2026-09-10-course-content-drill-down.md`, `docs/pages/admin.md`, `docs/pages/staff.md`, `docs/pages/student.md`, `docs/Cách làm việc.md`.
+- **Đợt tối ưu theo `react-doctor` (2026-09-11):** ADR `docs/adr/2026-09-11-frontend-perf-a11y-conventions.md`.
+  - `apps/web/lib/formatters.ts` mới: gom toàn bộ `Intl.NumberFormat` / `Intl.DateTimeFormat` về module scope (126 warning `intl-*`), component không tự dựng `Intl` trong render nữa.
+  - **22 trang** dùng `useSearchParams()` được bọc `<Suspense>` (24 → 0 cảnh báo `nextjs-no-use-search-params-without-suspense`); thiếu boundary thì Next.js bỏ static render cả route.
+  - Reset state theo prop chuyển từ `useEffect` sang so sánh prev-prop **trong render** (`SortableOrderList`, `tabs/SettingsTab`, `FinancialDetailModal`, `UserManageModal`) — hết frame nhấp nháy dữ liệu item trước.
+  - `Array.includes` trong vòng lặp → `Set` ở 15 chỗ (web + api); `Object.values(StaffRole)` trong `filter` hoist thành `STAFF_ROLE_VALUES` ở module scope của `user.service.ts`.
+  - `apps/api`: 8 chỗ `[...arr].sort(...)` → `arr.toSorted(...)` (target đã là ES2023).
+  - Accessibility: `<label htmlFor>` + `useId()` cho control native, `<label>` không bọc control đổi thành `<span>`/`<div>` + `ariaLabel` cho editor, `role="group"`/`role="button"`/`role="slider"` + `onKeyDown` cho phần tử tự chế, 22 field chỉ có placeholder được thêm `aria-label`.
+  - Key list dùng index → key theo dữ liệu ở `StaffCombinedList`, `OjProgressSection` (list có sort/filter nên index xê dịch).
+
+### Security
+
+- **`next` 16.1.6 → 16.2.6** — vá CVE-2026-23870 (RSC DoS, high).
+- **`axios` `^1.13.6` → `^1.20.0`** ở cả `apps/web` và `apps/api` — bản cũ bị Socket chấm 25/100 trục vulnerability (có advisory). axios 1.20 siết kiểu header value thành `string | number | boolean | string[] | AxiosHeaders`, nên `apps/api/src/unioj/unioj.service.ts` phải bọc `String(headers['content-type'] ?? '')`.
+- Hai bump trên cần dựng lại `node_modules` root (`ERR_PNPM_UNEXPECTED_VIRTUAL_STORE`). Sau khi `pnpm install` lại, pnpm 10 bỏ qua toàn bộ postinstall → thêm `pnpm.onlyBuiltDependencies` vào root `package.json` (`bcrypt`, `sharp`, `prisma`, `@prisma/engines`, `esbuild`, `@nestjs/core`, `unrs-resolver`); thiếu khai báo này thì native binding của bcrypt/sharp không build và API chạy sẽ lỗi.
+- Kết quả `react-doctor`: score 42 → **55**, Security **2 error → 0**, issues 765 → 686.
+
+### Fixed
+
+- **`POST/PATCH /questions` và `POST /questions/bulk`:** `options` của câu trắc nghiệm là `string[]` nhưng DTO gắn `@ValidateNested` (chỉ nhận object/array), nên lưu MCQ từ chuyên đề luyện tập / ngân hàng / nhập AI trả 400 `each value in nested property options must be either object or array`. Đổi sang `@IsString({ each: true })`.
+
+### Changed
+
+- **Workspace khoá học — tab Nội dung:** list chỉ chủ đề (kéo-thả + Lưu thứ tự); bấm row → `?chapter=` danh sách chuyên đề (cùng DnD). Trang riêng tạo/sửa chuyên đề `/courses/:id/chapters/:chapterId/topics/new|[topicId]` (admin + staff). Bài học trên trang chuyên đề lý thuyết (`?lecture=`). Bỏ tab **Đề thi**; `?tab=de-thi` về `noi-dung`. `lesson_plan` soạn được cây nội dung. PATCH/DELETE chuyên đề cấp khoá trên `CourseTopicController`. ADR: `docs/adr/2026-09-10-course-content-drill-down.md`.
+- **Cây tri thức:** bỏ kéo-thả Chủ đề / Chuyên đề / Bài học trên tab Nội dung khoá.
+- **Tab Đề thi:** thay nút lên/xuống bằng kéo-thả; thứ tự chỉ lưu khi bấm **Lưu thứ tự** (Hủy bỏ draft). Cùng UI trên `/admin/courses/:id` và `/staff/courses/:id`.
+- **Thang mức độ khó:** thay nút ↑↓ bằng kéo-thả; thứ tự chỉ lưu khi bấm **Lưu thứ tự** (Hủy bỏ draft). Tạo/sửa tên/bật-tắt/xoá vẫn ghi API ngay.
+
+### Added
+
+- **Workspace khoá học (`/admin/courses`, `/staff/courses`):** gộp danh sách + chi tiết một khoá vào một trang bốn tab (`noi-dung` · `cau-hoi` · `de-thi` · `cai-dat`), UI dùng chung `apps/web/components/course-workspace/`. Admin/assistant vào `/admin/courses*`; `lesson_plan` / `lesson_plan_head` vào `/staff/courses*` (cùng component, `routeBase` chỉ dựng href). `GET /courses` lọc server-side bằng `resolveListableCourseIds` (tách khỏi `resolveViewableCourseIds`). `lesson_plan_head` được `POST`/`PATCH`/`DELETE /courses` và CRUD cây Chương/Chuyên đề/Bài học. ADR: `docs/adr/2026-09-10-course-workspace.md`.
+
+### Removed
+
+- Route admin rời `/admin/question-bank`, `/admin/exam-library`, `/admin/classes/courses`, `/admin/classes/courses/[id]` — **xoá thẳng, không redirect.** Bookmark cũ 404; ngân hàng câu hỏi = tab **Câu hỏi**, thư viện đề = tab **Đề thi**, cài đặt khoá = tab **Cài đặt**.
+
+### Changed
+
+- **Hợp nhất `main` vào `dev` (merge, không rebase):** `dev` đã publish 53 commit lên `origin/dev` và 4 nhánh feature (`feat/07-redo`, `feat/09-question-bank`, `feat/54-lesson-content`, `feat/55-practice-topic-set`) đang fork từ `origin/dev`, nên rebase sẽ buộc force-push nhánh chung và vỡ base của cả 4 nhánh. Chọn merge: giải conflict một lần trên 14 file thay vì replay 68 commit. Hoà tính năng đụng nhau giữa **block pricing** (main) và **noAttendance** (dev): `session-create.service.ts` giữ wrapper `resolvedAttendanceInput` của dev (auto điểm danh khi bỏ điểm danh) và bổ sung `pricingMode` / `customTuitionPerBlock` / `classTuitionPerBlock` / `blockCount` của main vào `resolveDefaultStudentTuitionPerSession`; `AddSessionPopup` cho nhánh `skipAttendance` dùng `previewAttendanceItems` (đã quy giá theo block) thay vì `attendanceItems` thô, để lớp `per_block` bật "bỏ điểm danh" vẫn tính đúng học phí; `EditClassBasicInfoPopup` gửi `no_attendance` cùng `toPerSessionAmountForApi` / `toPerSessionMaxAllowanceForApi`. `apps/web/dtos/class.dto.ts` giữ rename `ClassCategory` → `Course` của dev và thêm `ClassPricingMode` của main.
+- **`@nestjs/schedule` 6.1.3 → 12.0.1 kéo theo cấu hình Jest:** bản 12 là ESM-only (`"type": "module"`), trong khi API build CJS. Runtime vẫn chạy nhờ Node 24 hỗ trợ `require(ESM)`, nhưng Jest bỏ qua `node_modules` khi transform nên `attempt-expiry.job.spec.ts` vỡ với `SyntaxError: Unexpected token 'export'`. Thêm vào `apps/api/package.json`: `transformIgnorePatterns: ["node_modules/(?!.*@nestjs[+/]schedule)"]` và `ts-jest` với `tsconfig.allowJs = true` để transform riêng package này. Lỗi chỉ xuất hiện sau merge vì `main` bump dep còn `dev` mới là nhánh thêm spec dùng nó.
+
+- **Lương cứng trên hồ sơ thu nhập:** card **Lương cứng** trên `/admin/staffs/:id` và `/staff/profile` không còn dòng tổng theo role (`Lương cứng · Giáo án` / `fixedSalaryRoleSummaries`). Chỉ còn từng khoản đã chốt (`fixedSalaryPayables`). API vẫn trả `fixedSalaryRoleSummaries` cho tổng thu nhập.
+
+- **Lương cứng — gộp bảng role + chuyển mức đè sang trang nhân sự (2026-09-10):**
+  - Tab **Lương cứng** (`/admin/system-settings?tab=fixed-salary`, mirror `/staff/...`): hai bảng role gộp thành **một bảng 3 cột** (Role / Số tiền lương cứng / % khấu trừ vận hành lương cứng). Vẫn **hai nút lưu độc lập** (`Lưu mức lương`, `Lưu % vận hành`) gọi hai API riêng — lưu trục này không đụng trục kia. Mobile giữ layout card theo role, mỗi card 2 ô.
+  - Khối **Mức đè theo nhân sự** đã **gỡ khỏi tab Lương cứng** và chuyển sang trang chi tiết nhân sự `/admin/staffs/[id]` (mirror `/staff/staffs/[id]`) dưới dạng card **Mức đè lương cứng theo nhân sự** (`StaffFixedSalaryOverrideCard`), lấy dữ liệu bằng `GET /fixed-salary-settings/staff-overrides?staffId=` thay cho tìm kiếm toàn danh sách. Nghiệp vụ 2 trục / Lưu–Gỡ mức đè / nhãn nguồn giữ nguyên; card chỉ hiện với admin + assistant và ẩn khi nhân sự tự xem hồ sơ mình trên staff shell.
+  - Không đổi backend. FE: xoá `StaffFixedSalaryOverridesPanel.tsx`, thêm `apps/web/lib/fixed-salary-settings.helpers.ts` (class input + parse lỗi API dùng chung), `RolePolicySettingsCard` nhận nhiều nút lưu qua prop `actions`.
+  - Docs: `docs/pages/admin.md`, ADR `docs/adr/2026-09-09-role-default-fixed-salary.md`.
+
+### Added
+
+- **Seed ngân hàng câu hỏi & đề luyện tập:** `apps/api/scripts/seed-question-bank.ts` + dữ liệu `apps/api/scripts/seed-data/` (pack `algorithms` cho VIP/Basic/Advance/Hardcore, pack `math-thpt` cho THPT Basic/Advanced/Luyện Đề). Mỗi khoá được seed 4 mức độ khó, 6 chương, 30 câu (25 trắc nghiệm + 5 tự luận, HTML TipTap + LaTeX `$…$`) và 12 đề `topics(kind=practice)` kèm 83 `question_links` (5 đề theo chương, giữa khoá, cuối khoá, khởi động, cụm 2, nâng cao, tự luận, cuối khoá đề 2). Đề khai báo theo blueprint độ khó; `SeedExam.rotate` xoay nguồn câu (offset = `rotate × số câu mức đó`) để hai đề cùng blueprint không lấy trùng câu. Lệnh `pnpm seed:question-bank` (dry-run mặc định, `--apply` mới ghi; hỗ trợ `--course`, `--pack`, `--reset`). Id sinh tất định bằng `sha1` → UUID v5 nên chạy lại là upsert, không nhân bản. Script không đụng lớp / học sinh / `attempts`. Thêm devDependency `tsx` cho `apps/api`. Docs: `docs/Seed Question Bank.md`.
+
+### Fixed
+
+- **`UpgradedSelect` menu mất nền khi truyền `menuClassName`:** `menuClassName` trước đây *thay thế* class mặc định (`??`), nên tab Cài đặt khoá (`Đội giáo án`, `menuClassName="max-h-72"`) bung listbox không có `bg-bg-surface`/viền/shadow. Giờ merge bằng `twMerge` giống `buttonClassName`; nền menu đặc `bg-bg-surface` (bỏ `/95` + `backdrop-blur`).
+- **Header lớp phía staff tham chiếu biến đã bị gỡ:** `/staff/classes/[id]` còn sót `{sessions.length}` trong dải thống kê header sau khi refactor timeline gỡ query `sessions` (trang admin tương đương đã bỏ chỉ số này). Gỡ nốt chỉ số cho khớp trang admin. Lỗi có sẵn trên `dev`, chỉ lộ khi chạy `tsc` sau merge.
+- **`AddSessionPopup` còn nhánh bắt buộc `recordingUrl`:** biến `isRecordingRequired` đã bị `main` gỡ ở hotfix "bỏ bắt buộc recordingUrl khi tạo/sửa buổi học (#95)" nhưng dev vẫn còn nhánh dùng nó. Theo main: `recordingUrl` không bắt buộc, chỉ validate định dạng YouTube khi có nhập.
+- **Mock Prisma thiếu `classScheduleEntry` trong `session-create.service.spec.ts`:** 5 test `noAttendance` của dev vỡ vì code block pricing của main đọc `tx.classScheduleEntry.findMany`. Thêm mock mặc định vào helper `baseTx` thay vì vá từng test.
+- **Đồng hồ làm bài luyện tập không dính khi cuộn:** Student layout dùng `h-dvh` + `main min-h-0 overflow-y-auto` để scroll nằm trong `main` (không scroll document); `StudentAttemptTimer` giữ `sticky top-0` với nền mờ (`backdrop-blur`) để luôn hiển thị thời gian còn lại khi cuộn câu hỏi.
+- **Đáp án đúng sau nộp bài không render KaTeX:** `StudentAttemptQuestion` (và màn ôn nhẹ topic) dùng `MathContent` cho text đáp án đúng thay vì plain text.
+- **Thư viện đề thi không dùng được (`/admin/exam-library`):** `ExamLibraryService` xây trên giả định "đề thi là topic cấp khoá nằm *ngoài* Chủ đề" (`chapterId: null` ở cả query, create, assert, reorder), trong khi CHECK constraint `topics_owner_check` (migration `20260907100000`) bắt buộc topic cấp khoá phải có `chapter_id`. Hệ quả: danh sách đề luôn rỗng và tạo đề luôn fail `23514 topics_owner_check`. Chốt lại theo constraint — **đề thi thuộc một Chủ đề của khoá**, thư viện gom đề của mọi Chủ đề lại một chỗ:
+  - `GET /course/:courseId/exam-library` bỏ điều kiện `chapter_id IS NULL`, trả kèm `chapter` (id/title/sortOrder) và `questionCount`, sắp theo `chapter.sortOrder → order → title`, nhận thêm query `chapterId` để lọc.
+  - `POST` bắt buộc `chapterId` và kiểm Chủ đề thuộc đúng khoá (400 nếu sai).
+  - `PATCH` / `DELETE` kiểm `topic.courseId` khớp `:courseId` — trước đây controller nhận `_courseId` rồi bỏ đi, nên route của khoá A sửa/xoá được đề của khoá B.
+  - Kiểm quyền `assertCanManageCourseContent` chạy trước khi soi payload, để người ngoài đội giáo án nhận 403 thay vì 400.
+  - Web: form tạo có chọn Chủ đề (bắt buộc), thanh lọc theo Chủ đề, mỗi dòng đề hiện badge Chủ đề + số câu.
+- **`/admin/question-bank` — responsive & khoảng cách:** card thêm `gap-4` (header / bộ lọc / danh sách trước đó dính sát nhau); nút hành động chia đôi hàng + cao 44px trên mobile; ô tìm kiếm full-width rồi `md:w-64`, cụm dropdown 1→2→4 cột; danh sách chuyển sang card trên mobile (bảng cũ ẩn cả cột *Nội dung* dưới `md`, chỉ còn Loại + Thao tác) và giữ bảng từ `md` trở lên; empty-state khung viền đứt nét; nút Xoá dùng token `text-error` thay `text-red-600`.
+- **`UpgradedSelect` — polish trigger + mở rộng search:** `buttonClassName` giờ *đè* lên surface mặc định bằng `twMerge` thay vì thay thế nó, nên các call site chỉ truyền chiều rộng (`/admin/exam-library`, `/admin/dashboard/statistics`, `PracticeTopicQuestionsCard`, `ClassPracticeQuestionComposer`, …) không còn mất viền/padding/shadow. Trigger `searchable` được bọc trong khung có viền + chevron giống trigger dạng button, bấm vào khung là focus ô nhập, mở menu khi bấm lại lúc đang đóng, giữ nhãn đang chọn làm placeholder khi gõ tìm, và không tự bật lại menu ngay sau khi chọn. Thêm dependency `tailwind-merge` (apps/web). Bật `searchable` cho lọc chương ở `/admin/exam-library` và lọc khoá học / chủ đề ở `/admin/question-bank`.
+- **Xem & sửa câu hỏi ngay trong dialog đề thi:** `PracticeTopicQuestionsCard` hiện đầy đủ nội dung câu hỏi (bỏ `line-clamp-2`), danh sách phương án với đáp án đúng được đánh dấu, và `<details>` lời giải / barem. Thêm nút *Sửa câu hỏi trong ngân hàng* mở `QuestionFormDialog` với `lockedCourseId`; đề đã giao cho lớp phải xác nhận trước vì sửa là sửa bản gốc dùng chung (bài đã nộp giữ nguyên nhờ snapshot `attempt_answers`). Form soạn câu hỏi được tách khỏi `app/admin/question-bank/page.tsx` thành component dùng chung `components/admin/question/QuestionFormDialog.tsx`; thêm type `QuestionFormInitial` trong `dtos/question.dto.ts` và siết `QuestionLinkQuestion.type` / `.options` trong `dtos/topic.dto.ts`.
+- **Thư viện đề thi — mở đề bằng dialog:** bấm dòng đề mở `ResponsiveDialog` (size `5xl`) chứa `PracticeTopicQuestionsCard`, thay accordion mở rộng tại chỗ. Dialog giữ `openedExamId` thay vì cả object nên số câu ở tiêu đề bám theo cache list.
+- **Schema drift — 3 bảng thiếu migration:** `question_links`, `lecture_quizzes`, `lecture_quiz_answers` đã có model trong `prisma/schema/learning.prisma` và được mô tả trong `docs/Database Schema.md`, nhưng chưa migration nào tạo chúng — mọi truy vấn chạm các bảng này fail runtime `P2021` dù đã apply đủ 131 migration. Bổ sung `20260919000000_question_links_lecture_quizzes` (CREATE TABLE + index + FK, `onDelete: Restrict` với `questions` để giữ lịch sử làm bài). Không đụng bảng nào khác.
+
+### Changed
+
+- **`/admin/question-bank` — gọn danh sách:** bỏ cột *Phương án* và *Đáp án* trên bảng desktop; card mobile cũng không còn hiện số phương án / đáp án đúng (chi tiết vẫn xem khi Sửa hoặc trong dialog đề thi).
+- **`/admin/question-bank` — tương tác danh sách:** bấm dòng/card mở `QuestionFormDialog` (bỏ nút Sửa); xoá bằng icon thùng rác (hover trên bảng desktop, luôn hiện trên card mobile vì không có hover).
+- **Ticket #114 — Tách `topic.controller` / `topic.service` theo resource:** `apps/api/src/topic/` không còn god-file. Bảy controller theo `@ApiTags` (`course-chapters`, `course-topics`, `class-topics`, `topic-lectures`, `class-content`, `practice-topic-questions`, `exam-library`) và service tương ứng (`CourseChapterService`, `CourseTopicService`, `LectureService`, `ClassContentService`, `PracticeQuestionLinkService`, `ExamLibraryService`) + helper `TopicSupportService`. `TopicModule` wire lại; route path, contract API, Swagger tag không đổi. `TopicService` còn là aggregator 3-arg cho unit test hiện có và `Attempt`/`UserProfile`. Docs: `docs/Cách làm việc.md`, `docs/pages/admin.md`, `docs/Database Schema.md`.
+
+### Added
+
+- **Ticket #113 — ResponsiveDialog + ConfirmDialog:** Overlay form/nội dung dùng `ResponsiveDialog` (role=dialog, focus trap, Escape, khoá scroll nền, padding mép mobile). Xác nhận xoá/huỷ dùng `ConfirmDialog` (shadcn AlertDialog, biến thể destructive) thay `window.confirm` và modal `<div className="fixed inset-0">` trong phạm vi review: `AiImportModal`, `KnowledgeTreeCard`, `PracticeTopicQuestionsCard`, ngân hàng câu hỏi (xoá + form), `ClassContentManager`, thư viện đề thi, cài đặt khoá. Backdrop/Escape khi form dirty hỏi trước khi bỏ thay đổi. Icon-only close có `aria-label`. Mục luyện tập chưa mở trên danh sách học sinh là `<button disabled>`.
+
+### Fixed
+
+- **Ticket #112 — Dọn TanStack Query:**
+  - `/auth/verify-login` dùng `useQuery` (`authKeys.verifyLogin`); lỗi mạng/hệ thống hiện message riêng, không gộp vào "liên kết không hợp lệ". `retry: false`, `staleTime: Infinity` vì GET có side-effect.
+  - Hook chung `useCourseChapters` / `useCourseDifficultyLevels`; BankPicker, composer, `PracticeTopicQuestionsCard`, `AiImportModal`, `question-bank` không còn copy-paste `useQuery`.
+  - `KnowledgeTreeCard` truyền `courseId` vào `getQuestions` — quiz dialog chỉ câu của khoá đang xem.
+  - Search BankPicker / dialog thêm câu / thư viện đề debounce 300ms.
+  - Mutation invalidate theo `courseId`: `questionKeys.course`, `examLibraryKeys.course`, `courseKeys.chapters` / `difficultyLevelsPrefix` — không `*.all` khi đã biết phạm vi.
+- **Ticket #111 — Timeline transaction + DTO @MaxLength + reorder validate:**
+  - `createClassContentItem` (tạo mới / nhập chuyên đề vào lớp) chạy trong một `$transaction`: tạo topic (nếu có) + `class_content_items` + dòng timeline + `syncClassTimelineSortByTime` đều dùng client `tx`. Lỗi giữa chừng rollback sạch, không content item mồ côi / `sortOrder` trùng.
+  - `updateClassContentSchedule` cũng bọc update lần giao + resync sort trong cùng tx.
+  - `POST /class/:id/timeline/reorder`: phát hiện id trùng (`[A,A,B]`), id lạ, hoặc thiếu item của lớp → HTTP 400; payload đủ & duy nhất mới persist.
+  - DTO: `essayAnswer` 20.000, `feedback` 4.000, nội dung lý thuyết bài học 100.000, nhận xét buổi học (lessonContent/homework/tutorial) 20.000, URL 2.048 (`@IsUrl` + `@MaxLength`), ghi chú điểm danh 500. FE hiện lỗi (inline + Sonner) khi vượt.
+- **Ticket #110 — DTO/Enums FE + skeleton + double-submit + toast có điều kiện:**
+  - `Course` / `Chapter` / `CourseDifficultyLevel` (và `KnowledgeTreeNode` / `KnowledgeTreeTopicNode`) chỉ còn trong `apps/web/dtos/`; page/component import, không khai báo DTO cục bộ.
+  - List trong phạm vi (`question-bank`, `exam-library`, `KnowledgeTreeCard`, `PracticeTopicQuestionsCard`, BankPicker) hiện shadcn `Skeleton` khi `isLoading`; empty-state chỉ sau khi load xong.
+  - Mutation create/update/delete đề thi, gán đội giáo án, thêm câu hỏi: disable `isPending` + nhãn **Đang lưu…**. Nút **Nhập từ AI** disable + tooltip khi chưa chọn khoá.
+  - `AiImportModal.handleCopy` await clipboard try/catch; CSV export và login chỉ toast success sau thao tác thật sự thành công.
+
+### Security
+
+- **Ticket #106 — Authorization theo khoá cho CRUD cây Kiến thức / Lecture / đọc câu hỏi topic:** `TopicService` gọi `CourseAccessService.assertCanManageCourse` trước ghi Chapter, Topic nhánh khoá, Lecture, Thư viện đề thi (kể cả reorder) và trước GET trả `correctIndex`/`explanation`/`answerGuide` cấp khoá. Gia sư `teacher` dạy lớp thuộc khoá X nhưng không trong đội giáo án → HTTP 403, không rò đáp án. `lesson_plan` chưa gán khoá Y không đọc được câu hỏi topic khoá Y. Thành viên đội giáo án hợp lệ vẫn CRUD bình thường. Swagger `@ApiResponse(403)`. Docs: ma trận dạy lớp ≠ soạn giáo án trong `docs/pages/admin.md`.
+
+### Fixed
+
+- **Ticket #102 — Cổng review bắt buộc khi nhập câu hỏi từ AI:** `AiImportModal` không còn bật Lưu ngay khi có câu hợp lệ. Sau parse, UI soát tuần tự từng câu (Trước/Sau, câu X/N, thanh tiến độ, tổng quan đã xem). Nút **Lưu vào ngân hàng** disabled tới khi mọi câu đã được xem; nhắc `Còn k câu chưa review`. Lỗi parse/item báo rõ câu số và trường. Invalidate `questionKeys.course(courseId)`. Docs: `docs/AI Question Import.md`.
+- **Ticket #109 — Drag-drop rollback, touch, keyboard:**
+  - `ClassTimelineManager`: lưu thứ tự lỗi rollback `localItems` về server, clear `orderDirty`, toast, kéo lại được. Drag handle thêm `touch-none`.
+  - `KnowledgeTreeCard`: reorder optimistic qua query cache, revert khi API fail; handle spread `{...attributes}` + `{...listeners}` + `KeyboardSensor`/`sortableKeyboardCoordinates`; kéo chuyên đề sang chủ đề khác toast `"Không thể chuyển chương ở đây"`.
+  - Drag handle các list còn lại (`ClassContentManager` đã có; gallery, thành tích) thêm `touch-none`.
+- **Ticket #107 — Cron finalize Attempt hết giờ:**
+  - Job `@Cron(EVERY_MINUTE)` (`AttemptExpiryJob`) quét Attempt `in_progress` đã quá `startedAt + durationMinutes` và gọi cùng `gradeAndClose` với nộp/GET. Status `timed_out`, chấm MCQ, câu tự luận vào hàng đợi gia sư, thống kê đếm là đã nộp.
+  - Idempotent: `updateMany` `WHERE id AND status = in_progress` trong transaction — job trùng nút Nộp không double-grade. Log số lượt đã chốt; 0 bản ghi không nổ. `ScheduleModule.forRoot` (cron tắt khi `NODE_ENV=test`).
+- **Ticket #108 — `openAt` tuỳ chọn + không floor phút + chặn duration 0:**
+  - `POST /class/:id/content` luyện tập: thiếu `openAt` thì backend ghi thời điểm tạo lần giao (server). `parsePracticeSchedule(required=false)` trên create; PATCH vẫn `required=true`. `durationMinutes` 1–720; duration 0 bị chặn.
+  - FE `AssignmentScheduleFields`: Ngày/Giờ mở bài không bắt buộc khi tạo; helper “để trống = mở ngay khi thêm vào lớp”. `fromOpenAtIso` giữ đúng phút (10:07 không thành 10:00). `EditScheduleDialog` disable Lưu khi duration rỗng/≤0.
+  - `TimeInput` thêm `prefillEmpty` (mặc định true, giữ ADR session); form lần giao tạo mới tắt prefill để có thể để trống.
+
+### Added
+
+- **Ticket #99 — Ẩn mềm nội dung lớp & chặn xoá cây Kiến thức đang dùng:**
+  - Prisma: `class_content_items` + `class_timeline_items` thêm `hidden_at` / `hidden_by_staff_id`. FK `class_content_items.topic_id` và `attempts.assignment_id` đổi `Cascade` → `Restrict`. Migration `20260918000000_soft_hide_class_content` (rollback trong ADR).
+  - `DELETE /class/:id/content/:itemId` ẩn (không xoá Attempt); `POST .../restore` hiện lại. Học sinh GET nội dung/timeline/topic/quiz/attempt không thấy item đã ẩn.
+  - Xóa Chủ đề / Chuyên đề / Bài học / đề thư viện khi còn `ClassContentItem` (kể cả ẩn) → HTTP 409 tiếng Việt `"… đang được N lớp sử dụng"`.
+  - FE: `ClassContentManager` nút **Ẩn** / **Khôi phục** + badge; timeline staff hiện badge **Đã ẩn**. Sonner toast.
+  - ADR `docs/adr/2026-09-07-class-content-soft-hide-restrict-knowledge-tree.md`.
+
+### Security
+
+- **Ticket #101 — Thu hồi phiên đăng nhập tức thời:** access/refresh JWT mang `deviceId` (`UserDevice.id`). `JwtStrategy` (APP_GUARD) và `jwt-refresh.strategy` đối chiếu thiết bị còn sống + `token_hash` refresh. Logout / đổi-reset mật khẩu / force-logout xóa device → request kế 401, không chờ access hết hạn. `last_active_at` throttle 1 phút. Không bảng/Redis mới. ADR `docs/adr/2026-09-07-immediate-device-revocation.md`.
+
+### Added
+
+- **Ticket #100 — Snapshot đề + thang 100 khi start Attempt:**
+  - Prisma: `attempt_answers` thêm snapshot `type`/`content`/`options`/`correct_index`/`explanation`/`answer_guide`/`difficulty_label`. `points_possible` = Hamilton 100/N lúc start (không dùng `question_links.points`). Migration `20260918000000_attempt_answer_exam_snapshot`. ADR `docs/adr/2026-09-07-attempt-exam-snapshot.md`.
+  - API: `start` N=0 → 400 tiếng Việt, không tạo Attempt. `gradeAndClose` + chấm tự luận đọc snapshot, không join `Question` live. Thống kê / hàng đợi / DTO `scoreMax` theo thang 100.
+  - FE: `PracticeStatsView` và màn chấm tự luận hiện `/100`; ô điểm tự luận vẫn chặn `[0, pointsPossible]`.
+
+### Changed
+
+- **Lớp không điểm danh (local merge, không lấy #104 điểm danh theo buổi):** `Class.noAttendance` luôn cho buổi mới; payload tạo/sửa buổi không nhận `noAttendance`; form buổi chỉ banner. Snapshot `sessions.snapshot_no_attendance` lúc tạo. ADR `docs/adr/2026-09-05-class-without-attendance-still-charges.md` (Accepted); không giữ ADR 2026-09-07.
+- **Timeline lớp (admin/staff):** bấm từng dòng `ClassTimelineManager` mở dialog chi tiết (buổi / khảo sát / chuyên đề). Kéo-thả chỉ đổi thứ tự trên client; **Lưu thứ tự** mới gọi `POST /class/:id/timeline/reorder`.
+
+### Fixed
+
+- **Ticket #105 — Polish nhỏ (review):**
+  - `StudentDevicePopup`: nút buộc đăng xuất dùng token `error` (nhìn thấy rõ) + `window.confirm` (TODO #11).
+  - `PracticeStatsView`: sort thật theo Điểm / Trạng thái; hàng chưa làm `bg-error/10` (bỏ opacity `/8` `/12`).
+  - Thư viện đề thi: Escape huỷ sửa tên inline, không để `onBlur` lưu.
+  - `EssayGradeCard`: Save disabled luôn hiện lý do (**Chưa nhập điểm** / **Điểm vượt thang**).
+  - Soạn câu trắc nghiệm: chọn đáp án A/B/C/D (`UpgradedSelect`), vẫn lưu index 0-based.
+  - `MathRichTextEditor`: toolbar đậm/nghiêng/list + chèn công thức LaTeX (inline/khối). Giữ rich text, không đổi nhãn thành "plain LaTeX".
+  - `AiImportModal`: xoá dead code (`difficultyLevelId` ternary vô nghĩa, re-validate lệch); toàn bộ chuỗi tiếng Việt đủ dấu (kể cả typo "Qua nhau cau hoi").
+  - `StudentAttemptTimer`: `aria-live` theo phút; đồng hồ visual vẫn tick 250ms.
+
+- **Ticket #103 — 3 lỗi mất dữ liệu UI:**
+  - **Sửa Bài học:** dialog `KnowledgeTreeCard` seed lại quiz đã gán mỗi lần mở (kể cả cùng lecture); gỡ quiz hiện `window.confirm` trước khi unlink.
+  - **Hàng đợi chấm:** giữ snapshot list + tăng cursor; không `invalidateQueries` giữa các câu (tránh bỏ sót). Hết cursor → màn đã chấm xong; refetch khi chấm lại câu bỏ qua.
+  - **Autosave bài thi:** `onError` + Sonner, chỉ báo Đang lưu / Đã lưu lúc hh:mm / Lưu lỗi — thử lại; Nộp flush save rồi dialog xác nhận (kèm số câu chưa trả lời); `beforeunload` khi còn thay đổi chưa lưu. Timer hết giờ vẫn nộp thẳng.
+
+- **Timeline lớp — dialog buổi học:** lần bấm đầu vào dòng buổi không mở dialog vì `SessionHistoryTable` auto-open chạy khi list tháng còn rỗng (query lazy), rồi không chạy lại khi data về. Effect chờ `sessions` và chỉ mở một lần theo `autoOpenToken`.
+
+### Added
+
+- **Timeline lớp:** bảng `class_timeline_items` (migration `20260915000000_add_class_timeline_items`), API `GET/POST /class/:id/timeline` + `GET .../timeline/student`. Mặc định **mới nhất trên, cũ nhất dưới** (trộn buổi/khảo sát/chuyên đề); DnD lần đầu set `classes.timeline_custom_order`. Migrations `20260916000000`, `20260917000000`, `20260917120000` (reset cờ lock + xếp DESC). ADR `docs/adr/2026-09-07-class-timeline-join-table.md`.
+- **Ticket #64 — Thống kê lần giao luyện tập (Màn 12):**
+  - API: `GET /staff-ops/classes/:classId/assignments/:assignmentId/stats` (cùng access #63: `admin`/`teacher` phụ trách lớp). Điểm = lượt `hasUngradedEssay=false` cao điểm nhất (MCQ `autoGradedScore` + tổng `pointsAwarded` essay). Lượt chờ chấm không vào điểm / trung bình / tỉ lệ đúng. Tỉ lệ từng câu chỉ trên lượt tốt nhất đã chấm xong; essay “đúng” khi `pointsAwarded === pointsPossible`. Lọc theo `assignmentId` + `classId` (không gộp lớp dùng chung đề).
+  - FE: `/staff/classes/[id]/practice/[cid]/stats` — 3 KPI, progress tỉ lệ đúng (câu dưới 50% tô error), bảng HS cuộn ngang, hàng Chưa làm nền đỏ nhạt, CSV “Xuất Excel”. Nút **Thống kê** cạnh Chấm tự luận trong `ClassContentManager`. TanStack Query + Sonner.
+
+- **Ticket #63 — Chấm tự luận (hàng đợi lượt mới nhất):**
+  - Prisma: `attempt_answers.feedback` (`TEXT?`) — nhận xét gia sư cho từng câu tự luận. Migration `20260914000000_add_attempt_answer_feedback`.
+  - API (`apps/api/src/attempt`): `GET /staff-ops/classes/:classId/assignments/:assignmentId/grading-queue` trả hàng đợi (chỉ câu tự luận chưa chấm của **lượt mới nhất** mỗi học sinh — `distinct studentId` + `orderBy startedAt desc`; ôn nhẹ không tạo Attempt nên tự động không xuất hiện). `PATCH .../grading-queue/:attemptAnswerId` chấm 1 câu: `pointsAwarded` (0..`pointsPossible` snapshot), `feedback?`. Chấm lượt cũ (không phải mới nhất) trả 404. Hết câu tự luận chờ → `has_ungraded_essay = false`. `is_correct` giữ null cho tự luận. Không đụng `auto_graded_score/max` (chỉ MCQ). Access: `StaffOperationsAccessService`, chỉ mode `admin` hoặc `teacher` phụ trách lớp.
+  - FE: `/staff/classes/[id]/grading/[assignmentId]` — Màn 11 mobile-first (banner "lượt mới nhất của {HS}", card 1 câu/lúc, pill độ khó + "Tối đa X điểm", box câu trả lời, xem barem `answerGuide` nếu có, input điểm `/max` + textarea nhận xét, "Bỏ qua" / "Lưu & chấm bài tiếp theo"). TanStack Query + Sonner. Entry point: nút "Chấm tự luận" ở mỗi mục luyện tập trong tab Nội dung của lớp.
+
+- **Ticket #62 — Học sinh làm bài (Attempt + đồng hồ riêng):**
+  - Prisma: `attempts` + `attempt_answers`; `assignment_id` → `class_content_items.id`. Snapshot `duration_minutes` / `points_possible`. Partial unique một `in_progress` / (assignment, student).
+  - API: lobby/start/get/save/submit dưới `/users/me/student-classes/:classId/...`. Reuse `getPracticeAssignmentForStudent` (`openAt` #59 + hết hạn xem #49). Hết giờ chốt + chấm MCQ (`timed_out`), không huỷ. Tự luận để chờ chấm.
+  - FE: tab Nội dung phân lý thuyết/luyện tập; `/student/classes/[id]/assignments/[assignmentId]` + trang làm bài mobile-first, timer sticky, TanStack Query, Sonner.
+
+### Security
+
+- **Ticket #86:** `GET /topics/:topicId/lectures/:lectureId/quizzes` chỉ còn `@Roles(admin)` (+ staff soạn nội dung). Học sinh phải dùng `GET /users/me/student-classes/:classId/topics/:topicId/lectures/:lectureId/quizzes` (có `validateStudentClassAccess`) để tránh IDOR nội dung câu hỏi ôn nhẹ theo `lectureId`.
+
+### Added
+
+- **Màn 09b: Lần giao — thời điểm mở và thời lượng riêng lớp (#59):**
+  - Prisma: `class_content_items.open_at` + `duration_minutes` (lần giao cấp lớp). Không thêm cột lịch lên `topics` (đề dùng chung).
+  - API: `POST /class/:id/content` nhận `openAt`/`durationMinutes` khi giao luyện tập; `PATCH /class/:id/content/:itemId` chỉ sửa lịch lần giao. Học sinh `GET .../topics/:topicId` và danh sách student content bị chặn/`isOpen=false` trước `openAt`.
+  - FE: bước **Đặt lần giao** sau khi chọn đề luyện tập (DateInput + TimeInput 24h + UpgradedSelect thời lượng); sửa lịch từng lớp độc lập; student list khoá mục chưa mở. Toast Sonner.
+
+- **Chuyên đề riêng lớp + gia sư tự soạn/nhập AI — Ticket #60 (màn 09c):**
+  - Backend: `createClassContentItem` (tạo mới) uỷ quyền `createTopic` (`classId` có, `courseId` null). Chuyên đề luyện tập riêng lớp resolve khoá từ `Class.courseId` khi gắn `QuestionLink` (không nhân bản CRUD #55). Gia sư chỉ `POST/PATCH /questions` và `POST /questions/bulk` vào ngân hàng khoá của lớp đang dạy (`CourseAccessService.assertCanWriteCourseQuestions`); đội giáo án vẫn sửa/xoá.
+  - Frontend: panel Thêm chuyên đề — hai banner riêng, composer chọn ngân hàng / soạn mới / `AiImportModal` inline; nhãn nguồn trên từng dòng; TanStack Query + Sonner.
+
+- **Thư viện đề thi — Ticket #56:**
+  - Backend: CRUD đề thi cấp khoá (`Topic.kind = practice`, `chapterId = null`) qua `GET/POST/PATCH/DELETE /course/:courseId/exam-library` và `POST /course/:courseId/exam-library/reorder`.
+  - Frontend: `/admin/exam-library` quản lý đề thi theo khoá; soạn câu hỏi tái sử dụng `PracticeTopicQuestionsCard` và API `/topics/:topicId/questions` của ticket #55 (không nhân bản QuestionLink).
+
+- **Soạn Chuyên đề luyện tập (đề) — Ticket #55:**
+  - Backend: CRUD API cho quản lý câu hỏi trong chuyên đề luyện tập (`QuestionLink`):
+    - `GET /topics/:topicId/questions` — Danh sách câu hỏi của đề
+    - `POST /topics/:topicId/questions` — Thêm câu hỏi vào đề
+    - `PATCH /topics/:topicId/questions/:linkId` — Cập nhật thứ tự/điểm
+    - `DELETE /topics/:topicId/questions/:linkId` — Xóa câu hỏi khỏi đề
+    - `POST /topics/:topicId/questions/reorder` — Sắp xếp lại thứ tự
+    - `GET /topics/:topicId/questions/summary` — Tổng số câu hỏi và tổng điểm
+    - `GET /topics/:topicId/questions/is-assigned` — Kiểm tra đề đã được giao cho lớp
+  - Frontend: `PracticeTopicQuestionsCard` component — UI quản lý câu hỏi trong chuyên đề luyện tập trên Cây tri thức (`KnowledgeTreeCard`), bao gồm: thêm câu hỏi từ ngân hàng (lọc theo chủ đề/mức khó/tìm kiếm), chỉnh điểm từng câu, xóa câu hỏi, hiển thị tổng điểm.
+  - Frontend: API functions, DTOs, query keys mới cho `QuestionLink`.
+- **Màn 09a: Thêm chuyên đề — chọn từ khoá (#58):** Nút "Thêm chuyên đề" trong tab Nội dung mở panel chọn chuyên đề từ khoá học của lớp. Panel hiển thị danh sách chuyên đề theo chủ đề (chapter), có tìm kiếm, chọn đúng 1 mục mỗi lần thêm. Chuyên đề đã có trong lớp hiện trạng thái "Đã thêm" và bị khoá. Backend endpoint `GET /class/:id/content/course-topics` trả danh sách chuyên đề khoá kèm `alreadyAdded`. Toast Sonner thành công/thất bại. Mobile-first.
+
+### Changed
+
+- **Panel Thêm chuyên đề — default tab + cây (#87):** Mở **Thêm chuyên đề** mặc định tab **Thêm từ khoá** khi khoá học của lớp còn chuyên đề; fallback **Tạo mới cho lớp** nếu không có topic để chọn. `CourseTopicPicker` đổi từ list phẳng nhóm `chapterTitle` sang cây Chủ đề → Chuyên đề có expand/collapse (mobile-first). Không đổi API/schema.
+
+- **Buổi học không điểm danh (`noAttendance`) — backend guard khi cập nhật session:**
+  - `PUT /sessions/:id` và `PUT /staff-ops/sessions/:id`: Khi session có `snapshotNoAttendance = true`, field `attendance` trong payload bị bỏ qua (silent ignore) — buổi học tự quản danh sách điểm danh, không cho phép cập nhật từ bên ngoài.
+  - Tính năng này đã có ở `POST /sessions` (tự tạo `Attendance.present` cho toàn bộ học sinh active), nay được mở rộng sang cả luồng cập nhật.
+  - Rebellion `docs/adr/2026-09-05-class-without-attendance-still-charges.md`.
+
+### Added
+
+- **Xác minh magic link học sinh — phân biệt trạng thái link (ticket #66, bổ sung trên nền #65):**
+  - `GET /auth/verify-login` trả `{ status, message, verified }` với `status: verified | used | expired | invalid` thay vì chỉ `{ message, verified }`.
+  - Máy bấm link lần đầu hợp lệ → `verified`; link đã được bấm trước đó (yêu cầu đã xác minh) → `used`; quá hạn 10 phút → `expired`; token sai/thiếu/không tồn tại → `invalid`. Không set cookie/kích hoạt phiên trên máy bấm link — thiết bị được kích hoạt vẫn là máy khởi tạo.
+  - Frontend `/auth/verify-login` hiển thị thông báo riêng cho từng trạng thái (Screen 17), đáp ứng AC "link hết hạn / đã dùng / sai có thông báo riêng".
+
+- **Cài đặt khoá — thời hạn, thang độ khó, đội giáo án (ticket #48):**
+  - Prisma: thêm model + bảng `course_lesson_plan_members` (quan hệ `Course`–`StaffInfo`, unique `(course_id, staff_id)`, cascade xoá). Migration `20260907000000_add_course_lesson_plan_members`.
+  - API `/courses`: `POST/PATCH` nhận và lưu `default_duration_days` (để trống/null = vô hạn); `GET /courses/:id` trả chi tiết kèm `difficultyLevels`, `lessonPlanMembers`, `_count.classes`; `GET /courses` trả `_count`.
+  - API `/courses/:id/difficulty-levels`: GET (lọc `includeInactive`), POST, PATCH theo id, PATCH `/reorder`, DELETE.
+  - API `/courses/:id/lesson-plan-members`: GET danh sách, PUT thay toàn bộ đội giáo án (chỉ nhân sự active có role `lesson_plan`/`lesson_plan_head`); `GET /courses/lesson-plan-staff` để fill picker.
+  - `CourseAccessService` — guard phân quyền nội dung khoá tái sử dụng: admin/trợ lí/`lesson_plan_head` quản lý mọi khoá; thành viên `lesson_plan` chỉ khoá được gán; gia sư dạy lớp thuộc khoá X không tự động sửa được nội dung cấp khoá X. Unit tests `course-access.service.spec.ts`.
+  - Frontend `/admin/classes/courses` (Màn 01) hiển thị thời hạn + số lượng, thêm/sửa `default_duration_days` trong `CourseFormPopup`; trang mới `/admin/classes/courses/:id` (Màn 08) quản lý thang độ khó và đội giáo án bằng TanStack Query + `UpgradedSelect` + `runBackgroundSave`/Sonner.
+  - Khi sửa khoá đã tồn tại, `CourseFormPopup` hiện banner cảnh báo (style `Alert variant="warning"`) cạnh thời hạn mặc định: "Chỉ áp dụng cho lớp tạo mới — Lớp đang chạy giữ nguyên hạn đã đặt. Đổi hạn từng lớp ở trang lớp." (`default_duration_days` không hồi tố cho lớp đã tạo).
+  - Đội giáo án (Màn 08): `lesson_plan_head` không cần gán nên không hiện trong picker để thêm; nếu có trong danh sách member thì hiện pill **Mặc định** và không có nút Gỡ.
+
+- **Lớp không điểm danh (`noAttendance`) — Tự động điểm danh present khi tạo buổi học:**
+  - Thêm boolean `noAttendance` trên `Class` (default `false`); admin/assistant có thể bật/tắt qua `PATCH /class/:id/basic-info`.
+  - Khi `noAttendance = true`, tạo buổi học tự động tạo `Attendance.present` cho toàn bộ học sinh active, bỏ qua form điểm danh.
+  - Session snapshot giá trị `noAttendance` thành `snapshotNoAttendance` (không đọc lại từ Class sau khi tạo).
+  - Tuition/allowance vẫn tính đúng — `tuitionFee` = tổng `present`/`excused` × học phí mỗi học sinh.
+  - **Migration:** `20260905100000_add_class_no_attendance` — thêm `no_attendance` vào `classes`, `snapshot_no_attendance` vào `sessions`.
+
+- **Student single-device login (ticket #65):**
+  - Thêm bảng `user_devices` và `login_requests` trong Prisma schema.
+  - Luật một thiết bị tại một thời điểm cho tài khoản học sinh: khi đăng nhập ở máy thứ hai khi máy cũ còn hiệu lực → bị chặn, hiện màn hình lỗi rõ lý do và cách gỡ.
+  - Flow đăng nhập học sinh mới: nhập credentials → gửi magic link email → poll chờ xác minh → activate device + cấp JWT tokens.
+  - `StudentDeviceGuard` trên `POST /auth/refresh`: kiểm tra student có device active không trước khi cấp token mới.
+  - Endpoint `POST /auth/admin/students/:id/force-logout`: admin/CSKH/assistant buộc đăng xuất học sinh, ghi audit trail.
+  - Lazy cleanup: xóa login requests hết hạn và devices inactive > 60 ngày khi tạo login request mới.
+  - Frontend: login page xử lý cả student và staff/admin flow; màn hình "Check your email" với polling; màn hình blocked device (Screen 18).
+  - Frontend: `verify-login` page cho magic link.
+  - Student sidebar/header dùng `POST /auth/student/logout` để cleanup device khi đăng xuất.
+  - `POST /auth/student/login/poll` đổi từ GET sang POST, requestId đưa vào body thay vì URL path để tránh leak trong access logs.
+  - Activate endpoint yêu cầu `activateSecret` (one-time secret trả về từ bước login init) kèm `requestId`, không còn dựa vào requestId UUID làm secret duy nhất.
+  - Device check cho student được áp dụng trên mỗi access token validation (`JwtStrategy.validate`), không chỉ ở refresh. Kết quả cache trong `AuthIdentityCacheService` (TTL 5s), invalidate khi force-logout/xóa device.
+  - `touchDevice` gọi trên mỗi refresh để rule inactive 60 ngày hoạt động đúng.
+  - `studentLoginInit` trả `error: NOT_STUDENT_ACCOUNT` hoặc `error: EMAIL_NOT_VERIFIED` riêng biệt; FE chỉ fallback sang staff login khi gặp `NOT_STUDENT_ACCOUNT`.
+  - Kiểm tra roleType chuyển xuống sau bcrypt.compare để tránh account enumeration.
+
+- **Lương cứng trên dashboard và thống kê tháng (ticket 06):**
+  - Chỉ số **Trợ cấp chờ thanh toán** (`pendingPayrollTotal` / `pendingPayrollBreakdown`) cộng lương cứng `pending` all-time (gross), không lọc theo kỳ dashboard. Popup chi tiết có nguồn **Lương cứng chưa thanh toán**.
+  - `GET /dashboard/monthly-statistics` (+ PDF) thêm cấu phần `fixedSalaryCost` tách khỏi trợ cấp/thưởng; `expense` / chi phí nhân sự cộng lương cứng. Tháng chưa chốt không có payable → 0, layout giữ nguyên.
+  - Cùng quy tắc che số liệu tài chính: `accountant_income` không thấy lương trên lớp/session; `accountant_expense` thấy lương cứng như các khoản chi khác trên dashboard chi.
+
+- **Cài đặt hệ thống (ticket 01):**
+  - Sidebar admin và staff (assistant) có mục **Cài đặt hệ thống** tại `/admin/system-settings` và `/staff/system-settings`. Tab đang chọn nằm trong URL (`?tab=deductions` hoặc `?tab=fixed-salary`). Tab **Khấu trừ** là màn khấu trừ cũ (role defaults, TanStack Query, UpgradedSelect, Sonner) không đổi nghiệp vụ.
+  - Bookmark `/admin/deductions` và `/staff/deductions` redirect vào tab Khấu trừ. Mục sidebar **Khấu trừ** đã gỡ. Quyền giữ như màn cũ: admin + assistant; kế toán không mở.
+
+- **Lương cứng mặc định theo role (ticket 02 / 02b):**
+  - Tab **Lương cứng** trên Cài đặt hệ thống: hai nhóm độc lập — **mức lương cứng theo role** và **% vận hành lương cứng theo role** — mỗi nhóm một nút lưu. Trống = chưa cấu hình, khác 0đ / 0%.
+  - `GET/PUT /fixed-salary-settings/role-defaults` (amount) và `GET/PUT /fixed-salary-settings/role-operating-rates` (percent). Swagger, admin + assistant. Validate số âm và % ngoài 0–100 ở FE + BE. Mỗi thay đổi ghi `action_history` (`role_fixed_salary_default` / `role_fixed_salary_operating_rate_default`). Bảng `role_fixed_salary_defaults` + `role_fixed_salary_operating_rate_defaults` — không tái dùng `extra_allowances`, không gộp hai cột trên một row.
+  - % vận hành lương cứng không đọc/ghi `% vận hành` theo lớp; test khẳng định trợ cấp buổi học không đổi số tiền. Thuế tái dùng tab Khấu trừ.
+  - Docs: `CONTEXT.md`, `docs/Database Schema.md`, ADR `docs/adr/2026-09-09-role-default-fixed-salary.md`.
+
+- **Đè lương cứng theo nhân sự (ticket 03):**
+  - Tab **Lương cứng** thêm danh sách nhân sự tìm kiếm được; mỗi (nhân sự, role đang mang) một dòng độc lập. Hai trục đè tách: lương (`staff_fixed_salary_overrides`) và % vận hành (`staff_fixed_salary_operating_rate_overrides`). Có row = đè (kể cả 0); không row = mặc định role. Đè một trục không chốt cứng trục kia.
+  - API: `GET /fixed-salary-settings/staff-overrides`, `PUT .../staff-overrides/amount`, `PUT .../staff-overrides/operating-rate`. Audit `staff_fixed_salary_override` / `staff_fixed_salary_operating_rate_override`. Admin + assistant. TanStack Query, Sonner, mobile-first.
+
+- **Chốt lương cứng tháng (ticket 04):**
+  - Cùng hàm cho cron 01:00 ngày 28 (timezone `Asia/Ho_Chi_Minh`) và nút **Chốt lương tháng này** trên tab Lương cứng. Sinh một khoản `staff_fixed_salary_payables` / (nhân sự `active`, role đang mang, tháng hiện tại) khi mức resolve > 0; snapshot gộp, % vận hành, % thuế, khấu trừ từng loại, thực nhận. Unique `(staff_id, role_type, month)` ở DB; lần hai không tạo thêm và không sửa khoản cũ. Công thức `calculateDeductionAmounts` (vận hành trên gộp, thuế trên phần còn lại).
+  - `POST /fixed-salary-settings/close-month`, `GET /fixed-salary-settings/payables?month=YYYY-MM`. Toast báo số khoản đã sinh / bỏ qua vì đã tồn tại; danh sách tháng hiện tại hiện ngay trên tab. Admin + assistant. Chưa nối vào màn payroll khác.
+
+- **Lương cứng trên hồ sơ thu nhập (ticket 05):**
+  - Card **Lương cứng** trên `/admin/staffs/:id` (mirror `/staff/staffs/:id`) và `/staff/profile`: dòng riêng theo role (gộp, KH VH, thuế, thực nhận, chưa nhận/đã nhận). Không gộp vào Công việc khác / thưởng / trợ cấp thêm.
+  - `GET /staff/:id/income-summary` và `GET /users/me/staff-income-summary` thêm `fixedSalaryRoleSummaries` + `fixedSalaryPayables`; tổng tháng/năm, snapshot chưa nhận gồm lương cứng. `PATCH /staff/:id/payment-status/pay-all` và `pay-selected` nhận `sourceType=fixed_salary` (giữ % đóng băng). `PATCH /staff/:id/fixed-salary-payables/:payableId` sửa số gộp/ghi chú khi pending; không có API xóa; paid không sửa. Audit `staff_fixed_salary_payable`. Cột `note` trên `staff_fixed_salary_payables`.
+  - FE: TanStack Query, Sonner, mobile-first. Nhân sự tự xem trên profile (không sửa). Admin / assistant / kế toán chi sửa khoản pending.
+
+- **Preview học phí theo 30 phút trong popup Thêm buổi học:**
+  - Popup **Thêm buổi học** tính lại học phí mặc định từng học sinh theo khung giờ đang nhập khi lớp bật `pricing_mode = per_block`: `custom_tuition_per_block` → `student_tuition_per_block`, nhân số block của buổi. Header **Học phí**, dòng **Mặc định / Đang áp dụng** và gợi ý học phí từng học sinh đều dùng số này thay vì học phí / buổi.
+  - Số block preview bám backend: lấy từ giờ bắt đầu–kết thúc, nếu không chia hết 30 phút thì rơi về số block của buổi chuẩn theo lịch cố định. Thiếu cả hai thì hiện nhắc nhập giờ kết thúc và giữ học phí / buổi.
+  - Lớp theo buổi không đổi hiển thị. Helper dùng chung `apps/web/lib/session-tuition.helpers.ts` (mirror `resolveSessionChargeTuitionFee` phía API) + unit test.
+
+- **Ô nhập Học phí / HV / 30 phút trên form lớp (#141):**
+  - Form thêm/sửa lớp khi bật chế độ theo block hiện ô **Học phí / HV / 30 phút** cạnh trợ cấp (MoneyInput, số block chuẩn, quy đổi buổi chuẩn). Prefill từ gói hoặc `student_tuition_per_block` đang lưu; số nhập tay được ghi thẳng vào cột lớp và không bị dual-write từ học phí mỗi buổi. Để trống thì vẫn suy `ROUND(per-session ÷ số block chuẩn)`.
+  - **Tổng gói** / **Số buổi** không đổi. Ô mới không ghi `student_tuition_per_session` (gói trống vẫn `null` / UI `—`). Lớp theo buổi không thấy ô này.
+  - API: `POST /class`, `PATCH /class`, `PATCH /class/:id/basic-info` nhận `student_tuition_per_block` (nullable). Swagger mô tả field. Đổi lịch cố định không còn ghi đè đơn giá học phí / 30 phút đã nhập tay.
+  - Docs: `CONTEXT.md` mục Chế độ tính tiền của lớp, `docs/pages/admin.md`.
+
+- **Trợ cấp gia sư theo block 30 phút, opt-in theo lớp (#135):**
+  - Lớp `pricing_mode = per_block`: `allowance_amount` = `đơn_giá_block/HS × sĩ số present/excused × snapshot_block_count + scale_amount` (`scale_amount` không nhân block). `class_teachers.custom_allowance` hiểu là VNĐ / HS / 30 phút. Trần payroll = `max_allowance_per_block × snapshot_block_count`.
+  - Lớp theo buổi (mặc định): giữ nguyên `computeDefaultSessionAllowanceAmountVnd` và trần `max_allowance_per_session` — regression test chứng minh số tiền y hệt trước.
+  - Payroll/dashboard/reporting đọc snapshot buổi, không suy lại từ giờ. Trợ cấp quản lý lớp / CSKH / trợ lý / hoa hồng giáo án vẫn theo `tuition_fee`, không cộng `scale_amount` lần hai.
+  - Docs: `CONTEXT.md`, `docs/Database Schema.md`, `docs/pages/admin.md`, ADR expand-block-pricing.
+
+- **UI admin — chọn chế độ tính tiền và đơn giá / 30 phút (#137):**
+  - Form thêm/sửa lớp: switch **Chế độ tính tiền** phản ánh `pricing_mode`; nhãn trợ cấp đổi **/ buổi** ↔ **/ 30 phút**.
+  - Chế độ theo block hiện số block chuẩn từ lịch và số tiền quy đổi một buổi chuẩn. Confirm trước khi đổi trên lớp đã có (unpaid tính lại; paid/cọc giữ nguyên).
+  - Chặn bật block khi thiếu số block chuẩn, toast lý do cụ thể (Sonner). Payload API vẫn `*_per_session`.
+  - Docs: `docs/pages/admin.md`, `CONTEXT.md`. Test FE `class-pricing-mode.test.ts` + regression charge `per_session` y hệt công thức cũ.
+
+- **Chế độ tính tiền theo lớp — bật/tắt block 30 phút, mặc định tắt (#139):**
+  - Enum `ClassPricingMode` (`per_session` / `per_block`) trên `classes.pricing_mode`, NOT NULL, mặc định theo buổi. Migration `20260909100000_class_pricing_mode` backfill mọi lớp hiện có.
+  - `resolveSessionChargeTuitionFee` và giờ buổi bắt buộc (`assertRequiredSessionTimes`) gated theo cờ. `sessions.snapshot_block_count` chỉ ghi khi lớp theo block. Gói riêng luôn theo buổi.
+  - `PATCH /class/:id/pricing-mode` đổi chế độ, tính lại buổi unpaid (học phí, trợ cấp, snapshot); buổi paid/deposit/cọc không đổi. Từ chối bật block nếu không có số block chuẩn.
+  - UI: switch **Chế độ tính tiền** trên thêm/sửa lớp; form buổi không bắt buộc giờ khi lớp theo buổi.
+  - Docs: `CONTEXT.md`, `docs/Database Schema.md`, ADR expand-block-pricing (contract #138 huỷ).
+
+- **Giáo án — bậc độ khó + tick hạng mục, tiền tự tính (`#132`):**
+  - `lesson_outputs` thêm `difficulty_band` (enum 5 bậc, nullable) và `includes_test` / `includes_solution` / `includes_lecture_video` (mặc định `false`). Migration `20260909090000_lesson_output_difficulty_pricing`.
+  - Backend bỏ qua `cost` client gửi lên; tạo/sửa có bậc thì `cost` = tổng bảng giá hằng số theo tick (không tick → `0`). Output chưa có bậc giữ nguyên `cost` cũ khi sửa các field khác.
+  - Form tạo/sửa output (full + popup nhanh): dropdown **Độ khó** kèm gợi ý rating, 3 checkbox hạng mục, ô **Chi phí** read-only với mọi vai trò. `level` vẫn dùng để lọc tab Bài tập, không liên quan tới tiền.
+
+### Changed
+
+- **Học phí lớp theo block: đơn giá / 30 phút thắng gói (#140):**
+  - `resolveSessionChargeTuitionFee` khi `pricing_mode = per_block`: `custom_tuition_per_block` → `student_tuition_per_block` → gói riêng → gói lớp. Charge = đơn giá block × `sessions.snapshot_block_count` (cùng số block với trợ cấp gia sư). Gói chỉ còn fallback khi thiếu đơn giá / 30 phút hoặc thiếu số block — khi đó vẫn tính theo buổi.
+  - Lớp theo buổi (`per_session`): không đổi; không đọc cột per-block. Test khoá hành vi cho cả hai chế độ.
+  - Docs: `CONTEXT.md` (bỏ “gói riêng luôn tính theo buổi” ở mục chế độ tính tiền).
+
+- **Học phí học sinh theo block 30 phút là opt-in theo lớp (#139, sửa #136):**
+  - Học sinh **không gói** chỉ charge `đơn_giá_block × snapshot_block_count` khi lớp `pricing_mode = per_block`. Lớp theo buổi (mặc định, mọi lớp cũ) dùng chuỗi `custom_tuition_per_session` → gói hiệu lực → `student_tuition_per_session`, kể cả khi cột block đã có giá trị.
+  - Học sinh **có gói** luôn theo buổi ở cả hai chế độ.
+  - Cột `*_per_session` không bị xoá (#138 huỷ).
+
+- **Học phí học sinh theo block 30 phút, gói là ngoại lệ (#136):**
+  - Học sinh **không gói**: `attendance.tuition_fee` mặc định = (`custom_tuition_per_block` hoặc `classes.student_tuition_per_block`) × `sessions.snapshot_block_count` (cùng số block với trợ cấp gia sư). Thiếu per-block hoặc số block → fallback cột per-session.
+  - Học sinh **có gói** (gói lớp khi charge đang đi nhánh gói, hoặc gói riêng): **không đổi** công thức theo buổi.
+  - Trợ cấp quản lý lớp / CSKH / trợ lý 3% / hoa hồng giáo án vẫn đọc `tuition_fee` đã chốt. Buổi tạo trước không bị backfill lại học phí.
+  - Docs: `CONTEXT.md`, `docs/pages/admin.md`, `docs/pages/staff.md`, `docs/Database Schema.md`.
+- **Buổi học — bắt buộc giờ bắt đầu/kết thúc (#133):**
+  - **Backend:** `POST /sessions` và `POST /staff-ops/classes/:classId/sessions` từ chối payload thiếu `startTime`/`endTime`; giờ kết thúc phải sau giờ bắt đầu. `PUT` buổi: nếu client gửi giờ thì cả hai phải hợp lệ; buổi `paid`/`deposit` từ chối đổi giờ. Script chỉ-đọc `pnpm --filter api sessions:list-missing-time` liệt kê buổi thiếu giờ (id, lớp, ngày). Cột DB vẫn nullable cho dữ liệu cũ.
+  - **Frontend:** Form tạo/sửa buổi validate giờ trước khi gửi, báo lỗi bằng Sonner. Ô giờ disabled khi buổi `paid`/`deposit` (cùng cơ chế khóa card Trợ cấp buổi).
+
+- **Hotfix — Link video YouTube (recording) không còn bắt buộc khi tạo/sửa buổi học:**
+  - **Backend:** `SessionCreateService` và `SessionUpdateService` bỏ validation bắt buộc `recordingUrl` khi lớp có $\ge 2$ học sinh. `recordingUrl` luôn optional cho mọi lớp/mọi actor; format YouTube vẫn chưa được validate ở backend (chỉ validate ở frontend, không đổi trong hotfix này).
+  - **Frontend:** `AddSessionPopup` (tạo buổi học) và `SessionHistoryTable` (sửa buổi học) bỏ dấu bắt buộc và chặn submit khi thiếu `recordingUrl`; vẫn giữ validate định dạng YouTube (`extractYouTubeVideoId`) khi người dùng có nhập link.
+
+### Added
+
+- **Expand đơn giá theo block 30 phút (#134):**
+  - Migration `20260909090000_expand_block_pricing` thêm `classes.allowance_per_block_per_student`, `max_allowance_per_block`, `student_tuition_per_block`, `student_classes.custom_tuition_per_block`, `sessions.snapshot_block_count` (không xóa cột cũ). Backfill `ROUND(giá_cũ / số_block_chuẩn)` từ lịch cố định; lớp không suy được số block để `null`. `class_teachers.custom_allowance` backfill cùng quy tắc (API vẫn nhận/trả theo buổi).
+  - Dual-write trên tạo/sửa lớp, roster gia sư, học phí riêng học sinh, đổi lịch cố định. Tạo buổi ghi `snapshot_block_count`.
+  - `GET /class/missing-standard-blocks` và script `apps/api/scripts/list-classes-missing-standard-blocks.ts` xuất lớp thiếu số block chuẩn.
+  - ADR: `docs/adr/2026-09-09-expand-block-pricing.md`. Payroll/gói/`scale_amount`/`coefficient` không đổi công thức trong bước này.
+- **Migration — Backfill hồ sơ `student_info` cho toàn bộ tài khoản `users` có role `student`:**
+  - Tạo migration `20260904090000_backfill_student_info_for_student_users` tự động đồng bộ hồ sơ `student_info` cho các tài khoản người dùng có role `student` nhưng chưa có profile (như tài khoản `hocsinh1` và các tài khoản test/legacy khác).
+  - Quy trình xử lý 2 bước: (1) Tự động liên kết các bản ghi `student_info` mồ côi nếu trùng email với tài khoản học sinh; (2) Tự động sinh ID chuẩn `UNIST-[0-9a-f]{10}` và chèn hồ sơ `student_info` mới (họ tên lấy theo `last_name + first_name` hoặc `account_handle`, trạng thái `active`, số dư ví `0 đ`, quyền nhận biên lai email) cho tất cả các tài khoản học sinh còn lại.
+- **Điều hướng & Trang chủ (`/`) — Định nghĩa trang chủ là Workspace của người dùng thay vì `/user-profile`:**
+  - Khắc phục triệt để lỗi tài khoản học sinh bị kẹt ở `/user-profile`. Khi truy cập `/` hoặc đăng nhập thành công, hệ thống điều hướng trực tiếp vào workspace mặc định của tài khoản (`/student` đối với học sinh, `/staff` đối với nhân sự/gia sư, `/admin/dashboard` đối với quản trị viên). Chỉ các tài khoản chưa có workspace khả dụng mới chuyển về `/user-profile`.
+  - Nút quay lại "← Trang chủ" tại `/user-profile` và các link trang chủ trên thanh điều hướng được cập nhật động theo workspace của người dùng (`getUserWorkspaceHref`).
+  - Đồng bộ logic giữa `apps/web/proxy.ts`, `apps/web/lib/auth-redirect.ts`, `apps/web/components/student/StudentAccessGate.tsx`, `apps/web/app/page.tsx`, `apps/web/components/student/StudentSidebar.tsx` và backend `AuthAccessService` (`resolveDefaultWorkspace`, `resolvePreferredRedirect`, `canAccessStudentWorkspace`).
+- **Chi tiết lớp học — Tách nút (+) dropdown thành 2 nút độc lập "Tạo buổi học" và "Tạo khảo sát":**
+  - Cập nhật cả 2 màn hình quản lý chi tiết lớp học (`/admin/classes/[id]` và `/staff/classes/[id]`), loại bỏ menu dropdown trung gian khi bấm nút tròn (+).
+  - Bổ sung 2 nút bấm riêng biệt: **Tạo buổi học** (mở dialog `AddSessionPopup`) và **Tạo khảo sát** (kích hoạt dialog tạo khảo sát của `ClassSurveyPanel`) giúp thao tác nhanh và trực quan.
+- **Lớp học — Bắt buộc nhập Link video YouTube (recording) đối với lớp có $\ge 2$ học sinh:**
+  - **Frontend:** Tại popup tạo buổi học (`AddSessionPopup`) và popup chỉnh sửa buổi học (`SessionHistoryTable`), tự động hiển thị dấu sao đỏ `<RequiredMark />` cùng ghi chú `(Bắt buộc đối với lớp từ 2 học sinh)` nếu số học sinh trong lớp/buổi học $\ge 2$; form validation chặn lưu và thông báo lỗi rõ ràng nếu trường link YouTube bị để trống.
+  - **Backend:** `SessionCreateService` và `SessionUpdateService` bổ sung validation nghiệp vụ: từ chối tạo hoặc cập nhật buổi học nếu có từ 2 học sinh trở lên mà `recordingUrl` rỗng hoặc null, trả về lỗi `BadRequestException` với thông báo tương ứng.
+- **Admin Dashboard — Cảnh báo lớp chưa nộp báo cáo khảo sát theo từng Bài khảo sát:** Thay thế cảnh báo khảo sát theo số lần đơn lẻ cố định bằng cơ chế cảnh báo theo danh sách các Bài khảo sát thực tế đang mở (`startDate <= hôm nay`). Với mỗi bài khảo sát đang mở, hệ thống tự động quét toàn bộ các lớp `running` (không nằm trong danh sách loại trừ của bài khảo sát đó) và chưa nộp báo cáo để đưa vào nhóm cảnh báo `Lớp chưa báo cáo khảo sát` trên Admin Dashboard kèm tên bài khảo sát, gia sư phụ trách, thời hạn và link mở chi tiết.
+- **Trang Khảo sát — Xem danh sách lớp Đã báo cáo / Chưa báo cáo khi bấm vào số liệu:** Trên bảng danh sách và card bài khảo sát (`SurveysManager`), các con số tại cột "Đã báo cáo" và "Chưa báo cáo" được nâng cấp thành nút bấm tương tác (có hiệu ứng hover/badge). Khi bấm vào, hệ thống mở modal `SurveyClassesDialog` phân tab Đã báo cáo / Chưa báo cáo, hỗ trợ tìm kiếm lớp & gia sư, xem chi tiết ngày nộp/người nộp/nhận xét đánh giá kiến thức, và click điều hướng trực tiếp vào trang chi tiết lớp học (`/admin/classes/:id` hoặc `/staff/classes/:id`). Backend bổ sung endpoint `GET /surveys/:id/reported-classes`.
+- **Học sinh — Gỡ bỏ hoàn toàn tính năng nhận thông báo:** Gỡ bỏ chuông thông báo (`SidebarNotificationTray`) khỏi giao diện học sinh (`StudentSidebar`, `StudentHeader`), ngắt kết nối realtime notification websocket cho role học sinh (`NotificationSocketBridge` trong `apps/web/app/providers.tsx`). Backend thu hẹp quyền feed thông báo (`GET /notifications/feed`, `PATCH /notifications/feed/:id/read`, socket gateway `/notifications`) chỉ cho `admin` và `staff`, đồng thời loại bỏ học sinh khỏi danh sách người nhận / đối tượng mục tiêu thông báo hệ thống.
+- **Điều hướng Trang chủ (`/`) — Thay thế Landing page bằng Workspace của người dùng:** Gỡ bỏ hoàn toàn trang giới thiệu landing page ở root `/`. Khi người dùng truy cập trang chủ, hệ thống (`proxy.ts` và `app/page.tsx`) sẽ tự động nhận diện tài khoản và điều hướng ngay lập tức tới workspace tương ứng (`/admin`, `/staff`, `/student`, hoặc `/user-profile` nếu chưa phân workspace, và `/auth/login` nếu chưa đăng nhập).
+- **Lớp học — Bổ sung trường Link recording vào form Chỉnh sửa buổi học (`SessionHistoryTable`):** Thêm trường nhập "Link video YouTube (recording)" kèm preview video `YouTubeEmbed` bảo mật trong popup chỉnh sửa buổi học; đồng bộ dirty checking và xử lý cập nhật `recordingUrl` xuống cơ sở dữ liệu trên Backend API (`SessionUpdateService`).
+- **Học sinh — Layout SPA không sidebar & Header mới (`StudentHeader`):** Chuyển giao diện học sinh từ sidebar dọc sang dạng SPA toàn màn hình với thanh `StudentHeader` trên đỉnh trang (Brand lockup, điều hướng nhanh, chuông thông báo portal, bộ chọn theme, avatar & nút đăng xuất).
+- **Học sinh — Tinh gọn Dashboard (`/student`):** Bỏ các card thông tin cơ bản, thông tin phụ huynh, lịch thi trên trang chủ học sinh (đã chuyển về quản lý tập trung tại `/user-profile` kèm `StudentExamCard` và `ParentReceiptEmailSwitch`). Trang chủ chỉ hiển thị Thẻ Số dư ví (kèm Nạp tiền SePay QR + Lịch sử ví), Danh sách lớp học (mỗi lớp có thể click trực tiếp để vào xem chi tiết lớp tại `/student/classes/[id]`), và tiến độ UNIOJ.
+- **Video bài học — Trình phát video bài học chuẩn Production (`YouTubeEmbed`):** Triển khai trình phát video tối ưu hóa cao cho bài giảng, kết nối trực tiếp YouTube Iframe API (`youtube-nocookie.com`). Khắc phục hoàn toàn các lỗi trên thiết bị di động / iOS Safari (Touch to Play/Pause tức thì, Fullscreen bung 100% màn hình thiết bị không bị lỗi iframe remount, thanh tua tiến trình kèm tooltip thời gian, điều chỉnh âm lượng & tốc độ phát 0.5x - 2x, phím tắt k/j/l/m/f/Esc, tự động ẩn controls sau 3.5s khi phát). Tích hợp cơ chế phát hiện DevTools đa tầng (`useDevToolsDetector`) hỗ trợ tức thì cả 2 chế độ **Docked** (bám viền) lẫn **Undocked / Cửa sổ rời** (Web Worker anti-debugging heartbeat, dynamic debugger timing loop, console serialization latency, object getters, window blur trigger) để lập tức ẩn & hủy iframe bảo vệ bản quyền video khi video đang phát.
+
+- **Bài khảo sát — tự động push thông báo cho gia sư liên quan khi tạo mới:** `SurveyService.createSurvey` sau khi tạo thành công sẽ tính danh sách gia sư đang phụ trách ít nhất 1 lớp `running` chưa bị loại trừ, rồi gọi `NotificationService` (module `notification` có sẵn — chuông thông báo FE) tạo + push 1 thông báo tới đúng các gia sư đó (`targetUserIds`), title = tên bài khảo sát, nội dung dựng từ Thời gian/Nội dung/Hướng dẫn/Lưu ý/Gia sư của bài khảo sát. Không có gia sư liên quan → bỏ qua; lỗi push chỉ log, không fail request tạo khảo sát. `ClassModule` import thêm `NotificationModule`.
+- **Bài khảo sát — chọn lớp loại trừ qua dialog search + filter loại lớp + infinite scroll:** thay picker checkbox inline (chỉ lọc lớp `status=running`, đã tải trước tối đa 300 lớp) bằng nút mở `ClassExclusionDialog` — dialog có ô tìm kiếm debounce gọi `GET /class?search=` phân trang (không giới hạn `status`, khắc phục lỗi "Không có lớp phù hợp" khi lớp cần loại trừ không thuộc trang tải sẵn) + dropdown lọc theo loại lớp (Tất cả/Basic/Advance/Hardcore/VIP, param `type`), danh sách cuộn vô hạn (`useInfiniteQuery` + `IntersectionObserver`). Checkbox **"Chọn tất cả (N)"** select **toàn bộ N lớp khớp filter** (gọi thêm các trang còn lại song song để lấy đủ ID trước khi set selection), không chỉ các lớp đã tải/hiển thị như trước. Lớp đã chọn hiển thị dạng chip có nút bỏ chọn nhanh bên ngoài dialog.
+- **Bài khảo sát — soạn thông báo có cấu trúc + copy Zalo, mở cho đội giáo án:** `Survey` thêm 3 field text mới `notification_instructions` (Hướng dẫn), `notification_notes` (Lưu ý), `notification_teacher_note` (Gia sư), cạnh `notification_title` và `notification_content` (Nội dung) đã có — form tạo/sửa bài khảo sát (`SurveysManager`) đổi từ 1 rich text field sang 4 field riêng (Nội dung/Hướng dẫn/Lưu ý/Gia sư), hiển thị phẳng không đóng khung card, có khung xem trước + nút **"Sao chép để dán Zalo"** ở footer dialog (cùng hàng "Hủy"/"Lưu bài khảo sát") dựng message dạng `📢 <tên bài khảo sát> / ⏰ Thời gian / 📌 Nội dung / 📝 Hướng dẫn / ⚠️ Lưu ý / 📅 Gia sư` (helper `apps/web/lib/survey-notification.ts`; không có input Title riêng — `notification_title` mirror trực tiếp từ `name` khi lưu để tránh trùng lặp với tên bài khảo sát); danh sách bài khảo sát cũng có icon sao chép nhanh. Thêm route `/staff/surveys` (mở cho `lesson_plan`, `lesson_plan_head`, `assistant`, `admin`) dùng chung component `SurveysManager` với `/admin/surveys`, để mem đội giáo án (không chỉ `lesson_plan_head`) tự tạo bài khảo sát mà không cần quyền admin đầy đủ.
+- **Bài khảo sát** (thay thế "lần khảo sát N toàn cục"): bảng `Survey` (model mới trên `survey_round`, giữ nguyên data lịch sử ở row `id = "current"`) cho phép admin + `lesson_plan`/`lesson_plan_head` CRUD nhiều bài khảo sát có `startDate`/`endDate`, nội dung thông báo rich text, và danh sách lớp loại trừ (`survey_excluded_classes`). Endpoints: `GET/POST /surveys`, `GET/PATCH/DELETE /surveys/:id`, `GET /surveys/:id/missing-classes`. UI: `/admin/surveys` (CRUD + `ClassExclusionPicker`).
+- **Báo cáo khảo sát theo roster học sinh**: `class_surveys` nay gắn `survey_id` (bắt buộc 1 báo cáo/lớp/bài khảo sát) và có `class_survey_student_assessments` — mỗi học sinh đang học một row với 2 field tự do **Đánh giá kiến thức** + **Nhận xét**. Form báo cáo (`ClassSurveyPanel`) đổi theo pattern roster của "Tạo buổi học" (`AddSessionPopup`) thay vì rich text đơn. Cho phép nộp trễ sau `endDate`.
+- **Cảnh báo gia sư (modal per-login)**: `SurveyReminderGate` mount ở `apps/web/app/staff/layout.tsx`, hiện mỗi lần gia sư truy cập `/staff` — một card/lớp liệt kê các Bài khảo sát đang mở (`startDate <= hôm nay`) mà lớp đó còn thiếu báo cáo, có nút "Báo cáo ngay" (link tới tab Khảo sát của lớp) và "Để sau" (dismiss theo session qua `sessionStorage`). Nguồn dữ liệu: `GET /survey-warnings/my-warnings`.
+- **Cảnh báo (bỏ qua được) khi thanh toán nhân sự còn báo cáo khảo sát quá hạn:** `StaffService.guardOverdueSurveyReports` chạy đầu `payAllPayments`/`paySelectedPayments`/`payDepositSessions` — nếu nhân sự còn lớp `running` thiếu báo cáo cho bài khảo sát đã quá hạn (`endDate < hôm nay`) và chưa gửi `confirmOverdueSurveyReports: true`, backend trả `400` với `code: SURVEY_OVERDUE_WARNING` kèm chi tiết `warnings`. FE trên `/admin/staffs/:id` (và mirror `/staff/staffs/:id`) hiển thị dialog cảnh báo liệt kê từng bài khảo sát + lớp còn thiếu, kế toán chọn "Hủy" hoặc **"Bỏ qua, vẫn thanh toán"** (retry với `confirmOverdueSurveyReports: true`) — không còn chặn cứng như trước, kế toán chủ động quyết định. Check độc lập với dismissal của banner kế toán chi.
+- **Cảnh báo gia sư — bắt buộc hiển thị lại mỗi lượt truy cập nếu có báo cáo quá hạn:** nếu trong danh sách cảnh báo có ít nhất 1 bài khảo sát đã quá hạn (`endDate < hôm nay`), `SurveyReminderGate` không còn dùng `sessionStorage` để ghi nhớ dismiss — "Để sau" chỉ ẩn tạm bằng React state (không persist), nên dialog sẽ hiện lại ngay từ lượt truy cập kế tiếp (tải lại trang/mở tab mới) cho tới khi báo cáo xong; badge **"Quá hạn"** (đỏ) đánh dấu từng bài khảo sát quá hạn trong danh sách, header/description đổi màu + copy cảnh báo khi có bài quá hạn. Nếu không có bài quá hạn, hành vi dismiss theo session (`sessionStorage`) giữ như trước.
+- **Cảnh báo kế toán chi (`accountant_expense`)**: `AccountantSurveyWarningBanner` trên `/staff` dashboard liệt kê gia sư còn thiếu báo cáo cho Bài khảo sát đã **quá hạn** (`endDate < hôm nay`). "Đóng" chỉ ẩn tạm trong session; "Đóng và không hiển thị lại" gọi `POST /survey-warnings/accountant-warnings/dismiss` lưu vĩnh viễn vào `survey_warning_dismissals`. Nguồn dữ liệu: `GET /survey-warnings/accountant-warnings`.
+- **`UpgradedSelect` — hỗ trợ search:** thêm prop `searchable` (+ `noResultsLabel`, option `searchLabel`) biến chính trigger thành 1 ô input gõ để lọc (không phải ô tìm kiếm phụ trong menu) — click/focus vào là gõ tìm ngay, chọn xong ô input hiển thị lại tên đã chọn; lọc option theo text không phân biệt hoa/thường và dấu tiếng Việt. Áp dụng cho dropdown "Bài khảo sát" trong form tạo/sửa báo cáo khảo sát lớp (`ClassSurveyPanel`, dùng chung `/admin/classes/:id` và `/staff/classes/:id`).
+- `GET /survey-warnings/open-surveys`: danh sách Bài khảo sát đã mở, dùng cho picker khi gia sư tạo báo cáo khảo sát lớp.
+- `GET /student/landing-achievements?includeUnpublished=true`: bỏ qua `sourceIds`/publish gate, trả thành tích TOÀN BỘ học sinh — dùng cho trang `/thanh-tich` list-theo-level. Mặc định (không set flag) giữ nguyên hành vi cũ: bắt buộc `sourceIds`, thiếu → trả rỗng (no roster leak), dùng cho khu "Tự Hào Unicorns". Docs `docs/api/landing-integration.md`.
+
+### Added
+
+- **CSKH — thẻ tóm tắt Đang học / Nghỉ trong tháng / Doanh thu tháng ở tab Học sinh:** `GET /customer-care/staff/:staffId/summary?month=YYYY-MM` (`CustomerCareService.getStudentSummaryByStaffId`) trả `{ monthKey, activeStudentsCount, droppedStudentsThisMonth, revenueThisMonth }` tính trên toàn bộ portfolio CSKH của staff (không giới hạn theo trang danh sách); FE (`CustomerCareDetailPanels`, dùng chung `/admin/customer_care_detail/[staffId]` và `/staff/customer-care-detail`) hiện 3 thẻ ngay đầu tab **Học sinh**.
+
+### Fixed
+
+- **Quản lý User (Admin & Trợ lí) — Khắc phục triệt để lỗi điều chỉnh Email Verified "lúc được lúc không":**
+  - **Sửa lỗi Race condition & form overwrite trong `UserManageModal`:** Trước đây `useEffect` lắng nghe `user` và toàn bộ trường dữ liệu của user để gọi `setForm`. Khi mở modal, nếu dữ liệu đã có trong cache nhưng `refetchOnMount: "always"` gọi ngầm server để lấy dữ liệu mới, request ngầm trả về sẽ tự động reset form về giá trị cũ trên server, xóa mất tick chọn của người dùng nếu mạng chậm hoặc thao tác nhanh. Đã sửa lại cơ chế khởi tạo bằng `initializedUserIdRef` chỉ đồng bộ khi đổi sang ID user khác, tránh ghi đè dữ liệu đang nhập.
+  - **Sửa lỗi đóng modal trước khi lưu hoàn thành:** Trước đây `handleSave` gọi `onClose()` ngay lập tức rồi mới chạy lưu nền qua `runBackgroundSave`, khiến form bị unmount sớm, người dùng mở lại ngay sẽ thấy dữ liệu cũ hoặc mất form nếu API lưu lỗi. Nay chuyển sang dùng `updateMutation` với trạng thái `isPending`: nút chuyển thành "Đang lưu…", vô hiệu hóa thao tác trùng lặp, chỉ đóng modal và toast thành công khi API đã cập nhật xong dữ liệu; nếu thất bại sẽ giữ nguyên form và thông báo lỗi.
+  - **Tự động đồng bộ trạng thái `pending` sang `active` khi xác thực email:** Trong `UserManageModal`, khi người dùng tick chọn `[x] Email đã xác thực`, nếu trạng thái tài khoản đang là `pending` (Chờ xác thực) thì hệ thống tự động đổi sang `active` (Đang hoạt động) để tránh nhầm lẫn giữa 2 trường dữ liệu.
+  - **Bổ sung badge trạng thái Email Verified trực quan trên danh sách User:** Bổ sung badge hiển thị rõ `Đã xác thực` (màu xanh kèm icon check) hoặc `Chưa xác thực` (màu vàng) ngay bên cạnh email ở cả bảng desktop và thẻ mobile tại `/admin/users` (và `/staff/users`).
+  - **Bổ sung tùy chọn `Xác thực email ngay` khi Tạo user mới:** `CreateUserDialog` bổ sung checkbox xác thực email; `AdminCreateUserDto` và `AdminCreateStudentUserDto` ở backend hỗ trợ `emailVerified: boolean`, cho phép admin/trợ lí kích hoạt tài khoản ngay khi tạo mà không bắt buộc người dùng phải kiểm tra email.
+- **Video bài học — Khắc phục lỗi hiển thị Fullscreen trên iOS Safari:** Thêm cấu hình `viewportFit: "cover"` trong `apps/web/app/layout.tsx` cho phép giao diện tràn viền cạnh notch/dynamic island; tinh chỉnh padding 4 chiều (`safe-area-inset-top/bottom/left/right`) trên các thanh điều khiển; bổ sung cơ chế khóa cuộn trang nền và chặn bouncing gesture trên WebKit/iOS Safari khi xem toàn màn hình; chuẩn hóa tỷ lệ khung hình và kích thước `-webkit-fill-available` trong `YouTubeEmbed`.
+- **Chi tiết buổi học học sinh — Tự động xuống dòng link & văn bản dài trong card Hướng dẫn tự học / Tutorial:** Thêm class `break-words`, `[overflow-wrap:anywhere]` và `[&_a]:break-all` vào `MathContent` và các card chi tiết buổi học trong `StudentSessionDetailDialog` để liên kết dài hoặc văn bản không khoảng trắng tự động xuống dòng, không tràn ra ngoài giao diện.
+- **`PATCH /class/:id/schedule` (+ mirror `staff-ops`) — chống lost-update khi 2 người sửa lịch cố định gần như đồng thời:** phát hiện qua debug production (lớp `UNICL-c1f789b32e`) — payload cũ dùng semantics "full-replace" (slot active vắng mặt trong `schedule` gửi lên bị coi là đã xoá), nên 2 request cận thời điểm với snapshot cũ khác nhau có thể tự xoá nhầm slot của nhau. Đổi sang **upsert**: slot vắng mặt trong payload nhưng không nằm trong `removedEntryIds` (field mới) được **giữ nguyên**; chỉ id liệt kê tường minh trong `removedEntryIds` mới bị soft-delete. Thêm optimistic lock qua `expectedUpdatedAt` (so với `Class.updatedAt`, lệch → `409 Conflict`) + `updateMany` có điều kiện ở tầng DB + khoá in-memory theo `classId` trong `ClassService` (mirror pattern khoá sẵn có ở `SessionCreateService`). Gia sư tự sửa lịch qua `staff-ops` giờ bị giới hạn chỉ được động tới slot có `teacherId` là chính họ (cả upsert lẫn `removedEntryIds`), vi phạm trả `403`. Đổi `UpdateClassScheduleDto`/`ClassScheduleItem` payload cả FE lẫn BE; `EditClassSchedulePopup` gửi kèm `removedEntryIds` diff được + `expectedUpdatedAt`, refetch class khi gặp `409`.
+- **CSKH — ẩn học sinh đã nghỉ khỏi tab Học sinh:** `CustomerCareService.getStudentsByStaffId` (`GET /customer-care/staff/:staffId/students`) trước đây trả cả học sinh `status = inactive` (đã chuyển **Nghỉ học**) vì chỉ lọc theo `staffId`, không lọc theo trạng thái học sinh, dù bản ghi `customer_care_service` không tự xoá khi học sinh nghỉ. Nay thêm điều kiện `student.status = active` vào cả `count` lẫn `findMany` (dùng chung where object để `total`/phân trang khớp danh sách), áp dụng cho cả `/admin/customer_care_detail/[staffId]` và `/staff/customer-care-detail`.
+- `GET /staff/landing-profiles` và `GET /student/landing-profiles`: chế độ `ids=` trước đây ép `skip=0` và giới hạn cứng `take = min(ids.length, 100)`, bỏ qua `page`/`limit` client truyền vào — nếu CMS gửi hơn 100 id thì phần vượt quá bị cắt âm thầm, không cách nào lấy tiếp bằng phân trang. Nay `ids=` dùng chung `skip`/`take` theo `page`/`limit` như chế độ search, CMS loop `page` bình thường để lấy hết roster đã publish. Docs `docs/api/landing-integration.md`.
+- **Báo cáo khảo sát lớp — sao chép nội dung để dán Zalo:** `ClassSurveyPanel` (dùng chung `/admin/classes/:id` và `/staff/classes/:id`) thêm nút sao chép (icon ở danh sách card mobile/bảng desktop; nút "Sao chép để dán Zalo" ở footer dialog xem chi tiết **và** footer form tạo/sửa báo cáo — copy trực tiếp từ nội dung đang nhập trong form, không cần lưu trước) dựng message dạng `📢 BÁO CÁO KHẢO SÁT / 🏫 Lớp / 📋 Bài khảo sát / 📅 Ngày báo cáo / 👨‍🏫 Người phụ trách / 📌 Đánh giá kiến thức / 📝 Nhận xét học sinh` (helper `buildClassSurveyReportZaloMessage` trong `apps/web/lib/survey-notification.ts`, tái dùng `copyTextToClipboard` đã có). Nút ở danh sách/dialog xem hoạt động độc lập với quyền `canManage`/`canViewDetails` — ai xem được danh sách báo cáo cũng sao chép được.
+- **Báo cáo khảo sát lớp — "Đánh giá kiến thức" đổi từ theo-từng-học-sinh thành 1 field dùng chung cho cả báo cáo:** roster `class_survey_student_assessments` trước đây có 2 field tự do mỗi học sinh (Đánh giá kiến thức + Nhận xét) là sai nghiệp vụ — đánh giá kiến thức là nhận định chung của gia sư cho cả lớp/bài khảo sát, không phải riêng từng học sinh. Chuyển field `knowledge_assessment` lên `class_surveys` (dùng chung cho cả báo cáo); `class_survey_student_assessments` giờ chỉ còn `comment` (nhận xét riêng từng học sinh). Migration `20260816123000_survey_knowledge_assessment_per_report` backfill toàn bộ `content` (nội dung báo cáo dạng cũ, trước khi đổi sang roster) vào `knowledge_assessment` mới để không mất dữ liệu các báo cáo đã tạo trước đây. `ClassSurveyPanel` (form tạo/sửa + dialog xem chi tiết, dùng chung cho `/admin/classes/:id` và `/staff/classes/:id`) cập nhật theo: 1 textarea "Đánh giá kiến thức" chung + roster chỉ còn field "Nhận xét" mỗi học sinh.
+
+### Changed
+
+- **Phân quyền Thành tích/Gallery: tách rõ quyền xem và quyền sửa.** Quyền **xem** (`GET`) khớp đúng với quyền xem hồ sơ tương ứng: `GET /staff/:staffId/achievements` mở thêm cho `accountant_expense` (khớp `GET /staff/:id`); `GET /student/:studentId/achievements` và `GET /student/:studentId/gallery` mở thêm cho `accountant`, `accountant_income` (khớp `GET /student/:id`), giữ nguyên `customer_care`. Quyền **sửa/xoá/upload ảnh/reorder** thu hẹp lại: chỉ admin đầy đủ, `staff.admin`, và `assistant` — bỏ `customer_care` khỏi quyền sửa thành tích/gallery học sinh (trước đây `customer_care` sửa được, nay chỉ xem). FE cập nhật theo: `apps/web/app/admin/students/[id]/page.tsx` và `EditStudentPopup` dùng `canManageStudent` (admin/assistant, prop mới `canEditAchievementsAndGallery`) thay vì `canEditStudentProfile` cho 2 khối Thành tích/Gallery; `apps/web/app/admin/staffs/[id]/page.tsx` truyền `allowAchievementEdit={(isAdmin || isAssistant) && !viewingOwnStaffRecordOnStaffShell}` cho `StaffIdentityOverview` để tránh fallback theo `allowQrEdit`. Nhân sự tự sửa thành tích của chính mình (`users/me/achievements`) không đổi.
+- `GET /student/landing-profiles?search=`: tokenized AND trên `fullName` (giống staff name tokens; `"Le A"` khớp `"Le Van A"`). Docs `docs/api/landing-integration.md`.
+- Landing integration **live-read**: CMS chỉ giữ publish gates (`sourceId`); public `/thanh-tich` + people surfaces đọc EduWeb5 qua `landing-achievements` / `landing-profiles?ids=`. Docs `docs/api/landing-integration.md`.
+- Landing profiles: `GET /staff/landing-profiles` **không lọc** `status`/`role` (trả toàn bộ staff); `GET /student/landing-profiles` **không lọc** `status` (active + inactive, phục vụ thành tích / học sinh tiêu biểu cựu học viên). Bỏ query `role`/`status` khỏi DTO + docs `docs/api/landing-integration.md`.
+
+### Removed
+
+- Gỡ `apps/api/scripts/import-honor-roll-achievements.ts` khỏi repo (Nest `build` compile scripts và fail CI với TS18048); ops import chạy local ngoài image nếu cần.
+
+### Added
+
+- Landing profiles response thêm `status` (`active` \| `inactive`) cho staff + student — endpoint vẫn **không lọc** status (đủ cả học sinh/gia sư đã nghỉ). Docs `docs/api/landing-integration.md`.
+- `GET /student/landing-achievements` (ApiKeyGuard): query `sourceIds` (comma-separated; empty → empty page), `level`, `page`, `limit` (default 9). Response flat achievements + nested student identity. `landing-profiles` thêm `ids=` hydrate. Docs `docs/api/landing-integration.md`.
+- Landing profiles pagination: `GET /staff/landing-profiles` và `GET /student/landing-profiles` thêm query `page` (1-based) + document `search`; student `limit` max hạ xuống 100 (default 50). `total` = full filtered count; CMS phải loop pages trước khi archive. Docs `docs/api/landing-integration.md`.
+- BE/FE **Student achievement structured fields** (landing `/thanh-tich` parity): `student_achievements` thay `title` bằng `award`/`exam`/`year`/`level`/`course_label` + enum `AchievementLevel`; CRUD/FE editor học sinh form đầy đủ field; `GET /student/landing-profiles` trả structured + derived `title`; script import từ folder `THÀNH TÍCH`; CMS landing sync vào `FeaturedStudent`+`Achievement` (SoT = EduWeb5).
+- FE/BE **Student gallery** (landing): bảng `student_gallery_items` (`image_path` / `image_watermarked_path` + `sort_order`; cột `caption` unused); bucket `student-gallery` / `student-gallery-public`; API `/student/:id/gallery`; landing `GET /student/landing-profiles` thêm `gallery[]` (watermarked public only). FE `StudentGalleryEditor` (ảnh only — **multi-select** thêm nhiều ảnh 1 lần / đổi / xoá / reorder) trên student detail + `EditStudentPopup`. ADR `docs/adr/2026-08-11-student-gallery-watermarked.md`.
+- Admin **upload avatar học sinh** qua linked user: `POST/DELETE /student/:id/avatar` (bake twin như `/users/me/avatar`); `GET /student/:id` trả `avatarUrl`/`avatarPath`; UI avatar trên `/admin/students/[id]`.
+- FE/BE **ảnh watermarked public cho landing** (ADR `2026-08-11-landing-watermarked-public-images`): cột `avatar_watermarked_path` / `image_watermarked_path`; bake diagonal-tile ("HỌC TIN cùng CHUYÊN TIN") lúc upload avatar + ảnh minh chứng; bucket public `avatars-public` / `achievements-public`; landing profiles chỉ trả twin public + **avatar học viên** parity; script `scripts/backfill-watermarked-images.ts`.
+- ADR **Landing watermarked public images** (`docs/adr/2026-08-11-landing-watermarked-public-images.md`): bake diagonal-tile watermark twin on EduWeb5 upload; landing/CMS chỉ dùng public URL ổn định của twin; thêm avatar học viên parity trên landing; glossary `CONTEXT.md` cập nhật.
+- Landing integration (`GET /staff/landing-profiles`, `GET /student/landing-profiles`): response thêm `achievements[]` (`id`, `title`, `imageUrl`/`imagePath` watermarked public, `sortOrder`). Staff vẫn trả `specialization` (deprecated) để CMS cũ không gãy; docs `docs/api/landing-integration.md` cập nhật contract + hướng dẫn sync minh chứng.
+- FE/BE **Thành tích** (Staff + Student): bảng `staff_achievements` / `student_achievements` (title + 1 `image_path` + `sort_order`), bucket Supabase `achievements`, API CRUD/reorder/upload ảnh (`/staff/:id/achievements`, `/student/:id/achievements`, `/users/me/achievements`). FE `AchievementListEditor` (@dnd-kit + Lucide icon buttons) mặc định **readonly**, icon **Chỉnh sửa** cạnh heading; bấm mới mở reorder/đổi tên/ảnh/thêm-xoá; nút **Tải ảnh** luôn hiện khi có `imageUrl` (readonly + edit); bấm thumbnail mở `ImageLightbox` fullscreen; gắn `EditStaffPopup` / `StaffSelfEditPopup` / `StaffIdentityOverview` / `EditStudentPopup` / student detail. Gate `staffProfileComplete` bỏ `personalAchievementLink` + `specialization`. Migration backfill `specialization` **tách theo bullet/dòng** (`-`/`*`/`•`, hoặc mỗi dòng nếu không có bullet; bỏ header kiểu `Thành tích:`); cột legacy giữ deprecated.
+- FE/BE `/admin/dashboard/statistics`: nút **Xuất PDF** gọi `GET /dashboard/monthly-statistics/pdf` (cùng khoảng tháng đang chọn), tải PDF landscape A4 gồm 3 section chart SVG + bảng (Tài chính / Chi phí theo khoản có cột Tổng / Vận hành); render server-side qua `MonthlyStatisticsExportPdfService` + `ReceiptPdfService` (hỗ trợ thêm option `landscape`).
+- Bảng `lesson_plan_head_commission`: snapshot hoa hồng doanh thu Trưởng giáo án (`lesson_plan_head`) theo từng buổi học toàn hệ thống, mỗi buổi chargeable sinh 1 dòng cho mỗi nhân sự role này đang active. Đồng bộ idempotent qua `syncLessonPlanHeadCommissions()` khi tạo/sửa session.
+- Nguồn `revenue_share` mới trong `GET /staff/:id/payment-preview`, `PATCH /staff/:id/payment-status/pay-all|pay-selected`: cho phép thanh toán từng dòng hoa hồng doanh thu Trưởng giáo án (không khấu trừ thuế), gộp vào popup **Thanh toán** hiện có ở `/admin/staff/:id`.
+- Cột **% CSKH** trong bảng học sinh ở `admin/customer_care_detail/[staffId]` và `staff/customer-care-detail/[staffId]` (đọc `CustomerCareService.profitPercent` qua `GET /customer-care/staff/:staffId/students`).
+- Inline edit % CSKH trực tiếp trên bảng học sinh (click ô % → input → Enter/blur lưu qua `PATCH /student/:id`); chỉ admin sửa được, CSKH/assistant chỉ xem.
+- Bulk edit % CSKH: checkbox chọn nhiều học sinh trong bảng + action bar ghi đè 1 giá trị % duy nhất qua `PATCH /customer-care/staff/:staffId/profit-percent/bulk` (chỉ admin, scoped theo `staffId`).
+- KPI card **Biến động học sinh** (`+X / -Y`) trên `admin/dashboard`: `summary.newStudentsThisMonth`/`droppedStudentsThisMonth` đếm toàn hệ thống theo `createdAt`/`dropOutDate` trong kỳ đang chọn (`GET /dashboard`), cập nhật theo month navigator.
+- Gộp KPI card **Biến động học sinh** vào card **Học sinh** trên `admin/dashboard` (bớt 1 card, note hiện `+X mới / -Y nghỉ trong kỳ`); bấm vào card mở popup drill-down 3 tab **Học sinh mới**/**Học sinh nghỉ**/**Học sinh hiện tại** liệt kê tên, lớp, ngày vào học/nghỉ (tab hiện tại chỉ tên + lớp, snapshot) qua endpoint mới `GET /dashboard/student-churn-details?type=new|dropped|active&month=&year=`.
+- KPI **HS mới tháng này** / **HS nghỉ tháng này** trên dashboard CSKH ở `/staff` (khối **Tổng hợp CSKH** của trợ lí và khối tổng hợp của CSKH) giờ bấm được, mở popup liệt kê tên học sinh + lớp + ngày mới/nghỉ qua endpoint mới `GET /users/me/staff-dashboard/customer-care-student-changes?month=&year=&type=new|dropped&scope=own|managed`.
+- Trang **Thống kê theo tháng** (`/admin/dashboard/statistics`), link từ `admin/dashboard` (nút "Thống kê theo tháng"), không có mục sidebar riêng. Chọn khoảng tháng bất kỳ (2 cặp Tháng/Năm bắt đầu-kết thúc, tối đa 36 tháng, mặc định 12 tháng gần nhất) qua endpoint mới `GET /dashboard/monthly-statistics?fromMonth=&fromYear=&toMonth=&toYear=`. Hiển thị 2 chart (tài chính: cột doanh thu/chi phí + đường lợi nhuận; vận hành: cột học sinh/lớp/gia sư) và 1 bảng dữ liệu chi tiết theo từng tháng. Số học sinh là số active thật tại cuối tháng (`created_at`/`drop_out_date`); số lớp/gia sư là proxy số lớp/gia sư có buổi học trong tháng (DB không lưu lịch sử đóng/nghỉ lớp và gia sư nên dùng proxy). Chi phí hiển thị 1 số tổng (nhân sự + vận hành), không breakdown theo loại.
+- Chart **Chi phí theo từng khoản** (multi-line, 8 series: dạy/CSKH/giáo án/bonus/trợ cấp khác/trợ lí/QL lớp/vận hành) trên `/admin/dashboard/statistics`, chèn giữa 2 chart hiện có. `AdminDashboardMonthlyStatisticDto`/`GET /dashboard/monthly-statistics` trả thêm 8 field breakdown chi phí (dữ liệu vốn đã tính trong SQL, trước đây chỉ gộp vào `expense`). Thêm token màu categorical `--ue-viz-1..8` (light/dark) vào `globals.css` theo palette đã validate của skill `dataviz`.
+- Cột **Chi phí** trong bảng dữ liệu chi tiết ở `/admin/dashboard/statistics` giờ bấm được: mở modal 2 tab **Nhân sự** / **Khác** cho đúng tháng, gọi lại `GET /dashboard/financial-detail?rowKey=personnel-cost|other-cost`. Tách `FinancialDetailModal` (trước đây định nghĩa cục bộ trong `admin/dashboard/page.tsx`) thành component dùng chung `apps/web/components/admin/dashboard/FinancialDetailModal.tsx`, hỗ trợ thêm chế độ `tabs` tự fetch nội bộ; dashboard chính vẫn dùng chế độ cũ (detail fetch từ ngoài) không đổi hành vi.
+- Chart **Tài chính** trên `/admin/dashboard/statistics` thêm 2 đường: **Tổng nạp** (tổng tiền nạp ví trong tháng, period-filterable qua `wallet_transactions_history.type='topup'`) và **Tổng chưa thanh toán** (tổng số dư ví âm của học sinh tại thời điểm **cuối mỗi tháng**, tái dựng bằng cộng dồn lịch sử giao dịch ví theo quy ước dấu `topup=+amount`, còn lại `-amount`, không phải snapshot số dư hiện tại). `AdminDashboardMonthlyStatisticDto`/`GET /dashboard/monthly-statistics` trả thêm 2 field `totalTopup`/`totalUnpaid`, thêm 2 CTE SQL mới (`monthly_topup`, `monthly_unpaid` dựa trên window function cộng dồn theo học sinh). Bảng dữ liệu chi tiết thêm 2 cột cùng tên; cột **Tổng nạp** bấm được (mở `FinancialDetailModal` không-tab, `rowKey=topup`, tái dùng nguyên endpoint/UI sẵn có ở dashboard chính), cột **Tổng chưa thanh toán** chỉ hiển thị số.
+
+### Changed
+
+- FE `/admin/lesson_plan_detail/[staffId]` (và staff shim): với role `lesson_plan_head` tách **2 tab** — **Hoa hồng doanh thu** (mặc định) và **Bài giáo án**; nhân sự chỉ `lesson_plan` giữ layout một khối bài giáo án (không hiện section hoa hồng).
+- Quyền chỉnh % CSKH (inline trên bảng chi tiết CSKH, bulk `PATCH .../profit-percent/bulk`, và ô trong popup **Chỉnh sửa hồ sơ học sinh`): chỉ còn **admin** (gỡ quyền `assistant`); FE/BE/docs đồng bộ.
+- FE `/admin/lesson_plan_detail`: ghi chú hoa hồng doanh thu làm rõ card **Tỷ lệ %** = mức đang cấu hình (áp buổi mới), còn **Số tiền thực nhận** = tổng snapshot `lesson_plan_head_commission` trong tháng — không còn copy sai kiểu “tháng quá khứ tính theo % hiện tại”.
+- FE `/admin/dashboard` và `/admin/dashboard/statistics`: xuất PDF/Excel dùng `useMutation` (TanStack Query) thay cho `useState` + gọi API thủ công.
+- FE popup **Biến động học sinh** trên `admin/dashboard`: dual layout card (mobile) + table (desktop) trong cùng nhánh dữ liệu, khớp pattern `FinancialDetailModal`.
+
+- FE/BE `/admin/dashboard/statistics`: ngay dưới mỗi bảng chi tiết tháng thêm khối **Giải thích chỉ số** bằng tiếng Việt dễ hiểu (không dùng thuật ngữ kỹ thuật); cột/series **Bonus** đổi nhãn thành **Thưởng**; PDF xuất và script DOCX one-off cũng kèm cùng nội dung giải thích.
+- FE `/admin/dashboard/statistics`: bảng **Chi phí theo từng khoản** thêm cột **Tổng** (= `expense` cùng tháng, bấm được mở chi tiết Nhân sự/Khác).
+- FE `/admin/dashboard/statistics`: tách bảng dữ liệu chi tiết chung thành 3 bảng riêng, mỗi bảng nằm ngay dưới chart tương ứng (Tài chính: Doanh thu/Chi phí/Lợi nhuận/Tổng nạp; Chi phí theo khoản: 8 cột breakdown; Vận hành: Học sinh/Lớp/Gia sư).
+- `GET /staff/:id/revenue-share`: `amount` đổi từ tính live (`doanh thu × %`) sang tổng `lesson_plan_head_commission.amount` snapshot theo tháng, đồng bộ với payload thanh toán.
+- FE popup **Thông tin lớp**: chọn trạng thái **Đã kết thúc** dùng cùng logic `POST /class/:id/end` (eligibility + confirm/lý do); BE `PATCH /class/:id/basic-info` từ chối `running → ended` (phải dùng `POST /end`).
+
+### Removed
+
+- FE `/admin/dashboard/statistics`: bỏ đường **Tổng chưa thanh toán** khỏi chart Tài chính và bỏ cột cùng tên khỏi bảng dữ liệu chi tiết (API vẫn trả `totalUnpaid`, chỉ không hiển thị).
+
+### Fixed
+
+- BE watermark bake: giảm opacity tile logo (`WATERMARK_ALPHA` → 0.05) để mark rất mờ trên twin public. Twin đã bake cần clear path + chạy lại backfill để cập nhật.
+- Docs/ops: script backfill watermark chạy bằng `pnpm dlx tsx scripts/backfill-watermarked-images.ts` (tránh `ts-node` lỗi resolve Prisma 7 generated client).
+- CD API image: chuyển `sharp` từ `devDependencies` → `dependencies` để `pnpm deploy --prod` giữ package trong image — tránh crash-loop `Cannot find module 'sharp'` khi boot Nest (watermark bake) sau deploy.
+- BE watermark bake: thay asset `watermark-logo.jpg` (nền gạch) bằng `watermark-logo.webp` (logo trong suốt); bỏ luma-key nền tối để không ăn mất viền chữ đen của mark "HỌC TIN cùng CHUYÊN TIN".
+- BE Google Calendar schedule resync: khi ghi lại `Class.schedule` sau sync/resync không còn strip `createdAt`/`deletedAt` hay xoá slot soft-deleted. Slot active thiếu `createdAt` (data cũ) được backfill từ `Class.updatedAt` lúc resync hoặc lúc đọc **Cảnh báo chưa dạy**, tránh cảnh báo giờ lịch mới trên ngày quá khứ sau khi đổi lịch cố định.
+
+- FE form sửa buổi học (`SessionHistoryTable`): badge trợ cấp **Đã chỉnh tay** không còn false positive khi mở buổi unpaid vừa tạo — seed điểm danh từ `session.attendance` trước khi merge roster lớp, và chỉ suy luận override sau khi `attendanceLoading` (và cấu hình lớp live nếu cần) xong. Create admin/staff vẫn không ghi flag chỉnh tay (không có cột DB); badge chỉ là suy luận FE.
+- FE `TimeInput` portal chọn giờ/phút: `z-[120]` (khớp `UpgradedSelect`) để không bị che bởi popup form lịch dạy bù / modal `z-[110]`.
 - BE `GET /staff/:id/income-summary` card **Lớp phụ trách** (`classMonthlySummaries`): không còn seed mọi row `class_teachers` (kể cả `inactive`) thành dòng 0đ; chỉ luôn hiện phân công hiện tại (`status` null/`active`); lớp nghỉ dạy chỉ hiện khi tháng đang chọn còn trợ cấp và/hoặc còn `unpaid`/`pending`, với `isCurrentTeacherAssignment=false` (badge **NGHỈ DẠY**).
 - BE `GET /staff` (list `/admin/staffs` cột **Lớp**): `classTeachers` chỉ gồm phân công hiện tại hoặc lớp nghỉ dạy còn trợ cấp tháng hiện tại / còn `unpaid`/`pending` — cùng rule ẩn lớp nghỉ 0đ với card **Lớp phụ trách**.
 

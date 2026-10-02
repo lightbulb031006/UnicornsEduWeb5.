@@ -204,6 +204,56 @@ describe('NotificationService', () => {
       }),
     ]);
   });
+
+  it('rejects student actor from accessing notification feed', async () => {
+    await expect(
+      service.getNotificationFeed(
+        {
+          id: 'student-user-1',
+          email: 'student@example.com',
+          accountHandle: 'student1',
+          roleType: UserRole.student,
+        },
+        { limit: 20 },
+      ),
+    ).rejects.toThrow('Notification feed is not available for this role');
+  });
+
+  it('excludes students from eligible recipient search', async () => {
+    mockPrisma.user.findMany.mockResolvedValue([]);
+
+    await service.searchNotificationRecipientOptions({
+      search: 'Nguyen',
+      limit: 10,
+    });
+
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          AND: [
+            {
+              OR: [
+                {
+                  roleType: UserRole.admin,
+                  status: 'active',
+                },
+                {
+                  roleType: UserRole.staff,
+                  status: 'active',
+                  staffInfo: {
+                    is: {
+                      status: 'active',
+                    },
+                  },
+                },
+              ],
+            },
+            expect.any(Object),
+          ],
+        },
+      }),
+    );
+  });
 });
 
 function makeNotificationRow(

@@ -207,8 +207,16 @@ export default function StaffBonusCard({
                       className={`group/bonus-item border-b border-border-default bg-bg-surface transition-colors ${
                         isInteractive ? "cursor-pointer hover:bg-bg-secondary" : ""
                       }`}
+                      tabIndex={isInteractive ? 0 : undefined}
                       onClick={() => {
                         if (isInteractive) {
+                          onEditBonus?.(b);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (!isInteractive) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
                           onEditBonus?.(b);
                         }
                       }}

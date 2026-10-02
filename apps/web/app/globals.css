@@ -15,6 +15,10 @@
   --ue-bg-surface: #FFFFFF;
   --ue-bg-elevated: #FFFFFF;
 
+  /* Panel tối cố định (thẻ số dư ví học phí) — luôn tối ở mọi theme */
+  --ue-panel-inverse: #0F172A;
+  --ue-panel-inverse-fg: #FFFFFF;
+
   --ue-text-primary: #0F172A;
   --ue-text-secondary: #334155;
   --ue-text-muted: #64748B;
@@ -41,6 +45,17 @@
   --ue-theme-preview-dark-end: #111827;
   --ue-theme-preview-pink-start: #FFF7FB;
   --ue-theme-preview-pink-end: #FCE7F3;
+
+  /* Categorical data-viz palette (dataviz skill reference, adjacent-pairlist order) */
+  --ue-viz-1: #2A78D6;
+  --ue-viz-2: #EB6834;
+  --ue-viz-3: #1BAF7A;
+  --ue-viz-4: #EDA100;
+  --ue-viz-5: #E87BA4;
+  --ue-viz-6: #008300;
+  --ue-viz-7: #4A3AA7;
+  --ue-viz-8: #E34948;
+  --ue-viz-9: #0D9488;
 }
 
 [data-theme="dark"] {
@@ -51,6 +66,9 @@
   --ue-bg-tertiary: #273449;
   --ue-bg-surface: #1F2937;
   --ue-bg-elevated: #273449;
+
+  --ue-panel-inverse: #0B1220;
+  --ue-panel-inverse-fg: #F8FAFC;
 
   --ue-text-primary: #F1F5F9;
   --ue-text-secondary: #CBD5E1;
@@ -71,6 +89,17 @@
   --ue-warning: #FBBF24;
   --ue-error: #F87171;
   --ue-info: #38BDF8;
+
+  /* Categorical data-viz palette (dataviz skill reference, dark-surface steps) */
+  --ue-viz-1: #3987E5;
+  --ue-viz-2: #D95926;
+  --ue-viz-3: #199E70;
+  --ue-viz-4: #C98500;
+  --ue-viz-5: #D55181;
+  --ue-viz-6: #008300;
+  --ue-viz-7: #9085E9;
+  --ue-viz-8: #E66767;
+  --ue-viz-9: #2DD4BF;
 }
 
 /* Hoa anh đào / Hana — tông hồng, điểm nhấn rose */
@@ -82,6 +111,9 @@
   --ue-bg-tertiary: #FBCFE8;
   --ue-bg-surface: #FFFFFF;
   --ue-bg-elevated: #FFF1F5;
+
+  --ue-panel-inverse: #3B0D33;
+  --ue-panel-inverse-fg: #FFF5F7;
 
   --ue-text-primary: #4A1942;
   --ue-text-secondary: #831843;
@@ -117,6 +149,9 @@
   --color-bg-elevated: var(--ue-bg-elevated);
 
   /* Text */
+  --color-panel-inverse: var(--ue-panel-inverse);
+  --color-panel-inverse-fg: var(--ue-panel-inverse-fg);
+
   --color-text-primary: var(--ue-text-primary);
   --color-text-secondary: var(--ue-text-secondary);
   --color-text-muted: var(--ue-text-muted);
@@ -200,6 +235,87 @@
     box-shadow: 0 12px 28px color-mix(in srgb, var(--ue-text-primary) 10%, transparent);
     border-color: var(--ue-border-focus);
   }
+}
+
+/* Video.js Unicorns Theme Customization */
+.video-js.vjs-theme-unicorns {
+  font-family: inherit;
+  color: #ffffff;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+}
+
+.video-js.vjs-theme-unicorns .vjs-tech {
+  pointer-events: none !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.video-js.vjs-theme-unicorns .vjs-big-play-button {
+  width: 4rem;
+  height: 4rem;
+  line-height: 3.8rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.video-js.vjs-theme-unicorns:hover .vjs-big-play-button {
+  background-color: var(--ue-primary);
+  transform: scale(1.08);
+}
+
+.video-js.vjs-theme-unicorns .vjs-control-bar {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.5) 70%, transparent 100%);
+  height: 3.5rem;
+  padding: 0 0.5rem;
+}
+
+.video-js.vjs-theme-unicorns .vjs-play-progress {
+  background-color: var(--ue-primary) !important;
+}
+
+.video-js.vjs-theme-unicorns .vjs-volume-level {
+  background-color: var(--ue-primary) !important;
+}
+
+.video-js.vjs-theme-unicorns .vjs-slider {
+  background-color: rgba(255, 255, 255, 0.25);
+  border-radius: 0.25rem;
+}
+
+.video-js.vjs-theme-unicorns .vjs-load-progress {
+  background-color: rgba(255, 255, 255, 0.4);
+  border-radius: 0.25rem;
+}
+
+.video-js.vjs-theme-unicorns .vjs-menu-button-popup .vjs-menu .vjs-menu-content {
+  background-color: rgba(23, 23, 23, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0.75rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  padding: 0.25rem;
+}
+
+.video-js.vjs-theme-unicorns .vjs-menu-item {
+  border-radius: 0.5rem;
+  margin: 0.125rem 0;
+  transition: background-color 0.15s ease;
+}
+
+.video-js.vjs-theme-unicorns .vjs-menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.video-js.vjs-theme-unicorns .vjs-menu-item.vjs-selected {
+  background-color: var(--ue-primary);
+  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {

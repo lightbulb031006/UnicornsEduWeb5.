@@ -2,10 +2,7 @@ jest.mock('../prisma/prisma.service', () => ({
   PrismaService: class PrismaServiceMock {},
 }));
 
-import {
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import {
   AttendanceStatus,
   PaymentStatus,
@@ -51,10 +48,7 @@ describe('TrainingManagerService', () => {
           trainingManagerRatePercent: 5,
           trainingManagerAllowanceAmount: 34714,
           trainingManagerPaymentStatus: PaymentStatus.pending,
-          attendance: [
-            { tuitionFee: 500_000 },
-            { tuitionFee: 194_280 },
-          ],
+          attendance: [{ tuitionFee: 500_000 }, { tuitionFee: 194_280 }],
         },
       ]);
 

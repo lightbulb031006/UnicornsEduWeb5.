@@ -94,11 +94,17 @@ describe('CustomerCareService', () => {
     );
 
     expect(mockPrisma.customerCareService.count).toHaveBeenCalledWith({
-      where: { staffId: 'staff-1' },
+      where: {
+        staffId: 'staff-1',
+        student: { status: StudentStatus.active },
+      },
     });
     expect(mockPrisma.customerCareService.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { staffId: 'staff-1' },
+        where: {
+          staffId: 'staff-1',
+          student: { status: StudentStatus.active },
+        },
         skip: 10,
         take: 10,
       }),
@@ -121,6 +127,7 @@ describe('CustomerCareService', () => {
           accountBalance: -120_000,
           province: 'Ha Noi',
           status: StudentStatus.active,
+          profitPercent: null,
           classes: [
             { id: 'class-1', name: 'Toan 8A' },
             { id: 'class-2', name: 'Ly 8A' },
@@ -239,10 +246,12 @@ describe('CustomerCareService', () => {
     expect(mockPrisma.walletTransactionsHistory.count).toHaveBeenCalledWith({
       where: expectedWhere,
     });
-    expect(mockPrisma.walletTransactionsHistory.aggregate).toHaveBeenCalledWith({
-      where: expectedWhere,
-      _sum: { amount: true },
-    });
+    expect(mockPrisma.walletTransactionsHistory.aggregate).toHaveBeenCalledWith(
+      {
+        where: expectedWhere,
+        _sum: { amount: true },
+      },
+    );
     expect(mockPrisma.walletTransactionsHistory.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expectedWhere,

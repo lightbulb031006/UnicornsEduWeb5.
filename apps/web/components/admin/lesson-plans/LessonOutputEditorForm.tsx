@@ -9,10 +9,10 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { DateInput } from "@/components/ui/DateInput";
-import { MoneyInput } from "@/components/ui/MoneyInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import type {
   CreateLessonOutputPayload,
+  LessonOutputDifficultyBand,
   LessonOutputItem,
   LessonPaymentStatus,
   LessonOutputStaffOption,
@@ -20,10 +20,7 @@ import type {
   LessonUpsertMode,
 } from "@/dtos/lesson.dto";
 import * as lessonApi from "@/lib/apis/lesson.api";
-import {
-  moneyInputInitialFromNumber,
-  parseMoneyInput,
-} from "@/lib/money-input.helpers";
+import LessonOutputPricingFields from "./LessonOutputPricingFields";
 import {
   LESSON_PAYMENT_STATUS_OPTIONS,
   LESSON_PAYMENT_STATUS_LABELS,
@@ -54,7 +51,7 @@ type Props = {
   allowTasklessOutput?: boolean;
   /** Khi `false`, ẩn dropdown thanh toán và giữ `paymentStatus` hiện tại. */
   allowPaymentStatusEdit?: boolean;
-  /** Khi `false`, giữ nguyên `cost` hiện tại và chỉ hiển thị read-only. */
+  /** Deprecated: ô chi phí luôn read-only; backend tự tính từ bậc + tick. */
   allowCostEdit?: boolean;
   isSubmitting?: boolean;
   onCancel?: () => void;
@@ -321,10 +318,6 @@ const PAYMENT_SELECT_OPTIONS = LESSON_PAYMENT_STATUS_OPTIONS.map((option) => ({
   ),
 }));
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("vi-VN").format(value);
-}
-
 export default function LessonOutputEditorForm({
   mode,
   initialData,
@@ -334,7 +327,6 @@ export default function LessonOutputEditorForm({
   forceSharedLayout = false,
   allowTasklessOutput = false,
   allowPaymentStatusEdit = true,
-  allowCostEdit = true,
   isSubmitting = false,
   onCancel,
   onSubmit,
@@ -358,8 +350,17 @@ export default function LessonOutputEditorForm({
   const [paymentStatus, setPaymentStatus] = useState<LessonPaymentStatus>(
     () => initialData?.paymentStatus ?? "pending",
   );
-  const [cost, setCost] = useState(() =>
-    moneyInputInitialFromNumber(initialData?.cost ?? 0),
+  const [difficultyBand, setDifficultyBand] = useState<
+    LessonOutputDifficultyBand | ""
+  >(() => initialData?.difficultyBand ?? "");
+  const [includesTest, setIncludesTest] = useState(
+    () => initialData?.includesTest ?? false,
+  );
+  const [includesSolution, setIncludesSolution] = useState(
+    () => initialData?.includesSolution ?? false,
+  );
+  const [includesLectureVideo, setIncludesLectureVideo] = useState(
+    () => initialData?.includesLectureVideo ?? false,
   );
   const [level, setLevel] = useState(() => initialData?.level ?? "");
   const [source, setSource] = useState(() => initialData?.source ?? "");
@@ -472,12 +473,6 @@ export default function LessonOutputEditorForm({
       return;
     }
 
-    const parsedCost = parseMoneyInput(cost.trim() || "0") ?? 0;
-    if (allowCostEdit && (!Number.isInteger(parsedCost) || parsedCost < 0)) {
-      toast.error("Chi phí phải là số nguyên không âm.");
-      return;
-    }
-
     const resolvedTaskId = allowTasklessOutput
       ? lessonTaskId.trim() || null
       : lessonTaskId.trim();
@@ -489,6 +484,10 @@ export default function LessonOutputEditorForm({
       source: source.trim() || null,
       originalLink: originalLink.trim() || null,
       level: level.trim() || null,
+      difficultyBand: difficultyBand || null,
+      includesTest,
+      includesSolution,
+      includesLectureVideo,
       tags: enrichedTags,
       date: date.trim(),
       contestUploaded: contestUploaded.trim() || null,
@@ -504,17 +503,10 @@ export default function LessonOutputEditorForm({
       payload.staffId = selectedStaff?.id ?? null;
     }
 
-    if (allowCostEdit) {
-      payload.cost = parsedCost;
-    }
-
     await onSubmit(payload);
   };
 
   if (useCompactTasklessLayout) {
-    const parsedCost = parseMoneyInput(cost.trim() || "0") ?? 0;
-    const displayCost = Number.isFinite(parsedCost) ? Math.max(0, parsedCost) : 0;
-
     return (
       <form onSubmit={handleSubmit} className="space-y-4">
         <section className="rounded-lg border border-border-default bg-bg-surface p-3 sm:p-4">
@@ -638,27 +630,23 @@ export default function LessonOutputEditorForm({
                     Code
                   </label>
                 </div>
-
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-sm text-text-secondary">Chi phí</span>
-                  <MoneyInput
-                    value={cost}
-                    onValueChange={setCost}
-                    readOnly={!allowCostEdit}
-                    aria-readonly={!allowCostEdit}
-                    className={`${fieldInputClass()} ${allowCostEdit ? "" : "cursor-not-allowed bg-bg-secondary/55 text-text-muted"}`}
-                  />
-                  <span className="text-sm font-semibold text-text-primary">
-                    {formatCurrency(displayCost)} đ
-                  </span>
-                  {!allowCostEdit ? (
-                    <span className="text-xs text-text-muted">
-                      Chi phí đang bị khóa trong popup này.
-                    </span>
-                  ) : null}
-                </label>
               </div>
             </div>
+
+            <LessonOutputPricingFields
+              compact
+              difficultyBand={difficultyBand}
+              includesTest={includesTest}
+              includesSolution={includesSolution}
+              includesLectureVideo={includesLectureVideo}
+              storedCost={initialData?.cost ?? 0}
+              selectButtonClassName={selectButtonClass()}
+              selectMenuClassName={selectMenuClass()}
+              onDifficultyBandChange={setDifficultyBand}
+              onIncludesTestChange={setIncludesTest}
+              onIncludesSolutionChange={setIncludesSolution}
+              onIncludesLectureVideoChange={setIncludesLectureVideo}
+            />
 
             {allowPaymentStatusEdit ? (
               <label className="flex flex-col gap-1.5">
@@ -851,22 +839,21 @@ export default function LessonOutputEditorForm({
               </label>
             ) : null}
 
-            <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              <span>Chi phí</span>
-              <MoneyInput
-                value={cost}
-                onValueChange={setCost}
-                readOnly={!allowCostEdit}
-                aria-readonly={!allowCostEdit}
-                placeholder="0"
-                className={`min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${allowCostEdit ? "" : "cursor-not-allowed bg-bg-secondary/55 text-text-muted"}`}
+            <div className="sm:col-span-2">
+              <LessonOutputPricingFields
+                difficultyBand={difficultyBand}
+                includesTest={includesTest}
+                includesSolution={includesSolution}
+                includesLectureVideo={includesLectureVideo}
+                storedCost={initialData?.cost ?? 0}
+                selectButtonClassName={selectButtonClass()}
+                selectMenuClassName={selectMenuClass()}
+                onDifficultyBandChange={setDifficultyBand}
+                onIncludesTestChange={setIncludesTest}
+                onIncludesSolutionChange={setIncludesSolution}
+                onIncludesLectureVideoChange={setIncludesLectureVideo}
               />
-              <span className="text-xs text-text-muted">
-                {allowCostEdit
-                  ? "Chi phí trợ cấp vẫn được giữ nguyên khi đã thanh toán."
-                  : "Chi phí đang ở chế độ chỉ xem và không thể chỉnh từ popup này."}
-              </span>
-            </label>
+            </div>
 
             <label className="flex flex-col gap-1 text-sm text-text-secondary">
               <span>Level</span>

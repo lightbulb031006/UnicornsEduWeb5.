@@ -114,10 +114,8 @@ function isStaffProfileComplete(
     hasText(staff.birthDate) &&
     hasText(staff.university) &&
     hasText(staff.highSchool) &&
-    hasText(staff.specialization) &&
     hasText(staff.bankAccount) &&
-    hasText(staff.bankQrLink) &&
-    hasText(staff.personalAchievementLink)
+    hasText(staff.bankQrLink)
   );
 }
 
@@ -158,13 +156,13 @@ function resolveAdminTier(
 function resolveDefaultWorkspace(
   roleType: UserRole,
   hasStaffProfile: boolean,
-  hasStudentProfile: boolean,
+  canAccessStudentWorkspace: boolean,
 ): AuthWorkspace | null {
   if (roleType === UserRole.admin) {
     return 'admin';
   }
 
-  if (roleType === UserRole.student && hasStudentProfile) {
+  if (roleType === UserRole.student && canAccessStudentWorkspace) {
     return 'student';
   }
 
@@ -172,7 +170,7 @@ function resolveDefaultWorkspace(
     return 'staff';
   }
 
-  if (hasStudentProfile) {
+  if (canAccessStudentWorkspace) {
     return 'student';
   }
 
@@ -182,21 +180,21 @@ function resolveDefaultWorkspace(
 function resolvePreferredRedirect(
   roleType: UserRole,
   hasStaffProfile: boolean,
-  hasStudentProfile: boolean,
+  canAccessStudentWorkspace: boolean,
 ) {
   if (roleType === UserRole.admin) {
     return '/admin/dashboard';
   }
 
   if (roleType === UserRole.student) {
-    return hasStudentProfile ? '/student' : '/user-profile';
+    return canAccessStudentWorkspace ? '/student' : '/user-profile';
   }
 
   if (hasStaffProfile) {
     return '/staff';
   }
 
-  if (hasStudentProfile) {
+  if (canAccessStudentWorkspace) {
     return '/student';
   }
 
@@ -278,6 +276,12 @@ export class AuthAccessService {
     const hasStudentProfile = Boolean(
       studentProfile?.id && isActiveStudentProfile(studentProfile.status),
     );
+    const isExplicitlyInactiveStudent = Boolean(
+      studentProfile?.id && !isActiveStudentProfile(studentProfile.status),
+    );
+    const canAccessStudentWorkspace =
+      hasStudentProfile ||
+      (user.roleType === UserRole.student && !isExplicitlyInactiveStudent);
     const staffRoles = hasStaffProfile
       ? await this.authIdentityCacheService.getStaffRoles(user.id, request)
       : [];
@@ -307,19 +311,19 @@ export class AuthAccessService {
     if (hasStaffProfile || canBypassStaffWorkspaceProfile) {
       availableWorkspaces.push('staff');
     }
-    if (hasStudentProfile) {
+    if (canAccessStudentWorkspace) {
       availableWorkspaces.push('student');
     }
 
     const defaultWorkspace = resolveDefaultWorkspace(
       user.roleType,
       hasStaffProfile,
-      hasStudentProfile,
+      canAccessStudentWorkspace,
     );
     const preferredRedirect = resolvePreferredRedirect(
       user.roleType,
       hasStaffProfile,
-      hasStudentProfile,
+      canAccessStudentWorkspace,
     );
     const staffProfileComplete =
       hasStaffProfile &&
@@ -350,7 +354,7 @@ export class AuthAccessService {
           profileComplete: staffProfileComplete,
         },
         student: {
-          canAccess: hasStudentProfile,
+          canAccess: canAccessStudentWorkspace,
         },
       },
     };

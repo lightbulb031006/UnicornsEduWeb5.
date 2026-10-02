@@ -23,6 +23,7 @@ export type CreateUserFormState = Pick<
   staffRoles: StaffRole[];
   studentName: string;
   confirmPassword: string;
+  emailVerified?: boolean;
 };
 
 export type CreateUserFormErrors = Partial<Record<CreateUserField, string>>;
@@ -35,6 +36,7 @@ export const EMPTY_CREATE_USER_FORM: CreateUserFormState = {
   staffRoles: [],
   studentName: "",
   confirmPassword: "",
+  emailVerified: false,
 };
 
 export function validateCreateUserForm(
@@ -76,6 +78,9 @@ export function buildCreateUserPayload(
     password: form.password,
     accountHandle: form.accountHandle.trim(),
     roleType: form.roleType,
+    ...(form.emailVerified !== undefined
+      ? { emailVerified: form.emailVerified }
+      : {}),
     ...(form.roleType === "staff" ? { staffRoles: form.staffRoles } : {}),
   };
 

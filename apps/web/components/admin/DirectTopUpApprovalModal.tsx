@@ -18,6 +18,10 @@ import { markNotificationFeedRead } from "@/lib/apis/notification.api";
 import * as studentApi from "@/lib/apis/student.api";
 import { notificationFeedQueryKey } from "@/lib/notification-feed-query";
 import { cn } from "@/lib/utils";
+import {
+  formatVnCurrency,
+  formatVnDateTime,
+} from "@/lib/formatters";
 
 const STATUS_LABELS: Record<StudentWalletDirectTopUpRequestStatus, string> = {
   pending: "Chờ duyệt",
@@ -34,24 +38,14 @@ function canUseAdminApproval(user: ReturnType<typeof useAuth>["user"]) {
 }
 
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
+  return formatVnCurrency(value);
 }
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return formatVnDateTime(date);
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {

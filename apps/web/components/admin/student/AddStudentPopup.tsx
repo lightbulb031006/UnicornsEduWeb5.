@@ -9,8 +9,10 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import { CustomerSourceFields } from "@/components/admin/student/CustomerSourceFields";
 import type {
   StudentAssignableUser,
+  StudentCustomerSource,
   StudentDetail,
   StudentGender,
   StudentStatus,
@@ -69,6 +71,8 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
   const [gender, setGender] = useState<StudentGender>("male");
   const [status, setStatus] = useState<StudentStatus>("active");
   const [goal, setGoal] = useState("");
+  const [customerSource, setCustomerSource] = useState<StudentCustomerSource | "">("");
+  const [customerSourceNote, setCustomerSourceNote] = useState("");
 
   const {
     data: assignableUsers = [],
@@ -107,6 +111,8 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
     setGender("male");
     setStatus("active");
     setGoal("");
+    setCustomerSource("");
+    setCustomerSourceNote("");
   };
 
   const handleEmailInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -134,6 +140,8 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
     setGender("male");
     setStatus("active");
     setGoal("");
+    setCustomerSource("");
+    setCustomerSourceNote("");
   };
 
   const handleSubmit = (event: SyntheticEvent<HTMLFormElement>) => {
@@ -152,6 +160,17 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
     const trimmedName = fullName.trim();
     if (!trimmedName) {
       toast.error("Họ và tên học sinh là bắt buộc.");
+      return;
+    }
+
+    if (!customerSource) {
+      toast.error("Nguồn khách là bắt buộc.");
+      return;
+    }
+
+    const trimmedSourceNote = customerSourceNote.trim();
+    if (customerSource === "other" && !trimmedSourceNote) {
+      toast.error("Chú thích nguồn là bắt buộc khi chọn Khác.");
       return;
     }
 
@@ -187,6 +206,8 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
           status,
           goal: goal.trim() || undefined,
           user_id: selectedUser.id,
+          customer_source: customerSource,
+          ...(customerSource === "other" ? { customer_source_note: trimmedSourceNote } : {}),
         }),
       onSuccess: async (createdStudent) => {
         await queryClient.invalidateQueries({ queryKey: ["student", "list"] });
@@ -448,6 +469,18 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
                           className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:bg-bg-tertiary disabled:text-text-muted"
                         />
                       </label>
+
+                      <CustomerSourceFields
+                        idPrefix="add-student"
+                        source={customerSource}
+                        note={customerSourceNote}
+                        disabled={formDisabled}
+                        onSourceChange={(nextSource) => {
+                          setCustomerSource(nextSource);
+                          if (nextSource !== "other") setCustomerSourceNote("");
+                        }}
+                        onNoteChange={setCustomerSourceNote}
+                      />
 
                       <label className="flex flex-col gap-1 text-sm text-text-secondary">
                         <span>Trường học</span>

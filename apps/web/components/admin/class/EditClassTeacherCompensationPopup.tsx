@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ClassDetail } from "@/dtos/class.dto";
 import * as classApi from "@/lib/apis/class.api";
@@ -10,6 +9,7 @@ import {
   moneyInputInitialFromNumber,
   parseMoneyInput,
 } from "@/lib/money-input.helpers";
+import { BodyPortal } from "@/components/ui/BodyPortal";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 import {
@@ -161,8 +161,8 @@ function EditClassTeacherCompensationPopupContent({
     });
   };
 
-  return createPortal(
-    <>
+  return (
+    <BodyPortal>
       <div
         className="fixed inset-0 z-40 bg-bg-primary/70 backdrop-blur-sm"
         aria-hidden
@@ -210,12 +210,12 @@ function EditClassTeacherCompensationPopupContent({
                       {teacher.fullName?.trim() || "Gia sư"}
                     </span>
                     <span className="mt-1 block text-xs text-text-muted">
-                      Hiện tại: {teacher.customAllowance == null ? "—" : formatCurrency(teacher.customAllowance)}
+                      Hiện tại: {teacher.customAllowance == null ? "—" : `${formatCurrency(teacher.customAllowance)}/hs`}
                     </span>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="block">
                         <span className="block text-xs font-medium text-text-muted">
-                          Trợ cấp riêng
+                          Trợ cấp riêng / học sinh
                         </span>
                         <MoneyInput
                           value={value}
@@ -226,7 +226,7 @@ function EditClassTeacherCompensationPopupContent({
                             }))
                           }
                           className="mt-1 min-h-11 w-full rounded-md border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                          placeholder="Để trống = mặc định lớp"
+                          placeholder="Để trống = mặc định lớp (đ/học sinh)"
                         />
                         {isInvalid ? (
                           <span className="mt-1 block text-xs text-error">
@@ -285,8 +285,7 @@ function EditClassTeacherCompensationPopupContent({
           </button>
         </div>
       </div>
-    </>,
-    document.body,
+    </BodyPortal>
   );
 }
 

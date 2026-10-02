@@ -24,16 +24,16 @@ export class SurveyRoundService {
 
   /** Read the global current survey round, seeding the singleton if needed. */
   async getCurrentRound(): Promise<number> {
-    const record = await this.prisma.surveyRound.findUnique({
+    const record = await this.prisma.survey.findUnique({
       where: { id: SURVEY_ROUND_SINGLETON_ID },
       select: { currentRound: true },
     });
 
     if (record) {
-      return record.currentRound;
+      return record.currentRound ?? DEFAULT_SURVEY_ROUND;
     }
 
-    const created = await this.prisma.surveyRound.upsert({
+    const created = await this.prisma.survey.upsert({
       where: { id: SURVEY_ROUND_SINGLETON_ID },
       update: {},
       create: {
@@ -43,7 +43,7 @@ export class SurveyRoundService {
       select: { currentRound: true },
     });
 
-    return created.currentRound;
+    return created.currentRound ?? DEFAULT_SURVEY_ROUND;
   }
 
   async getRoundSummary(): Promise<AdminSurveyRoundSummaryDto> {
@@ -112,8 +112,12 @@ export class SurveyRoundService {
         .filter((name): name is string => Boolean(name && name.trim()));
 
       const latestReportedRound = item.surveys.reduce<number | null>(
-        (max, survey) =>
-          max == null ? survey.testNumber : Math.max(max, survey.testNumber),
+        (max, survey) => {
+          if (survey.testNumber == null) return max;
+          return max == null
+            ? survey.testNumber
+            : Math.max(max, survey.testNumber);
+        },
         null,
       );
 
@@ -158,7 +162,7 @@ export class SurveyRoundService {
     const previous = await this.getCurrentRound();
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.surveyRound.upsert({
+      await tx.survey.upsert({
         where: { id: SURVEY_ROUND_SINGLETON_ID },
         update: {
           currentRound: nextRound,

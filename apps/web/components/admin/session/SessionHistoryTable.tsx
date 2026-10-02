@@ -11,6 +11,10 @@ import {
   SessionAttendanceRecord,
   SessionUpdatePayload,
 } from "@/dtos/session.dto";
+import {
+  CONTENT_LIMITS,
+  firstOverLimit,
+} from "@/dtos/content-limits";
 
 type SessionAttendanceRecordWithStudent = SessionAttendanceRecord & {
   student?: { fullName?: string | null } | null;
@@ -27,6 +31,7 @@ import {
   parseMoneyInput,
 } from "@/lib/money-input.helpers";
 import {
+  blockCountFromClockRange,
   computeTeacherSessionAllowanceGrossPreviewVnd,
   formatSessionAllowanceBreakdownVnd,
   grossAllowanceToRawBaseVnd,
@@ -37,6 +42,10 @@ import {
   buildSessionFormDirtySnapshot,
   isSessionFormDirty,
 } from "@/lib/session-form-dirty.helpers";
+import {
+  getSessionTimeSubmitError,
+  isSessionPaymentLockedStatus,
+} from "@/lib/session-time.helpers";
 import {
   buildSessionCommentZaloText,
   findStudentsMissingRequiredComments,
@@ -69,6 +78,7 @@ import { DateInput } from "@/components/ui/DateInput";
 import RichTextEditor from "@/components/ui/RichTextEditor";
 import { TimeInput } from "@/components/ui/TimeInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import YouTubeEmbed, { extractYouTubeVideoId } from "@/components/ui/YouTubeEmbed";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import * as classApi from "@/lib/apis/class.api";
 import * as sessionApi from "@/lib/apis/session.api";
@@ -119,6 +129,9 @@ type Props = {
     data: SessionUpdatePayload,
   ) => Promise<SessionItem>;
   deleteSessionFn?: (id: string) => Promise<void>;
+  hideList?: boolean;
+  autoOpenSessionId?: string | null;
+  autoOpenToken?: number;
 };
 
 type AttendanceFormItem = {
@@ -130,7 +143,26 @@ type AttendanceFormItem = {
   defaultTuitionFee: number | null;
 };
 
-const MAX_ATTENDANCE_NOTES_LENGTH = 500;
+function mapSessionAttendanceToFormItems(
+  existingAttendance: SessionItem["attendance"],
+): AttendanceFormItem[] {
+  return (existingAttendance ?? []).map((attendanceItem) => ({
+    studentId: attendanceItem.studentId,
+    fullName:
+      (
+        attendanceItem as SessionAttendanceRecordWithStudent
+      ).student?.fullName?.trim() || "—",
+    status: (attendanceItem.status ?? "absent") as SessionAttendanceStatus,
+    notes: attendanceItem.notes ?? "",
+    tuitionFee:
+      normalizeMoneyValue(attendanceItem.tuitionFee) != null
+        ? moneyInputInitialFromNumber(
+            normalizeMoneyValue(attendanceItem.tuitionFee),
+          )
+        : "",
+    defaultTuitionFee: normalizeMoneyValue(attendanceItem.tuitionFee),
+  }));
+}
 
 function formatDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -191,7 +223,7 @@ function renderClassDetailSessionTime(session: SessionItem): string {
   return start !== "—" ? start : end;
 }
 
-function ClassDetailDateTimeBlock({ session }: { session: SessionItem }) {
+export function ClassDetailDateTimeBlock({ session }: { session: SessionItem }) {
   return (
     <div className="flex min-w-[5.5rem] flex-col gap-0.5 text-left">
       <p className="text-xs leading-tight text-text-secondary">
@@ -248,7 +280,7 @@ function renderSessionDeleteSummary(session: SessionItem): string {
   return time !== "—" ? `${date} (${time})` : date;
 }
 
-function renderSessionStatus(
+export function renderSessionStatus(
   session: SessionItem,
   statusMode: SessionStatusMode,
 ): { label: string; className: string } {
@@ -504,7 +536,6 @@ function SelectionCheckbox({
 }: SelectionCheckboxProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (!inputRef.current) return;
     inputRef.current.indeterminate = indeterminate;
@@ -614,7 +645,7 @@ function SelectionCheckbox({
       />
       {checked ? (
         <span
-          className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-[1.45rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/35 bg-success shadow-[0_0_0_4px_color-mix(in_srgb,var(--ue-success)_12%,transparent),0_12px_26px_-14px_color-mix(in_srgb,var(--ue-success)_70%,transparent)] transition-all duration-200 motion-reduce:transition-none"
+          className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-[1.45rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/35 bg-success shadow-[0_0_0_4px_color-mix(in_srgb,var(--ue-success)_12%,transparent),0_12px_26px_-14px_color-mix(in_srgb,var(--ue-success)_70%,transparent)] transition-colors duration-200 motion-reduce:transition-none"
           aria-hidden
         />
       ) : null}
@@ -674,7 +705,7 @@ function renderCoefficientLabel(raw: unknown): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
-function ClassDetailInfoColumn({
+export function ClassDetailInfoColumn({
   session,
   entityMode,
   status,
@@ -801,6 +832,9 @@ export default function SessionHistoryTable({
   showTrainingManagerAllowance = false,
   updateSessionFn = sessionApi.updateSession,
   deleteSessionFn = sessionApi.deleteSession,
+  hideList = false,
+  autoOpenSessionId = null,
+  autoOpenToken = 0,
 }: Props) {
   const isWideEditor = editorLayout === "wide";
   const showActionsColumn = showActionsColumnProp ?? Boolean(onSessionUpdated);
@@ -834,6 +868,7 @@ export default function SessionHistoryTable({
   const [editLessonContent, setEditLessonContent] = useState("");
   const [editHomework, setEditHomework] = useState("");
   const [editTutorial, setEditTutorial] = useState("");
+  const [editRecordingUrl, setEditRecordingUrl] = useState("");
   const [lessonContentError, setLessonContentError] = useState("");
   const [homeworkError, setHomeworkError] = useState("");
   const [tutorialError, setTutorialError] = useState("");
@@ -846,6 +881,7 @@ export default function SessionHistoryTable({
     [],
   );
   const attendanceDirtyRef = useRef(false);
+  const openedTimelineTokenRef = useRef(0);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     new Set(),
@@ -953,38 +989,20 @@ export default function SessionHistoryTable({
     }
 
     const paymentStatus = (session.teacherPaymentStatus ?? "").toLowerCase();
-    const isLockedSession =
-      paymentStatus === "paid" || paymentStatus === "deposit";
+    const isLockedSession = isSessionPaymentLockedStatus(paymentStatus);
 
-    setAttendanceLoading(true);
-    setAttendanceItems([]);
-    attendanceDirtyRef.current = false;
     const existingAttendance = session.attendance ?? [];
+    // Seed immediately so allowance override init does not compare against
+    // an empty roster (false "Đã chỉnh tay") while class students load.
+    setAttendanceItems(mapSessionAttendanceToFormItems(existingAttendance));
+    attendanceDirtyRef.current = false;
 
     if (isLockedSession) {
-      const items: AttendanceFormItem[] = existingAttendance.map(
-        (attendanceItem) => ({
-          studentId: attendanceItem.studentId,
-          fullName:
-            (
-              attendanceItem as SessionAttendanceRecordWithStudent
-            ).student?.fullName?.trim() || "—",
-          status: (attendanceItem.status ??
-            "absent") as SessionAttendanceStatus,
-          notes: attendanceItem.notes ?? "",
-          tuitionFee:
-            normalizeMoneyValue(attendanceItem.tuitionFee) != null
-              ? moneyInputInitialFromNumber(
-                  normalizeMoneyValue(attendanceItem.tuitionFee),
-                )
-              : "",
-          defaultTuitionFee: normalizeMoneyValue(attendanceItem.tuitionFee),
-        }),
-      );
-      setAttendanceItems(items);
       setAttendanceLoading(false);
       return;
     }
+
+    setAttendanceLoading(true);
 
     void getClassStudents(session.classId)
       .then((students) => {
@@ -1025,7 +1043,7 @@ export default function SessionHistoryTable({
         setAttendanceItems(merged);
       })
       .catch(() => {
-        setAttendanceItems([]);
+        // Keep seeded session attendance so allowance formula stays accurate.
         attendanceDirtyRef.current = false;
       })
       .finally(() => setAttendanceLoading(false));
@@ -1173,6 +1191,7 @@ export default function SessionHistoryTable({
     );
     setEditHomework(session.homework ?? "");
     setEditTutorial(session.tutorial ?? "");
+    setEditRecordingUrl(session.recordingUrl ?? "");
     setLessonContentError("");
     setHomeworkError("");
     setTutorialError("");
@@ -1188,8 +1207,21 @@ export default function SessionHistoryTable({
     loadAttendanceForEdit(session);
   };
 
+  useEffect(() => {
+    if (!autoOpenSessionId || !autoOpenToken) return;
+    if (openedTimelineTokenRef.current === autoOpenToken) return;
+    const session = sessions.find((item) => item.id === autoOpenSessionId);
+    if (!session) return;
+    openedTimelineTokenRef.current = autoOpenToken;
+    openEdit(session);
+    // openEdit is recreated each render; open once per click token after the
+    // month-scoped session list arrives (timeline click fetches that list lazily).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenSessionId, autoOpenToken, sessions]);
+
   const closeEdit = useCallback(() => {
     setEditingSession(null);
+    setEditRecordingUrl("");
     setTeachersList([]);
     setTeachersLoading(false);
     setAttendanceItems([]);
@@ -1209,6 +1241,7 @@ export default function SessionHistoryTable({
       lessonContent: editLessonContent,
       homework: editHomework,
       tutorial: editTutorial,
+      recordingUrl: editRecordingUrl,
       isTrialLesson,
       teacherPaymentStatus: editPaymentStatus,
       teacherId: editTeacherId,
@@ -1227,6 +1260,7 @@ export default function SessionHistoryTable({
       editHomework,
       editLessonContent,
       editPaymentStatus,
+      editRecordingUrl,
       editStartTime,
       editTeacherId,
       editTutorial,
@@ -1256,18 +1290,18 @@ export default function SessionHistoryTable({
 
   const handleSaveEdit = () => {
     if (!editingSession) return;
-    const startNorm = normalizeTimeForApi(editStartTime);
-    const endNorm = normalizeTimeForApi(editEndTime);
-    if (startNorm && endNorm) {
-      const toSeconds = (hhmmss: string) => {
-        const [h, m, s] = hhmmss.split(":").map(Number);
-        return (h ?? 0) * 3600 + (m ?? 0) * 60 + (s ?? 0);
-      };
-      if (toSeconds(endNorm) <= toSeconds(startNorm)) {
-        toast.error("Giờ kết thúc phải lớn hơn giờ bắt đầu.");
+    const isTimeLocked = isSessionPaymentLockedStatus(editPaymentStatus);
+    if (!isTimeLocked) {
+      const timeError = getSessionTimeSubmitError(editStartTime, editEndTime, {
+        required: editingClassDetail?.pricingMode === "per_block",
+      });
+      if (timeError) {
+        toast.error(timeError);
         return;
       }
     }
+    const startNorm = normalizeTimeForApi(editStartTime);
+    const endNorm = normalizeTimeForApi(editEndTime);
     if (!editDate.trim()) {
       toast.error("Vui lòng chọn ngày học.");
       return;
@@ -1291,6 +1325,32 @@ export default function SessionHistoryTable({
       toast.error("Vui lòng nhập tutorial các buổi học.");
       return;
     }
+    const sessionTextTooLong = firstOverLimit([
+      {
+        label: "Nội dung bài học",
+        value: editLessonContent,
+        max: CONTENT_LIMITS.sessionRichText,
+      },
+      {
+        label: "Bài tập về nhà",
+        value: editHomework,
+        max: CONTENT_LIMITS.sessionRichText,
+      },
+      {
+        label: "Tutorial",
+        value: editTutorial,
+        max: CONTENT_LIMITS.sessionRichText,
+      },
+      {
+        label: "Link recording",
+        value: editRecordingUrl.trim(),
+        max: CONTENT_LIMITS.url,
+      },
+    ]);
+    if (sessionTextTooLong) {
+      toast.error(sessionTextTooLong);
+      return;
+    }
     const missingStudentComments = findStudentsMissingRequiredComments(
       attendanceItems,
     );
@@ -1299,11 +1359,11 @@ export default function SessionHistoryTable({
       return;
     }
     const hasAttendanceNotesTooLong = attendanceItems.some(
-      (item) => stripRichTextToPlainText(item.notes).length > MAX_ATTENDANCE_NOTES_LENGTH,
+      (item) => stripRichTextToPlainText(item.notes).length > CONTENT_LIMITS.attendanceNotes,
     );
     if (hasAttendanceNotesTooLong) {
       toast.error(
-        `Ghi chú điểm danh tối đa ${MAX_ATTENDANCE_NOTES_LENGTH} ký tự.`,
+        `Ghi chú điểm danh tối đa ${CONTENT_LIMITS.attendanceNotes} ký tự.`,
       );
       return;
     }
@@ -1341,6 +1401,14 @@ export default function SessionHistoryTable({
         return;
       }
     }
+
+    if (
+      editRecordingUrl.trim() &&
+      !extractYouTubeVideoId(editRecordingUrl.trim())
+    ) {
+      toast.error("Link video YouTube không hợp lệ.");
+      return;
+    }
     const savedNotes = buildSessionCommentZaloText({
       className:
         editingSession.class?.name ??
@@ -1366,11 +1434,12 @@ export default function SessionHistoryTable({
       ...(allowTeacherSelection &&
         editTeacherId &&
         teachersList.length > 0 && { teacherId: editTeacherId }),
-      ...(startNorm && { startTime: startNorm }),
-      ...(endNorm && { endTime: endNorm }),
+      ...(!isTimeLocked && startNorm && { startTime: startNorm }),
+      ...(!isTimeLocked && endNorm && { endTime: endNorm }),
       lessonContent: editLessonContent.trim(),
       homework: editHomework.trim(),
       tutorial: editTutorial.trim(),
+      recordingUrl: editRecordingUrl.trim() || null,
       notes: savedNotes,
       ...(allowPaymentStatusEdit
         ? { teacherPaymentStatus: editPaymentStatus }
@@ -1391,6 +1460,7 @@ export default function SessionHistoryTable({
           lessonContent: payload.lessonContent,
           homework: payload.homework,
           tutorial: payload.tutorial,
+          recordingUrl: payload.recordingUrl,
           notes: payload.notes,
         };
         if (payload.teacherPaymentStatus !== undefined) {
@@ -1511,6 +1581,17 @@ export default function SessionHistoryTable({
     [attendanceItems],
   );
 
+  const previewBlockCount = useMemo(() => {
+    return (
+      editingSession?.snapshotBlockCount ??
+      blockCountFromClockRange(editStartTime, editEndTime)
+    );
+  }, [
+    editingSession?.snapshotBlockCount,
+    editStartTime,
+    editEndTime,
+  ]);
+
   const allowancePreviewInputs = useMemo(
     () =>
       resolveSessionAllowancePreviewInputs({
@@ -1518,17 +1599,23 @@ export default function SessionHistoryTable({
         classDetail: editingClassDetail,
         teacherId: selectedTeacherId || null,
         chargeableStudentCount: chargeableAttendanceCountForAllowance,
+        blockCount: previewBlockCount,
       }),
     [
       editingSession,
       editingClassDetail,
       selectedTeacherId,
       chargeableAttendanceCountForAllowance,
+      previewBlockCount,
     ],
   );
 
   const usesSessionAllowanceSnapshot =
     allowancePreviewInputs?.source === "snapshot";
+  const shouldWaitForClassFormula =
+    Boolean(editingSession && editingClassId) &&
+    !usesSessionAllowanceSnapshot &&
+    isEditingClassDetailLoading;
   const allowancePerStudentNumeric = allowancePreviewInputs?.perStudent ?? 0;
   const scaleAmountForAllowancePreview = allowancePreviewInputs?.scaleAmount ?? 0;
   const allowanceRawBaseEdit = allowancePreviewInputs?.rawBase ?? null;
@@ -1540,11 +1627,17 @@ export default function SessionHistoryTable({
       rawBase: allowanceRawBaseEdit,
       coefficient: coefficientForAllowancePreview,
       maxAllowancePerSession: editingClassDetail?.maxAllowancePerSession,
+      maxAllowancePerBlock: editingClassDetail?.maxAllowancePerBlock,
+      snapshotBlockCount: previewBlockCount,
+      pricingMode: editingClassDetail?.pricingMode,
     });
   }, [
     allowanceRawBaseEdit,
     allowancePreviewInputs,
     editingClassDetail?.maxAllowancePerSession,
+    editingClassDetail?.maxAllowancePerBlock,
+    editingClassDetail?.pricingMode,
+    previewBlockCount,
     coefficientForAllowancePreview,
   ]);
 
@@ -1555,6 +1648,11 @@ export default function SessionHistoryTable({
       return;
     }
     if (allowanceOverrideInitSessionIdRef.current === editingSession.id) {
+      return;
+    }
+    // Wait for attendance (and live class config when needed) so we do not
+    // falsely treat formula-with-empty-roster as a manual override.
+    if (attendanceLoading || shouldWaitForClassFormula) {
       return;
     }
     if (allowanceRawBaseEdit == null) return;
@@ -1570,6 +1668,9 @@ export default function SessionHistoryTable({
           rawBase: savedRawBase,
           coefficient: coefficientForAllowancePreview,
           maxAllowancePerSession: editingClassDetail?.maxAllowancePerSession,
+          maxAllowancePerBlock: editingClassDetail?.maxAllowancePerBlock,
+          snapshotBlockCount: previewBlockCount,
+          pricingMode: editingClassDetail?.pricingMode,
         }),
       );
       return;
@@ -1577,9 +1678,14 @@ export default function SessionHistoryTable({
     setManualAllowanceGrossOverride(null);
   }, [
     editingSession,
+    attendanceLoading,
+    shouldWaitForClassFormula,
     allowanceRawBaseEdit,
     coefficientForAllowancePreview,
     editingClassDetail?.maxAllowancePerSession,
+    editingClassDetail?.maxAllowancePerBlock,
+    editingClassDetail?.pricingMode,
+    previewBlockCount,
   ]);
 
   useEffect(() => {
@@ -1589,7 +1695,7 @@ export default function SessionHistoryTable({
   }, [isTrialLesson]);
 
   const isAllowancePaymentLocked =
-    editPaymentStatus === "paid" || editPaymentStatus === "deposit";
+    isSessionPaymentLockedStatus(editPaymentStatus);
   const isAllowanceEditLocked = isTrialLesson || isAllowancePaymentLocked;
   const allowanceEditLockedReason = isTrialLesson
     ? "Buổi dạy thử không tính trợ cấp."
@@ -1622,10 +1728,6 @@ export default function SessionHistoryTable({
 
   const isAdminViewer = fullProfile?.roleType === "admin";
 
-  const shouldWaitForClassFormula =
-    Boolean(editingSession && editingClassId) &&
-    !usesSessionAllowanceSnapshot &&
-    isEditingClassDetailLoading;
   const allowanceFormulaNote = isEditingClassDetailError &&
     !usesSessionAllowanceSnapshot
     ? "Công thức trợ cấp: không tải được cấu hình lớp để preview."
@@ -1788,7 +1890,7 @@ export default function SessionHistoryTable({
 
       {/* Mobile layout: card list */}
       <div
-        className={`${isClassDetailRowLayout ? "space-y-2" : "space-y-3"} ${className} lg:hidden`}
+        className={`${isClassDetailRowLayout ? "space-y-2" : "space-y-3"} ${className} lg:hidden ${hideList ? "hidden" : ""}`}
       >
         {sessions.length > 0 ? (
           sessions.map((session) => {
@@ -2064,7 +2166,7 @@ export default function SessionHistoryTable({
       </div>
 
       {/* Desktop / tablet layout: table */}
-      <div className={`hidden overflow-x-auto lg:block ${className}`}>
+      <div className={`hidden overflow-x-auto lg:block ${className} ${hideList ? "!hidden" : ""}`}>
         {isClassDetailRowLayout ? (
           <table className="w-full min-w-[880px] border-collapse text-left text-sm">
             <caption className="sr-only">Lịch sử buổi học</caption>
@@ -2727,7 +2829,7 @@ export default function SessionHistoryTable({
 
         <SessionFormDialogBody>
           <div className="space-y-5">
-                      <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
+                      <div className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                         <span>
                           Ngày học <RequiredMark />
                         </span>
@@ -2739,7 +2841,7 @@ export default function SessionHistoryTable({
                           disabled={readOnlySessionDetails}
                           className="min-h-11 rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                         />
-                      </label>
+                      </div>
 
                       <div>
                         <p className="mb-1.5 text-sm font-medium text-text-primary">
@@ -2753,7 +2855,10 @@ export default function SessionHistoryTable({
                               value={editStartTime}
                               autoComplete="off"
                               onChange={(e) => setEditStartTime(e.target.value)}
-                              disabled={readOnlySessionDetails}
+                              disabled={
+                                readOnlySessionDetails ||
+                                isAllowancePaymentLocked
+                              }
                               className="min-h-11 rounded-lg border border-border-default bg-bg-surface px-3 py-2 font-mono text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                             />
                           </label>
@@ -2770,7 +2875,10 @@ export default function SessionHistoryTable({
                               value={editEndTime}
                               autoComplete="off"
                               onChange={(e) => setEditEndTime(e.target.value)}
-                              disabled={readOnlySessionDetails}
+                              disabled={
+                                readOnlySessionDetails ||
+                                isAllowancePaymentLocked
+                              }
                               className="min-h-11 rounded-lg border border-border-default bg-bg-surface px-3 py-2 font-mono text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                             />
                           </label>
@@ -2778,6 +2886,11 @@ export default function SessionHistoryTable({
                         {editDurationLabel ? (
                           <p className="mt-1.5 text-xs text-text-muted">
                             Thời lượng: {editDurationLabel}
+                          </p>
+                        ) : null}
+                        {isAllowancePaymentLocked ? (
+                          <p className="mt-1.5 text-xs text-text-muted">
+                            Buổi đã thanh toán hoặc ghi cọc — không chỉnh giờ.
                           </p>
                         ) : null}
                       </div>
@@ -2885,7 +2998,13 @@ export default function SessionHistoryTable({
                       ) : null}
                     </div>
 
-                    {getClassStudents ? (
+                    {editingSession?.snapshotNoAttendance ? (
+                      <div className="rounded-lg border border-border-default bg-bg-secondary/40 px-4 py-3 text-sm text-text-muted">
+                        Buổi học này thuộc lớp không cần điểm danh — hệ thống tự sinh Attendance present cho mọi học sinh.
+                      </div>
+                    ) : null}
+
+                    {getClassStudents && !editingSession?.snapshotNoAttendance ? (
                       <section className="space-y-3">
                         <div className="space-y-1">
                           <h3 className="text-sm font-semibold text-text-primary">
@@ -2962,7 +3081,7 @@ export default function SessionHistoryTable({
                       </section>
                     ) : null}
 
-                    <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
+                    <div className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                       <span>
                         Nội dung bài học <RequiredMark />
                       </span>
@@ -2985,7 +3104,7 @@ export default function SessionHistoryTable({
                           {lessonContentError}
                         </span>
                       ) : null}
-                    </label>
+                    </div>
 
                     <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                       <span>
@@ -3036,6 +3155,33 @@ export default function SessionHistoryTable({
                         </span>
                       ) : null}
                     </label>
+
+                    <div className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
+                      <label htmlFor="edit-session-recording-url" className="flex items-center gap-1.5">
+                        <span>Link video YouTube (recording)</span>
+                        <span className="text-xs font-normal text-text-muted">
+                          (Không bắt buộc)
+                        </span>
+                      </label>
+                      <input
+                        id="edit-session-recording-url"
+                        type="url"
+                        value={editRecordingUrl}
+                        onChange={(e) => setEditRecordingUrl(e.target.value)}
+                        disabled={readOnlySessionDetails}
+                        placeholder="https://youtube.com/watch?v=..."
+                        className="min-h-11 rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
+                      />
+                      {editRecordingUrl && (
+                        <div className="mt-2">
+                          <YouTubeEmbed
+                            url={editRecordingUrl}
+                            protected
+                            className="w-full aspect-video rounded-xl shadow-md"
+                          />
+                        </div>
+                      )}
+                    </div>
 
                     <SessionCopyCommentButton text={zaloCommentText} />
         </SessionFormDialogBody>

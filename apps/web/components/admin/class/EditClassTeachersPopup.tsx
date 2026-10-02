@@ -311,7 +311,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                   <label className="min-w-0">
                     <span className="sr-only">Trợ cấp riêng cho {t.name}</span>
                     <p className="mb-1.5 ml-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
-                      Trợ cấp
+                      Trợ cấp / HS
                     </p>
                     <div className="min-h-11 rounded-xl border border-border-default bg-bg-primary px-3 py-2">
                       <div className="flex items-center gap-1.5">

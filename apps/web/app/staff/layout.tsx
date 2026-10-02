@@ -1,6 +1,7 @@
 "use client";
 
 import { StaffAccessGate, StaffSidebar } from "@/components/staff";
+import SurveyReminderGate from "@/components/staff/SurveyReminderGate";
 
 const STAFF_LAYOUT_BACKGROUND_STYLE = {
   background:
@@ -14,6 +15,7 @@ export default function StaffLayout({
 }) {
   return (
     <StaffAccessGate>
+      <SurveyReminderGate />
       <div className="min-h-screen bg-bg-primary">
         <a
           href="#staff-main-content"
@@ -31,7 +33,7 @@ export default function StaffLayout({
           <StaffSidebar />
           <main
             id="staff-main-content"
-            className="min-w-0 flex-1 overflow-auto px-4 pb-4 pt-16 md:py-4 md:pt-4 lg:px-6 lg:py-6"
+            className="flex min-w-0 flex-1 flex-col overflow-auto px-4 pb-4 pt-16 md:py-4 md:pt-4 lg:px-6 lg:py-6"
           >
             {children}
           </main>

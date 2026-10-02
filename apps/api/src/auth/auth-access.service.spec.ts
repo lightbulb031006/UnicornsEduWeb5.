@@ -275,13 +275,14 @@ describe('AuthAccessService', () => {
     });
   });
 
-  it('requires personal achievement link before a staff profile is complete', async () => {
+  it('does not require personal achievement link for a complete staff profile', async () => {
     prisma.user.findUnique.mockResolvedValue({
       ...currentConsent,
       staffInfo: {
         ...completeStaffInfo,
         id: 'staff-5',
         personalAchievementLink: null,
+        specialization: null,
       },
       studentInfo: null,
     });
@@ -302,9 +303,9 @@ describe('AuthAccessService', () => {
       }),
     ).resolves.toMatchObject({
       hasStaffProfile: true,
-      staffProfileComplete: false,
+      staffProfileComplete: true,
       access: {
-        staff: { canAccess: true, profileComplete: false },
+        staff: { canAccess: true, profileComplete: true },
       },
     });
   });

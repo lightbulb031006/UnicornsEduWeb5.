@@ -114,6 +114,9 @@ type MakeupEditorDialogProps = {
   onDelete: () => void;
 };
 
+/** Tham chiếu ổn định: default `[]` inline tạo mảng mới mỗi render, phá memo. */
+const EMPTY_MISSED_ALERTS: MissedTeachingAlert[] = [];
+
 function findMissedAlertForMakeupForm(
   alerts: MissedTeachingAlert[],
   originalDate: string,
@@ -268,7 +271,7 @@ function MakeupEditorDialog({
   teachers,
   defaultTeacherId,
   teacherMode,
-  missedTeachingAlerts = [],
+  missedTeachingAlerts = EMPTY_MISSED_ALERTS,
   isSubmitting,
   readOnly = false,
   canDelete,

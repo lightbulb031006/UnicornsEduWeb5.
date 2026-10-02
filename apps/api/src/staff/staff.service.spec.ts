@@ -3,13 +3,21 @@ jest.mock('../prisma/prisma.service', () => ({
 }));
 jest.mock('../../generated/client', () => ({
   Prisma: {
-    sql: () => ({}),
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
     join: () => ({}),
+    raw: (value: string) => value,
   },
 }));
 jest.mock('src/storage/supabase-storage', () => ({
   createSignedStorageUrl: jest.fn(async (options: { path?: string | null }) =>
     options.path ? `signed:${options.path}` : null,
+  ),
+  createPublicStorageUrl: jest.fn(
+    (options: { bucket: string; path?: string | null }) =>
+      options.path ? `public:${options.bucket}:${options.path}` : null,
   ),
   getSupabaseAdminClient: jest.fn(),
   validateImageFile: jest.fn(),
@@ -64,6 +72,16 @@ describe('StaffService', () => {
       findMany: jest.fn(),
       update: jest.fn(),
     },
+    classScheduleEntry: {
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    survey: {
+      findMany: jest.fn(),
+    },
+    classSurvey: {
+      findMany: jest.fn(),
+    },
     makeupScheduleEvent: {
       updateMany: jest.fn(),
       findMany: jest.fn(),
@@ -98,6 +116,12 @@ describe('StaffService', () => {
       findMany: jest.fn(),
       updateMany: jest.fn(),
     },
+    staffFixedSalaryPayable: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
     roleTaxDeductionRate: {
       findFirst: jest.fn(),
     },
@@ -121,6 +145,10 @@ describe('StaffService', () => {
     generateTutorMeetLink: jest.fn(),
     deleteCalendarEvent: jest.fn(),
   };
+  const fixedSalarySettingsService = {
+    assertStaffOverrideItems: jest.fn(),
+    syncStaffRoleOverridesInTx: jest.fn(),
+  };
 
   let service: StaffService;
 
@@ -131,6 +159,11 @@ describe('StaffService', () => {
         options.path ? `signed:${options.path}` : null,
     );
     mockPrisma.extraAllowance.findMany.mockResolvedValue([]);
+    mockPrisma.staffFixedSalaryPayable.findMany.mockResolvedValue([]);
+    mockPrisma.staffFixedSalaryPayable.findFirst.mockResolvedValue(null);
+    mockPrisma.staffFixedSalaryPayable.updateMany.mockResolvedValue({
+      count: 0,
+    });
     mockPrisma.bonus.findMany.mockResolvedValue([]);
     mockPrisma.session.findMany.mockResolvedValue([]);
     mockPrisma.session.updateMany.mockResolvedValue({ count: 0 });
@@ -148,6 +181,10 @@ describe('StaffService', () => {
     mockPrisma.classTeacher.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.class.findMany.mockResolvedValue([]);
     mockPrisma.class.update.mockResolvedValue({});
+    mockPrisma.classScheduleEntry.findMany.mockResolvedValue([]);
+    mockPrisma.classScheduleEntry.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.survey.findMany.mockResolvedValue([]);
+    mockPrisma.classSurvey.findMany.mockResolvedValue([]);
     mockPrisma.makeupScheduleEvent.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
     mockPrisma.makeupScheduleEvent.deleteMany.mockResolvedValue({ count: 0 });
@@ -156,6 +193,11 @@ describe('StaffService', () => {
       'https://meet.google.com/fixed-staff-link',
     );
     googleCalendarService.deleteCalendarEvent.mockResolvedValue(undefined);
+    fixedSalarySettingsService.assertStaffOverrideItems.mockReset();
+    fixedSalarySettingsService.syncStaffRoleOverridesInTx.mockReset();
+    fixedSalarySettingsService.syncStaffRoleOverridesInTx.mockResolvedValue(
+      undefined,
+    );
     mockPrisma.$queryRaw.mockResolvedValue([]);
     mockPrisma.$transaction.mockImplementation(
       (callback: (db: typeof mockPrisma) => unknown) => callback(mockPrisma),
@@ -165,6 +207,7 @@ describe('StaffService', () => {
       actionHistoryService as never,
       googleCalendarService as never,
       authIdentityCacheService as never,
+      fixedSalarySettingsService as never,
     );
   });
 
@@ -359,17 +402,10 @@ describe('StaffService', () => {
       id: 'staff-1',
       status: StaffStatus.inactive,
     } as never);
-    mockPrisma.class.findMany.mockResolvedValue([
+    mockPrisma.classScheduleEntry.findMany.mockResolvedValue([
       {
-        id: 'class-1',
-        schedule: [
-          {
-            id: 'slot-1',
-            teacherId: 'staff-1',
-            googleCalendarEventId: 'calendar-1',
-          },
-          { id: 'slot-2', teacherId: 'staff-2' },
-        ],
+        id: 'slot-1',
+        googleCalendarEventId: 'calendar-1',
       },
     ]);
     mockPrisma.makeupScheduleEvent.findMany.mockResolvedValue([
@@ -382,21 +418,9 @@ describe('StaffService', () => {
       { userId: 'assistant-1', roleType: UserRole.staff },
     );
 
-    expect(mockPrisma.class.update).toHaveBeenCalledWith({
-      where: { id: 'class-1' },
-      data: {
-        schedule: [
-          expect.objectContaining({
-            id: 'slot-1',
-            teacherId: 'staff-1',
-            deletedAt: expect.any(String),
-          }),
-          expect.objectContaining({
-            id: 'slot-2',
-            teacherId: 'staff-2',
-          }),
-        ],
-      },
+    expect(mockPrisma.classScheduleEntry.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['slot-1'] } },
+      data: { effectiveTo: expect.any(Date) },
     });
     expect(mockPrisma.classTeacher.updateMany).toHaveBeenCalledWith({
       where: {
@@ -495,6 +519,165 @@ describe('StaffService', () => {
     );
   });
 
+  it('writes roles then fixed-salary overrides in the same transaction, including a newly added role', async () => {
+    const existingStaff = {
+      id: 'staff-1',
+      userId: 'user-1',
+      roles: [StaffRole.teacher],
+      status: 'active',
+      customerCareManagedByStaffId: null,
+      user: {
+        id: 'user-1',
+        first_name: 'An',
+        last_name: 'Nguyen',
+      },
+      classTeachers: [],
+    };
+    const updatedStaff = {
+      ...existingStaff,
+      roles: [StaffRole.teacher, StaffRole.assistant],
+    };
+
+    mockPrisma.staffInfo.findUnique
+      .mockResolvedValueOnce(existingStaff)
+      .mockResolvedValue(updatedStaff);
+    mockPrisma.staffInfo.update.mockResolvedValue({ id: 'staff-1' });
+    jest
+      .spyOn(service, 'getStaffById')
+      .mockResolvedValue(updatedStaff as never);
+
+    await service.updateStaffWithFixedSalaryOverrides(
+      'staff-1',
+      {
+        roles: [StaffRole.teacher, StaffRole.assistant],
+        roleFixedSalaryOverrides: [
+          {
+            roleType: StaffRole.assistant,
+            amount: 0,
+            operatingRatePercent: null,
+          },
+        ],
+      },
+      {
+        userId: 'admin-1',
+        userEmail: 'admin@example.com',
+        roleType: 'admin',
+      },
+    );
+
+    expect(
+      fixedSalarySettingsService.assertStaffOverrideItems,
+    ).toHaveBeenCalledWith(
+      [StaffRole.teacher, StaffRole.assistant],
+      [
+        {
+          roleType: StaffRole.assistant,
+          amount: 0,
+          operatingRatePercent: null,
+        },
+      ],
+    );
+    expect(mockPrisma.staffInfo.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          roles: [StaffRole.teacher, StaffRole.assistant],
+        }),
+      }),
+    );
+    expect(
+      fixedSalarySettingsService.syncStaffRoleOverridesInTx,
+    ).toHaveBeenCalledWith(
+      mockPrisma,
+      expect.objectContaining({
+        staffId: 'staff-1',
+        nextRoles: [StaffRole.teacher, StaffRole.assistant],
+      }),
+    );
+    const updateOrder =
+      mockPrisma.staffInfo.update.mock.invocationCallOrder[0];
+    const syncOrder =
+      fixedSalarySettingsService.syncStaffRoleOverridesInTx.mock
+        .invocationCallOrder[0];
+    expect(syncOrder).toBeGreaterThan(updateOrder);
+  });
+
+  it('syncs remaining roles after a role is removed, still in the same transaction', async () => {
+    const existingStaff = {
+      id: 'staff-1',
+      userId: 'user-1',
+      roles: [StaffRole.teacher, StaffRole.assistant],
+      status: 'active',
+      customerCareManagedByStaffId: null,
+      user: { id: 'user-1' },
+      classTeachers: [],
+    };
+    const updatedStaff = {
+      ...existingStaff,
+      roles: [StaffRole.teacher],
+    };
+
+    mockPrisma.staffInfo.findUnique
+      .mockResolvedValueOnce(existingStaff)
+      .mockResolvedValue(updatedStaff);
+    mockPrisma.staffInfo.update.mockResolvedValue({ id: 'staff-1' });
+    jest
+      .spyOn(service, 'getStaffById')
+      .mockResolvedValue(updatedStaff as never);
+
+    await service.updateStaffWithFixedSalaryOverrides(
+      'staff-1',
+      {
+        roles: [StaffRole.teacher],
+        roleFixedSalaryOverrides: [],
+      },
+      {
+        userId: 'admin-1',
+        userEmail: 'admin@example.com',
+        roleType: 'admin',
+      },
+    );
+
+    expect(
+      fixedSalarySettingsService.syncStaffRoleOverridesInTx,
+    ).toHaveBeenCalledWith(
+      mockPrisma,
+      expect.objectContaining({
+        staffId: 'staff-1',
+        nextRoles: [StaffRole.teacher],
+        items: [],
+      }),
+    );
+  });
+
+  it('does not keep role changes when override sync fails in the same transaction', async () => {
+    const existingStaff = {
+      id: 'staff-1',
+      userId: 'user-1',
+      roles: [StaffRole.teacher],
+      status: 'active',
+      customerCareManagedByStaffId: null,
+      user: { id: 'user-1' },
+      classTeachers: [],
+    };
+    mockPrisma.staffInfo.findUnique.mockResolvedValue(existingStaff);
+    mockPrisma.staffInfo.update.mockResolvedValue({ id: 'staff-1' });
+    fixedSalarySettingsService.syncStaffRoleOverridesInTx.mockRejectedValue(
+      new BadRequestException('invalid percent'),
+    );
+
+    await expect(
+      service.updateStaffWithFixedSalaryOverrides('staff-1', {
+        roles: [StaffRole.teacher, StaffRole.assistant],
+        roleFixedSalaryOverrides: [
+          {
+            roleType: StaffRole.assistant,
+            operatingRatePercent: 120,
+          },
+        ],
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
   it('returns friendly error when cccd number is duplicated', async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       id: 'user-1',
@@ -534,25 +717,19 @@ describe('StaffService', () => {
     mockPrisma.class.findMany.mockResolvedValue([
       {
         id: 'class-1',
-        schedule: [
+        teachers: [{ teacherId: 'staff-1' }, { teacherId: 'staff-2' }],
+        scheduleEntries: [
           {
             id: 'slot-1',
-            dayOfWeek: 1,
-            from: '19:00:00',
-            to: '20:30:00',
             teacherId: 'staff-1',
             meetLink: 'https://meet.google.com/old-slot-link',
           },
           {
             id: 'slot-2',
-            dayOfWeek: 2,
-            from: '19:00:00',
-            to: '20:30:00',
             teacherId: 'staff-2',
             meetLink: 'https://meet.google.com/other-teacher-link',
           },
         ],
-        teachers: [{ teacherId: 'staff-1' }, { teacherId: 'staff-2' }],
       },
     ]);
 
@@ -564,28 +741,9 @@ describe('StaffService', () => {
       where: { id: 'staff-1' },
       data: { googleMeetLink: 'https://meet.google.com/fixed-staff-link' },
     });
-    expect(mockPrisma.class.update).toHaveBeenCalledWith({
-      where: { id: 'class-1' },
-      data: {
-        schedule: [
-          {
-            id: 'slot-1',
-            dayOfWeek: 1,
-            from: '19:00:00',
-            to: '20:30:00',
-            teacherId: 'staff-1',
-            meetLink: 'https://meet.google.com/fixed-staff-link',
-          },
-          {
-            id: 'slot-2',
-            dayOfWeek: 2,
-            from: '19:00:00',
-            to: '20:30:00',
-            teacherId: 'staff-2',
-            meetLink: 'https://meet.google.com/other-teacher-link',
-          },
-        ],
-      },
+    expect(mockPrisma.classScheduleEntry.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['slot-1'] } },
+      data: { meetLink: 'https://meet.google.com/fixed-staff-link' },
     });
     expect(mockPrisma.makeupScheduleEvent.updateMany).toHaveBeenCalledWith({
       where: { teacherId: 'staff-1' },
@@ -2563,6 +2721,109 @@ describe('StaffService', () => {
     );
   });
 
+  it('warns (without hard-blocking) when staff has classes missing overdue survey reports', async () => {
+    mockPrisma.survey.findMany.mockResolvedValue([
+      {
+        id: 'survey-1',
+        name: 'Bài khảo sát 7',
+        excludedClasses: [],
+      },
+    ]);
+    mockPrisma.class.findMany.mockResolvedValue([
+      { id: 'class-1', name: 'Lớp Toán A' },
+    ]);
+    mockPrisma.classSurvey.findMany.mockResolvedValue([]);
+
+    let caughtError: unknown;
+    try {
+      await service.paySelectedPayments('staff-1', {
+        month: '03',
+        year: '2026',
+        items: [{ sourceType: 'customer_care', id: 'attendance-1' }],
+      });
+    } catch (error) {
+      caughtError = error;
+    }
+
+    expect(caughtError).toBeInstanceOf(BadRequestException);
+    const response = (caughtError as BadRequestException).getResponse() as {
+      code: string;
+      warnings: Array<{ surveyName: string; classNames: string[] }>;
+    };
+    expect(response.code).toBe('SURVEY_OVERDUE_WARNING');
+    expect(response.warnings).toEqual([
+      {
+        surveyId: 'survey-1',
+        surveyName: 'Bài khảo sát 7',
+        classNames: ['Lớp Toán A'],
+      },
+    ]);
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows payment when the accountant confirms despite overdue survey warnings', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-1',
+    });
+    mockPrisma.survey.findMany.mockResolvedValue([
+      {
+        id: 'survey-1',
+        name: 'Bài khảo sát 7',
+        excludedClasses: [],
+      },
+    ]);
+    mockPrisma.class.findMany.mockResolvedValue([
+      { id: 'class-1', name: 'Lớp Toán A' },
+    ]);
+    mockPrisma.classSurvey.findMany.mockResolvedValue([]);
+    mockPrisma.session.findMany.mockResolvedValue([
+      { id: 'session-1', teacherPaymentStatus: 'deposit' },
+    ]);
+    jest
+      .spyOn(service as any, 'getSessionPaymentSnapshots')
+      .mockResolvedValue(new Map());
+    mockPrisma.session.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      service.payDepositSessions('staff-1', {
+        sessionIds: ['session-1'],
+        confirmOverdueSurveyReports: true,
+      }),
+    ).resolves.toMatchObject({ updatedCount: 1 });
+  });
+
+  it('allows payment when the class already reported the overdue survey', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-1',
+    });
+    mockPrisma.survey.findMany.mockResolvedValue([
+      {
+        id: 'survey-1',
+        name: 'Bài khảo sát 7',
+        excludedClasses: [],
+      },
+    ]);
+    mockPrisma.class.findMany.mockResolvedValue([
+      { id: 'class-1', name: 'Lớp Toán A' },
+    ]);
+    mockPrisma.classSurvey.findMany.mockResolvedValue([
+      { classId: 'class-1', surveyId: 'survey-1' },
+    ]);
+    mockPrisma.session.findMany.mockResolvedValue([
+      { id: 'session-1', teacherPaymentStatus: 'deposit' },
+    ]);
+    jest
+      .spyOn(service as any, 'getSessionPaymentSnapshots')
+      .mockResolvedValue(new Map());
+    mockPrisma.session.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      service.payDepositSessions('staff-1', {
+        sessionIds: ['session-1'],
+      }),
+    ).resolves.toMatchObject({ updatedCount: 1 });
+  });
+
   it('returns authoritative unpaid totals for staff list rows', async () => {
     mockPrisma.staffInfo.count.mockResolvedValue(1);
     mockPrisma.staffInfo.findMany.mockResolvedValue([
@@ -2792,12 +3053,26 @@ describe('StaffService', () => {
         id: 'teacher-1',
         university: 'HCMUS',
         specialization: 'Computer Science',
+        achievements: [
+          {
+            id: 'ach-1',
+            title: 'HCV Olympic 2024',
+            imageWatermarkedPath: 'staff/teacher-1/ach-1.jpg',
+            sortOrder: 0,
+          },
+          {
+            id: 'ach-2',
+            title: 'Giải Nhì HSG tỉnh',
+            imageWatermarkedPath: null,
+            sortOrder: 1,
+          },
+        ],
         user: {
           first_name: 'Nguyen',
           last_name: 'Van A',
           accountHandle: 'teacher-a',
           email: 'teacher@example.com',
-          avatarPath: 'users/user-1/avatar',
+          avatarWatermarkedPath: 'users/user-1/avatar.jpg',
         },
       },
     ]);
@@ -2808,28 +3083,233 @@ describe('StaffService', () => {
         {
           id: 'teacher-1',
           name: 'Van A Nguyen',
-          avatarUrl: 'signed:users/user-1/avatar',
-          avatarPath: 'users/user-1/avatar',
+          avatarUrl: 'public:avatars-public:users/user-1/avatar.jpg',
+          avatarPath: 'users/user-1/avatar.jpg',
           university: 'HCMUS',
           specialization: 'Computer Science',
+          achievements: [
+            {
+              id: 'ach-1',
+              title: 'HCV Olympic 2024',
+              imagePath: 'staff/teacher-1/ach-1.jpg',
+              imageUrl: 'public:achievements-public:staff/teacher-1/ach-1.jpg',
+              sortOrder: 0,
+            },
+            {
+              id: 'ach-2',
+              title: 'Giải Nhì HSG tỉnh',
+              imagePath: null,
+              imageUrl: null,
+              sortOrder: 1,
+            },
+          ],
         },
       ],
     });
 
     expect(mockPrisma.staffInfo.count).toHaveBeenCalledWith({
-      where: {
-        status: StaffStatus.active,
-        roles: { has: StaffRole.teacher },
-      },
+      where: {},
     });
     expect(mockPrisma.staffInfo.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
-          status: StaffStatus.active,
-          roles: { has: StaffRole.teacher },
-        },
+        where: {},
+        skip: 0,
         take: 50,
+        select: expect.objectContaining({
+          achievements: expect.any(Object),
+        }),
       }),
     );
+  });
+
+  it('getLandingProfiles applies page skip and name search', async () => {
+    mockPrisma.staffInfo.count.mockResolvedValue(25);
+    mockPrisma.staffInfo.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.getLandingProfiles({ page: 2, limit: 10, search: 'Nguyen' }),
+    ).resolves.toEqual({ data: [], total: 25 });
+
+    expect(mockPrisma.staffInfo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 10,
+        take: 10,
+        where: {
+          AND: expect.any(Array),
+        },
+      }),
+    );
+  });
+
+  it('getLandingProfiles paginates ids mode instead of returning all matches unbounded', async () => {
+    mockPrisma.staffInfo.count.mockResolvedValue(101);
+    mockPrisma.staffInfo.findMany.mockResolvedValue([]);
+
+    const ids = Array.from({ length: 101 }, (_, i) => `UNISTAFF-${i}`);
+
+    await expect(
+      service.getLandingProfiles({ ids: ids.join(','), page: 2, limit: 100 }),
+    ).resolves.toEqual({ data: [], total: 101 });
+
+    expect(mockPrisma.staffInfo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ids } },
+        skip: 100,
+        take: 100,
+      }),
+    );
+  });
+
+  it('pays pending fixed-salary payables in pay-all without refreshing frozen rates', async () => {
+    jest
+      .spyOn(service as any, 'loadStaffPaymentPreviewRecords')
+      .mockResolvedValue({
+        monthKey: '2026-09',
+        records: [
+          {
+            id: 'fs-1',
+            role: StaffRole.assistant,
+            sourceType: 'fixed_salary',
+            sourceLabel: 'Lương cứng',
+            label: 'Lương cứng Trợ lí',
+            secondaryLabel: '2026-09',
+            date: null,
+            currentStatus: PaymentStatus.pending,
+            grossAmount: 8_000_000,
+            operatingAmount: 800_000,
+            operatingRatePercent: 10,
+            taxRatePercent: 10,
+            taxAmount: 720_000,
+            netAmount: 6_480_000,
+          },
+        ],
+      });
+    jest.spyOn(service as any, 'guardOverdueSurveyReports').mockResolvedValue(undefined);
+
+    await service.payAllPayments(
+      'staff-1',
+      { month: '09', year: '2026' },
+      { userId: 'admin-1', userEmail: 'a@x.com', roleType: 'admin' },
+    );
+
+    expect(mockPrisma.staffFixedSalaryPayable.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['fs-1'] },
+        staffId: 'staff-1',
+        status: PaymentStatus.pending,
+      },
+      data: {
+        status: PaymentStatus.paid,
+      },
+    });
+    expect(actionHistoryService.recordUpdates).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        entityType: 'staff_fixed_salary_payable',
+      }),
+    );
+  });
+
+  it('recalculates pending fixed-salary net from frozen rates and rejects paid edits', async () => {
+    const pending = {
+      id: 'fs-1',
+      staffId: 'staff-1',
+      roleType: StaffRole.teacher,
+      month: '2026-09',
+      status: PaymentStatus.pending,
+      note: null,
+      grossAmount: 8_000_000,
+      operatingRatePercent: 10,
+      taxRatePercent: 10,
+      operatingDeductionAmount: 800_000,
+      taxDeductionAmount: 720_000,
+      netAmount: 6_480_000,
+    };
+    mockPrisma.staffFixedSalaryPayable.findFirst.mockResolvedValue(pending);
+    mockPrisma.staffFixedSalaryPayable.update.mockResolvedValue({
+      ...pending,
+      grossAmount: 4_000_000,
+      operatingDeductionAmount: 400_000,
+      taxDeductionAmount: 360_000,
+      netAmount: 3_240_000,
+      note: 'Giữa tháng',
+    });
+
+    const updated = await service.updateStaffFixedSalaryPayable(
+      'staff-1',
+      'fs-1',
+      { amount: 4_000_000, note: 'Giữa tháng' },
+      { userId: 'admin-1' },
+    );
+
+    expect(updated.netAmount).toBe(3_240_000);
+    expect(mockPrisma.staffFixedSalaryPayable.update).toHaveBeenCalledWith({
+      where: { id: 'fs-1' },
+      data: expect.objectContaining({
+        grossAmount: 4_000_000,
+        operatingDeductionAmount: 400_000,
+        taxDeductionAmount: 360_000,
+        netAmount: 3_240_000,
+        note: 'Giữa tháng',
+      }),
+    });
+    expect(actionHistoryService.recordUpdate).toHaveBeenCalled();
+
+    mockPrisma.staffFixedSalaryPayable.findFirst.mockResolvedValue({
+      ...pending,
+      status: PaymentStatus.paid,
+    });
+    await expect(
+      service.updateStaffFixedSalaryPayable('staff-1', 'fs-1', {
+        amount: 1,
+      }),
+    ).rejects.toThrow('đã thanh toán');
+  });
+
+  it('keeps fixed salary as a separate income-summary line per role', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-1',
+      roles: [StaffRole.assistant],
+      classTeachers: [],
+    });
+    mockEmptyTeacherIncome();
+    mockPrisma.bonus.findMany.mockResolvedValue([]);
+    mockPrisma.extraAllowance.findMany.mockResolvedValue([]);
+    mockPrisma.staffFixedSalaryPayable.findMany.mockResolvedValue([
+      {
+        id: 'fs-1',
+        staffId: 'staff-1',
+        roleType: StaffRole.assistant,
+        month: '2026-03',
+        status: PaymentStatus.pending,
+        note: null,
+        grossAmount: 1_000_000,
+        operatingRatePercent: 10,
+        taxRatePercent: 0,
+        operatingDeductionAmount: 100_000,
+        taxDeductionAmount: 0,
+        netAmount: 900_000,
+      },
+    ]);
+    mockOtherRoleUnpaidByRole([[StaffRole.assistant, 0]]);
+
+    const result = await service.getIncomeSummary('staff-1', {
+      month: '03',
+      year: '2026',
+    });
+
+    expect(result.fixedSalaryRoleSummaries).toEqual([
+      expect.objectContaining({
+        role: StaffRole.assistant,
+        label: 'Lương cứng · Trợ lí',
+        total: 900000,
+        unpaid: 900000,
+        paid: 0,
+        grossTotal: 1_000_000,
+      }),
+    ]);
+    expect(result.otherRoleSummaries[0]?.total).toBe(0);
+    expect(result.monthlyIncomeTotals.total).toBe(900000);
+    expect(result.fixedSalaryPayables).toHaveLength(1);
   });
 });

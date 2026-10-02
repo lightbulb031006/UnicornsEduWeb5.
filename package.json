@@ -2,6 +2,10 @@
   "name": "unicorns-edu",
   "private": true,
   "packageManager": "pnpm@10.27.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
@@ -15,5 +19,19 @@
     "postcss": "^8.5.10",
     "tailwindcss": "^4.2.1",
     "turbo": "latest"
+  },
+  "overrides": {
+    "google-auth-library": "10.5.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/engines",
+      "bcrypt",
+      "esbuild",
+      "prisma",
+      "sharp",
+      "unrs-resolver"
+    ]
   }
 }

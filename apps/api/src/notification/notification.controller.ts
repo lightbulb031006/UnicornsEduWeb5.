@@ -107,7 +107,7 @@ export class NotificationController {
   @ApiOperation({
     summary: 'Search eligible notification recipients for tagging',
     description:
-      'Return active admin, staff, and student accounts that can receive notification feed items.',
+      'Return active admin and staff accounts that can receive notification feed items.',
   })
   @ApiQuery({
     name: 'search',
@@ -134,7 +134,7 @@ export class NotificationController {
   }
 
   @Patch('feed/:notificationId/read')
-  @Roles(UserRole.admin, UserRole.staff, UserRole.student)
+  @Roles(UserRole.admin, UserRole.staff)
   @ApiOperation({
     summary: 'Mark a published notification as read for the current user',
     description:
@@ -249,11 +249,11 @@ export class NotificationController {
   }
 
   @Get('feed')
-  @Roles(UserRole.admin, UserRole.staff, UserRole.student)
+  @Roles(UserRole.admin, UserRole.staff)
   @ApiOperation({
-    summary: 'Get the notification feed (staff, student, admin)',
+    summary: 'Get the notification feed (staff, admin)',
     description:
-      'Return published notifications targeted to the current actor, with per-user readStatus. Admin: không cần staff/student profile. Staff/student: cần profile active.',
+      'Return published notifications targeted to the current actor, with per-user readStatus. Admin: không cần staff profile. Staff: cần profile active.',
   })
   @ApiQuery({
     name: 'limit',

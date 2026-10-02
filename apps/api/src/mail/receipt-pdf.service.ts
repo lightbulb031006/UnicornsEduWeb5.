@@ -1,5 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+export type ReceiptPdfRenderOptions = {
+  landscape?: boolean;
+  margin?: {
+    top?: string;
+    right?: string;
+    bottom?: string;
+    left?: string;
+  };
+};
+
 /**
  * HTML (React Email đã render) → PDF qua Chromium + puppeteer-core.
  * `CHROMIUM_PATH`: macOS Chrome hoặc `/usr/bin/chromium-browser` (Alpine Docker).
@@ -15,7 +25,10 @@ export class ReceiptPdfService {
       process.env.CHROMIUM_PATH?.trim() || '/usr/bin/chromium-browser';
   }
 
-  async renderToPdf(html: string): Promise<Buffer | null> {
+  async renderToPdf(
+    html: string,
+    options?: ReceiptPdfRenderOptions,
+  ): Promise<Buffer | null> {
     let pCore: any;
     try {
       pCore = await import('puppeteer-core');
@@ -53,8 +66,14 @@ export class ReceiptPdfService {
 
       const pdfBuffer = await page.pdf({
         format: 'A4',
+        landscape: options?.landscape === true,
         printBackground: true,
-        margin: { top: '14mm', right: '14mm', bottom: '14mm', left: '14mm' },
+        margin: {
+          top: options?.margin?.top ?? '14mm',
+          right: options?.margin?.right ?? '14mm',
+          bottom: options?.margin?.bottom ?? '14mm',
+          left: options?.margin?.left ?? '14mm',
+        },
       });
 
       return Buffer.from(pdfBuffer);

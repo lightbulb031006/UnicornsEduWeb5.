@@ -36,7 +36,9 @@ export function computeTrainingManagerSessionSnapshot(params: {
     };
   }
 
-  const allowance = Math.round((params.sessionTuitionTotal * ratePercent) / 100);
+  const allowance = Math.round(
+    (params.sessionTuitionTotal * ratePercent) / 100,
+  );
   if (allowance <= 0) {
     return {
       trainingManagerStaffId: staffId,

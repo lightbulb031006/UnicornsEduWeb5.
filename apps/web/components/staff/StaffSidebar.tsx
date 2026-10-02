@@ -21,6 +21,8 @@ type MenuVisibility = {
   canAccessClassWorkspace: boolean;
   canAccessCustomerCareSelf: boolean;
   canAccessLessonPlanWorkspace: boolean;
+  canAccessCourseWorkspace: boolean;
+  canAccessSurveys: boolean;
   isTraining: boolean;
   isAccountant: boolean;
   isAccountantIncome: boolean;
@@ -119,13 +121,6 @@ const DEFAULT_MENU_ITEMS: MenuItem[] = [
         canAccessClassWorkspace || isTraining,
     },
     {
-      href: "/staff/deductions",
-      label: "Khấu trừ",
-      icon: <IconDeductions />,
-      isActive: (pathname) => pathname.startsWith("/staff/deductions"),
-      isVisible: () => false,
-    },
-    {
       href: "/staff/costs",
       label: "Chi phí",
       icon: <IconCosts />,
@@ -150,6 +145,20 @@ const DEFAULT_MENU_ITEMS: MenuItem[] = [
         pathname.startsWith("/staff/lesson-manage-details"),
       isVisible: ({ canAccessLessonPlanWorkspace, isAccountantExpense }) =>
         canAccessLessonPlanWorkspace || isAccountantExpense,
+    },
+    {
+      href: "/staff/courses",
+      label: "Nội dung khoá",
+      icon: <IconExamLibrary />,
+      isActive: (pathname) => pathname.startsWith("/staff/courses"),
+      isVisible: ({ canAccessCourseWorkspace }) => canAccessCourseWorkspace,
+    },
+    {
+      href: "/staff/surveys",
+      label: "Bài khảo sát",
+      icon: <IconSurveys />,
+      isActive: (pathname) => pathname.startsWith("/staff/surveys"),
+      isVisible: ({ canAccessSurveys }) => canAccessSurveys,
     },
     {
       href: "/staff/communication-detail",
@@ -242,11 +251,13 @@ function buildAssistantMenuItems(ownStaffId: string): MenuItem[] {
       isVisible: () => true,
     },
     {
-      href: "/staff/deductions",
-      label: "Khấu trừ",
-      icon: <IconDeductions />,
-      isActive: (pathname) => pathname.startsWith("/staff/deductions"),
-      isVisible: () => false,
+      href: "/staff/system-settings",
+      label: "Cài đặt hệ thống",
+      icon: <IconSystemSettings />,
+      isActive: (pathname) =>
+        pathname.startsWith("/staff/system-settings") ||
+        pathname.startsWith("/staff/deductions"),
+      isVisible: () => true,
     },
     {
       href: "/staff/costs",
@@ -264,6 +275,13 @@ function buildAssistantMenuItems(ownStaffId: string): MenuItem[] {
         pathname.startsWith("/staff/lesson-plan-manage-details") ||
         pathname.startsWith("/staff/lesson-plans") ||
         pathname.startsWith("/staff/lesson-manage-details"),
+      isVisible: () => true,
+    },
+    {
+      href: "/staff/surveys",
+      label: "Bài khảo sát",
+      icon: <IconSurveys />,
+      isActive: (pathname) => pathname.startsWith("/staff/surveys"),
       isVisible: () => true,
     },
     {
@@ -360,14 +378,20 @@ function IconCosts() {
   );
 }
 
-function IconDeductions() {
+function IconSystemSettings() {
   return (
     <svg className="size-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={2}
-        d="M9 14h6m-6 4h3m6-10V6a2 2 0 00-2-2H8a2 2 0 00-2 2v2m12 0H6m12 0a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2v-8a2 2 0 012-2"
+        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
       />
     </svg>
   );
@@ -394,6 +418,32 @@ function IconLessonPlans() {
         strokeLinejoin="round"
         strokeWidth={2}
         d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+      />
+    </svg>
+  );
+}
+
+function IconExamLibrary() {
+  return (
+    <svg className="size-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+      />
+    </svg>
+  );
+}
+
+function IconSurveys() {
+  return (
+    <svg className="size-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 8l2 2 4-4"
       />
     </svg>
   );
@@ -471,6 +521,13 @@ export default function StaffSidebar() {
   const isAccountant = isAccountantIncome || isAccountantExpense;
   const canAccessLessonPlanWorkspace =
     lessonWorkspace.canAccessWorkspace || isAccountantExpense;
+  const canAccessCourseWorkspace =
+    lessonWorkspace.isLessonPlan || lessonWorkspace.isLessonPlanHead;
+  const canAccessSurveys =
+    isFullAdmin ||
+    isAssistant ||
+    lessonWorkspace.isLessonPlan ||
+    lessonWorkspace.isLessonPlanHead;
   const isCommunication = staffRoles.includes("communication");
   const isTechnical = staffRoles.includes("technical");
   const baseMenuItems = isFullAdmin || isAssistant
@@ -485,6 +542,8 @@ export default function StaffSidebar() {
       canAccessClassWorkspace,
       canAccessCustomerCareSelf,
       canAccessLessonPlanWorkspace,
+      canAccessCourseWorkspace,
+      canAccessSurveys,
       isTraining,
       isAccountant,
       isAccountantIncome,
@@ -612,7 +671,7 @@ export default function StaffSidebar() {
               variant="navbar"
               showWordmark={!compact}
               dense={compact}
-              className="w-full min-w-0 transition-all duration-300 ease-out"
+              className="w-full min-w-0 transition-[width,opacity] duration-300 ease-out"
               wordmarkClassName="truncate"
             />
           </div>
@@ -665,6 +724,8 @@ export default function StaffSidebar() {
                       canAccessClassWorkspace,
                       canAccessCustomerCareSelf,
                       canAccessLessonPlanWorkspace,
+                      canAccessCourseWorkspace,
+                      canAccessSurveys,
                       isTraining,
                       isAccountant,
                       isAccountantIncome,

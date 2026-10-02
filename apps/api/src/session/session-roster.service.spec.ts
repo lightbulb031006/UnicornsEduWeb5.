@@ -23,28 +23,34 @@ describe('SessionRosterService', () => {
     );
   });
 
-  it('returns the effective default tuition, including class package fallback', async () => {
+  it('block mode: class per-block beats class package; custom per-block still wins', async () => {
     mockPrisma.studentClass.findMany.mockResolvedValue([
       {
         studentId: 'student-1',
         customStudentTuitionPerSession: null,
+        customTuitionPerBlock: null,
         customTuitionPackageTotal: null,
         customTuitionPackageSession: null,
         class: {
           studentTuitionPerSession: null,
+          studentTuitionPerBlock: 60000,
           tuitionPackageTotal: 3600000,
           tuitionPackageSession: 12,
+          pricingMode: 'per_block',
         },
       },
       {
         studentId: 'student-2',
         customStudentTuitionPerSession: 420000,
+        customTuitionPerBlock: 140000,
         customTuitionPackageTotal: null,
         customTuitionPackageSession: null,
         class: {
           studentTuitionPerSession: 300000,
+          studentTuitionPerBlock: 100000,
           tuitionPackageTotal: 3600000,
           tuitionPackageSession: 12,
+          pricingMode: 'per_block',
         },
       },
     ]);
@@ -52,6 +58,49 @@ describe('SessionRosterService', () => {
     const result = await service.assertAttendanceStudentsBelongToClass(
       'class-1',
       ['student-1', 'student-2'],
+      { blockCount: 4 },
+    );
+
+    expect(result.get('student-1')).toBe(240000);
+    expect(result.get('student-2')).toBe(560000);
+  });
+
+  it('per_session mode: giữ nguyên chuỗi resolve cũ, không đọc cột block', async () => {
+    mockPrisma.studentClass.findMany.mockResolvedValue([
+      {
+        studentId: 'student-1',
+        customStudentTuitionPerSession: null,
+        customTuitionPerBlock: null,
+        customTuitionPackageTotal: null,
+        customTuitionPackageSession: null,
+        class: {
+          studentTuitionPerSession: null,
+          studentTuitionPerBlock: 60000,
+          tuitionPackageTotal: 3600000,
+          tuitionPackageSession: 12,
+          pricingMode: 'per_session',
+        },
+      },
+      {
+        studentId: 'student-2',
+        customStudentTuitionPerSession: 420000,
+        customTuitionPerBlock: 140000,
+        customTuitionPackageTotal: null,
+        customTuitionPackageSession: null,
+        class: {
+          studentTuitionPerSession: 300000,
+          studentTuitionPerBlock: 100000,
+          tuitionPackageTotal: 3600000,
+          tuitionPackageSession: 12,
+          pricingMode: 'per_session',
+        },
+      },
+    ]);
+
+    const result = await service.assertAttendanceStudentsBelongToClass(
+      'class-1',
+      ['student-1', 'student-2'],
+      { blockCount: 4 },
     );
 
     expect(result.get('student-1')).toBe(300000);

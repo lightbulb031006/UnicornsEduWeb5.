@@ -161,6 +161,48 @@ describe('MailService', () => {
     );
   });
 
+  it('builds production student email links from the public host when FRONTEND_URL is localhost', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    configService.get.mockImplementation((key: string) => {
+      const values: Record<string, string> = {
+        SMTP_HOST: 'smtp.gmail.com',
+        SMTP_PORT: '587',
+        SMTP_USER: 'sender@gmail.com',
+        SMTP_PASS: 'app-password',
+        SMTP_SECURE: 'false',
+        MAIL_FROM: 'Unicorns Edu <sender@gmail.com>',
+        FRONTEND_URL: 'http://localhost:3000',
+        BACKEND_URL: 'http://localhost:3001',
+      };
+      return values[key];
+    });
+    sendMail.mockResolvedValueOnce(undefined);
+    const service = new MailService(
+      configService as never,
+      receiptPdfService as never,
+      receiptAssetsService as never,
+    );
+
+    try {
+      await service.sendVerificationEmail(
+        'student@example.com',
+        'verify-token',
+        {
+          host: 'it.unicornsedu.com',
+          protocol: 'https',
+        },
+      );
+      const sent = getLastSendMailOptions(sendMail);
+      expect(sent.text).toContain(
+        'https://it.unicornsedu.com/verify-email?token=verify-token',
+      );
+      expect(sent.text).not.toContain('localhost');
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+  });
+
   it('rejects production direct top-up approval emails when FRONTEND_URL is unsafe', async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';

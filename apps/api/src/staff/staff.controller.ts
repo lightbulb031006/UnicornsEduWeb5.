@@ -51,10 +51,12 @@ import {
   type StaffPaymentPreviewDto,
   StaffPaymentMonthDto,
   type StaffIncomeSummaryDto,
+  UpdateStaffFixedSalaryPayableDto,
   SearchCustomerCareStaffDto,
   SearchAssignableStaffUsersDto,
   SearchStaffOptionsDto,
   UpdateStaffDto,
+  UpdateStaffWithFixedSalaryOverridesDto,
   UpdateStaffStatusDto,
   PatchStaffClassTeacherOperatingDeductionDto,
 } from 'src/dtos/staff.dto';
@@ -296,7 +298,7 @@ export class StaffController {
   @ApiOperation({
     summary: 'List public staff landing profiles',
     description:
-      'API-key protected endpoint for the marketing landing site. Returns sanitized teacher/staff identity fields only.',
+      'API-key protected endpoint for the marketing landing site. Returns sanitized staff identity fields only. Does not filter by status or role (all staff).',
   })
   @ApiHeader({
     name: LANDING_API_KEY_HEADER,
@@ -304,22 +306,30 @@ export class StaffController {
     description: 'Landing site API key (LANDING_API_KEY)',
   })
   @ApiQuery({
-    name: 'role',
+    name: 'search',
     required: false,
-    enum: StaffRole,
-    description: 'Filter by staff role (default: teacher)',
+    type: String,
+    description: 'Case-insensitive staff name search',
   })
   @ApiQuery({
-    name: 'status',
+    name: 'ids',
     required: false,
-    enum: ['active', 'inactive'],
-    description: 'Filter by staff status (default: active)',
+    type: String,
+    description:
+      'Comma-separated staff ids (`UNISTAFF-…`). When set, only those profiles are returned. Still paginated by page/limit — loop pages if more than `limit` ids are passed.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+    example: 1,
   })
   @ApiQuery({
     name: 'limit',
     required: false,
     type: Number,
-    description: 'Max profiles to return (default: 50, max: 100)',
+    description: 'Page size (default: 50, max: 100)',
     example: 50,
   })
   @ApiResponse({
@@ -382,6 +392,66 @@ export class StaffController {
       year,
       days: parsedDays,
     });
+  }
+
+  @Patch(':id/fixed-salary-payables/:payableId')
+  @ApiOperation({
+    summary: 'Update a pending fixed-salary payable',
+    description:
+      'Edit gross amount and/or note while the payable is still pending. Net is recalculated from the frozen operating and tax percents stored on the payable. Paid payables cannot be edited. There is no delete endpoint — set the staff override to 0 instead.',
+  })
+  @ApiParam({ name: 'id', description: 'Staff id' })
+  @ApiParam({ name: 'payableId', description: 'Fixed-salary payable id' })
+  @ApiBody({ type: UpdateStaffFixedSalaryPayableDto })
+  @ApiResponse({ status: 200, description: 'Updated payable amounts.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Paid payable, empty payload, or invalid amount.',
+  })
+  @ApiResponse({ status: 404, description: 'Staff or payable not found.' })
+  async updateStaffFixedSalaryPayable(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStaffIdPipe()) id: string,
+    @Param('payableId', new ParseUUIDPipe()) payableId: string,
+    @Body() data: UpdateStaffFixedSalaryPayableDto,
+  ) {
+    return this.staffService.updateStaffFixedSalaryPayable(id, payableId, data, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Get(':id/revenue-share')
+  @ApiOperation({
+    summary: 'Get staff revenue share commission (lesson_plan_head)',
+    description:
+      'Tổng doanh thu hệ thống (gộp, chưa trừ chi phí) trong tháng, % hoa hồng doanh thu hiện tại của staff, và số tiền tương ứng = doanh thu × %. Tính real-time, không khấu trừ thuế.',
+  })
+  @ApiParam({ name: 'id', description: 'Staff id' })
+  @ApiQuery({
+    name: 'month',
+    required: true,
+    type: String,
+    description: 'Month in 01-12 format',
+    example: '03',
+  })
+  @ApiQuery({
+    name: 'year',
+    required: true,
+    type: String,
+    description: 'Year in YYYY format',
+    example: '2026',
+  })
+  @ApiResponse({ status: 200, description: 'Staff revenue share commission.' })
+  @ApiResponse({ status: 400, description: 'month/year invalid.' })
+  @ApiResponse({ status: 404, description: 'Staff not found.' })
+  async getStaffRevenueShare(
+    @Param('id', new ParseStaffIdPipe()) id: string,
+    @Query('month') month: string,
+    @Query('year') year: string,
+  ) {
+    return this.staffService.getStaffRevenueShare(id, month, year);
   }
 
   @Get(':id/payment-preview')
@@ -455,13 +525,17 @@ export class StaffController {
   @ApiBody({
     type: StaffPayAllPaymentsDto,
     description:
-      'Month/year for UI context; payable set includes all pending/unpaid items regardless of month.',
+      'Month/year for UI context; payable set includes all pending/unpaid items regardless of month. Set confirmOverdueSurveyReports=true to proceed despite an overdue survey warning.',
   })
   @ApiResponse({
     status: 200,
     description: 'All listed staff payments processed.',
   })
-  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, or overdue survey warning (code SURVEY_OVERDUE_WARNING) requiring confirmation via confirmOverdueSurveyReports.',
+  })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
   async payAllStaffPayments(
     @CurrentUser() user: JwtPayload,
@@ -485,13 +559,17 @@ export class StaffController {
   @ApiBody({
     type: StaffPaySelectedPaymentsDto,
     description:
-      'Selected preview items identified by sourceType and entity id.',
+      'Selected preview items identified by sourceType and entity id. Set confirmOverdueSurveyReports=true to proceed despite an overdue survey warning.',
   })
   @ApiResponse({
     status: 200,
     description: 'Selected staff payments processed.',
   })
-  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, or overdue survey warning (code SURVEY_OVERDUE_WARNING) requiring confirmation via confirmOverdueSurveyReports.',
+  })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
   async paySelectedStaffPayments(
     @CurrentUser() user: JwtPayload,
@@ -514,13 +592,18 @@ export class StaffController {
   @ApiParam({ name: 'id', description: 'Staff id' })
   @ApiBody({
     type: StaffPayDepositSessionsDto,
-    description: 'Selected deposit session ids',
+    description:
+      'Selected deposit session ids. Set confirmOverdueSurveyReports=true to proceed despite an overdue survey warning.',
   })
   @ApiResponse({
     status: 200,
     description: 'Selected deposit sessions processed.',
   })
-  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, or overdue survey warning (code SURVEY_OVERDUE_WARNING) requiring confirmation via confirmOverdueSurveyReports.',
+  })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
   async payStaffDepositSessions(
     @CurrentUser() user: JwtPayload,
@@ -671,6 +754,58 @@ export class StaffController {
     );
 
     return this.staffService.updateStaff(
+      {
+        ...data,
+        bank_qr_link: normalizedBankQrLink ?? undefined,
+        personal_achievement_link: normalizedAchievementLink ?? undefined,
+      },
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+  }
+
+  @Patch(':id/with-fixed-salary-overrides')
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Update staff roles and fixed-salary overrides together',
+    description:
+      'Write staff profile fields, the authoritative role list, and per-role lương cứng / % vận hành overrides in one transaction. Roles are stored first, then overrides, so a newly added role can receive an override in the same request. Teacher is not a fixed-salary role (session allowance only) — teacher overrides are rejected and leftover teacher config rows are cleared. An error rolls back every change. Null on an axis clears that override only; 0 is stored as an intentional exclusion. Roles removed from the payload have both override rows deleted and action-history records the deletion with that role; staff_fixed_salary_payables (closed months) are not touched. Per-axis PUT /fixed-salary-settings/staff-overrides/* endpoints are unchanged.',
+  })
+  @ApiParam({ name: 'id', description: 'Staff ID' })
+  @ApiBody({
+    type: UpdateStaffWithFixedSalaryOverridesDto,
+    description:
+      'Staff update payload plus roleFixedSalaryOverrides. Path id is the staff id.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Staff updated with roles and overrides applied together.',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, override for a role not in the payload roles list, or duplicate roleType.',
+  })
+  @ApiResponse({ status: 404, description: 'Staff not found.' })
+  async updateStaffWithFixedSalaryOverrides(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStaffIdPipe()) id: string,
+    @Body() data: UpdateStaffWithFixedSalaryOverridesDto,
+  ) {
+    const normalizedBankQrLink = normalizeHttpHttpsUrl(
+      data.bank_qr_link,
+      'Link QR ngân hàng',
+    );
+    const normalizedAchievementLink = normalizeHttpHttpsUrl(
+      data.personal_achievement_link,
+      'Link thành tích cá nhân',
+    );
+
+    return this.staffService.updateStaffWithFixedSalaryOverrides(
+      id,
       {
         ...data,
         bank_qr_link: normalizedBankQrLink ?? undefined,

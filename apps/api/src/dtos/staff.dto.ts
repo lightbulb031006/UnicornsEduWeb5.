@@ -1,10 +1,17 @@
-import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { Gender, StaffRole, StaffStatus } from 'generated/enums';
+import { Transform, Type } from 'class-transformer';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PartialType,
+} from '@nestjs/swagger';
+import { StaffRoleFixedSalaryOverrideItemDto } from './fixed-salary-settings.dto';
+import { Gender, PaymentStatus, StaffRole, StaffStatus } from 'generated/enums';
 import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsDateString,
@@ -17,6 +24,7 @@ import {
   Max,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { IsStaffId } from '../common/entity-id.validators';
@@ -198,6 +206,17 @@ export class CreateStaffDto {
   @IsOptional()
   @IsString()
   google_meet_link?: string | null;
+
+  @ApiPropertyOptional({
+    example: 3,
+    description:
+      'Tỷ lệ % hoa hồng trên tổng doanh thu hệ thống, áp dụng cho nhân sự có vai trò lesson_plan_head (Trưởng giáo án). Đơn vị phần trăm (VD: 3 = 3%).',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  revenue_share_percent?: number | null;
 }
 
 export class UpdateStaffDto extends PartialType(CreateStaffDto) {
@@ -212,6 +231,32 @@ export class UpdateStaffDto extends PartialType(CreateStaffDto) {
   @IsOptional()
   @IsEnum(StaffStatus)
   status?: StaffStatus;
+}
+
+export class UpdateStaffWithFixedSalaryOverridesDto extends OmitType(
+  UpdateStaffDto,
+  ['id'] as const,
+) {
+  @ApiProperty({
+    enum: StaffRole,
+    isArray: true,
+    description:
+      'Authoritative role list after this save. Overrides are applied only after these roles are written in the same transaction.',
+  })
+  @IsArray()
+  @IsEnum(StaffRole, { each: true })
+  roles: StaffRole[];
+
+  @ApiProperty({
+    type: StaffRoleFixedSalaryOverrideItemDto,
+    isArray: true,
+    description:
+      'Per-role lương cứng / % vận hành overrides for roles in `roles`. Null on an axis clears that override only. 0 is stored as an intentional exclusion. Omitted axes are left unchanged. Roles removed from `roles` have both override rows deleted in this same transaction; action-history records that deletion with the disabled role. Closed-month staff_fixed_salary_payables are never written.',
+  })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StaffRoleFixedSalaryOverrideItemDto)
+  roleFixedSalaryOverrides: StaffRoleFixedSalaryOverrideItemDto[];
 }
 
 export class UpdateStaffStatusDto {
@@ -278,6 +323,27 @@ export interface StaffIncomeRoleSummaryDto extends StaffIncomeAmountSummaryDto {
   label: string;
 }
 
+export interface StaffFixedSalaryRoleSummaryDto extends StaffIncomeRoleSummaryDto {
+  grossTotal: number;
+  operatingDeductionTotal: number;
+  taxDeductionTotal: number;
+}
+
+export interface StaffFixedSalaryPayableItemDto {
+  id: string;
+  roleType: StaffRole;
+  roleLabel: string;
+  month: string;
+  status: PaymentStatus;
+  note: string | null;
+  grossAmount: number;
+  operatingRatePercent: number;
+  taxRatePercent: number;
+  operatingDeductionAmount: number;
+  taxDeductionAmount: number;
+  netAmount: number;
+}
+
 export interface StaffIncomeDepositSessionDto {
   id: string;
   date: string;
@@ -335,6 +401,10 @@ export interface StaffIncomeSummaryDto {
    */
   bonusMonthlyTotals: StaffIncomeAmountSummaryDto;
   otherRoleSummaries: StaffIncomeRoleSummaryDto[];
+  /** Lương cứng theo role: tách khỏi trợ cấp / thưởng / trợ cấp thêm. Net-first như Công việc khác. */
+  fixedSalaryRoleSummaries: StaffFixedSalaryRoleSummaryDto[];
+  /** Khoản lương cứng tháng đang xem, cộng mọi khoản pending khác tháng (để sửa trước khi trả). */
+  fixedSalaryPayables: StaffFixedSalaryPayableItemDto[];
 }
 
 export class StaffPaymentMonthDto {
@@ -355,6 +425,15 @@ export class StaffPaymentMonthDto {
     message: 'year must use YYYY format.',
   })
   year: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Kế toán xác nhận vẫn thanh toán dù nhân sự còn báo cáo khảo sát quá hạn (bỏ qua cảnh báo SURVEY_OVERDUE_WARNING).',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmOverdueSurveyReports?: boolean;
 }
 
 export class StaffDepositPaymentYearDto {
@@ -416,10 +495,46 @@ export const STAFF_PAYMENT_SOURCE_TYPES = [
   'teacher_session',
   'customer_care',
   'assistant_share',
+  'training_manager',
   'lesson_output',
+  'revenue_share',
   'extra_allowance',
   'bonus',
+  'fixed_salary',
 ] as const;
+
+export class UpdateStaffFixedSalaryPayableDto {
+  @ApiPropertyOptional({
+    description:
+      'Gross amount in VND. Recalculates net from the frozen operating and tax percents on this payable.',
+    example: 4_000_000,
+    minimum: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  amount?: number;
+
+  @ApiPropertyOptional({
+    description: 'Optional note. Empty string clears the note.',
+    nullable: true,
+  })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null) {
+      return null;
+    }
+    const trimmed = String(value).trim();
+    return trimmed.length === 0 ? null : trimmed;
+  })
+  @ValidateIf((_, value) => value != null)
+  @IsString()
+  note?: string | null;
+}
 
 export type StaffPaymentSourceTypeDto =
   (typeof STAFF_PAYMENT_SOURCE_TYPES)[number];
@@ -452,6 +567,12 @@ export class StaffPaySelectedPaymentsDto extends StaffPaymentMonthDto {
   @ValidateNested({ each: true })
   @Type(() => StaffPaySelectedPaymentItemDto)
   items: StaffPaySelectedPaymentItemDto[];
+}
+
+export interface StaffOverdueSurveyWarningItemDto {
+  surveyId: string;
+  surveyName: string;
+  classNames: string[];
 }
 
 export interface StaffPayAllPaymentsSourceResultDto {
@@ -510,6 +631,15 @@ export class StaffPayDepositSessionsDto {
   @ArrayUnique()
   @IsUUID('4', { each: true })
   sessionIds: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Kế toán xác nhận vẫn thanh toán dù nhân sự còn báo cáo khảo sát quá hạn (bỏ qua cảnh báo SURVEY_OVERDUE_WARNING).',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmOverdueSurveyReports?: boolean;
 }
 
 export interface StaffPayDepositSessionsResultDto {

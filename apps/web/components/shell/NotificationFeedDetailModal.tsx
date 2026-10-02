@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, m, useReducedMotion } from "framer-motion";
 import { useMemo } from "react";
 import type { NotificationFeedItem } from "@/dtos/notification.dto";
 import {
@@ -38,7 +38,7 @@ export function NotificationFeedDetailModal({
     <AnimatePresence>
       {open && item ? (
         <>
-          <motion.button
+          <m.button
             type="button"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -49,7 +49,7 @@ export function NotificationFeedDetailModal({
             onClick={onClose}
           />
           <div className="fixed inset-0 z-[121] flex items-center justify-center p-3 sm:p-4 pointer-events-none">
-            <motion.div
+            <m.div
               role="dialog"
               aria-modal="true"
               aria-labelledby="notif-detail-title"
@@ -110,7 +110,7 @@ export function NotificationFeedDetailModal({
                   Quay lại danh sách
                 </button>
               </footer>
-            </motion.div>
+            </m.div>
           </div>
         </>
       ) : null}

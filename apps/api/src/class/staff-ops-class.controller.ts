@@ -133,9 +133,9 @@ export class StaffOpsClassController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, enum: ['running', 'ended'] })
   @ApiQuery({
-    name: 'type',
+    name: 'courseId',
     required: false,
-    enum: ['vip', 'basic', 'advance', 'hardcore'],
+    description: 'Filter by course id (see GET /courses)',
   })
   @ApiResponse({ status: 200, description: 'Paginated class list.' })
   async getClasses(
@@ -143,13 +143,13 @@ export class StaffOpsClassController {
     @Query() query: PaginationQueryDto,
     @Query('search') search?: string,
     @Query('status') status?: string,
-    @Query('type') type?: string,
+    @Query('courseId') courseId?: string,
   ) {
     return this.classService.getClassesForStaff(user.id, user.roleType, {
       ...query,
       search,
       status,
-      type,
+      courseId,
     });
   }
 
@@ -316,10 +316,23 @@ export class StaffOpsClassController {
   @Patch(':id/schedule')
   @ApiOperation({
     summary: 'Update class schedule for staff operations',
+    description:
+      'Upsert schedule slots. Slot active nhưng vắng mặt trong `schedule` sẽ được giữ nguyên — ' +
+      'xoá phải liệt kê id trong `removedEntryIds`. Gia sư (teacher-only role) chỉ được thêm/sửa/xoá ' +
+      'slot có `teacherId` là chính mình; đụng vào slot của gia sư khác sẽ bị từ chối (403). ' +
+      'Truyền `expectedUpdatedAt` để bật optimistic lock.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassScheduleDto })
   @ApiResponse({ status: 200, description: 'Class schedule updated.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Gia sư cố sửa/xoá lịch của gia sư khác.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Lịch vừa bị người khác cập nhật (optimistic lock).',
+  })
   async updateClassSchedule(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,

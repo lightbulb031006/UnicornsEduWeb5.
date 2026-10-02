@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Query,
   Req,
@@ -17,6 +18,7 @@ import type { CookieOptions, Request, Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { readProxyPublicOrigin } from '../mail/public-frontend-url';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { Public } from './decorators/public.decorator';
 import { AuthGuard } from '@nestjs/passport';
@@ -38,6 +40,7 @@ import {
   ApiBody,
   ApiCookieAuth,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiResponse,
   ApiTags,
@@ -47,6 +50,10 @@ import { JwtService } from '@nestjs/jwt';
 import type { RequestWithResolvedAuthContext } from './auth-request-context';
 import { PUBLIC_REGISTRATION_DISABLED_MESSAGE } from './constants';
 import { GoogleAuthExceptionFilter } from './filters/google-auth.exception-filter';
+import { UserDeviceService } from './user-device.service';
+import { Roles } from './decorators/roles.decorator';
+import { RolesGuard } from './guards/roles.guard';
+import { StudentDeviceGuard } from './guards/student-device.guard';
 
 const ONE_MINUTE_IN_MS = 60_000;
 const THIRTY_MINUTES_IN_MS = 30 * ONE_MINUTE_IN_MS;
@@ -57,6 +64,7 @@ interface VerifiedTokenPayload {
   accountHandle: string;
   roleType: UserRole;
   rememberMe?: boolean;
+  deviceId?: string;
 }
 
 interface GoogleAuthRequest extends Request {
@@ -80,6 +88,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
+    private readonly userDeviceService: UserDeviceService,
   ) {}
 
   private getGuestProfile() {
@@ -249,7 +258,7 @@ export class AuthController {
   }
 
   @Public()
-  @UseGuards(JwtRefreshGuard)
+  @UseGuards(JwtRefreshGuard, StudentDeviceGuard)
   @HttpCode(HttpStatus.OK)
   @Post('refresh')
   @Throttle({ default: { limit: 120, ttl: ONE_MINUTE_IN_MS } })
@@ -278,6 +287,7 @@ export class AuthController {
       user.user.id,
       oldRefreshToken,
       user.rememberMe,
+      user.deviceId,
     );
 
     this.setAuthCookies(res, { accessToken, refreshToken }, user.rememberMe);
@@ -414,11 +424,12 @@ export class AuthController {
       payload.id,
       body.password,
     );
-    const tokenPair = await this.authService.generateTokenPairAndSave(
+    const tokenPair = await this.authService.issueTokenPairForUser(
       payload.id,
       payload.accountHandle,
       payload.roleType,
       payload.rememberMe ?? false,
+      { deviceId: payload.deviceId },
     );
     this.setAuthCookies(res, tokenPair, payload.rememberMe ?? false);
 
@@ -481,8 +492,11 @@ export class AuthController {
     description: 'Reset email sent if account exists.',
   })
   @ApiResponse({ status: 429, description: 'Too many requests.' })
-  async forgotPassword(@Body() body: ForgotPasswordDto) {
-    return this.authService.forgotPassword(body.email);
+  async forgotPassword(@Body() body: ForgotPasswordDto, @Req() req: Request) {
+    return this.authService.forgotPassword(
+      body.email,
+      readProxyPublicOrigin(req),
+    );
   }
 
   @Public()
@@ -571,7 +585,11 @@ export class AuthController {
     @Body() body?: ResendVerificationDto,
   ) {
     const userId = await this.getAuthenticatedUserIdFromCookies(req);
-    return this.authService.resendVerificationEmail(userId, body?.email);
+    return this.authService.resendVerificationEmail(
+      userId,
+      body?.email,
+      readProxyPublicOrigin(req),
+    );
   }
 
   @Public()
@@ -579,6 +597,182 @@ export class AuthController {
   @UseFilters(GoogleAuthExceptionFilter)
   @UseGuards(AuthGuard('google'))
   async googleAuth() {}
+
+  // ─── Student single-device login ─────────────────────────────────────
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('student/login')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Initiate student login',
+    description:
+      'Validates credentials and sends a magic link to the student email. Returns a requestId for polling.',
+  })
+  @ApiBody({
+    type: UserAuthDto,
+    description: 'accountHandle, password, and optional rememberMe',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Login request created, verification email sent.',
+  })
+  @ApiResponse({ status: 401, description: 'Invalid credentials.' })
+  @ApiResponse({
+    status: 409,
+    description: 'Student already has an active device.',
+  })
+  @ApiResponse({ status: 429, description: 'Too many requests.' })
+  async studentLogin(@Body() body: UserAuthDto, @Req() req: Request) {
+    const deviceInfo = {
+      userAgent: req.headers['user-agent'],
+      acceptLanguage: req.headers['accept-language'],
+    };
+    const ipAddress =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.socket.remoteAddress ||
+      undefined;
+
+    return this.authService.studentLoginInit(
+      body.accountHandle,
+      body.password,
+      deviceInfo,
+      ipAddress,
+      readProxyPublicOrigin(req),
+    );
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('student/login/poll')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Poll student login verification',
+    description:
+      'Polls the status of a student login request. Returns verified: true when the magic link has been clicked.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string' },
+      },
+      required: ['requestId'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns verification status.',
+  })
+  @ApiResponse({ status: 404, description: 'Request not found.' })
+  async studentLoginPoll(@Body() body: { requestId: string }) {
+    return this.authService.studentLoginPoll(body.requestId);
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Get('verify-login')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Verify login magic link',
+    description:
+      'Marks a login request as verified when the student clicks the magic link from email. Never sets a session on this device — the initiating browser (waiting screen) is the only device activated. Returns an outcome status so the UI can show distinct messages: verified / used / expired / invalid.',
+  })
+  @ApiQuery({
+    name: 'token',
+    required: true,
+    description: 'Login verification token from email',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Outcome: { status: verified|used|expired|invalid, message, verified }.',
+  })
+  async verifyLogin(@Query('token') token: string) {
+    return this.authService.verifyLoginMagicLink(token);
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @Post('student/activate')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Activate student device',
+    description:
+      'Creates a device record and issues tokens after login request is verified.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string' },
+        activateSecret: { type: 'string' },
+        rememberMe: { type: 'boolean', default: false },
+      },
+      required: ['requestId', 'activateSecret'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Device activated, tokens issued.',
+  })
+  @ApiResponse({ status: 400, description: 'Request not verified or expired.' })
+  @ApiResponse({ status: 401, description: 'Invalid activation secret.' })
+  async studentActivate(
+    @Body()
+    body: { requestId: string; activateSecret: string; rememberMe?: boolean },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const tokenPair = await this.authService.activateStudentDevice(
+      body.requestId,
+      body.activateSecret,
+      body.rememberMe ?? false,
+    );
+    this.setAuthCookies(res, tokenPair, body.rememberMe ?? false);
+    return { message: 'Đăng nhập thành công' };
+  }
+
+  @Post('student/logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth('access_token')
+  @ApiOperation({
+    summary: 'Student self-logout',
+    description: 'Removes the current device and invalidates the session.',
+  })
+  @ApiResponse({ status: 200, description: 'Logged out successfully.' })
+  async studentLogout(
+    @Req() req: RequestWithResolvedAuthContext,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const userId = await this.getAuthenticatedUserIdFromCookies(req);
+    await this.authService.studentSelfLogout(userId);
+
+    const authCookieOptions = this.getAuthCookieOptions();
+    res.clearCookie('access_token', authCookieOptions);
+    res.clearCookie('refresh_token', authCookieOptions);
+    return { message: 'Đã đăng xuất' };
+  }
+
+  @Post('admin/students/:id/force-logout')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(UserRole.admin, UserRole.staff)
+  @ApiCookieAuth('access_token')
+  @ApiOperation({
+    summary: 'Force logout student',
+    description:
+      'Admin or staff force-logouts a student, removing all active devices.',
+  })
+  @ApiParam({ name: 'id', description: 'Student user ID' })
+  @ApiResponse({ status: 200, description: 'Student force-logged out.' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions.' })
+  @ApiResponse({ status: 404, description: 'Student not found.' })
+  async forceLogoutStudent(
+    @Param('id') studentId: string,
+    @CurrentUser() actor: JwtPayload,
+  ) {
+    return this.authService.forceLogoutStudent(studentId, actor.id);
+  }
 
   @Public()
   @Get('google/callback')
@@ -589,7 +783,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const rememberMe = true;
-    const tokenPair = await this.authService.generateTokenPairAndSave(
+    const tokenPair = await this.authService.issueTokenPairForUser(
       req.user.id,
       req.user.accountHandle,
       req.user.roleType,

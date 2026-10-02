@@ -13,6 +13,7 @@ import {
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -24,12 +25,37 @@ import {
 } from '../common/entity-id.validators';
 import {
   Gender,
+  StudentCustomerSource,
   StudentStatus,
   StudentWalletDirectTopUpRequestStatus,
   UserRole,
   WalletTransactionType,
 } from 'generated/enums';
 import { PaginationQueryDto } from './pagination.dto';
+
+export const STUDENT_CUSTOMER_SOURCE_VALUES = [
+  StudentCustomerSource.tiktok,
+  StudentCustomerSource.fanpage_hoc_tin,
+  StudentCustomerSource.fanpage_luyen_tin,
+  StudentCustomerSource.referral,
+  StudentCustomerSource.personal,
+  StudentCustomerSource.other,
+] as const;
+
+export const STUDENT_CUSTOMER_SOURCE_LABELS: Record<
+  StudentCustomerSource,
+  string
+> = {
+  tiktok: 'Tiktok',
+  fanpage_hoc_tin: 'Fanpage Học Toán Cùng Chuyên Toán',
+  fanpage_luyen_tin: 'Fanpage Luyện Toán THPT',
+  referral: 'Giới thiệu từ người quen của khách',
+  personal: 'Nguồn riêng của bản thân',
+  other: 'Khác',
+};
+
+export const UNASSIGNED_CUSTOMER_SOURCE_KEY = 'unassigned';
+export const UNASSIGNED_CUSTOMER_SOURCE_LABEL = 'Chưa gán';
 
 export class SearchAssignableStudentUsersDto {
   @ApiProperty({
@@ -183,6 +209,26 @@ export class UpdateStudentBodyDto {
   @Min(0)
   @Max(0.99)
   customer_care_profit_percent?: number | null;
+
+  @ApiPropertyOptional({
+    enum: STUDENT_CUSTOMER_SOURCE_VALUES,
+    description:
+      'Nguồn khách. Bỏ trống khi sửa hồ sơ cũ chưa gán nguồn. Không gửi null để xóa nguồn đã chọn.',
+  })
+  @IsOptional()
+  @IsEnum(StudentCustomerSource)
+  customer_source?: StudentCustomerSource;
+
+  @ApiPropertyOptional({
+    example: 'Bạn học giới thiệu qua Zalo',
+    description:
+      'Bắt buộc khi customer_source là other. Bị xóa khi đổi sang nguồn khác.',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  customer_source_note?: string | null;
 }
 
 export class CreateStudentDto {
@@ -258,6 +304,22 @@ export class CreateStudentDto {
   @ApiProperty({ description: 'User id' })
   @IsUUID()
   user_id: string;
+
+  @ApiProperty({
+    enum: STUDENT_CUSTOMER_SOURCE_VALUES,
+    description: 'Nguồn khách. Bắt buộc khi tạo hồ sơ mới.',
+  })
+  @IsEnum(StudentCustomerSource)
+  customer_source: StudentCustomerSource;
+
+  @ApiPropertyOptional({
+    example: 'Bạn học giới thiệu qua Zalo',
+    description: 'Bắt buộc khi customer_source là other.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  customer_source_note?: string;
 }
 
 export class UpdateStudentDto extends UpdateStudentBodyDto {

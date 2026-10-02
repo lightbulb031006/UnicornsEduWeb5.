@@ -16,6 +16,7 @@ import {
 } from "./lessonTaskUi";
 import LessonOutputEditorForm from "./LessonOutputEditorForm";
 import LessonOutputQuickPopup from "./LessonOutputQuickPopup";
+import { formatVnDate } from "@/lib/formatters";
 
 function getErrorMessage(error: unknown, fallback: string) {
   return (
@@ -31,11 +32,7 @@ function formatLessonDate(value: string | null) {
     return "Chưa có deadline";
   }
 
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
+  return formatVnDate(new Date(value));
 }
 
 type Props = {

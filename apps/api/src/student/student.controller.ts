@@ -4,17 +4,23 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ParseStudentIdPipe } from 'src/common/pipes/parse-entity-id.pipe';
 import {
   ApiBody,
+  ApiConsumes,
   ApiCookieAuth,
   ApiHeader,
   ApiOperation,
@@ -60,10 +66,24 @@ import {
   UpdateStudentStatusDto,
 } from 'src/dtos/student.dto';
 import {
+  StudentLandingAchievementsQueryDto,
+  StudentLandingAchievementsResponseDto,
   StudentLandingProfileQueryDto,
   StudentLandingProfilesResponseDto,
 } from 'src/dtos/landing-profile.dto';
+import {
+  buildImageUploadFileFilter,
+  DEFAULT_MAX_IMAGE_BYTES,
+} from 'src/storage/supabase-storage';
 import { StudentService } from './student.service';
+
+const avatarUploadInterceptor = FileInterceptor('avatar', {
+  limits: { fileSize: DEFAULT_MAX_IMAGE_BYTES },
+  fileFilter: buildImageUploadFileFilter({
+    defaultFieldLabel: 'Ảnh đại diện',
+    labelsByFieldName: { avatar: 'Ảnh đại diện' },
+  }),
+});
 
 @ApiTags('student')
 @Controller('student')
@@ -392,7 +412,7 @@ export class StudentController {
   @ApiOperation({
     summary: 'List public student landing profiles',
     description:
-      'API-key protected endpoint for the marketing landing site. Returns sanitized student identity fields only.',
+      'API-key protected endpoint for the marketing landing site. Returns sanitized student identity fields only. Does not filter by status (active + inactive).',
   })
   @ApiHeader({
     name: LANDING_API_KEY_HEADER,
@@ -400,17 +420,32 @@ export class StudentController {
     description: 'Landing site API key (LANDING_API_KEY)',
   })
   @ApiQuery({
-    name: 'status',
+    name: 'search',
     required: false,
-    enum: ['active', 'inactive'],
-    description: 'Filter by student status (default: active)',
+    type: String,
+    description: 'Case-insensitive student full name search',
+  })
+  @ApiQuery({
+    name: 'ids',
+    required: false,
+    type: String,
+    description:
+      'Comma-separated student ids (`UNIST-…`). When set, only those profiles are returned. Still paginated by page/limit — loop pages if more than `limit` ids are passed.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+    example: 1,
   })
   @ApiQuery({
     name: 'limit',
     required: false,
     type: Number,
-    description: 'Max profiles to return (default: 100, max: 500)',
-    example: 100,
+    description:
+      'Page size (default: 50, max: 100). Loop pages for full CMS sync.',
+    example: 50,
   })
   @ApiResponse({
     status: 200,
@@ -422,6 +457,69 @@ export class StudentController {
     @Query() query: StudentLandingProfileQueryDto,
   ): Promise<StudentLandingProfilesResponseDto> {
     return this.studentService.getLandingProfiles(query);
+  }
+
+  @Get('landing-achievements')
+  @Public()
+  @Roles()
+  @UseGuards(ApiKeyGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'List public student landing achievements',
+    description:
+      'API-key protected endpoint for the marketing landing site. Default: returns flat achievements filtered by CMS published `sourceIds`; empty/missing `sourceIds` returns an empty page (no roster leak). Pass `includeUnpublished=true` for the /thanh-tich level-list surface to return achievements for all students regardless of publish gate.',
+  })
+  @ApiHeader({
+    name: LANDING_API_KEY_HEADER,
+    required: true,
+    description: 'Landing site API key (LANDING_API_KEY)',
+  })
+  @ApiQuery({
+    name: 'sourceIds',
+    required: false,
+    type: String,
+    description:
+      'Comma-separated published student ids (`UNIST-…`). Required unless `includeUnpublished=true`; empty/missing → empty page.',
+  })
+  @ApiQuery({
+    name: 'includeUnpublished',
+    required: false,
+    type: Boolean,
+    description:
+      'When true, ignores sourceIds/publish gate and returns achievements for ALL students (level-list surface). Keep false/omit for publish-gated surfaces (e.g. "Tự Hào Unicorns").',
+  })
+  @ApiQuery({
+    name: 'level',
+    required: false,
+    type: String,
+    description:
+      'Optional achievement level filter (e.g. national, provincial)',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size (default: 9, max: 100)',
+    example: 9,
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Sanitized student landing achievements with nested student identity.',
+    type: StudentLandingAchievementsResponseDto,
+  })
+  @ApiResponse({ status: 401, description: 'Missing or invalid API key.' })
+  async getStudentLandingAchievements(
+    @Query() query: StudentLandingAchievementsQueryDto,
+  ): Promise<StudentLandingAchievementsResponseDto> {
+    return this.studentService.getLandingAchievements(query);
   }
 
   @Post(':id/wallet-direct-topup-requests')
@@ -653,6 +751,65 @@ export class StudentController {
   ) {
     return this.studentService.getStudentById(id, {
       userId: user.id,
+      roleType: user.roleType,
+    });
+  }
+
+  @Post(':id/avatar')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(avatarUploadInterceptor)
+  @ApiOperation({
+    summary: 'Upload student avatar',
+    description:
+      'Uploads avatar for the linked user account (clean + watermarked twin).',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiParam({ name: 'id', description: 'Student ID' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['avatar'],
+      properties: { avatar: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Student detail with avatar URL.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Missing linked user or invalid image.',
+  })
+  @ApiResponse({ status: 404, description: 'Student not found.' })
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  async uploadStudentAvatar(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStudentIdPipe()) id: string,
+    @UploadedFile()
+    file?: { buffer: Buffer; mimetype: string; size: number },
+  ) {
+    return this.studentService.uploadStudentAvatar(id, file, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Delete(':id/avatar')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Delete student avatar',
+    description: 'Removes clean + watermarked avatar for the linked user.',
+  })
+  @ApiParam({ name: 'id', description: 'Student ID' })
+  @ApiResponse({ status: 200, description: 'Student detail without avatar.' })
+  @ApiResponse({ status: 400, description: 'Missing linked user.' })
+  @ApiResponse({ status: 404, description: 'Student not found.' })
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  async deleteStudentAvatar(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStudentIdPipe()) id: string,
+  ) {
+    return this.studentService.deleteStudentAvatar(id, {
+      userId: user.id,
+      userEmail: user.email,
       roleType: user.roleType,
     });
   }

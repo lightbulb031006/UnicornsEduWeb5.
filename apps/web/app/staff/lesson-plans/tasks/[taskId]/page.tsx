@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LessonTaskDetailPage } from "@/app/admin/lesson-plans/tasks/[taskId]/page";
 import { LessonTaskDetailPageSkeleton } from "@/components/admin/lesson-plans/LessonOverviewSkeleton";
@@ -31,12 +32,14 @@ export default function StaffLessonTaskDetailPage() {
   }
 
   return (
-    <LessonTaskDetailPage
-      workspaceBasePath="/staff/lesson-plans"
-      participantMode={participantMode}
-      accountantMode={isAccountant}
-      allowPaymentStatusEdit={workspacePolicy === "admin" || isAccountantExpense}
-      allowDelete={isAssistant}
-    />
+    <Suspense fallback={<LessonTaskDetailPageSkeleton />}>
+      <LessonTaskDetailPage
+        workspaceBasePath="/staff/lesson-plans"
+        participantMode={participantMode}
+        accountantMode={isAccountant}
+        allowPaymentStatusEdit={workspacePolicy === "admin" || isAccountantExpense}
+        allowDelete={isAssistant}
+      />
+    </Suspense>
   );
 }

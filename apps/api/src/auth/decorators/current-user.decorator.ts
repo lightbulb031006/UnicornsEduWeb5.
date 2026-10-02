@@ -7,12 +7,14 @@ export interface JwtPayload {
   emailVerified?: boolean;
   accountHandle: string;
   roleType: UserRole;
+  deviceId?: string;
 }
 
 export interface JwtRefreshPayload {
   user: JwtPayload;
   rememberMe: boolean;
   refreshTokenExpiresAt: Date;
+  deviceId: string;
 }
 
 export const CurrentUser = createParamDecorator(

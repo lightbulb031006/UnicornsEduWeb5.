@@ -135,7 +135,7 @@ export default function DashboardAlertListDialog({
           <>
             {alerts.map((item) => (
               <button
-                key={`${group}-${item.targetId}-${item.subject}`}
+                key={`${group}-${item.targetId}-${item.due ?? item.subject}`}
                 type="button"
                 onClick={() => onOpenAlert(item)}
                 className={`w-full rounded-md border px-3 py-2.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${itemToneClass}`}
@@ -143,9 +143,11 @@ export default function DashboardAlertListDialog({
                 <p className="text-sm font-semibold text-text-primary">{item.subject}</p>
                 <p className="mt-0.5 text-xs text-text-secondary">{item.owner ?? item.due}</p>
                 <p className="mt-1 text-xs font-medium text-text-primary">
-                  {formatDashboardAlertCurrency(item.amount)}
+                  {item.detail ?? formatDashboardAlertCurrency(item.amount)}
                 </p>
-                <p className="mt-1 text-[11px] text-text-muted">{item.due}</p>
+                {!item.detail && item.due ? (
+                  <p className="mt-1 text-[11px] text-text-muted">{item.due}</p>
+                ) : null}
               </button>
             ))}
             <div ref={loadMoreRef} className="h-1" aria-hidden />

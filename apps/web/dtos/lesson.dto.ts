@@ -8,6 +8,12 @@ export type LessonTaskStatus =
 export type LessonTaskPriority = "low" | "medium" | "high";
 export type LessonOutputStatus = "pending" | "completed" | "cancelled";
 export type LessonPaymentStatus = "pending" | "paid";
+export type LessonOutputDifficultyBand =
+  | "easy"
+  | "medium"
+  | "hard"
+  | "very_hard"
+  | "extreme";
 export type LessonStaffStatus = "active" | "inactive";
 export type LessonStaffRole =
   | "admin"
@@ -272,6 +278,10 @@ export interface LessonOutputItem {
   source: string | null;
   originalLink: string | null;
   level: string | null;
+  difficultyBand: LessonOutputDifficultyBand | null;
+  includesTest: boolean;
+  includesSolution: boolean;
+  includesLectureVideo: boolean;
   tags: string[];
   cost: number;
   date: string;
@@ -295,6 +305,10 @@ export interface CreateLessonOutputPayload {
   source?: string | null;
   originalLink?: string | null;
   level?: string | null;
+  difficultyBand?: LessonOutputDifficultyBand | null;
+  includesTest?: boolean;
+  includesSolution?: boolean;
+  includesLectureVideo?: boolean;
   tags?: string[];
   cost?: number;
   paymentStatus?: LessonPaymentStatus;
@@ -313,6 +327,10 @@ export interface UpdateLessonOutputPayload {
   source?: string | null;
   originalLink?: string | null;
   level?: string | null;
+  difficultyBand?: LessonOutputDifficultyBand | null;
+  includesTest?: boolean;
+  includesSolution?: boolean;
+  includesLectureVideo?: boolean;
   tags?: string[];
   cost?: number;
   paymentStatus?: LessonPaymentStatus;

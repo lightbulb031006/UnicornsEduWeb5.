@@ -36,3 +36,10 @@ export class GoogleCalendarApiError extends GoogleCalendarError {
     this.name = 'GoogleCalendarApiError';
   }
 }
+
+export class GoogleCalendarTimeoutError extends GoogleCalendarError {
+  constructor(message = 'Google Calendar request timed out') {
+    super(message, HttpStatus.GATEWAY_TIMEOUT);
+    this.name = 'GoogleCalendarTimeoutError';
+  }
+}

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { MakeupScheduleEventRecord } from "@/dtos/class-schedule.dto";
+import { formatVnDate } from "@/lib/formatters";
 
 type PastMakeupEventsPopupProps = {
   open: boolean;
@@ -29,11 +30,7 @@ function formatDateLabel(value?: string | null) {
   if (!value) return "--";
   const parsed = new Date(`${value}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(parsed);
+  return formatVnDate(parsed);
 }
 
 function formatTime(value?: string | null) {

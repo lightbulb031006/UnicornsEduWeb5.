@@ -5,6 +5,7 @@ jest.mock('./session-student-balance.service', () => ({
   SessionStudentBalanceService: class SessionStudentBalanceServiceMock {},
 }));
 
+import { BadRequestException } from '@nestjs/common';
 import {
   AttendanceStatus,
   SessionPaymentStatus,
@@ -31,6 +32,15 @@ describe('SessionUpdateService', () => {
     },
     staffTaxDeductionOverride: {
       findFirst: jest.fn(),
+    },
+    studentInfo: {
+      findMany: jest.fn(),
+    },
+    attendance: {
+      findMany: jest.fn(),
+    },
+    staffInfo: {
+      findMany: jest.fn(),
     },
   };
 
@@ -75,6 +85,9 @@ describe('SessionUpdateService', () => {
     mockPrisma.classTeacher.findUnique.mockResolvedValue(null);
     mockPrisma.roleTaxDeductionRate.findFirst.mockResolvedValue(null);
     mockPrisma.staffTaxDeductionOverride.findFirst.mockResolvedValue(null);
+    mockPrisma.studentInfo.findMany.mockResolvedValue([]);
+    mockPrisma.attendance.findMany.mockResolvedValue([]);
+    mockPrisma.staffInfo.findMany.mockResolvedValue([]);
     service = new SessionUpdateService(
       mockPrisma as never,
       accessService as never,
@@ -390,6 +403,138 @@ describe('SessionUpdateService', () => {
     );
     expect(updateArgs.data).not.toHaveProperty(
       'teacherTaxDeductionRatePercent',
+    );
+  });
+
+  it('allows updating session with >= 2 students without recordingUrl (recording is optional)', async () => {
+    mockPrisma.session.findUnique
+      .mockResolvedValueOnce({
+        id: 'session-1',
+        classId: 'class-1',
+        teacherId: 'teacher-1',
+        date: new Date('2026-03-15T00:00:00.000Z'),
+        teacherPaymentStatus: SessionPaymentStatus.unpaid,
+        recordingUrl: null,
+        class: { name: 'Toán 10A' },
+        attendance: [
+          { id: 'att-1', studentId: 'student-1' },
+          { id: 'att-2', studentId: 'student-2' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        id: 'session-1',
+        attendance: [
+          { id: 'att-1', studentId: 'student-1' },
+          { id: 'att-2', studentId: 'student-2' },
+        ],
+      });
+
+    await service.updateSession({
+      id: 'session-1',
+      recordingUrl: '',
+    });
+
+    const updateArgs = mockPrisma.session.update.mock.calls[0][0];
+    expect(updateArgs).toMatchObject({
+      where: { id: 'session-1' },
+      data: { recordingUrl: null },
+    });
+  });
+
+  it('rejects update when payload has startTime but endTime is missing on the session', async () => {
+    mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'session-1',
+      classId: 'class-1',
+      teacherId: 'teacher-1',
+      date: new Date('2026-03-15T00:00:00.000Z'),
+      startTime: null,
+      endTime: null,
+      teacherPaymentStatus: SessionPaymentStatus.unpaid,
+      class: { name: 'Toán 10A' },
+      attendance: [],
+    });
+
+    await expect(
+      service.updateSession({
+        id: 'session-1',
+        startTime: '19:00:00',
+      }),
+    ).rejects.toThrow(new BadRequestException('Giờ kết thúc là bắt buộc.'));
+  });
+
+  it('rejects update when endTime is not after startTime', async () => {
+    mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'session-1',
+      classId: 'class-1',
+      teacherId: 'teacher-1',
+      date: new Date('2026-03-15T00:00:00.000Z'),
+      startTime: new Date('1970-01-01T19:00:00.000Z'),
+      endTime: new Date('1970-01-01T20:30:00.000Z'),
+      teacherPaymentStatus: SessionPaymentStatus.unpaid,
+      class: { name: 'Toán 10A' },
+      attendance: [],
+    });
+
+    await expect(
+      service.updateSession({
+        id: 'session-1',
+        startTime: '19:00:00',
+        endTime: '18:00:00',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException('Giờ kết thúc phải sau giờ bắt đầu.'),
+    );
+  });
+
+  it('rejects changing times on a paid session', async () => {
+    mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'session-1',
+      classId: 'class-1',
+      teacherId: 'teacher-1',
+      date: new Date('2026-03-15T00:00:00.000Z'),
+      startTime: new Date('1970-01-01T19:00:00.000Z'),
+      endTime: new Date('1970-01-01T20:30:00.000Z'),
+      teacherPaymentStatus: SessionPaymentStatus.paid,
+      class: { name: 'Toán 10A' },
+      attendance: [],
+    });
+
+    await expect(
+      service.updateSession({
+        id: 'session-1',
+        startTime: '18:00:00',
+        endTime: '19:30:00',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(
+        'Không thể sửa giờ buổi đã thanh toán hoặc ghi cọc.',
+      ),
+    );
+  });
+
+  it('rejects changing times on a deposit session', async () => {
+    mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'session-1',
+      classId: 'class-1',
+      teacherId: 'teacher-1',
+      date: new Date('2026-03-15T00:00:00.000Z'),
+      startTime: new Date('1970-01-01T19:00:00.000Z'),
+      endTime: new Date('1970-01-01T20:30:00.000Z'),
+      teacherPaymentStatus: SessionPaymentStatus.deposit,
+      class: { name: 'Toán 10A' },
+      attendance: [],
+    });
+
+    await expect(
+      service.updateSession({
+        id: 'session-1',
+        startTime: '18:00:00',
+        endTime: '19:30:00',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(
+        'Không thể sửa giờ buổi đã thanh toán hoặc ghi cọc.',
+      ),
     );
   });
 });

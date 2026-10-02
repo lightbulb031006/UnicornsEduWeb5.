@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import { BodyPortal } from "@/components/ui/BodyPortal";
 import { DateInput } from "@/components/ui/DateInput";
 import { createClientId } from "@/lib/client-id";
 import type { StudentExamItem } from "./StudentExamCard";
@@ -81,8 +81,8 @@ export default function StudentExamSchedulePopup({
     onSave(normalizedItems.filter((item) => item.examDate));
   };
 
-  return createPortal(
-    <>
+  return (
+    <BodyPortal>
       <div
         className="fixed inset-0 z-40 bg-bg-primary/75 backdrop-blur-[1px]"
         aria-hidden
@@ -221,7 +221,6 @@ export default function StudentExamSchedulePopup({
           </button>
         </div>
       </div>
-    </>,
-    document.body,
+    </BodyPortal>
   );
 }

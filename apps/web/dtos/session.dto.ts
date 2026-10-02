@@ -91,6 +91,7 @@ export interface SessionCreatePayload {
   lessonContent: string;
   homework: string;
   tutorial: string;
+  recordingUrl?: string | null;
   teacherPaymentStatus?: string | null;
   /** Coefficient from 0.0 to 1.0. Default 1.0. */
   coefficient?: number;
@@ -98,7 +99,7 @@ export interface SessionCreatePayload {
   allowanceAmount?: number | null;
   /** Whether teacher operating deduction should be applied to this session. Defaults to true. */
   includeTeacherOperatingDeduction?: boolean;
-  attendance: SessionAttendanceItem[];
+  attendance?: SessionAttendanceItem[];
 }
 
 export interface SessionUpdatePayload {
@@ -112,6 +113,7 @@ export interface SessionUpdatePayload {
   lessonContent?: string;
   homework?: string;
   tutorial?: string;
+  recordingUrl?: string | null;
   teacherPaymentStatus?: string | null;
   coefficient?: number;
   allowanceAmount?: number | null;
@@ -150,6 +152,10 @@ export interface SessionItem {
   snapshotPerStudentAllowance?: number | null;
   /** Class scale amount snapshot at session creation. */
   snapshotScaleAmount?: number | null;
+  /** 30-minute block count snapshotted when the session was created. */
+  snapshotBlockCount?: number | null;
+  /** Snapshot of class noAttendance flag at session creation. */
+  snapshotNoAttendance?: boolean;
   tuitionFee?: number | null;
   /** Coefficient from 0.0 to 1.0. */
   coefficient?: number | null;
@@ -169,6 +175,8 @@ export interface SessionItem {
   googleMeetLink?: string | null;
   /** Google Calendar event ID */
   googleCalendarEventId?: string | null;
+  /** YouTube recording URL */
+  recordingUrl?: string | null;
   trainingManagerAllowanceAmount?: number | null;
   trainingManagerPaymentStatus?: SessionPaymentStatus | null;
   trainingManagerRatePercent?: number | null;

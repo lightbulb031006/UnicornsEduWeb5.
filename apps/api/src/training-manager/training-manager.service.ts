@@ -23,7 +23,10 @@ import { resolveTaxDeductionRate } from 'src/payroll/deduction-rates';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { normalizeTrainingManagerRatePercent } from './training-manager.utils';
 
-function parseMonthRange(monthKey: string): { start: Date; endExclusive: Date } {
+function parseMonthRange(monthKey: string): {
+  start: Date;
+  endExclusive: Date;
+} {
   const matched = /^(\d{4})-(\d{2})$/.exec(monthKey.trim());
   if (!matched) {
     throw new BadRequestException('month must use YYYY-MM format.');

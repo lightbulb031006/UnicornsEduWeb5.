@@ -6,14 +6,24 @@ import {
   RegisterDto,
   ResetPasswordDto,
   SetupPasswordDto,
+  StudentActivateDto,
+  StudentActivateResponse,
+  StudentLoginInitResponse,
+  StudentLoginPollResponse,
   UserInfoDto,
+  VerifyLoginResponse,
 } from "@/dtos/Auth.dto";
 import type {
   BonusListResponse,
   CreateMyBonusPayload,
   UpdateMyBonusPayload,
 } from "@/dtos/bonus.dto";
-import type { StaffDashboardDto } from "@/dtos/dashboard.dto";
+import type {
+  StaffDashboardDto,
+  StaffDashboardStudentChangeItem,
+  StaffDashboardStudentChangeScope,
+  StaffDashboardStudentChangeType,
+} from "@/dtos/dashboard.dto";
 import type {
   CreateMyStaffExtraAllowancePayload,
   ExtraAllowanceListResponse,
@@ -104,6 +114,11 @@ export async function setupPassword(data: SetupPasswordDto) {
 
 export async function logout() {
   const response = await api.post("/auth/logout");
+  return response.data;
+}
+
+export async function studentLogout() {
+  const response = await api.post("/auth/student/logout");
   return response.data;
 }
 
@@ -255,6 +270,30 @@ export async function getMyStaffDashboard(
   return response.data;
 }
 
+/** New/dropped student rows in selected period, scoped by CSKH portfolio (own or managed). */
+export async function getMyCustomerCareStudentChanges(params: {
+  month?: string;
+  year?: string;
+  type: StaffDashboardStudentChangeType;
+  scope: StaffDashboardStudentChangeScope;
+  staffId?: string;
+}): Promise<StaffDashboardStudentChangeItem[]> {
+  const response = await api.get<StaffDashboardStudentChangeItem[]>(
+    "/users/me/staff-dashboard/customer-care-student-changes",
+    {
+      params: {
+        ...(params.month ? { month: params.month } : {}),
+        ...(params.year ? { year: params.year } : {}),
+        type: params.type,
+        scope: params.scope,
+        ...(params.staffId ? { staffId: params.staffId } : {}),
+      },
+    },
+  );
+
+  return response.data;
+}
+
 /** Current linked staff bonuses for self-service pages. */
 export async function getMyStaffBonuses(params: {
   page: number;
@@ -380,4 +419,52 @@ export async function getMyStaffLessonOutputStats(params?: {
   );
 
   return response.data;
+}
+
+// ─── Student single-device login ─────────────────────────────────────
+
+export async function studentLoginInit(
+  dto: LoginDto,
+): Promise<StudentLoginInitResponse> {
+  const response = await api.post<StudentLoginInitResponse>(
+    "/auth/student/login",
+    dto,
+  );
+  return response.data;
+}
+
+export async function studentLoginPoll(
+  requestId: string,
+): Promise<StudentLoginPollResponse> {
+  const response = await api.post<StudentLoginPollResponse>(
+    "/auth/student/login/poll",
+    { requestId },
+  );
+  return response.data;
+}
+
+export async function studentActivate(
+  dto: StudentActivateDto,
+): Promise<StudentActivateResponse> {
+  const response = await api.post<StudentActivateResponse>(
+    "/auth/student/activate",
+    dto,
+  );
+  return response.data;
+}
+
+export async function verifyLoginLink(
+  token: string,
+): Promise<VerifyLoginResponse> {
+  const response = await api.get<VerifyLoginResponse>(
+    `/auth/verify-login?token=${encodeURIComponent(token)}`,
+  );
+  return response.data;
+}
+
+export async function forceLogoutStudent(studentId: string) {
+  const response = await api.post(
+    `/auth/admin/students/${encodeURIComponent(studentId)}/force-logout`,
+  );
+  return response.data as { message: string };
 }

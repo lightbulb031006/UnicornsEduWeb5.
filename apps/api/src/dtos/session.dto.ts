@@ -10,9 +10,11 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   IsUUID,
   Matches,
   Max,
+  MaxLength,
   Min,
   ValidateIf,
   ValidateNested,
@@ -24,6 +26,7 @@ import {
 } from '../common/entity-id.validators';
 import { AttendanceStatus, SessionPaymentStatus } from '../../generated/enums';
 import { AttendanceCreateDto, AttendanceUpdateDto } from './attendance.dto';
+import { CONTENT_LIMITS, HTTP_URL_OPTIONS } from './content-limits';
 
 export class MissedTeachingAlertExplanationDto {
   @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
@@ -174,10 +177,12 @@ export class SessionCreateDto {
   date: string;
 
   @ApiPropertyOptional({
-    description: 'Start time HH:mm or HH:mm:ss',
+    description:
+      'Start time HH:mm or HH:mm:ss. Bắt buộc khi lớp ở chế độ theo block 30 phút.',
     example: '19:00:00',
   })
   @IsOptional()
+  @ValidateIf((_obj, value) => value != null && String(value).trim() !== '')
   @IsString()
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/, {
     message: 'startTime must use HH:mm or HH:mm:ss format',
@@ -185,10 +190,12 @@ export class SessionCreateDto {
   startTime?: string;
 
   @ApiPropertyOptional({
-    description: 'End time HH:mm or HH:mm:ss',
+    description:
+      'End time HH:mm or HH:mm:ss. Bắt buộc khi lớp ở chế độ theo block 30 phút; phải sau startTime.',
     example: '20:30:00',
   })
   @IsOptional()
+  @ValidateIf((_obj, value) => value != null && String(value).trim() !== '')
   @IsString()
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/, {
     message: 'endTime must use HH:mm or HH:mm:ss format',
@@ -198,30 +205,50 @@ export class SessionCreateDto {
   @ApiPropertyOptional({
     description:
       'Session note (HTML/plain text accepted). Legacy field; prefer lessonContent.',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   notes?: string | null;
 
   @ApiProperty({
     description: 'Lesson content for the session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   lessonContent: string;
 
   @ApiProperty({
     description:
       'Homework assignment for the session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   homework: string;
 
   @ApiProperty({
     description:
       'Session tutorial for the class session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   tutorial: string;
+
+  @ApiPropertyOptional({
+    description: 'YouTube video recording URL for this session.',
+    example: 'https://youtube.com/watch?v=abc123',
+    nullable: true,
+    maxLength: CONTENT_LIMITS.url,
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => typeof value === 'string' && value.trim() !== '')
+  @IsUrl(HTTP_URL_OPTIONS)
+  @MaxLength(CONTENT_LIMITS.url)
+  recordingUrl?: string | null;
 
   @ApiPropertyOptional({
     description: 'Coefficient for this session, from 0.0 to 1.0.',
@@ -264,14 +291,16 @@ export class SessionCreateDto {
   @IsString()
   teacherPaymentStatus?: string | null;
 
-  @ApiProperty({
-    description: 'Attendance items for this session.',
+  @ApiPropertyOptional({
+    description:
+      'Attendance items for this session. Required for normal classes; omitted for no-attendance classes (auto-generated as present).',
     type: [AttendanceCreateDto],
   })
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AttendanceCreateDto)
-  attendance: AttendanceCreateDto[];
+  attendance?: AttendanceCreateDto[];
 }
 
 export class SessionUpdateDto extends PartialType(SessionCreateDto) {
@@ -282,25 +311,31 @@ export class SessionUpdateDto extends PartialType(SessionCreateDto) {
 
   @ApiPropertyOptional({
     description: 'Lesson content for the session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   declare lessonContent?: string;
 
   @ApiPropertyOptional({
     description:
       'Homework assignment for the session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   declare homework?: string;
 
   @ApiPropertyOptional({
     description:
       'Session tutorial for the class session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   declare tutorial?: string;
 
   @ApiPropertyOptional({
@@ -369,11 +404,14 @@ export class StaffOpsAttendanceDto {
   status: AttendanceStatus;
 
   @ApiPropertyOptional({
-    description: 'Attendance note',
+    description:
+      'Rich-text attendance note, maximum 500 plain-text characters.',
     example: 'Đi trễ 10 phút.',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   notes?: string | null;
 }
 
@@ -388,10 +426,12 @@ export class CreateStaffOpsSessionDto {
   date: string;
 
   @ApiPropertyOptional({
-    description: 'Start time HH:mm or HH:mm:ss',
+    description:
+      'Start time HH:mm or HH:mm:ss. Bắt buộc khi lớp ở chế độ theo block 30 phút.',
     example: '19:00:00',
   })
   @IsOptional()
+  @ValidateIf((_obj, value) => value != null && String(value).trim() !== '')
   @IsString()
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/, {
     message: 'startTime must use HH:mm or HH:mm:ss format',
@@ -399,10 +439,12 @@ export class CreateStaffOpsSessionDto {
   startTime?: string;
 
   @ApiPropertyOptional({
-    description: 'End time HH:mm or HH:mm:ss',
+    description:
+      'End time HH:mm or HH:mm:ss. Bắt buộc khi lớp ở chế độ theo block 30 phút; phải sau startTime.',
     example: '20:30:00',
   })
   @IsOptional()
+  @ValidateIf((_obj, value) => value != null && String(value).trim() !== '')
   @IsString()
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/, {
     message: 'endTime must use HH:mm or HH:mm:ss format',
@@ -412,30 +454,50 @@ export class CreateStaffOpsSessionDto {
   @ApiPropertyOptional({
     description:
       'Session note (HTML/plain text accepted). Legacy field; prefer lessonContent.',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsOptional()
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   notes?: string | null;
 
   @ApiProperty({
     description: 'Lesson content for the session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   lessonContent: string;
 
   @ApiProperty({
     description:
       'Homework assignment for the session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   homework: string;
 
   @ApiProperty({
     description:
       'Session tutorial for the class session (HTML/plain text accepted).',
+    maxLength: CONTENT_LIMITS.sessionRichText,
   })
   @IsString()
+  @MaxLength(CONTENT_LIMITS.sessionRichText)
   tutorial: string;
+
+  @ApiPropertyOptional({
+    description: 'YouTube video recording URL for this session.',
+    example: 'https://youtube.com/watch?v=abc123',
+    nullable: true,
+    maxLength: CONTENT_LIMITS.url,
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => typeof value === 'string' && value.trim() !== '')
+  @IsUrl(HTTP_URL_OPTIONS)
+  @MaxLength(CONTENT_LIMITS.url)
+  recordingUrl?: string | null;
 
   @ApiPropertyOptional({
     description:
@@ -449,14 +511,16 @@ export class CreateStaffOpsSessionDto {
   @Max(1)
   coefficient?: number;
 
-  @ApiProperty({
-    description: 'Attendance items without financial overrides.',
+  @ApiPropertyOptional({
+    description:
+      'Attendance items without financial overrides. Required for normal classes; omitted for no-attendance classes (auto-generated as present).',
     type: [StaffOpsAttendanceDto],
   })
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => StaffOpsAttendanceDto)
-  attendance: StaffOpsAttendanceDto[];
+  attendance?: StaffOpsAttendanceDto[];
 }
 
 export class UpdateStaffOpsSessionDto extends PartialType(

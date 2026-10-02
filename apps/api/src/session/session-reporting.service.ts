@@ -5,6 +5,7 @@ import { SessionUnpaidSummaryItem } from '../dtos/session.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { StaffOperationsAccessService } from '../staff-ops/staff-operations-access.service';
 import { getUserFullNameFromParts } from '../common/user-name.util';
+import { SQL_TEACHER_SESSION_CAPPED_GROSS } from '../common/teacher-session-allowance-sql.util';
 import {
   redactSessionsForAccountantView,
   redactSessionsForTrainingManagerView,
@@ -219,26 +220,10 @@ export class SessionReportingService {
         sessions.class_id AS "classId",
         classes.name AS "className",
         SUM(
-          LEAST(
-            COALESCE(
-              NULLIF(classes.max_allowance_per_session, 0),
-              COALESCE(sessions.coefficient, 1) *
-                COALESCE(sessions.allowance_amount, 0)
-            ),
-            COALESCE(sessions.coefficient, 1) *
-              COALESCE(sessions.allowance_amount, 0)
-          ) -
+          ${SQL_TEACHER_SESSION_CAPPED_GROSS} -
           ROUND(
             (
-              LEAST(
-                COALESCE(
-                  NULLIF(classes.max_allowance_per_session, 0),
-                  COALESCE(sessions.coefficient, 1) *
-                    COALESCE(sessions.allowance_amount, 0)
-                ),
-                COALESCE(sessions.coefficient, 1) *
-                  COALESCE(sessions.allowance_amount, 0)
-              ) * COALESCE(sessions.teacher_tax_rate_percent, 0)
+              ${SQL_TEACHER_SESSION_CAPPED_GROSS} * COALESCE(sessions.teacher_tax_rate_percent, 0)
             ) / 100.0,
             0
           )

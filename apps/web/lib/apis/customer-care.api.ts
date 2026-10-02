@@ -1,11 +1,14 @@
 import type {
   CustomerCareBulkPaymentStatusUpdatePayload,
   CustomerCareBulkPaymentStatusUpdateResult,
+  CustomerCareBulkProfitPercentUpdatePayload,
+  CustomerCareBulkProfitPercentUpdateResult,
   CustomerCareCommissionListParams,
   CustomerCarePaymentStatus,
   CustomerCareStudentListResponse,
   CustomerCareCommissionItem,
   CustomerCareSessionCommissionItem,
+  CustomerCareStudentSummary,
   CustomerCareTopUpHistoryListResponse,
 } from "@/dtos/customer-care.dto";
 import { api } from "../client";
@@ -34,6 +37,23 @@ export async function getCustomerCareStudents(
       page: payload?.meta?.page ?? page,
       limit: payload?.meta?.limit ?? limit,
     },
+  };
+}
+
+export async function getCustomerCareStudentSummary(
+  staffId: string,
+  params: { month?: string } = {},
+): Promise<CustomerCareStudentSummary> {
+  const res = await api.get<CustomerCareStudentSummary>(
+    `/customer-care/staff/${encodeURIComponent(staffId)}/summary`,
+    { params },
+  );
+  const payload = res.data;
+  return {
+    monthKey: payload?.monthKey ?? "",
+    activeStudentsCount: payload?.activeStudentsCount ?? 0,
+    droppedStudentsThisMonth: payload?.droppedStudentsThisMonth ?? 0,
+    revenueThisMonth: payload?.revenueThisMonth ?? 0,
   };
 }
 
@@ -127,6 +147,17 @@ export async function bulkUpdateCustomerCarePaymentStatus(
 ): Promise<CustomerCareBulkPaymentStatusUpdateResult> {
   const res = await api.patch<CustomerCareBulkPaymentStatusUpdateResult>(
     `/customer-care/staff/${encodeURIComponent(staffId)}/payment-status/bulk`,
+    payload,
+  );
+  return res.data;
+}
+
+export async function bulkUpdateCustomerCareProfitPercent(
+  staffId: string,
+  payload: CustomerCareBulkProfitPercentUpdatePayload,
+): Promise<CustomerCareBulkProfitPercentUpdateResult> {
+  const res = await api.patch<CustomerCareBulkProfitPercentUpdateResult>(
+    `/customer-care/staff/${encodeURIComponent(staffId)}/profit-percent/bulk`,
     payload,
   );
   return res.data;

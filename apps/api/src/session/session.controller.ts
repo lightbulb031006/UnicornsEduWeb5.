@@ -72,7 +72,11 @@ export class SessionController {
   @Post()
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
-  @ApiOperation({ summary: 'Tạo session' })
+  @ApiOperation({
+    summary: 'Tạo session',
+    description:
+      'startTime và endTime bắt buộc; giờ kết thúc phải sau giờ bắt đầu. Cột DB vẫn nullable cho dữ liệu cũ.',
+  })
   @ApiBody({ type: SessionCreateDto, description: 'Session create payload' })
   @ApiResponse({ status: 201, description: 'Session đã được tạo.' })
   @ApiResponse({ status: 400, description: 'Lỗi khi tạo session.' })
@@ -94,7 +98,11 @@ export class SessionController {
     StaffRole.accountant_income,
     StaffRole.accountant_expense,
   )
-  @ApiOperation({ summary: 'Cập nhật session' })
+  @ApiOperation({
+    summary: 'Cập nhật session',
+    description:
+      'Nếu payload có startTime/endTime thì cả hai phải có và giờ kết thúc phải sau giờ bắt đầu. Buổi paid/deposit từ chối đổi giờ.',
+  })
   @ApiParam({ name: 'id', description: 'ID session' })
   @ApiBody({ type: SessionUpdateDto, description: 'Session update payload' })
   @ApiResponse({ status: 200, description: 'Session đã được cập nhật.' })

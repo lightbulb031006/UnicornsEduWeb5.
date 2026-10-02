@@ -34,6 +34,11 @@ const MENU_ITEMS: {
   { href: "/admin/staffs", label: "Nhân sự", icon: <IconStaff /> },
   { href: "/admin/classes", label: "Lớp học", icon: <IconClasses /> },
   {
+    href: "/admin/courses",
+    label: "Nội dung khoá",
+    icon: <IconExamLibrary />,
+  },
+  {
     href: "/admin/surveys",
     label: "Khảo sát",
     icon: <IconSurveys />,
@@ -44,9 +49,9 @@ const MENU_ITEMS: {
   { href: "/admin/lesson-plans", label: "Giáo Án", icon: <IconLessonPlans /> },
   { href: "/admin/calendar", label: "Lịch", icon: <IconCalendar /> },
   {
-    href: "/admin/deductions",
-    label: "Khấu trừ",
-    icon: <IconDeductions />,
+    href: "/admin/system-settings",
+    label: "Cài đặt hệ thống",
+    icon: <IconSystemSettings />,
   },
   { href: "/admin/notes-subject", label: "Quy định", icon: <IconNotesSubject /> },
   {
@@ -162,14 +167,20 @@ function IconCosts() {
     </svg>
   );
 }
-function IconDeductions() {
+function IconSystemSettings() {
   return (
     <svg className="size-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth={2}
-        d="M9 14h6m-6 4h3m6-10V6a2 2 0 00-2-2H8a2 2 0 00-2 2v2m12 0H6m12 0a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2v-8a2 2 0 012-2"
+        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
       />
     </svg>
   );
@@ -196,6 +207,19 @@ function IconCalendar() {
         strokeLinejoin="round"
         strokeWidth={2}
         d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
+function IconExamLibrary() {
+  return (
+    <svg className="size-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
       />
     </svg>
   );
@@ -355,7 +379,7 @@ export default function AdminSidebar() {
               variant="navbar"
               showWordmark={!compact}
               dense={compact}
-              className="w-full min-w-0 transition-all duration-300 ease-out"
+              className="w-full min-w-0 transition-[width,opacity] duration-300 ease-out"
               wordmarkClassName="truncate"
             />
           </div>
@@ -405,6 +429,9 @@ export default function AdminSidebar() {
                       isAssistantDashboardTarget &&
                       pathname === assistantDashboardHref
                     ? false
+                    : item.href === "/admin/system-settings"
+                      ? pathname.startsWith("/admin/system-settings") ||
+                        pathname.startsWith("/admin/deductions")
                     : pathname.startsWith(item.href);
               const isItemActive = activeHrefState
                 ? activeHrefState === resolvedHref

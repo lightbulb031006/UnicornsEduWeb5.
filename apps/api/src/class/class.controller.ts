@@ -36,6 +36,7 @@ import {
   CreateClassDto,
   UpdateClassBasicInfoDto,
   UpdateClassDto,
+  UpdateClassPricingModeDto,
   UpdateClassScheduleDto,
   UpdateClassStudentsDto,
   UpdateClassStudentTuitionDto,
@@ -115,10 +116,9 @@ export class ClassController {
     description: 'Filter by class status',
   })
   @ApiQuery({
-    name: 'type',
+    name: 'courseId',
     required: false,
-    enum: ['vip', 'basic', 'advance', 'hardcore'],
-    description: 'Filter by class type',
+    description: 'Filter by course id (see GET /courses)',
   })
   @ApiResponse({
     status: 200,
@@ -130,13 +130,13 @@ export class ClassController {
     @Query() query: PaginationQueryDto,
     @Query('search') search?: string,
     @Query('status') status?: string,
-    @Query('type') type?: string,
+    @Query('courseId') courseId?: string,
   ) {
     const classes = await this.classService.getClasses({
       ...query,
       search,
       status,
-      type,
+      courseId,
     });
     return redactClassListForAccountantView(
       classes,
@@ -186,7 +186,7 @@ export class ClassController {
   @ApiOperation({
     summary: 'Update class basic info',
     description:
-      'Update basic info and tuition. Changing allowance_per_session_per_student updates only the class default; per-teacher class_teachers.custom_allowance overrides are not modified.',
+      'Update basic info and tuition. Changing allowance_per_session_per_student updates only the class default; per-teacher class_teachers.custom_allowance overrides are not modified. student_tuition_per_block (optional): a number is stored as the class / 30 phút rate and is not overwritten by the package; null still derives ROUND(per-session ÷ standard blocks). Does not write student_tuition_per_session from the block field.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassBasicInfoDto })
@@ -199,6 +199,33 @@ export class ClassController {
     @Body() dto: UpdateClassBasicInfoDto,
   ) {
     return this.classService.updateClassBasicInfo(id, dto, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Patch(':id/pricing-mode')
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Đổi chế độ tính tiền của lớp',
+    description:
+      'Theo buổi (mặc định) hoặc theo block 30 phút. Buổi unpaid được tính lại học phí/trợ cấp/snapshot; buổi paid, deposit hoặc cọc không đổi. Từ chối bật theo block nếu không suy được số block chuẩn từ lịch cố định.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiBody({ type: UpdateClassPricingModeDto })
+  @ApiResponse({ status: 200, description: 'Class updated.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Không suy được số block chuẩn, hoặc payload không hợp lệ.',
+  })
+  @ApiResponse({ status: 404, description: 'Class not found.' })
+  async updateClassPricingMode(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseClassIdPipe()) id: string,
+    @Body() dto: UpdateClassPricingModeDto,
+  ) {
+    return this.classService.updateClassPricingMode(id, dto, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,
@@ -264,13 +291,20 @@ export class ClassController {
   @ApiOperation({
     summary: 'Update class schedule',
     description:
-      'Replace the class schedule (array of { dayOfWeek, from, to, teacherId } in HH:mm:ss).',
+      'Upsert schedule slots (array of { dayOfWeek, from, to, teacherId } in HH:mm:ss). ' +
+      'Slot đang active nhưng không có trong `schedule` sẽ được GIỮ NGUYÊN — muốn xoá phải liệt kê id trong `removedEntryIds`. ' +
+      'Truyền `expectedUpdatedAt` (lấy từ response GET class gần nhất) để bật optimistic lock, tránh ghi đè thay đổi của người khác.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassScheduleDto })
   @ApiResponse({ status: 200, description: 'Class updated.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Lịch vừa bị người khác cập nhật (optimistic lock) hoặc đang có request khác xử lý cùng lớp.',
+  })
   async updateClassSchedule(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -478,6 +512,20 @@ export class ClassController {
     );
   }
 
+  @Get('missing-standard-blocks')
+  @ApiOperation({
+    summary: 'List classes missing a standard 30-minute block count',
+    description:
+      'Classes without a unique active class_schedule_entries duration (to − from) that is a whole multiple of 30 minutes. Admin must enter per-block rates by hand for these classes.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Classes that could not be backfilled with per-block rates.',
+  })
+  listClassesMissingStandardBlockCount() {
+    return this.classService.listClassesMissingStandardBlockCount();
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get class by id',
@@ -503,7 +551,7 @@ export class ClassController {
   @ApiOperation({
     summary: 'Create class',
     description:
-      'Create a new class record. Class id is auto-generated by backend.',
+      'Create a new class record. Class id is auto-generated by backend. Optional student_tuition_per_block stores the class / 30 phút tuition rate as typed; omit or null to derive from student_tuition_per_session. The block field never writes student_tuition_per_session.',
   })
   @ApiBody({ type: CreateClassDto, description: 'Class create payload' })
   @ApiResponse({ status: 201, description: 'Class created.' })

@@ -77,7 +77,6 @@ export default function ProblemTutorialPopup({
 
   useEffect(() => {
     if (!open) return;
-    if (typeof document === "undefined") return;
 
     const existing = document.getElementById("katex-styles");
     if (existing) return;
@@ -168,7 +167,7 @@ export default function ProblemTutorialPopup({
         </div>
 
         <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
-          <label className="flex flex-col gap-1 text-sm text-text-secondary">
+          <div className="flex flex-col gap-1 text-sm text-text-secondary">
             <span>Nội dung tutorial</span>
             {isLoading ? (
               <div className="min-h-[180px] rounded-md border border-border-default bg-bg-secondary animate-pulse" />
@@ -198,7 +197,7 @@ export default function ProblemTutorialPopup({
                 )}
               </div>
             )}
-          </label>
+          </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-border-default pt-4">
             <button

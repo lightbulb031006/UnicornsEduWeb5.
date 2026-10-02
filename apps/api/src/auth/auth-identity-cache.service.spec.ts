@@ -129,4 +129,52 @@ describe('AuthIdentityCacheService', () => {
     expect(prisma.user.findUnique).toHaveBeenCalledTimes(2);
     expect(prisma.staffInfo.findUnique).toHaveBeenCalledTimes(2);
   });
+
+  describe('getHasActiveDevice', () => {
+    it('caches result and only calls hasActiveFn once on repeated calls', async () => {
+      const hasActiveFn = jest.fn().mockResolvedValue(true);
+
+      const result1 = await service.getHasActiveDevice('user-1', hasActiveFn);
+      const result2 = await service.getHasActiveDevice('user-1', hasActiveFn);
+
+      expect(result1).toBe(true);
+      expect(result2).toBe(true);
+      expect(hasActiveFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns false and caches it', async () => {
+      const hasActiveFn = jest.fn().mockResolvedValue(false);
+
+      const result = await service.getHasActiveDevice('user-1', hasActiveFn);
+
+      expect(result).toBe(false);
+      expect(hasActiveFn).toHaveBeenCalledTimes(1);
+
+      // Cached — second call does not re-invoke
+      const result2 = await service.getHasActiveDevice('user-1', hasActiveFn);
+      expect(result2).toBe(false);
+      expect(hasActiveFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-fetches after invalidateHasActiveDevice', async () => {
+      const hasActiveFn = jest.fn().mockResolvedValue(true);
+
+      await service.getHasActiveDevice('user-1', hasActiveFn);
+      expect(hasActiveFn).toHaveBeenCalledTimes(1);
+
+      service.invalidateHasActiveDevice('user-1');
+      await service.getHasActiveDevice('user-1', hasActiveFn);
+      expect(hasActiveFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('expires after TTL', async () => {
+      const hasActiveFn = jest.fn().mockResolvedValue(true);
+
+      await service.getHasActiveDevice('user-1', hasActiveFn);
+      jest.advanceTimersByTime(5_001);
+      await service.getHasActiveDevice('user-1', hasActiveFn);
+
+      expect(hasActiveFn).toHaveBeenCalledTimes(2);
+    });
+  });
 });

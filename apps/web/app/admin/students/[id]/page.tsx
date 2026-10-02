@@ -10,16 +10,22 @@ import {
     StudentBalancePopup,
     StudentDetailRow,
     StudentInfoCard,
+    STUDENT_DETAIL_BASIC_INFO_OPEN_KEY,
+    STUDENT_DETAIL_PARENT_CONTACT_OPEN_KEY,
     StudentExamCard,
     StudentWalletHistoryPopup,
     StudentWalletCard,
     StudentClassTuitionPopup,
+    StudentDevicePopup,
 } from "@/components/admin/student";
 import { UserLinkedProfileLinks } from "@/components/admin/user";
 import ParentReceiptEmailSwitch from "@/components/student/ParentReceiptEmailSwitch";
 import OjProgressSection from "@/components/student/OjProgressSection";
+import AchievementListEditor from "@/components/shared/achievement/AchievementListEditor";
+import StudentGalleryEditor from "@/components/shared/student-gallery/StudentGalleryEditor";
+import PreviewableUserAvatar from "@/components/ui/PreviewableUserAvatar";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
-import type { StudentDetail, StudentGender, StudentStatus } from "@/dtos/student.dto";
+import { STUDENT_CUSTOMER_SOURCE_LABELS, type StudentDetail, type StudentGender, type StudentStatus } from "@/dtos/student.dto";
 import { StudentLevelBadge } from "@/components/ui/LevelBadge";
 import {
     buildAdminLikePath,
@@ -28,8 +34,11 @@ import {
 import { resolveStudentAdminCapabilities, resolveUserAdminCapabilities } from "@/lib/admin-shell-access";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import * as studentApi from "@/lib/apis/student.api";
+import { pickAvatarUrl } from "@/lib/avatar";
 import { formatCurrency } from "@/lib/class.helpers";
 import { cn } from "@/lib/utils";
+import { forceLogoutStudent } from "@/lib/apis/auth.api";
+import { formatVnDate } from "@/lib/formatters";
 
 const STATUS_LABELS: Record<StudentStatus, string> = {
     active: "Đang học",
@@ -44,11 +53,7 @@ const GENDER_LABELS: Record<StudentGender, string> = {
 function formatDate(iso?: string | null): string {
   if (!iso) return "—";
   try {
-        return new Intl.DateTimeFormat("vi-VN", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-        }).format(new Date(iso));
+        return formatVnDate(new Date(iso));
     } catch {
         return "—";
   }
@@ -107,6 +112,7 @@ export default function AdminStudentDetailPage() {
     const [classesPopupOpen, setClassesPopupOpen] = useState(false);
     const [balancePopupMode, setBalancePopupMode] = useState<"topup" | "withdraw" | null>(null);
     const [walletHistoryOpen, setWalletHistoryOpen] = useState(false);
+    const [devicePopupOpen, setDevicePopupOpen] = useState(false);
     const [editingPackageForClassId, setEditingPackageForClassId] = useState<string | null>(null);
     const queryClient = useQueryClient();
     const { data: fullProfile } = useQuery({
@@ -175,6 +181,42 @@ export default function AdminStudentDetailPage() {
             await queryClient.invalidateQueries({ queryKey: ["student", "detail", id] });
             toast.success("Đã cập nhật cài đặt gửi biên lai.");
         },
+    });
+
+    const forceLogoutMutation = useMutation({
+        mutationFn: () => {
+            if (!student?.userId) {
+                throw new Error("Student userId not available");
+            }
+            return forceLogoutStudent(student.userId);
+        },
+        onSuccess: async () => {
+            toast.success("Đã buộc đăng xuất học sinh.");
+        },
+        onError: (err: unknown) => {
+            const msg =
+                (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+                "Không thể buộc đăng xuất.";
+            toast.error(msg);
+        },
+    });
+
+    const uploadAvatarMutation = useMutation({
+        mutationFn: (file: File) => studentApi.uploadStudentAvatar(id, file),
+        onSuccess: async (data) => {
+            queryClient.setQueryData(["student", "detail", id], data);
+            toast.success("Đã cập nhật ảnh đại diện.");
+        },
+        onError: () => toast.error("Không thể tải ảnh đại diện."),
+    });
+
+    const deleteAvatarMutation = useMutation({
+        mutationFn: () => studentApi.deleteStudentAvatar(id),
+        onSuccess: async (data) => {
+            queryClient.setQueryData(["student", "detail", id], data);
+            toast.success("Đã xoá ảnh đại diện.");
+        },
+        onError: () => toast.error("Không thể xoá ảnh đại diện."),
     });
 
     const {
@@ -309,6 +351,10 @@ export default function AdminStudentDetailPage() {
     const parentReceiptEmailEnabled = student.parentReceiptEmailEnabled !== false;
     const isReceiptTogglePending = receiptEmailMutation.isPending;
     const initials = (student.fullName?.trim() || student.email || "?").charAt(0).toUpperCase();
+    const studentAvatarUrl = pickAvatarUrl(student.avatarUrl);
+    const avatarBusy =
+        uploadAvatarMutation.isPending || deleteAvatarMutation.isPending;
+    const canEditAvatar = canEditStudentProfile && Boolean(student.userId);
     const contactEmail = student.email?.trim() || "Chưa có email";
     const sePayStaticQrErrorMessage =
         (sePayStaticQrError as { response?: { data?: { message?: string } } } | null)?.response?.data?.message ??
@@ -334,6 +380,7 @@ export default function AdminStudentDetailPage() {
                     onClose={() => setEditPopupOpen(false)}
                     student={student}
                     canEditCustomerCareProfitPercent={canEditCustomerCareProfitPercent}
+                    canEditAchievementsAndGallery={canManageStudent}
                 />
             ) : null}
             {canManageStudent ? (
@@ -427,6 +474,14 @@ export default function AdminStudentDetailPage() {
                     currentBalance={student.accountBalance ?? 0}
                 />
             ) : null}
+            {canManageStudent ? (
+                <StudentDevicePopup
+                    open={devicePopupOpen}
+                    onClose={() => setDevicePopupOpen(false)}
+                    studentId={student.id}
+                    studentName={student.fullName?.trim() || "Học sinh"}
+                />
+            ) : null}
             {canEditStudentClassTuition && editingPackageForClassId ? (() => {
                 const item = classItemsWithTuition.find((classItem) => classItem.classId === editingPackageForClassId);
 
@@ -456,22 +511,62 @@ export default function AdminStudentDetailPage() {
                     />
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="flex min-w-0 flex-1 items-start gap-3.5 sm:gap-4">
-                            <div className="relative shrink-0">
-                                <div className="flex size-14 items-center justify-center rounded-[1.25rem] border border-border-default bg-bg-secondary text-lg font-semibold text-text-primary shadow-sm sm:size-20 sm:rounded-2xl sm:text-3xl">
-                                    {initials}
+                            <div className="relative flex shrink-0 flex-col items-center gap-2">
+                                <div className="relative">
+                                    <PreviewableUserAvatar
+                                        src={studentAvatarUrl}
+                                        fallback={initials}
+                                        alt={`Avatar ${student.fullName?.trim() || "học sinh"}`}
+                                        displayName={student.fullName?.trim() || "Học sinh"}
+                                        className="size-14 rounded-[1.25rem] bg-bg-secondary text-lg font-semibold text-text-primary ring-1 ring-border-default sm:size-20 sm:rounded-2xl sm:text-3xl"
+                                        buttonClassName="rounded-[1.25rem] sm:rounded-2xl"
+                                    />
+                                    <span
+                                        className={`absolute -bottom-1 -right-1 block size-3.5 rounded-full border-2 border-bg-surface ${normalizedStatus === "active" ? "bg-success" : "bg-error"
+                                            }`}
+                                        aria-hidden
+                                    />
                                 </div>
-                                <span
-                                    className={`absolute -bottom-1 -right-1 block size-3.5 rounded-full border-2 border-bg-surface ${normalizedStatus === "active" ? "bg-success" : "bg-error"
-                                        }`}
-                                    aria-hidden
-                                />
+                                {canEditAvatar ? (
+                                    <div className="flex max-w-[9.5rem] flex-col items-center gap-1">
+                                        <label className="cursor-pointer text-[11px] font-medium text-primary hover:underline">
+                                            {uploadAvatarMutation.isPending
+                                                ? "Đang tải…"
+                                                : studentAvatarUrl
+                                                  ? "Đổi ảnh"
+                                                  : "Tải ảnh"}
+                                            <input
+                                                type="file"
+                                                accept="image/jpeg,image/png,image/webp"
+                                                className="sr-only"
+                                                disabled={avatarBusy}
+                                                onChange={(event) => {
+                                                    const file = event.target.files?.[0];
+                                                    event.target.value = "";
+                                                    if (file) uploadAvatarMutation.mutate(file);
+                                                }}
+                                            />
+                                        </label>
+                                        {studentAvatarUrl ? (
+                                            <button
+                                                type="button"
+                                                disabled={avatarBusy}
+                                                onClick={() => deleteAvatarMutation.mutate()}
+                                                className="text-[11px] font-medium text-text-muted hover:text-danger disabled:opacity-50"
+                                            >
+                                                {deleteAvatarMutation.isPending
+                                                    ? "Đang xoá…"
+                                                    : "Xoá ảnh"}
+                                            </button>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                             </div>
 
                             <div className="min-w-0 flex-1">
                                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-muted">
                                     Thông tin học sinh
-                                </p>
-                                <div className="mt-2 flex flex-col gap-2">
+                                </p>                                <div className="mt-2 flex flex-col gap-2">
                                     <div className="flex items-center gap-2">
                                         <h1 className="min-w-0 text-2xl font-semibold leading-tight text-text-primary sm:truncate">
                                             {student.fullName?.trim() || "Học sinh"}
@@ -486,6 +581,37 @@ export default function AdminStudentDetailPage() {
                                             >
                                                 <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-5m-1.414-9.414a2 2 0 1 1 2.828 2.828L11.828 15H9v-2.828l8.586-8.586Z" />
+                                                </svg>
+                                            </button>
+                                        ) : null}
+                                        {canManageUsers && student.userId ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (confirm("Buộc đăng xuất học sinh này? Thiết bị hiện tại sẽ bị ngắt kết nối.")) {
+                                                        forceLogoutMutation.mutate();
+                                                    }
+                                                }}
+                                                disabled={forceLogoutMutation.isPending}
+                                                className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-muted transition hover:bg-error/10 hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:size-8 disabled:opacity-50"
+                                                aria-label="Buộc đăng xuất học sinh"
+                                                title="Buộc đăng xuất"
+                                            >
+                                                <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                                </svg>
+                                            </button>
+                                        ) : null}
+                                        {canManageStudent ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setDevicePopupOpen(true)}
+                                                className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-muted transition hover:bg-bg-tertiary hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:size-8"
+                                                aria-label="Quản trị thiết bị"
+                                                title="Quản trị thiết bị"
+                                            >
+                                                <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
                                                 </svg>
                                             </button>
                                         ) : null}
@@ -537,11 +663,41 @@ export default function AdminStudentDetailPage() {
                     </div>
 
                     <div className="mt-4 grid gap-3.5 sm:mt-5 sm:gap-4">
-                        <div className="grid min-w-0 gap-3.5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,0.95fr)_minmax(0,1.1fr)] sm:gap-4">
-                            <StudentInfoCard title="Thông tin cơ bản">
+                        <div className="grid min-w-0 gap-3.5 sm:grid-cols-2 sm:gap-4">
+                            <StudentWalletCard
+                                className="min-w-0"
+                                balance={student.accountBalance ?? 0}
+                                onTopUp={canCreateWalletQr || canDirectlyAdjustWallet ? handleTopUp : undefined}
+                                onWithdraw={canDirectlyWithdrawWallet ? handleWithdraw : undefined}
+                                onOpenHistory={canManageStudent ? () => setWalletHistoryOpen(true) : undefined}
+                            />
+                            <StudentExamCard
+                                className="min-w-0"
+                                key={student.id}
+                                studentId={student.id}
+                            />
+                        </div>
+
+                        <div className="grid min-w-0 gap-3.5 sm:grid-cols-2 sm:gap-4">
+                            <StudentInfoCard
+                                title="Thông tin cơ bản"
+                                collapsible
+                                defaultOpen={false}
+                                storageKey={STUDENT_DETAIL_BASIC_INFO_OPEN_KEY}
+                            >
                                 <dl className="divide-y divide-border-subtle">
                                     <StudentDetailRow label="Email" value={student.email?.trim() || "—"} />
                                     <StudentDetailRow label="Trường" value={student.school?.trim() || "—"} />
+                                    <StudentDetailRow
+                                        label="Nguồn khách"
+                                        value={
+                                            student.customerSource
+                                                ? student.customerSource === "other" && student.customerSourceNote?.trim()
+                                                    ? `${STUDENT_CUSTOMER_SOURCE_LABELS.other} · ${student.customerSourceNote.trim()}`
+                                                    : STUDENT_CUSTOMER_SOURCE_LABELS[student.customerSource]
+                                                : "Chưa gán"
+                                        }
+                                    />
                                     <StudentDetailRow label="Tỉnh / Thành phố" value={student.province?.trim() || "—"} />
                                     <StudentDetailRow
                                         label="CSKH phụ trách"
@@ -562,7 +718,12 @@ export default function AdminStudentDetailPage() {
                                 </dl>
                             </StudentInfoCard>
 
-                            <StudentInfoCard title="Liên hệ phụ huynh">
+                            <StudentInfoCard
+                                title="Liên hệ phụ huynh"
+                                collapsible
+                                defaultOpen={false}
+                                storageKey={STUDENT_DETAIL_PARENT_CONTACT_OPEN_KEY}
+                            >
                                 <dl className="divide-y divide-border-subtle">
                                     <StudentDetailRow label="Họ tên" value={student.parentName?.trim() || "—"} />
                                     <StudentDetailRow label="Số điện thoại" value={student.parentPhone?.trim() || "—"} />
@@ -598,17 +759,27 @@ export default function AdminStudentDetailPage() {
                                     </p>
                                 )}
                             </StudentInfoCard>
-
-                            <div className="min-w-0 space-y-3.5 xl:col-span-1 xl:space-y-4">
-                                <StudentWalletCard
-                                    balance={student.accountBalance ?? 0}
-                                    onTopUp={canCreateWalletQr || canDirectlyAdjustWallet ? handleTopUp : undefined}
-                                    onWithdraw={canDirectlyWithdrawWallet ? handleWithdraw : undefined}
-                                    onOpenHistory={canManageStudent ? () => setWalletHistoryOpen(true) : undefined}
-                                />
-                                <StudentExamCard key={student.id} studentId={student.id} />
-                            </div>
                         </div>
+
+                        <StudentInfoCard title="Thành tích">
+                            <AchievementListEditor
+                                owner={{
+                                    kind: "student",
+                                    mode: "admin",
+                                    studentId: student.id,
+                                }}
+                                editable={canManageStudent}
+                                heading=""
+                            />
+                        </StudentInfoCard>
+
+                        <StudentInfoCard title="Feedback">
+                            <StudentGalleryEditor
+                                studentId={student.id}
+                                editable={canManageStudent}
+                                heading=""
+                            />
+                        </StudentInfoCard>
 
                         {/* <StudentInfoCard title="Phân bổ lớp học"> */}
                         <div className="rounded-[1.25rem] border border-border-default bg-bg-secondary/50 p-3.5 sm:rounded-2xl sm:p-4">

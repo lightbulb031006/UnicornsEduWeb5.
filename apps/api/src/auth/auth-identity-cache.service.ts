@@ -35,6 +35,10 @@ export class AuthIdentityCacheService {
     CacheEntry<CachedAuthIdentity | null>
   >();
   private readonly staffRolesCache = new Map<string, CacheEntry<StaffRole[]>>();
+  private readonly hasActiveDeviceCache = new Map<
+    string,
+    CacheEntry<boolean>
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -144,6 +148,25 @@ export class AuthIdentityCacheService {
   invalidateUser(userId: string) {
     this.authIdentityCache.delete(userId);
     this.staffRolesCache.delete(userId);
+    this.hasActiveDeviceCache.delete(userId);
+  }
+
+  async getHasActiveDevice(
+    userId: string,
+    hasActiveFn: () => Promise<boolean>,
+  ): Promise<boolean> {
+    const cached = this.readFromCache(this.hasActiveDeviceCache, userId);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const result = await hasActiveFn();
+    this.writeToCache(this.hasActiveDeviceCache, userId, result);
+    return result;
+  }
+
+  invalidateHasActiveDevice(userId: string) {
+    this.hasActiveDeviceCache.delete(userId);
   }
 
   private readFromCache<T>(

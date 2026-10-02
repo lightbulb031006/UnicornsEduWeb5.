@@ -55,8 +55,6 @@ export default function RichTextEditor({
         ? [
             Placeholder.configure({
               placeholder,
-              // TipTap requires float + height:0 so the ::before placeholder
-              // does not take layout space (otherwise caret lands mid/end of text).
               emptyEditorClass:
                 "before:content-[attr(data-placeholder)] before:float-left before:h-0 before:pointer-events-none before:text-text-muted before:opacity-70",
             }),
@@ -78,8 +76,6 @@ export default function RichTextEditor({
 
   useEffect(() => {
     if (!editor) return;
-    // Only apply external value changes (load session, reset form). Skip echo
-    // of our own onChange — sanitizing/re-setting TipTap Link HTML resets caret.
     if (isSameEditorHtml(value, lastEmittedHtmlRef.current)) return;
     lastEmittedHtmlRef.current = value;
     const current = editor.getHTML();

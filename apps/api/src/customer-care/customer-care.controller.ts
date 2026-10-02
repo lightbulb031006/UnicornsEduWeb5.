@@ -21,10 +21,13 @@ import { Roles } from 'src/auth/decorators/roles.decorator';
 import type {
   CustomerCareBulkPaymentStatusUpdateDto,
   CustomerCareBulkPaymentStatusUpdateResultDto,
+  CustomerCareBulkProfitPercentUpdateDto,
+  CustomerCareBulkProfitPercentUpdateResultDto,
   CustomerCareCommissionDto,
   CustomerCareCommissionListDto,
   CustomerCareSessionCommissionDto,
   CustomerCareStudentListDto,
+  CustomerCareStudentSummaryDto,
   CustomerCareTopUpHistoryListDto,
 } from 'src/dtos/customer-care.dto';
 import { CustomerCareService } from './customer-care.service';
@@ -71,6 +74,34 @@ export class CustomerCareController {
         page: page ? parseInt(page, 10) : undefined,
         limit: limit ? parseInt(limit, 10) : undefined,
       },
+    );
+  }
+
+  @Get('staff/:staffId/summary')
+  @ApiOperation({
+    summary: 'Student summary for customer care (current or given month)',
+    description:
+      'Số học sinh đang học, số học sinh nghỉ trong tháng, và tổng học phí đã học (doanh thu) trong tháng, cho toàn bộ học sinh gán cho CSKH này.',
+  })
+  @ApiParam({ name: 'staffId', description: 'Staff ID' })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    type: String,
+    description: 'Month key YYYY-MM (default: current month).',
+  })
+  @ApiResponse({ status: 200, description: 'Student summary.' })
+  @ApiResponse({ status: 404, description: 'Staff not found.' })
+  async getStudentSummaryByStaffId(
+    @CurrentUser() user: JwtPayload,
+    @Param('staffId', new ParseStaffIdPipe()) staffId: string,
+    @Query('month') month?: string,
+  ): Promise<CustomerCareStudentSummaryDto> {
+    return this.customerCareService.getStudentSummaryByStaffId(
+      user.id,
+      user.roleType,
+      staffId,
+      month,
     );
   }
 
@@ -285,6 +316,55 @@ export class CustomerCareController {
       staffId,
       data.attendanceIds,
       data.paymentStatus,
+    );
+  }
+
+  @Patch('staff/:staffId/profit-percent/bulk')
+  @ApiOperation({
+    summary: 'Bulk overwrite CSKH profit percent for selected students',
+    description:
+      'Ghi đè profitPercent cho các học sinh đã chọn (chỉ trong phạm vi staffId này). Chỉ admin hoặc staff có role trợ lí được gọi. Không hồi tố: chỉ áp dụng từ session tạo/sửa tiếp theo.',
+  })
+  @ApiParam({ name: 'staffId', description: 'Staff ID' })
+  @ApiBody({
+    description: 'Bulk profit percent update payload',
+    schema: {
+      type: 'object',
+      required: ['studentIds', 'profitPercent'],
+      properties: {
+        studentIds: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        profitPercent: {
+          type: 'number',
+          description: 'Fraction 0.00-0.99',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Selected customer-care service rows updated.',
+    type: Object,
+  })
+  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({ status: 403, description: 'Forbidden.' })
+  @ApiResponse({
+    status: 404,
+    description: 'At least one student was not found for this staff.',
+  })
+  async bulkUpdateProfitPercent(
+    @CurrentUser() user: JwtPayload,
+    @Param('staffId', new ParseStaffIdPipe()) staffId: string,
+    @Body() data: CustomerCareBulkProfitPercentUpdateDto,
+  ): Promise<CustomerCareBulkProfitPercentUpdateResultDto> {
+    return this.customerCareService.bulkUpdateProfitPercent(
+      user.id,
+      user.roleType,
+      staffId,
+      data.studentIds,
+      data.profitPercent,
     );
   }
 }

@@ -8,7 +8,9 @@ import {
   Patch,
   Post,
   Query,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   ApiBody,
   ApiCookieAuth,
@@ -32,6 +34,7 @@ import {
   UpdateUserDto,
 } from 'src/dtos/user.dto';
 import { UserService } from './user.service';
+import { readProxyPublicOrigin } from 'src/mail/public-frontend-url';
 
 @ApiTags('users')
 @Controller('users')
@@ -121,12 +124,17 @@ export class UserController {
   async createUser(
     @CurrentUser() user: JwtPayload,
     @Body() data: AdminCreateUserDto,
+    @Req() req: Request,
   ) {
-    return this.userService.createUser(data, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    return this.userService.createUser(
+      data,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+      readProxyPublicOrigin(req),
+    );
   }
 
   @Post('student')
@@ -155,12 +163,17 @@ export class UserController {
   async createStudentUser(
     @CurrentUser() user: JwtPayload,
     @Body() data: AdminCreateStudentUserDto,
+    @Req() req: Request,
   ) {
-    return this.userService.createStudentUser(data, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    return this.userService.createStudentUser(
+      data,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+      readProxyPublicOrigin(req),
+    );
   }
 
   @Patch()

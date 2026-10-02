@@ -15,6 +15,7 @@ import type {
 } from "@/dtos/lesson.dto";
 import * as lessonApi from "@/lib/apis/lesson.api";
 import LessonTagPicker from "./LessonTagPicker";
+import { formatVnDate } from "@/lib/formatters";
 import {
   LESSON_TASK_PRIORITY_LABELS,
   LESSON_TASK_STATUS_LABELS,
@@ -46,11 +47,7 @@ function formatLessonDate(value: string | null) {
     return "Chưa có deadline";
   }
 
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(value));
+  return formatVnDate(new Date(value));
 }
 
 function LessonResourceFormPopupContent({

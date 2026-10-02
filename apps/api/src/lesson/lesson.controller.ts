@@ -328,7 +328,8 @@ export class LessonController {
   @Post('lesson-outputs')
   @ApiOperation({
     summary: 'Create lesson output',
-    description: 'Create a lesson output under a lesson task.',
+    description:
+      'Create a lesson output. `cost` from the client is ignored; backend computes it from `difficultyBand` + item flags. `level` remains a search/filter field and is unrelated to pricing.',
   })
   @ApiBody({
     type: CreateLessonOutputDto,
@@ -354,7 +355,8 @@ export class LessonController {
   @Patch('lesson-outputs/:id')
   @ApiOperation({
     summary: 'Update lesson output',
-    description: 'Update a lesson output by id.',
+    description:
+      'Update a lesson output by id. `cost` from the client is ignored. If the output has (or is given) a difficulty band, cost is recomputed from the band and item flags. Outputs without a band keep the stored cost when the band is not set.',
   })
   @ApiParam({
     name: 'id',

@@ -1,5 +1,7 @@
 "use client";
 
+import { Suspense } from "react";
+
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -11,6 +13,10 @@ import type {
 } from "@/dtos/student.dto";
 import * as studentApi from "@/lib/apis/student.api";
 import { cn } from "@/lib/utils";
+import {
+  formatVnCurrency,
+  formatVnDateTime,
+} from "@/lib/formatters";
 
 const PAGE_SIZE = 20;
 
@@ -48,24 +54,14 @@ function buildUrl(pathname: string, params: URLSearchParams): string {
 }
 
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
+  return formatVnCurrency(value);
 }
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return formatVnDateTime(date);
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -168,7 +164,7 @@ function DirectTopUpRequestCard({
   );
 }
 
-export default function AdminWalletDirectTopUpRequestsPage() {
+function AdminWalletDirectTopUpRequestsPageContent() {
   const pathname = usePathname();
   const { replace } = useRouter();
   const searchParams = useSearchParams();
@@ -442,5 +438,14 @@ export default function AdminWalletDirectTopUpRequestsPage() {
         </section>
       </div>
     </div>
+  );
+}
+
+export default function AdminWalletDirectTopUpRequestsPage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <AdminWalletDirectTopUpRequestsPageContent />
+    </Suspense>
   );
 }

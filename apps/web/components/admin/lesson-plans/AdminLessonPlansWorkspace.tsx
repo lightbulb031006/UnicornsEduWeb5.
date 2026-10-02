@@ -2,7 +2,7 @@
 
 import {
   AnimatePresence,
-  motion,
+  m,
   useReducedMotion,
   type Transition,
 } from "framer-motion";
@@ -670,7 +670,7 @@ export default function AdminLessonPlansWorkspace({
                 >
                   <span className="relative z-10">{TAB_LABELS[tabId]}</span>
                   {isActive ? (
-                    <motion.span
+                    <m.span
                       layoutId="lesson-plans-tab-underline"
                       aria-hidden
                       className="absolute bottom-0 left-0 right-0 h-[2px] rounded-full bg-primary"
@@ -686,7 +686,7 @@ export default function AdminLessonPlansWorkspace({
         <div className="min-w-0 flex-1">
           <AnimatePresence mode="wait" initial={false}>
             {activeTabState === "overview" ? (
-            <motion.section
+            <m.section
               key="overview"
               id="lesson-panel-overview"
               role="tabpanel"
@@ -1471,9 +1471,9 @@ export default function AdminLessonPlansWorkspace({
                   </section>
                 </>
               )}
-            </motion.section>
+            </m.section>
           ) : activeTabState === "work" ? (
-            <motion.div key="work" className="min-w-0" {...panelMotionProps}>
+            <m.div key="work" className="min-w-0" {...panelMotionProps}>
               <LessonWorkTab
                 basePagePath={basePath}
                 outputAccessMode={resolvedWorkAccessMode}
@@ -1483,15 +1483,15 @@ export default function AdminLessonPlansWorkspace({
                 allowBulkPaymentStatusEdit={canEditOutputPaymentStatus}
                 allowDelete={canDelete}
               />
-            </motion.div>
+            </m.div>
           ) : (
-            <motion.div key="exercises" className="min-w-0" {...panelMotionProps}>
+            <m.div key="exercises" className="min-w-0" {...panelMotionProps}>
               <LessonExercisesTab
                 basePagePath={basePath}
                 manageDetailsPath={manageDetailsPath}
                 participantMode={participantMode}
               />
-            </motion.div>
+            </m.div>
           )}
           </AnimatePresence>
         </div>

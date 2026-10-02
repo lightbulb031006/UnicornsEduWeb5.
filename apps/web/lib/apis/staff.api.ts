@@ -11,10 +11,15 @@ import {
     StaffPayAllPaymentsResult,
     StaffPaySelectedPaymentsPayload,
     StaffPaymentPreview,
+    StaffRevenueShare,
     StaffIncomeSummary,
+    StaffFixedSalaryPayableItem,
+    UpdateStaffFixedSalaryPayablePayload,
     StaffListResponse,
     StaffOption,
     StaffStatus,
+    UpdateStaffPayload,
+    UpdateStaffWithFixedSalaryOverridesPayload,
 } from '@/dtos/staff.dto';
 import { CreateUserPayload, UpdateUserPayload } from '@/dtos/user.dto';
 import { api } from '../client';
@@ -115,27 +120,21 @@ export async function patchStaffClassTeacherOperatingDeduction(
 }
 
 /** Cập nhật thông tin nhân sự: PATCH /staff */
-export async function updateStaff(payload: {
-    id: string;
-    full_name?: string;
-    cccd_number?: string;
-    ethnicity?: string;
-    gender?: "male" | "female";
-    current_address?: string;
-    cccd_issued_date?: string;
-    cccd_issued_place?: string;
-    birth_date?: string;
-    university?: string;
-    high_school?: string;
-    specialization?: string;
-    bank_account?: string;
-    bank_qr_link?: string;
-    personal_achievement_link?: string | null;
-    roles?: string[];
-    status?: StaffStatus;
-    customer_care_managed_by_staff_id?: string | null;
-}): Promise<StaffDetail> {
+export async function updateStaff(payload: UpdateStaffPayload): Promise<StaffDetail> {
     const response = await api.patch("/staff", payload);
+    return response.data;
+}
+
+/** Cập nhật hồ sơ, vai trò và mức đè lương cứng trong một transaction: PATCH /staff/:id/with-fixed-salary-overrides */
+export async function updateStaffWithFixedSalaryOverrides(
+    payload: UpdateStaffWithFixedSalaryOverridesPayload,
+): Promise<StaffDetail> {
+    const { id, ...body } = payload;
+    const safeId = encodeURIComponent(id);
+    const response = await api.patch(
+        `/staff/${safeId}/with-fixed-salary-overrides`,
+        body,
+    );
     return response.data;
 }
 
@@ -240,6 +239,24 @@ export async function getStaffIncomeSummary(
     return normalizeStaffIncomeSummary(response.data);
 }
 
+export async function getStaffRevenueShare(
+    id: string,
+    params: {
+        month: string;
+        year: string;
+    },
+): Promise<StaffRevenueShare> {
+    const safeId = encodeURIComponent(id);
+    const response = await api.get<StaffRevenueShare>(`/staff/${safeId}/revenue-share`, {
+        params: {
+            month: params.month,
+            year: params.year,
+        },
+    });
+
+    return response.data;
+}
+
 export async function getStaffPaymentPreview(
     id: string,
     params: {
@@ -307,6 +324,21 @@ export async function payStaffDepositSessions(
     const safeId = encodeURIComponent(id);
     const response = await api.patch<StaffPayDepositSessionsResult>(
         `/staff/${safeId}/payment-status/pay-deposit`,
+        data,
+    );
+
+    return response.data;
+}
+
+export async function updateStaffFixedSalaryPayable(
+    staffId: string,
+    payableId: string,
+    data: UpdateStaffFixedSalaryPayablePayload,
+): Promise<StaffFixedSalaryPayableItem> {
+    const safeStaffId = encodeURIComponent(staffId);
+    const safePayableId = encodeURIComponent(payableId);
+    const response = await api.patch<StaffFixedSalaryPayableItem>(
+        `/staff/${safeStaffId}/fixed-salary-payables/${safePayableId}`,
         data,
     );
 

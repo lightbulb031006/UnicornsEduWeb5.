@@ -50,7 +50,7 @@ export default function AlertGroupCard({
         {alerts.length > 0 ? (
           alerts.map((item) => (
             <button
-              key={`${title}-${item.targetId}-${item.subject}`}
+              key={`${title}-${item.targetId}-${item.due ?? item.subject}`}
               type="button"
               onClick={() => onOpenAlert(item)}
               className={`w-full rounded-md border px-2 py-1.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${itemToneClass}`}

@@ -17,6 +17,7 @@ import {
   Gender,
   StaffRole,
   StudentClassStatus,
+  StudentCustomerSource,
   StudentStatus,
   StudentWalletDirectTopUpRequestStatus,
   UserRole,
@@ -42,7 +43,28 @@ import {
   UpdateStudentDto,
   UpdateStudentStatusDto,
 } from 'src/dtos/student.dto';
-import { StudentLandingProfileQueryDto } from 'src/dtos/landing-profile.dto';
+import {
+  StudentLandingAchievementsQueryDto,
+  StudentLandingProfileQueryDto,
+} from 'src/dtos/landing-profile.dto';
+import { mapLandingStudentAchievements } from 'src/achievements/achievement-landing.mapper';
+import { mapLandingStudentGallery } from 'src/student-gallery/student-gallery-landing.mapper';
+import {
+  AVATAR_PUBLIC_BUCKET,
+  AVATAR_STORAGE_BUCKET,
+} from 'src/storage/media-buckets';
+import {
+  createPublicStorageUrl,
+  createSignedStorageUrl,
+  removeStorageObjects,
+  uploadStorageObject,
+  type UploadableFile,
+  validateImageFile,
+} from 'src/storage/supabase-storage';
+import {
+  bakeDiagonalWatermark,
+  buildAvatarWatermarkedPath,
+} from 'src/storage/image-watermark';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { getUserFullNameFromParts } from 'src/common/user-name.util';
 import {
@@ -69,6 +91,8 @@ const RECENT_TOP_UP_DAYS = 21;
 const RECENT_TOP_UP_THRESHOLD = 300_000;
 const DIRECT_TOPUP_APPROVAL_TOKEN_DAYS = 14;
 const DIRECT_TOPUP_APPROVAL_TOKEN_BYTES = 32;
+const AVATAR_STORAGE_PATH_SEGMENT = 'avatar';
+const AVATAR_SIGNED_URL_TTL_SECONDS = 60 * 60;
 const ADMIN_EMAIL_PLACEHOLDER_DOMAINS = new Set([
   'example.com',
   'example.net',
@@ -103,6 +127,12 @@ const studentDetailInclude = {
   studentClasses: studentClassDetailInclude,
   examSchedules: {
     orderBy: [{ examDate: 'asc' }, { createdAt: 'asc' }],
+  },
+  user: {
+    select: {
+      id: true,
+      avatarPath: true,
+    },
   },
   customerCareServices: {
     include: {
@@ -430,10 +460,32 @@ export class StudentService {
     };
   }
 
+  private async createAvatarSignedUrl(path?: string | null) {
+    return createSignedStorageUrl({
+      bucket: AVATAR_STORAGE_BUCKET,
+      path,
+      expiresIn: AVATAR_SIGNED_URL_TTL_SECONDS,
+    });
+  }
+
+  private buildAvatarStoragePath(userId: string) {
+    return `users/${userId}/${AVATAR_STORAGE_PATH_SEGMENT}`;
+  }
+
+  private async withStudentAvatarUrl<T extends { avatarPath?: string | null }>(
+    detail: T,
+  ) {
+    return {
+      ...detail,
+      avatarUrl: await this.createAvatarSignedUrl(detail.avatarPath),
+    };
+  }
+
   private serializeStudentDetail(student: StudentDetailEntity) {
     return {
       ...this.serializeStudentListItem(student),
       userId: student.userId,
+      avatarPath: student.user?.avatarPath ?? null,
       birthYear: student.birthYear,
       parentName: student.parentName,
       parentPhone: student.parentPhone,
@@ -441,6 +493,8 @@ export class StudentService {
       parentReceiptEmailEnabled: student.parentReceiptEmailEnabled,
       goal: student.goal,
       dropOutDate: student.dropOutDate,
+      customerSource: student.customerSource,
+      customerSourceNote: student.customerSourceNote,
       customerCare: student.customerCareServices
         ? {
             staff: {
@@ -838,7 +892,7 @@ export class StudentService {
 
   /**
    * Ensures the actor may mutate the student profile (admin, assistant, or
-   * assigned customer_care). Customer care cannot change profit percent.
+   * assigned customer_care). Only admin/assistant can change profit percent.
    */
   private async assertCanMutateStudentProfile(
     studentId: string,
@@ -874,15 +928,71 @@ export class StudentService {
       select: { roles: true },
     });
 
-    const canEditProfitPercent =
-      Boolean(staff?.roles.includes(StaffRole.assistant)) ||
-      Boolean(staff?.roles.includes(StaffRole.admin));
+    const canEditProfitPercent = Boolean(
+      staff?.roles.includes(StaffRole.admin) ||
+      staff?.roles.includes(StaffRole.assistant),
+    );
 
     if (!canEditProfitPercent) {
       throw new ForbiddenException(
-        'CSKH cannot change customer care profit percent',
+        'Only admin or assistant staff can change customer care profit percent',
       );
     }
+  }
+
+  private resolveCustomerSourceWrite(
+    source: StudentCustomerSource,
+    note: string | null | undefined,
+  ): {
+    customerSource: StudentCustomerSource;
+    customerSourceNote: string | null;
+  } {
+    if (source !== StudentCustomerSource.other) {
+      return { customerSource: source, customerSourceNote: null };
+    }
+
+    const normalized = note?.trim() ?? '';
+    if (!normalized) {
+      throw new BadRequestException(
+        'Chú thích nguồn là bắt buộc khi chọn Khác.',
+      );
+    }
+
+    return { customerSource: source, customerSourceNote: normalized };
+  }
+
+  private resolveCustomerSourceUpdate(
+    dto: UpdateStudentBodyDto,
+    current: {
+      customerSource: StudentCustomerSource | null;
+      customerSourceNote: string | null;
+    },
+  ): {
+    customerSource?: StudentCustomerSource;
+    customerSourceNote?: string | null;
+  } {
+    if (
+      dto.customer_source === undefined &&
+      dto.customer_source_note === undefined
+    ) {
+      return {};
+    }
+
+    if (dto.customer_source !== undefined) {
+      return this.resolveCustomerSourceWrite(
+        dto.customer_source,
+        dto.customer_source_note,
+      );
+    }
+
+    if (current.customerSource !== StudentCustomerSource.other) {
+      throw new BadRequestException('Chú thích nguồn chỉ dùng khi chọn Khác.');
+    }
+
+    return this.resolveCustomerSourceWrite(
+      StudentCustomerSource.other,
+      dto.customer_source_note,
+    );
   }
 
   private buildUpdateData(dto: UpdateStudentBodyDto) {
@@ -1229,25 +1339,44 @@ export class StudentService {
   }
 
   async getLandingProfiles(query: StudentLandingProfileQueryDto) {
-    const status = query.status ?? StudentStatus.active;
+    // Landing sync intentionally ignores status (active + inactive).
     const limit =
       typeof query.limit === 'number' && Number.isInteger(query.limit)
-        ? Math.min(Math.max(query.limit, 1), 500)
-        : 100;
+        ? Math.min(Math.max(query.limit, 1), 100)
+        : 50;
+    const page =
+      typeof query.page === 'number' && Number.isInteger(query.page)
+        ? Math.max(query.page, 1)
+        : 1;
+    const skip = (page - 1) * limit;
 
-    const where: Prisma.StudentInfoWhereInput = { status };
-    const trimmedSearch = query.search?.trim();
-    if (trimmedSearch) {
-      where.fullName = {
-        contains: trimmedSearch,
-        mode: 'insensitive',
-      };
+    const idList = parseCommaSeparatedIds(query.ids);
+    const where: Prisma.StudentInfoWhereInput = {};
+    if (idList.length > 0) {
+      where.id = { in: idList };
+    } else {
+      const nameTokens = (query.search ?? '')
+        .trim()
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter(Boolean)
+        .slice(0, 5);
+      if (nameTokens.length > 0) {
+        // Tokenized AND: "Le A" matches "Le Van A" (contiguous contains did not).
+        where.AND = nameTokens.map((token) => ({
+          fullName: {
+            contains: token,
+            mode: 'insensitive' as const,
+          },
+        }));
+      }
     }
 
     const [total, rows] = await Promise.all([
       this.prisma.studentInfo.count({ where }),
       this.prisma.studentInfo.findMany({
         where,
+        skip,
         take: limit,
         orderBy: [{ fullName: 'asc' }, { id: 'asc' }],
         select: {
@@ -1255,19 +1384,140 @@ export class StudentService {
           fullName: true,
           school: true,
           province: true,
+          status: true,
+          achievements: {
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            select: {
+              id: true,
+              award: true,
+              exam: true,
+              year: true,
+              level: true,
+              courseLabel: true,
+              imageWatermarkedPath: true,
+              sortOrder: true,
+            },
+          },
+          galleryItems: {
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            select: {
+              id: true,
+              caption: true,
+              imageWatermarkedPath: true,
+              sortOrder: true,
+            },
+          },
+          user: {
+            select: {
+              avatarWatermarkedPath: true,
+            },
+          },
         },
       }),
     ]);
 
+    const data = rows.map((student) => ({
+      id: student.id,
+      name: student.fullName,
+      status: student.status,
+      school: student.school,
+      province: student.province,
+      avatarUrl: createPublicStorageUrl({
+        bucket: AVATAR_PUBLIC_BUCKET,
+        path: student.user?.avatarWatermarkedPath,
+      }),
+      avatarPath: student.user?.avatarWatermarkedPath ?? null,
+      achievements: mapLandingStudentAchievements(student.achievements),
+      gallery: mapLandingStudentGallery(student.galleryItems),
+    }));
+
     return {
-      data: rows.map((student) => ({
-        id: student.id,
-        name: student.fullName,
-        school: student.school,
-        province: student.province,
-      })),
+      data,
       total,
     };
+  }
+
+  /**
+   * Flat achievement list for landing /thanh-tich.
+   * Default: filter by CMS published sourceIds; empty/missing sourceIds → empty page (no roster leak).
+   * includeUnpublished=true: level-list surface, returns achievements for all students regardless of publish gate.
+   */
+  async getLandingAchievements(query: StudentLandingAchievementsQueryDto) {
+    const includeUnpublished = query.includeUnpublished === true;
+    const sourceIds = parseCommaSeparatedIds(query.sourceIds);
+    if (!includeUnpublished && sourceIds.length === 0) {
+      return { data: [], total: 0 };
+    }
+
+    const limit =
+      typeof query.limit === 'number' && Number.isInteger(query.limit)
+        ? Math.min(Math.max(query.limit, 1), 100)
+        : 9;
+    const page =
+      typeof query.page === 'number' && Number.isInteger(query.page)
+        ? Math.max(query.page, 1)
+        : 1;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.StudentAchievementWhereInput = {};
+    if (!includeUnpublished) {
+      where.studentId = { in: sourceIds };
+    }
+    if (query.level) {
+      where.level = query.level;
+    }
+
+    const [total, rows] = await Promise.all([
+      this.prisma.studentAchievement.count({ where }),
+      this.prisma.studentAchievement.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ year: 'desc' }, { sortOrder: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          award: true,
+          exam: true,
+          year: true,
+          level: true,
+          courseLabel: true,
+          imageWatermarkedPath: true,
+          sortOrder: true,
+          student: {
+            select: {
+              id: true,
+              fullName: true,
+              school: true,
+              province: true,
+              user: {
+                select: { avatarWatermarkedPath: true },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const mappedAchievements = mapLandingStudentAchievements(rows);
+    const data = mappedAchievements.map((achievement, index) => {
+      const row = rows[index];
+      return {
+        ...achievement,
+        student: {
+          id: row.student.id,
+          name: row.student.fullName,
+          school: row.student.school,
+          province: row.student.province,
+          avatarUrl: createPublicStorageUrl({
+            bucket: AVATAR_PUBLIC_BUCKET,
+            path: row.student.user?.avatarWatermarkedPath,
+          }),
+          avatarPath: row.student.user?.avatarWatermarkedPath ?? null,
+        },
+      };
+    });
+
+    return { data, total };
   }
 
   private async getRecentTopUpTotalsByStudentId(
@@ -1305,7 +1555,158 @@ export class StudentService {
       throw new NotFoundException('Student not found');
     }
 
-    return this.serializeStudentDetail(student);
+    return this.withStudentAvatarUrl(this.serializeStudentDetail(student));
+  }
+
+  private async resolveLinkedUserIdForAvatar(studentId: string) {
+    const student = await this.prisma.studentInfo.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true,
+        userId: true,
+        user: {
+          select: {
+            id: true,
+            avatarPath: true,
+            avatarWatermarkedPath: true,
+          },
+        },
+      },
+    });
+
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    if (!student.userId || !student.user) {
+      throw new BadRequestException(
+        'Học sinh chưa gắn tài khoản user nên không thể cập nhật ảnh đại diện.',
+      );
+    }
+
+    return student;
+  }
+
+  async uploadStudentAvatar(
+    studentId: string,
+    file: UploadableFile | undefined,
+    auditActor?: ActionHistoryActor,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Vui lòng chọn ảnh đại diện để tải lên.');
+    }
+    validateImageFile(file, 'Ảnh đại diện');
+
+    const student = await this.resolveLinkedUserIdForAvatar(studentId);
+    const userId = student.userId!;
+    const avatarPath = this.buildAvatarStoragePath(userId);
+    const avatarWatermarkedPath = buildAvatarWatermarkedPath(userId);
+    const watermarked = await bakeDiagonalWatermark(file.buffer);
+
+    await uploadStorageObject({
+      bucket: AVATAR_STORAGE_BUCKET,
+      path: avatarPath,
+      body: file.buffer,
+      contentType: file.mimetype,
+      upsert: true,
+    });
+
+    try {
+      await uploadStorageObject({
+        bucket: AVATAR_PUBLIC_BUCKET,
+        path: avatarWatermarkedPath,
+        body: watermarked.buffer,
+        contentType: watermarked.contentType,
+        upsert: true,
+      });
+    } catch (error) {
+      await removeStorageObjects({
+        bucket: AVATAR_STORAGE_BUCKET,
+        paths: [avatarPath],
+      }).catch(() => undefined);
+      throw error;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { avatarPath, avatarWatermarkedPath },
+      });
+
+      if (auditActor) {
+        const afterValue = await this.getStudentAuditSnapshot(tx, studentId);
+        if (afterValue) {
+          await this.actionHistoryService.recordUpdate(tx, {
+            actor: auditActor,
+            entityType: 'student',
+            entityId: studentId,
+            description: 'Cập nhật ảnh đại diện học sinh',
+            beforeValue: {
+              avatarPath: student.user?.avatarPath ?? null,
+              avatarWatermarkedPath:
+                student.user?.avatarWatermarkedPath ?? null,
+            },
+            afterValue: {
+              avatarPath,
+              avatarWatermarkedPath,
+            },
+          });
+        }
+      }
+    });
+
+    this.invalidateStudentAuthIdentity(userId);
+    return this.getStudentById(studentId);
+  }
+
+  async deleteStudentAvatar(
+    studentId: string,
+    auditActor?: ActionHistoryActor,
+  ) {
+    const student = await this.resolveLinkedUserIdForAvatar(studentId);
+    const userId = student.userId!;
+    const existingPath = student.user?.avatarPath ?? null;
+    const existingWatermarked = student.user?.avatarWatermarkedPath ?? null;
+
+    if (!existingPath && !existingWatermarked) {
+      return this.getStudentById(studentId);
+    }
+
+    await removeStorageObjects({
+      bucket: AVATAR_STORAGE_BUCKET,
+      paths: [existingPath],
+    });
+    await removeStorageObjects({
+      bucket: AVATAR_PUBLIC_BUCKET,
+      paths: [existingWatermarked],
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { avatarPath: null, avatarWatermarkedPath: null },
+      });
+
+      if (auditActor) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'student',
+          entityId: studentId,
+          description: 'Xoá ảnh đại diện học sinh',
+          beforeValue: {
+            avatarPath: existingPath,
+            avatarWatermarkedPath: existingWatermarked,
+          },
+          afterValue: {
+            avatarPath: null,
+            avatarWatermarkedPath: null,
+          },
+        });
+      }
+    });
+
+    this.invalidateStudentAuthIdentity(userId);
+    return this.getStudentById(studentId);
   }
 
   async getStudentSelfDetail(id: string) {
@@ -2190,7 +2591,10 @@ export class StudentService {
       throw new NotFoundException('Student not found');
     }
 
-    const updateData = this.buildUpdateData(dto);
+    const updateData = {
+      ...this.buildUpdateData(dto),
+      ...this.resolveCustomerSourceUpdate(dto, student),
+    };
     const shouldSyncCustomerCare =
       dto.customer_care_staff_id !== undefined ||
       dto.customer_care_profit_percent !== undefined;
@@ -2245,7 +2649,7 @@ export class StudentService {
       this.invalidateStudentAuthIdentity(student.userId);
     }
 
-    return this.serializeStudentDetail(updated);
+    return this.withStudentAvatarUrl(this.serializeStudentDetail(updated));
   }
 
   async updateStudentStatus(
@@ -2303,7 +2707,7 @@ export class StudentService {
     });
 
     this.invalidateStudentAuthIdentity(student.userId);
-    return this.serializeStudentDetail(updated);
+    return this.withStudentAvatarUrl(this.serializeStudentDetail(updated));
   }
 
   async updateStudent(data: UpdateStudentDto, auditActor?: ActionHistoryActor) {
@@ -2335,7 +2739,7 @@ export class StudentService {
       auditActor,
     );
 
-    return this.serializeStudentDetail(updated);
+    return this.withStudentAvatarUrl(this.serializeStudentDetail(updated));
   }
 
   updateMyStudentAccountBalance(
@@ -2390,9 +2794,10 @@ export class StudentService {
     const existingClassIds = new Set(
       existingMemberships.map((membership) => membership.classId),
     );
+    const requestedClassIds = new Set(classIds);
     const classIdsToRemove = existingMemberships
       .map((membership) => membership.classId)
-      .filter((classId) => !classIds.includes(classId));
+      .filter((classId) => !requestedClassIds.has(classId));
     const classIdsToActivate = classIds.filter((classId) =>
       existingClassIds.has(classId),
     );
@@ -2454,6 +2859,7 @@ export class StudentService {
           data: {
             status: StudentClassStatus.active,
             customStudentTuitionPerSession: null,
+            customTuitionPerBlock: null,
             customTuitionPackageTotal: null,
             customTuitionPackageSession: null,
           },
@@ -2493,7 +2899,9 @@ export class StudentService {
       return nextStudent;
     });
 
-    return this.serializeStudentDetail(updatedStudent);
+    return this.withStudentAvatarUrl(
+      this.serializeStudentDetail(updatedStudent),
+    );
   }
 
   async deleteStudent(id: string, auditActor?: ActionHistoryActor) {
@@ -2571,8 +2979,19 @@ export class StudentService {
       throw new BadRequestException('Student full name is required.');
     }
 
+    const customerSource = this.resolveCustomerSourceWrite(
+      data.customer_source,
+      data.customer_source_note,
+    );
+
     return this.withEntityIdRetry(() =>
-      this.createStudentOnce(data, auditActor, user, trimmedFullName),
+      this.createStudentOnce(
+        data,
+        auditActor,
+        user,
+        trimmedFullName,
+        customerSource,
+      ),
     );
   }
 
@@ -2586,12 +3005,18 @@ export class StudentService {
       roleType: UserRole;
     },
     trimmedFullName: string,
+    customerSource: {
+      customerSource: StudentCustomerSource;
+      customerSourceNote: string | null;
+    },
   ) {
     return this.prisma.$transaction(async (tx) => {
       const createdStudent = await tx.studentInfo.create({
         data: {
           id: generateStudentId(),
           fullName: trimmedFullName,
+          customerSource: customerSource.customerSource,
+          customerSourceNote: customerSource.customerSourceNote,
           email: normalizeOptionalText(data.email) ?? user.email,
           school: normalizeOptionalText(data.school),
           province:
@@ -2661,4 +3086,18 @@ export class StudentService {
       { cause: lastError },
     );
   }
+}
+
+function parseCommaSeparatedIds(raw?: string): string[] {
+  if (!raw?.trim()) {
+    return [];
+  }
+  return [
+    ...new Set(
+      raw
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean),
+    ),
+  ];
 }

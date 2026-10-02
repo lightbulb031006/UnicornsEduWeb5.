@@ -30,9 +30,16 @@ describe('ClassSurveyService', () => {
     classSurvey: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
     },
     classTeacher: {
       findUnique: jest.fn(),
+    },
+    survey: {
+      findUnique: jest.fn(),
+    },
+    studentClass: {
+      findMany: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -60,6 +67,11 @@ describe('ClassSurveyService', () => {
       classId: 'class-1',
       teacherId: 'teacher-1',
     });
+    mockPrisma.survey.findUnique.mockResolvedValue({ id: 'survey-1' });
+    mockPrisma.classSurvey.findFirst.mockResolvedValue(null);
+    mockPrisma.studentClass.findMany.mockResolvedValue([
+      { studentId: 'student-1' },
+    ]);
     mockPrisma.$transaction.mockImplementation(
       async (callback: (tx: typeof mockTx) => Promise<unknown>) =>
         callback(mockTx),
@@ -95,10 +107,10 @@ describe('ClassSurveyService', () => {
 
     await expect(
       service.createClassSurvey('class-1', {
-        test_number: 1,
+        survey_id: 'survey-1',
         report_date: '2026-05-18',
         teacher_id: 'teacher-99',
-        content: '<p>Ổn định</p>',
+        students: [{ student_id: 'student-1', comment: 'Ổn định' }],
       }),
     ).rejects.toThrow('Người phụ trách phải là gia sư của lớp.');
 
@@ -113,10 +125,10 @@ describe('ClassSurveyService', () => {
 
     await expect(
       service.createClassSurveyForStaff('user-1', UserRole.staff, 'class-1', {
-        test_number: 1,
+        survey_id: 'survey-1',
         report_date: '2026-05-18',
         teacher_id: 'teacher-2',
-        content: '<p>Ổn định</p>',
+        students: [{ student_id: 'student-1', comment: 'Ổn định' }],
       }),
     ).rejects.toThrow(
       'Teacher chỉ được tạo khảo sát với chính mình là người phụ trách.',

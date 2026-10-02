@@ -32,6 +32,7 @@ import {
 import { formatCurrency } from "@/lib/class.helpers";
 import { formatMonthKeyLabel, getDefaultMonthKey } from "@/lib/month-format";
 import { cn } from "@/lib/utils";
+import { formatVnDate } from "@/lib/formatters";
 
 type Props = {
   staffId: string;
@@ -61,11 +62,7 @@ const BULK_PAYMENT_STATUS_OPTIONS = [
 function formatSessionDate(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(iso));
+    return formatVnDate(new Date(iso));
   } catch {
     return "—";
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { type UIEvent, useRef, useState } from "react";
+import { type UIEvent, useMemo, useRef, useState, Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { DateInput } from "@/components/ui/DateInput";
@@ -12,6 +12,11 @@ import type {
   ActionHistoryListItem,
 } from "@/dtos/action-history.dto";
 import * as actionHistoryApi from "@/lib/apis/action-history.api";
+import {
+  formatVnDate,
+  formatVnNumber,
+  formatVnTime,
+} from "@/lib/formatters";
 
 const PAGE_SIZE = 20;
 const EMPTY_HISTORY_ENTRIES: ActionHistoryListItem[] = [];
@@ -139,15 +144,8 @@ function formatDateTime(value: string) {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(date),
-    date: new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(date),
-    time: new Intl.DateTimeFormat("vi-VN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date),
+    date: formatVnDate(date),
+    time: formatVnTime(date),
   };
 }
 
@@ -161,7 +159,7 @@ function formatDateLabel(value: string) {
 }
 
 function formatMetricNumber(value: number) {
-  return new Intl.NumberFormat("vi-VN").format(value);
+  return formatVnNumber(value);
 }
 
 function shortenMiddle(value: string, start = 8, end = 4) {
@@ -799,12 +797,17 @@ function HistoryFilterCard({
   );
 }
 
-export default function AdminHistoryPage() {
+function AdminHistoryPageContent() {
   const { replace } = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const getSearchParam = searchParams.get.bind(searchParams);
   const [expandedEntryIds, setExpandedEntryIds] = useState<string[]>([]);
+  // Set: tra cứu O(1) khi render danh sách timeline dài.
+  const expandedEntryIdSet = useMemo(
+    () => new Set(expandedEntryIds),
+    [expandedEntryIds],
+  );
   const defaultStartDate = getDefaultStartDate();
   const defaultEndDate = getDefaultEndDate();
 
@@ -987,7 +990,7 @@ export default function AdminHistoryPage() {
                     key={item.id}
                     item={item}
                     isLast={index === historyEntries.length - 1}
-                    isExpanded={expandedEntryIds.includes(item.id)}
+                    isExpanded={expandedEntryIdSet.has(item.id)}
                     onToggle={toggleEntry}
                   />
                 ))}
@@ -1035,5 +1038,14 @@ export default function AdminHistoryPage() {
         </section>
       </div>
     </div>
+  );
+}
+
+export default function AdminHistoryPage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <AdminHistoryPageContent />
+    </Suspense>
   );
 }

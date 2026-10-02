@@ -1,3 +1,4 @@
+import { storeCustomAllowanceFromPerSessionInput } from '../common/block-pricing.util';
 import { normalizeNullableMoney } from '../common/student-class-tuition.util';
 
 /**
@@ -10,9 +11,13 @@ export function resolveClassTeacherCustomAllowanceOnWrite(input: {
   incoming: number | null | undefined;
   existingCustomAllowance: number | null | undefined;
   isExistingAssignment: boolean;
+  standardBlockCount?: number | null;
 }): number | null {
   if (input.incoming !== undefined) {
-    return normalizeNullableMoney(input.incoming);
+    return storeCustomAllowanceFromPerSessionInput(
+      normalizeNullableMoney(input.incoming),
+      input.standardBlockCount,
+    );
   }
 
   if (input.isExistingAssignment) {

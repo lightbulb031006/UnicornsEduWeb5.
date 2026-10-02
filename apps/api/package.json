@@ -32,6 +32,8 @@
     "db:migrate": "prisma migrate dev --schema=./prisma/schema/",
     "seed": "ts-node -r tsconfig-paths/register scripts/seed.ts",
     "seed:admin": "ts-node -r tsconfig-paths/register scripts/seed-admin.ts",
+    "sessions:list-missing-time": "pnpm dlx tsx scripts/list-sessions-missing-time.ts",
+    "seed:question-bank": "tsx scripts/seed-question-bank.ts",
     "db:delete-admins-except-official": "prisma db execute --file scripts/delete-admins-except-official.sql",
     "db:fix-users-columns": "prisma db execute --file scripts/fix-users-add-student-staff-id.sql"
   },
@@ -46,6 +48,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/platform-socket.io": "^11.1.8",
+    "@nestjs/schedule": "^12.0.1",
     "@nestjs/swagger": "^11.2.6",
     "@nestjs/throttler": "^6.5.0",
     "@nestjs/websockets": "^11.1.8",
@@ -56,7 +59,7 @@
     "@supabase/supabase-js": "^2.102.1",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
-    "axios": "^1.13.6",
+    "axios": "^1.20.0",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
@@ -64,6 +67,7 @@
     "csv-parse": "^5.5.6",
     "docx": "^9.6.0",
     "dotenv": "^17.3.1",
+    "exceljs": "^4.4.0",
     "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.3",
@@ -78,6 +82,7 @@
     "react-dom": "19.2.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sharp": "^0.34.5",
     "socket.io": "^4.8.1",
     "uuid": "^13.0.0"
   },
@@ -103,13 +108,13 @@
     "jest": "^30.0.0",
     "pnpm": "^10.33.0",
     "prettier": "^3.4.2",
-    "sharp": "^0.34.5",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
   },
@@ -128,13 +133,23 @@
     },
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)sx?$": "ts-jest"
+      "^.+\\.(t|j)sx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "allowJs": true
+          }
+        }
+      ]
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "transformIgnorePatterns": [
+      "node_modules/(?!.*@nestjs[+/]schedule)"
+    ]
   },
   "prisma": {
     "schema": "./prisma/schema/"

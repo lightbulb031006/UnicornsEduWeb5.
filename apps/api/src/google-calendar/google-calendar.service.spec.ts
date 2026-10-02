@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import type { GoogleCalendarService as GoogleCalendarServiceType } from './google-calendar.service';
+import { GoogleCalendarTimeoutError } from './errors/google-calendar.errors';
 
 jest.mock('uuid', () => ({
   v4: jest.fn(() => 'mock-uuid'),
@@ -265,6 +266,28 @@ describe('GoogleCalendarService', () => {
         meetLink: undefined,
       });
       expect(mockCalendar.events.insert).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('executeCalendarRequest timeout handling', () => {
+    it('throws GoogleCalendarTimeoutError without retrying when the underlying request times out', async () => {
+      const operation = jest.fn().mockRejectedValue(
+        Object.assign(new Error('The operation was aborted.'), {
+          code: 'TimeoutError',
+        }),
+      );
+
+      await expect(
+        (
+          service as unknown as {
+            executeCalendarRequest: <T>(
+              context: string,
+              op: () => Promise<T>,
+            ) => Promise<T>;
+          }
+        ).executeCalendarRequest('create event', operation),
+      ).rejects.toBeInstanceOf(GoogleCalendarTimeoutError);
+      expect(operation).toHaveBeenCalledTimes(1);
     });
   });
 

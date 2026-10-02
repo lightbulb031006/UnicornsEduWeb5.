@@ -156,3 +156,70 @@ export async function createSignedStorageUrl(options: {
 
   return data.signedUrl ?? null;
 }
+
+/** Public object URL for watermarked twins (bucket must be public-read). */
+export function createPublicStorageUrl(options: {
+  bucket: string;
+  path?: string | null;
+}): string | null {
+  if (!options.path?.trim()) {
+    return null;
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL?.trim().replace(/\/$/, '');
+  if (!supabaseUrl) {
+    return null;
+  }
+
+  const encodedPath = options.path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+  return `${supabaseUrl}/storage/v1/object/public/${options.bucket}/${encodedPath}`;
+}
+
+export async function uploadStorageObject(options: {
+  bucket: string;
+  path: string;
+  body: Buffer;
+  contentType: string;
+  upsert?: boolean;
+}) {
+  const supabase = getSupabaseAdminClient();
+  const uploadResult = await supabase.storage
+    .from(options.bucket)
+    .upload(options.path, options.body, {
+      upsert: options.upsert ?? true,
+      contentType: options.contentType,
+    });
+
+  if (uploadResult.error) {
+    throw new BadRequestException(
+      uploadResult.error.message || 'Không thể tải tệp lên storage.',
+    );
+  }
+}
+
+export async function removeStorageObjects(options: {
+  bucket: string;
+  paths: Array<string | null | undefined>;
+}) {
+  const paths = options.paths.filter((path): path is string =>
+    Boolean(path && path.trim()),
+  );
+  if (paths.length === 0) {
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const deleteResult = await supabase.storage
+    .from(options.bucket)
+    .remove(paths);
+
+  if (deleteResult.error) {
+    throw new BadRequestException(
+      deleteResult.error.message || 'Không thể xoá tệp trên storage.',
+    );
+  }
+}

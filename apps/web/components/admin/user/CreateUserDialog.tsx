@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
@@ -66,21 +66,23 @@ export default function CreateUserDialog({
   const visibleStaffRoles = hideAdminOptions
     ? STAFF_ROLES.filter((role) => role !== "admin")
     : STAFF_ROLES;
+  const selectedStaffRoleSet = new Set(form.staffRoles);
 
-  useEffect(() => {
-    if (!open) {
-      setForm(EMPTY_CREATE_USER_FORM);
-      setErrors({});
-    }
-  }, [open]);
+  const handleClose = () => {
+    setForm(EMPTY_CREATE_USER_FORM);
+    setErrors({});
+    onClose();
+  };
 
   const createUserMutation = useMutation({
     mutationFn: (payload: CreateUserPayload) => userApi.createUser(payload),
     onSuccess: async (response) => {
       await queryClient.invalidateQueries({ queryKey: ["user", "list"] });
       toast.success(
-        response.message || "Tạo user thành công. Email xác thực đã được gửi.",
+        response.message || "Tạo user thành công.",
       );
+      setForm(EMPTY_CREATE_USER_FORM);
+      setErrors({});
       onCreated?.();
       onClose();
     },
@@ -170,7 +172,7 @@ export default function CreateUserDialog({
       <div
         className="fixed inset-0 z-40 bg-bg-primary/75 backdrop-blur-[2px]"
         aria-hidden
-        onClick={onClose}
+        onClick={handleClose}
       />
       <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5">
         <div
@@ -199,7 +201,7 @@ export default function CreateUserDialog({
                 </div>
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleClose}
                   className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-border-default bg-bg-surface text-text-secondary transition hover:border-border-focus hover:bg-bg-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   aria-label="Đóng popup tạo user"
                 >
@@ -246,7 +248,7 @@ export default function CreateUserDialog({
                         <label key={role} className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg px-2 text-sm text-text-primary">
                           <input
                             type="checkbox"
-                            checked={form.staffRoles.includes(role)}
+                            checked={selectedStaffRoleSet.has(role)}
                             onChange={(e) => toggleStaffRole(role, e.target.checked)}
                             className="size-4 rounded border-border-default text-primary focus:ring-border-focus"
                           />
@@ -328,16 +330,30 @@ export default function CreateUserDialog({
                   />
                 </label>
               </div>
+
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-border-default bg-bg-secondary/40 p-3 text-sm text-text-primary transition hover:bg-bg-secondary/70">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.emailVerified)}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, emailVerified: e.target.checked }))
+                  }
+                  className="size-4 rounded border-border-default text-primary focus:ring-border-focus"
+                />
+                <span>Xác thực email ngay (kích hoạt tài khoản lập tức, không cần chờ bấm link qua email)</span>
+              </label>
             </div>
 
             <div className="flex flex-col gap-3 border-t border-border-default/80 bg-bg-surface px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <p className="text-sm leading-6 text-text-secondary">
-                Tài khoản mới sẽ ở trạng thái chờ xác thực email sau khi tạo.
+                {form.emailVerified
+                  ? "Tài khoản sẽ được kích hoạt email ngay sau khi tạo."
+                  : "Tài khoản mới sẽ ở trạng thái chờ xác thực email sau khi tạo."}
               </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleClose}
                   className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-4 py-2.5 text-sm font-medium text-text-primary hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 >
                   Hủy

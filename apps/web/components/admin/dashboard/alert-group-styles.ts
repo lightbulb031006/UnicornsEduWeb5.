@@ -1,3 +1,4 @@
+import { formatVnInteger } from "@/lib/formatters";
 export type AlertGroupTone = "warning" | "destructive" | "info" | "class";
 
 export function getAlertGroupToneClasses(tone: AlertGroupTone) {
@@ -43,5 +44,5 @@ export function getAlertGroupToneClasses(tone: AlertGroupTone) {
 }
 
 export function formatDashboardAlertCurrency(value: number) {
-  return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(value)} đ`;
+  return `${formatVnInteger(value)} đ`;
 }

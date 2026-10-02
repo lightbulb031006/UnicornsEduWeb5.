@@ -20,7 +20,12 @@ export default function StudentAccessGate({
   const restrictedByEmailVerification = isRestrictedByEmailVerification(user);
 
   const hasStudentProfile = Boolean(user.hasStudentProfile);
-  const isAllowed = Boolean(user.access?.student?.canAccess ?? hasStudentProfile);
+  const isAllowed = Boolean(
+    user.roleType === Role.student ||
+      user.effectiveRoleTypes?.includes(Role.student) ||
+      user.access?.student?.canAccess ||
+      hasStudentProfile,
+  );
   const hasStudentWorkspaceHint =
     user.roleType === "student" ||
     hasStudentProfile ||

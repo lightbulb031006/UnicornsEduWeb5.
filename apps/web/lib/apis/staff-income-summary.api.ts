@@ -1,4 +1,6 @@
 import type {
+  StaffFixedSalaryPayableItem,
+  StaffFixedSalaryRoleSummary,
   StaffIncomeAmountSummary,
   StaffIncomeClassSummary,
   StaffIncomeDepositClassSummary,
@@ -163,6 +165,12 @@ export function normalizeStaffIncomeSummary(
     bonusMonthlyTotals: normalizeAmountSummary(source.bonusMonthlyTotals),
     otherRoleSummaries: Array.isArray(source.otherRoleSummaries)
       ? (source.otherRoleSummaries as StaffIncomeRoleSummary[])
+      : [],
+    fixedSalaryRoleSummaries: Array.isArray(source.fixedSalaryRoleSummaries)
+      ? (source.fixedSalaryRoleSummaries as StaffFixedSalaryRoleSummary[])
+      : [],
+    fixedSalaryPayables: Array.isArray(source.fixedSalaryPayables)
+      ? (source.fixedSalaryPayables as StaffFixedSalaryPayableItem[])
       : [],
   };
 }

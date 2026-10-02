@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import LessonExercisesTab from "@/components/admin/lesson-plans/LessonExercisesTab";
 
@@ -24,12 +25,14 @@ export function LessonManageDetailsPage({
             Quay lại
           </Link>
         </div>
-        <LessonExercisesTab
-          expandedView
-          basePagePath={basePagePath}
-          manageDetailsPath={manageDetailsPath}
-          participantMode={participantMode}
-        />
+        <Suspense fallback={null}>
+          <LessonExercisesTab
+            expandedView
+            basePagePath={basePagePath}
+            manageDetailsPath={manageDetailsPath}
+            participantMode={participantMode}
+          />
+        </Suspense>
       </div>
     </div>
   );

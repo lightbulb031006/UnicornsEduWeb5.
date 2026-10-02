@@ -1,6 +1,6 @@
 export type NotificationStatus = "draft" | "published";
 export type NotificationDeliveryKind = "published" | "adjusted";
-export type NotificationTargetUserRole = "admin" | "staff" | "student";
+export type NotificationTargetUserRole = "admin" | "staff";
 export type NotificationTargetStaffRole =
   | "admin"
   | "teacher"

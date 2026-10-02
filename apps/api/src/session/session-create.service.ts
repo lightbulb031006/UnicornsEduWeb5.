@@ -4,11 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AttendanceStatus,
   PaymentStatus,
   StaffRole,
   StudentClassStatus,
   UserRole,
   WalletTransactionType,
+  ClassTimelineItemKind,
 } from '../../generated/enums';
 import {
   ActionHistoryActor,
@@ -26,11 +28,18 @@ import { SessionScheduleRulesService } from './session-schedule-rules.service';
 import { computeTrainingManagerSessionSnapshot } from '../training-manager/training-manager.utils';
 import { createMemoizedTaxDeductionResolver } from '../payroll/deduction-rates';
 import { resolveAssistantManagerStaffIdForAttendance } from '../payroll/assistant-share.util';
+import { syncLessonPlanHeadCommissions } from '../payroll/lesson-plan-head-commission.util';
+import { resolveLiveSessionAllowanceSnapshots } from './session-allowance.util';
+import { appendClassTimelineItem } from '../class-timeline/append-timeline-item';
 import {
-  computeDefaultSessionAllowanceAmountVnd,
-  resolveSnapshotPerStudentAllowanceVnd,
-  resolveSnapshotScaleAmountVnd,
-} from './session-allowance.util';
+  presentCustomAllowanceAsPerSession,
+  standardBlockCountFromSlots,
+} from '../common/block-pricing.util';
+import {
+  isBlockPricingMode,
+  resolveAllowanceReconstructionBlockCount,
+  resolveSnapshotBlockCountForPricingMode,
+} from '../common/class-pricing-mode.util';
 
 /** Interactive tx: create runs many reads, balance/wallet writes, nested attendance create, optional audit snapshot. */
 const SESSION_CREATE_TRANSACTION_MAX_WAIT_MS = 10_000;
@@ -68,12 +77,6 @@ export class SessionCreateService {
     this.activeSessionCreations.add(lockKey);
 
     try {
-      this.sessionValidationService.validateAttendanceItems(data.attendance, {
-        required: true,
-      });
-      this.sessionValidationService.validateAttendanceNotes(data.attendance, {
-        required: true,
-      });
       this.sessionValidationService.validateSessionCommentFields(
         {
           lessonContent: data.lessonContent,
@@ -82,6 +85,41 @@ export class SessionCreateService {
         },
         { required: true },
       );
+      const classPricing = await this.prisma.class.findUnique({
+        where: { id: data.classId },
+        select: { pricingMode: true },
+      });
+      if (!classPricing) {
+        throw new NotFoundException('Class not found');
+      }
+      const requireSessionTimes = isBlockPricingMode(classPricing.pricingMode);
+      this.sessionValidationService.assertRequiredSessionTimes(
+        data.startTime,
+        data.endTime,
+        { required: requireSessionTimes },
+      );
+      const hasSessionTimes = Boolean(
+        (typeof data.startTime === 'string' && data.startTime.trim()) ||
+        (typeof data.endTime === 'string' && data.endTime.trim()),
+      );
+      const sessionStartTime = hasSessionTimes
+        ? this.sessionValidationService.parseSessionTime(
+            data.startTime as string,
+            'startTime',
+          )
+        : null;
+      const sessionEndTime = hasSessionTimes
+        ? this.sessionValidationService.parseSessionTime(
+            data.endTime as string,
+            'endTime',
+          )
+        : null;
+      if (hasSessionTimes) {
+        this.sessionValidationService.assertSessionEndAfterStart(
+          sessionStartTime as Date,
+          sessionEndTime as Date,
+        );
+      }
 
       const createdSession = await this.prisma.$transaction(
         async (tx) => {
@@ -92,16 +130,6 @@ export class SessionCreateService {
             tx,
             sessionDate,
           );
-          const attendanceStudentIds = data.attendance.map(
-            (attendanceItem) => attendanceItem.studentId,
-          );
-          const chargeableAttendanceStudentIds = data.attendance
-            .filter((item) =>
-              this.sessionValidationService.isTuitionChargeableStatus(
-                item.status,
-              ),
-            )
-            .map((attendanceItem) => attendanceItem.studentId);
 
           const classTeacher = await tx.classTeacher.findUnique({
             where: {
@@ -116,7 +144,10 @@ export class SessionCreateService {
               class: {
                 select: {
                   name: true,
+                  noAttendance: true,
+                  pricingMode: true,
                   allowancePerSessionPerStudent: true,
+                  allowancePerBlockPerStudent: true,
                   scaleAmount: true,
                   trainingManagerStaffId: true,
                   trainingManagerRatePercent: true,
@@ -124,6 +155,56 @@ export class SessionCreateService {
               },
             },
           });
+
+          if (!classTeacher) {
+            throw new NotFoundException(
+              'Class teacher not found for this class and teacher.',
+            );
+          }
+
+          const isNoAttendanceClass = classTeacher.class.noAttendance;
+
+          let resolvedAttendanceInput: NonNullable<
+            SessionCreateDto['attendance']
+          >;
+
+          if (isNoAttendanceClass) {
+            // Auto-generate attendance: present for all active students
+            const activeStudents = await tx.studentClass.findMany({
+              where: {
+                classId: data.classId,
+                status: StudentClassStatus.active,
+              },
+              select: { studentId: true },
+            });
+            resolvedAttendanceInput = activeStudents.map((sc) => ({
+              studentId: sc.studentId,
+              status: AttendanceStatus.present,
+              notes: null,
+            }));
+          } else {
+            const attendanceInput = data.attendance ?? [];
+            this.sessionValidationService.validateAttendanceItems(
+              attendanceInput,
+              { required: true },
+            );
+            this.sessionValidationService.validateAttendanceNotes(
+              attendanceInput,
+              { required: true },
+            );
+            resolvedAttendanceInput = attendanceInput;
+          }
+
+          const attendanceStudentIds = resolvedAttendanceInput.map(
+            (attendanceItem) => attendanceItem.studentId,
+          );
+          const chargeableAttendanceStudentIds = resolvedAttendanceInput
+            .filter((item) =>
+              this.sessionValidationService.isTuitionChargeableStatus(
+                item.status,
+              ),
+            )
+            .map((attendanceItem) => attendanceItem.studentId);
 
           const studentCustomerCare = await tx.customerCareService.findMany({
             where: {
@@ -149,11 +230,13 @@ export class SessionCreateService {
             select: {
               studentId: true,
               customStudentTuitionPerSession: true,
+              customTuitionPerBlock: true,
               customTuitionPackageTotal: true,
               customTuitionPackageSession: true,
               class: {
                 select: {
                   studentTuitionPerSession: true,
+                  studentTuitionPerBlock: true,
                   tuitionPackageTotal: true,
                   tuitionPackageSession: true,
                 },
@@ -207,12 +290,6 @@ export class SessionCreateService {
             ]),
           );
 
-          if (!classTeacher) {
-            throw new NotFoundException(
-              'Class teacher not found for this class and teacher.',
-            );
-          }
-
           const scheduleMatch = shouldEnforceDeclaredSchedule(actor)
             ? await this.sessionScheduleRulesService.assertSessionMatchesDeclaredSchedule(
                 tx,
@@ -236,24 +313,57 @@ export class SessionCreateService {
             this.sessionValidationService.normalizeCoefficient(
               data.coefficient,
             ) ?? 1.0;
-          const snapshotPerStudentAllowance =
-            resolveSnapshotPerStudentAllowanceVnd({
-              customAllowance: classTeacher.customAllowance,
-              classDefaultPerStudent:
-                classTeacher.class.allowancePerSessionPerStudent,
-            });
-          const snapshotScaleAmount = resolveSnapshotScaleAmountVnd(
-            classTeacher.class.scaleAmount,
+          let snapshotBlockCount = resolveSnapshotBlockCountForPricingMode({
+            pricingMode: classTeacher.class.pricingMode,
+            startTime: data.startTime,
+            endTime: data.endTime,
+          });
+          const scheduleRows = await tx.classScheduleEntry.findMany({
+            where: { classId: data.classId, effectiveTo: null },
+            select: { from: true, to: true },
+          });
+          const standardBlockCount = standardBlockCountFromSlots(scheduleRows);
+          if (
+            isBlockPricingMode(classTeacher.class.pricingMode) &&
+            snapshotBlockCount == null
+          ) {
+            snapshotBlockCount = standardBlockCount;
+          }
+          const reconstructionBlocks = resolveAllowanceReconstructionBlockCount(
+            {
+              snapshotBlockCount,
+              startTime: data.startTime,
+              endTime: data.endTime,
+              standardBlockCount,
+            },
           );
+          const storedAsPerBlock =
+            classTeacher.class.allowancePerBlockPerStudent != null;
+          const liveAllowance = resolveLiveSessionAllowanceSnapshots({
+            pricingMode: classTeacher.class.pricingMode,
+            customAllowanceStored: classTeacher.customAllowance,
+            classDefaultPerStudent:
+              classTeacher.class.allowancePerSessionPerStudent,
+            classDefaultPerBlock:
+              classTeacher.class.allowancePerBlockPerStudent,
+            scaleAmount: classTeacher.class.scaleAmount,
+            reconstructionBlocks,
+            storedAsPerBlock,
+            snapshotBlockCount,
+            chargeableStudentCount: chargeableAttendanceStudentIds.length,
+            presentCustomAsPerSession: presentCustomAllowanceAsPerSession(
+              classTeacher.customAllowance,
+              reconstructionBlocks,
+              storedAsPerBlock,
+            ),
+          });
+          const snapshotPerStudentAllowance =
+            liveAllowance.snapshotPerStudentAllowance;
+          const snapshotScaleAmount = liveAllowance.snapshotScaleAmount;
           const allowanceAmount =
             data.allowanceAmount !== undefined && data.allowanceAmount !== null
               ? Math.floor(Number(data.allowanceAmount))
-              : computeDefaultSessionAllowanceAmountVnd({
-                  perStudentAllowance: snapshotPerStudentAllowance,
-                  classDefaultPerStudent: null,
-                  scaleAmount: snapshotScaleAmount,
-                  chargeableStudentCount: chargeableAttendanceStudentIds.length,
-                });
+              : liveAllowance.allowanceAmount;
           const includeTeacherOperatingDeduction =
             data.includeTeacherOperatingDeduction !== false;
           const currentTeacherOperatingDeductionRatePercent =
@@ -271,60 +381,72 @@ export class SessionCreateService {
             StaffRole.teacher,
           );
 
-          const resolvedAttendance = data.attendance.map((attendanceItem) => {
-            const customerCare = customerCareByStudentId.get(
-              attendanceItem.studentId,
-            );
-
-            return {
-              studentId: attendanceItem.studentId,
-              status: attendanceItem.status,
-              notes: attendanceItem.notes ?? null,
-              customerCareCoef: customerCare?.profitPercent,
-              customerCareStaffId: customerCare?.staffId,
-              tuitionFee:
-                this.sessionValidationService.resolveChargeableAttendanceTuitionFee(
-                  attendanceItem.status,
-                  attendanceItem.tuitionFee,
-                  this.sessionValidationService.resolveDefaultStudentTuitionPerSession(
-                    {
-                      customTuitionPerSession: studentClassByStudentId.get(
-                        attendanceItem.studentId,
-                      )?.customStudentTuitionPerSession,
-                      customTuitionPackageTotal: studentClassByStudentId.get(
-                        attendanceItem.studentId,
-                      )?.customTuitionPackageTotal,
-                      customTuitionPackageSession: studentClassByStudentId.get(
-                        attendanceItem.studentId,
-                      )?.customTuitionPackageSession,
-                      classTuitionPerSession: studentClassByStudentId.get(
-                        attendanceItem.studentId,
-                      )?.class?.studentTuitionPerSession,
-                      classTuitionPackageTotal: studentClassByStudentId.get(
-                        attendanceItem.studentId,
-                      )?.class?.tuitionPackageTotal,
-                      classTuitionPackageSession: studentClassByStudentId.get(
-                        attendanceItem.studentId,
-                      )?.class?.tuitionPackageSession,
-                    },
-                  ),
-                ),
-              accountBalance: studentAccountBalanceByStudentId.get(
+          const resolvedAttendance = resolvedAttendanceInput.map(
+            (attendanceItem) => {
+              const customerCare = customerCareByStudentId.get(
                 attendanceItem.studentId,
-              ),
-            };
-          });
+              );
+
+              return {
+                studentId: attendanceItem.studentId,
+                status: attendanceItem.status,
+                notes: attendanceItem.notes ?? null,
+                customerCareCoef: customerCare?.profitPercent,
+                customerCareStaffId: customerCare?.staffId,
+                tuitionFee:
+                  this.sessionValidationService.resolveChargeableAttendanceTuitionFee(
+                    attendanceItem.status,
+                    attendanceItem.tuitionFee,
+                    this.sessionValidationService.resolveDefaultStudentTuitionPerSession(
+                      {
+                        pricingMode: classTeacher.class.pricingMode,
+                        customTuitionPerSession: studentClassByStudentId.get(
+                          attendanceItem.studentId,
+                        )?.customStudentTuitionPerSession,
+                        customTuitionPerBlock: studentClassByStudentId.get(
+                          attendanceItem.studentId,
+                        )?.customTuitionPerBlock,
+                        customTuitionPackageTotal: studentClassByStudentId.get(
+                          attendanceItem.studentId,
+                        )?.customTuitionPackageTotal,
+                        customTuitionPackageSession:
+                          studentClassByStudentId.get(attendanceItem.studentId)
+                            ?.customTuitionPackageSession,
+                        classTuitionPerSession: studentClassByStudentId.get(
+                          attendanceItem.studentId,
+                        )?.class?.studentTuitionPerSession,
+                        classTuitionPerBlock: studentClassByStudentId.get(
+                          attendanceItem.studentId,
+                        )?.class?.studentTuitionPerBlock,
+                        classTuitionPackageTotal: studentClassByStudentId.get(
+                          attendanceItem.studentId,
+                        )?.class?.tuitionPackageTotal,
+                        classTuitionPackageSession: studentClassByStudentId.get(
+                          attendanceItem.studentId,
+                        )?.class?.tuitionPackageSession,
+                        blockCount: snapshotBlockCount,
+                      },
+                    ),
+                  ),
+                accountBalance: studentAccountBalanceByStudentId.get(
+                  attendanceItem.studentId,
+                ),
+              };
+            },
+          );
 
           const tuitionFee = resolvedAttendance.reduce(
             (sum, attendanceItem) => sum + (attendanceItem.tuitionFee ?? 0),
             0,
           );
-          const trainingManagerSnapshot = computeTrainingManagerSessionSnapshot({
-            sessionTuitionTotal: tuitionFee,
-            trainingManagerStaffId: classTeacher.class.trainingManagerStaffId,
-            trainingManagerRatePercent:
-              classTeacher.class.trainingManagerRatePercent,
-          });
+          const trainingManagerSnapshot = computeTrainingManagerSessionSnapshot(
+            {
+              sessionTuitionTotal: tuitionFee,
+              trainingManagerStaffId: classTeacher.class.trainingManagerStaffId,
+              trainingManagerRatePercent:
+                classTeacher.class.trainingManagerRatePercent,
+            },
+          );
 
           const attendanceWithCharge = resolvedAttendance.filter(
             (attendanceItem) => (attendanceItem.tuitionFee ?? 0) > 0,
@@ -410,10 +532,12 @@ export class SessionCreateService {
             data: {
               classId: data.classId,
               teacherId: data.teacherId,
+              snapshotNoAttendance: isNoAttendanceClass,
               coefficient,
               allowanceAmount,
               snapshotPerStudentAllowance,
               snapshotScaleAmount,
+              snapshotBlockCount,
               teacherOperatingDeductionRatePercent: Number.isFinite(
                 teacherOperatingDeductionRatePercent,
               )
@@ -426,24 +550,16 @@ export class SessionCreateService {
                 : 0,
               tuitionFee,
               date: sessionDate,
-              startTime: data.startTime
-                ? this.sessionValidationService.parseSessionTime(
-                    data.startTime,
-                    'startTime',
-                  )
-                : null,
-              endTime: data.endTime
-                ? this.sessionValidationService.parseSessionTime(
-                    data.endTime,
-                    'endTime',
-                  )
-                : null,
+              startTime: sessionStartTime,
+              endTime: sessionEndTime,
               notes: data.notes ?? null,
               lessonContent: data.lessonContent ?? null,
               homework: data.homework ?? null,
               tutorial: data.tutorial ?? null,
+              recordingUrl: data.recordingUrl ? data.recordingUrl.trim() : null,
               teacherPaymentStatus: data.teacherPaymentStatus ?? undefined,
-              trainingManagerStaffId: trainingManagerSnapshot.trainingManagerStaffId,
+              trainingManagerStaffId:
+                trainingManagerSnapshot.trainingManagerStaffId,
               trainingManagerRatePercent:
                 trainingManagerSnapshot.trainingManagerRatePercent,
               trainingManagerAllowanceAmount:
@@ -469,6 +585,13 @@ export class SessionCreateService {
             );
           }
 
+          await syncLessonPlanHeadCommissions(
+            tx,
+            createdSession.attendance.map(
+              (attendanceItem) => attendanceItem.id,
+            ),
+          );
+
           if (actor) {
             const afterValue =
               await this.sessionSnapshotService.getSessionAuditSnapshot(
@@ -484,6 +607,12 @@ export class SessionCreateService {
               afterValue,
             });
           }
+
+          await appendClassTimelineItem(tx, {
+            classId: data.classId,
+            kind: ClassTimelineItemKind.session,
+            sessionId: createdSession.id,
+          });
 
           return createdSession;
         },
@@ -511,10 +640,11 @@ export class SessionCreateService {
       lessonContent: string;
       homework: string;
       tutorial: string;
+      recordingUrl?: string | null;
       coefficient?: number;
-      attendance: Array<{
+      attendance?: Array<{
         studentId: string;
-        status: SessionCreateDto['attendance'][number]['status'];
+        status: (typeof AttendanceStatus)[keyof typeof AttendanceStatus];
         notes?: string | null;
       }>;
     },
@@ -532,10 +662,12 @@ export class SessionCreateService {
       );
     }
 
-    await this.sessionRosterService.assertAttendanceStudentsBelongToClass(
-      classId,
-      data.attendance.map((attendanceItem) => attendanceItem.studentId),
-    );
+    if (data.attendance && data.attendance.length > 0) {
+      await this.sessionRosterService.assertAttendanceStudentsBelongToClass(
+        classId,
+        data.attendance.map((attendanceItem) => attendanceItem.studentId),
+      );
+    }
 
     const teacherId = isTeacher
       ? actor.id
@@ -553,7 +685,8 @@ export class SessionCreateService {
         lessonContent: data.lessonContent,
         homework: data.homework,
         tutorial: data.tutorial,
-        attendance: data.attendance.map((attendanceItem) => ({
+        recordingUrl: data.recordingUrl ?? null,
+        attendance: (data.attendance ?? []).map((attendanceItem) => ({
           studentId: attendanceItem.studentId,
           status: attendanceItem.status,
           notes: attendanceItem.notes ?? null,

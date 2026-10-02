@@ -11,6 +11,12 @@ describe('SessionScheduleRulesService', () => {
       findUnique: jest.fn(),
       findMany: jest.fn(),
     },
+    classScheduleEntry: {
+      findMany: jest.fn(),
+    },
+    classTeacher: {
+      findUnique: jest.fn(),
+    },
     session: {
       findMany: jest.fn(),
     },
@@ -33,6 +39,8 @@ describe('SessionScheduleRulesService', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-05-29T12:00:00'));
     prisma.missedTeachingExplanation.findMany.mockResolvedValue([]);
     prisma.user.findMany.mockResolvedValue([]);
+    prisma.classScheduleEntry.findMany.mockResolvedValue([]);
+    prisma.classTeacher.findUnique.mockResolvedValue({ status: 'active' });
     service = new SessionScheduleRulesService(prisma as never);
   });
 
@@ -41,17 +49,11 @@ describe('SessionScheduleRulesService', () => {
   });
 
   it('allows creating a session on the fixed schedule day within the 3 hour window', async () => {
-    prisma.class.findUnique.mockResolvedValue({
-      schedule: [
-        {
-          id: 'slot-1',
-          dayOfWeek: 1,
-          from: '19:00:00',
-          to: '20:30:00',
-          teacherId: 'teacher-1',
-        },
-      ],
-    });
+    prisma.classScheduleEntry.findMany.mockResolvedValue([
+      {
+        from: '19:00:00',
+      },
+    ]);
     prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
 
     await expect(
@@ -64,17 +66,52 @@ describe('SessionScheduleRulesService', () => {
     ).resolves.toEqual({});
   });
 
+  it('allows an active class teacher to submit a session for a slot owned by another teacher (dạy thay)', async () => {
+    prisma.classTeacher.findUnique.mockResolvedValue({ status: 'active' });
+    prisma.classScheduleEntry.findMany.mockResolvedValue([
+      {
+        from: '19:00:00',
+      },
+    ]);
+    prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.assertSessionMatchesDeclaredSchedule(prisma as never, {
+        classId: 'class-1',
+        teacherId: 'teacher-substitute',
+        date: new Date(Date.UTC(2026, 4, 18)),
+        startTime: '19:00:00',
+      }),
+    ).resolves.toEqual({});
+    expect(prisma.classScheduleEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ teacherId: expect.anything() }),
+      }),
+    );
+  });
+
+  it("blocks a removed (inactive) class teacher from matching another teacher's slot", async () => {
+    prisma.classTeacher.findUnique.mockResolvedValue({ status: 'inactive' });
+    prisma.classScheduleEntry.findMany.mockResolvedValue([]);
+    prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.assertSessionMatchesDeclaredSchedule(prisma as never, {
+        classId: 'class-1',
+        teacherId: 'teacher-removed',
+        date: new Date(Date.UTC(2026, 4, 18)),
+        startTime: '19:00:00',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.classScheduleEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ teacherId: 'teacher-removed' }),
+      }),
+    );
+  });
+
   it('blocks creating a session when the date has no fixed or makeup schedule', async () => {
-    prisma.class.findUnique.mockResolvedValue({
-      schedule: [
-        {
-          id: 'slot-1',
-          dayOfWeek: 1,
-          from: '19:00:00',
-          teacherId: 'teacher-1',
-        },
-      ],
-    });
+    prisma.classScheduleEntry.findMany.mockResolvedValue([]);
     prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
 
     await expect(
@@ -88,16 +125,11 @@ describe('SessionScheduleRulesService', () => {
   });
 
   it('blocks creating a session when start time is more than 3 hours from declared schedule', async () => {
-    prisma.class.findUnique.mockResolvedValue({
-      schedule: [
-        {
-          id: 'slot-1',
-          dayOfWeek: 1,
-          from: '19:00:00',
-          teacherId: 'teacher-1',
-        },
-      ],
-    });
+    prisma.classScheduleEntry.findMany.mockResolvedValue([
+      {
+        from: '19:00:00',
+      },
+    ]);
     prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
 
     await expect(
@@ -112,9 +144,7 @@ describe('SessionScheduleRulesService', () => {
 
   it('links an unlinked matching makeup schedule event', async () => {
     const makeupDate = new Date(Date.UTC(2026, 4, 19));
-    prisma.class.findUnique.mockResolvedValue({
-      schedule: [],
-    });
+    prisma.classScheduleEntry.findMany.mockResolvedValue([]);
     prisma.makeupScheduleEvent.findMany.mockResolvedValue([
       {
         id: 'makeup-1',
@@ -138,13 +168,15 @@ describe('SessionScheduleRulesService', () => {
       id: 'class-1',
       name: 'IELTS Foundation',
       status: 'running',
-      schedule: [
+      scheduleEntries: [
         {
           id: 'slot-1',
           dayOfWeek: 1,
           from: '08:00:00',
           to: '09:30:00',
           teacherId: 'teacher-1',
+          effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
+          effectiveTo: null,
         },
       ],
       teachers: [
@@ -177,19 +209,21 @@ describe('SessionScheduleRulesService', () => {
     ).resolves.toEqual([]);
   });
 
-  it('omits missed alerts for dates before the class creation date', async () => {
+  it('omits missed alerts for dates before the schedule entry effectiveFrom', async () => {
     prisma.class.findUnique.mockResolvedValue({
       id: 'class-1',
       name: 'IELTS Foundation',
       status: 'running',
       createdAt: new Date('2026-05-27T00:00:00.000Z'), // Created Wednesday May 27th
-      schedule: [
+      scheduleEntries: [
         {
           id: 'slot-1',
           dayOfWeek: 1, // Monday May 25th
           from: '08:00:00',
           to: '09:30:00',
           teacherId: 'teacher-1',
+          effectiveFrom: new Date('2026-05-27T00:00:00.000Z'),
+          effectiveTo: null,
         },
       ],
       teachers: [
@@ -222,13 +256,15 @@ describe('SessionScheduleRulesService', () => {
       name: 'IELTS Foundation',
       status: 'running',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
-      schedule: [
+      scheduleEntries: [
         {
           id: 'slot-1',
           dayOfWeek: 1,
           from: '08:00:00',
           to: '09:30:00',
           teacherId: 'teacher-1',
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          effectiveTo: null,
         },
       ],
       teachers: [
@@ -262,13 +298,15 @@ describe('SessionScheduleRulesService', () => {
       name: 'IELTS Foundation',
       status: 'running',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
-      schedule: [
+      scheduleEntries: [
         {
           id: 'slot-1',
           dayOfWeek: 1,
           from: '08:00:00',
           to: '09:30:00',
           teacherId: 'teacher-1',
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          effectiveTo: null,
         },
       ],
       teachers: [
@@ -307,7 +345,7 @@ describe('SessionScheduleRulesService', () => {
       name: 'IELTS Foundation',
       status: 'ended',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
-      schedule: [],
+      scheduleEntries: [],
       teachers: [],
     });
 
@@ -324,13 +362,15 @@ describe('SessionScheduleRulesService', () => {
       name: 'IELTS Foundation',
       status: 'running',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
-      schedule: [
+      scheduleEntries: [
         {
           id: 'slot-1',
           dayOfWeek: 1,
           from: '08:00:00',
           to: '09:30:00',
           teacherId: 'teacher-1',
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          effectiveTo: null,
         },
       ],
       teachers: [
@@ -406,13 +446,15 @@ describe('SessionScheduleRulesService', () => {
       name: 'IELTS Foundation',
       status: 'running',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
-      schedule: [
+      scheduleEntries: [
         {
           id: 'slot-1',
           dayOfWeek: 1,
           from: '09:00:00',
           to: '11:00:00',
           teacherId: 'teacher-1',
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          effectiveTo: null,
         },
       ],
       teachers: [
@@ -448,7 +490,7 @@ describe('SessionScheduleRulesService', () => {
       ).resolves.toEqual([]);
     });
 
-    it('includes missed alert when session time is outside tolerance', async () => {
+    it('includes missed alert when session time is outside the 60-minute alert tolerance', async () => {
       prisma.class.findUnique.mockResolvedValue(classFixture);
       prisma.session.findMany.mockResolvedValue([
         {
@@ -470,22 +512,98 @@ describe('SessionScheduleRulesService', () => {
         }),
       ]);
     });
+
+    it('omits missed alert when session time is within the 60-minute alert tolerance but outside the old 180-minute one', async () => {
+      prisma.class.findUnique.mockResolvedValue(classFixture);
+      prisma.session.findMany.mockResolvedValue([
+        {
+          classId: 'class-1',
+          teacherId: 'teacher-1',
+          date: new Date(Date.UTC(2026, 5, 1)),
+          // 09:45 start vs 09:00 scheduled: 45 minutes off, inside 60 but would
+          // also have matched the old 180-minute tolerance.
+          startTime: new Date('1970-01-01T09:45:00.000Z'),
+        },
+      ]);
+      prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.getMissedTeachingAlertsByClass('class-1', 7),
+      ).resolves.toEqual([]);
+    });
+
+    it('omits missed alert when another active teacher of the class taught the slot as a substitute', async () => {
+      prisma.class.findUnique.mockResolvedValue({
+        ...classFixture,
+        teachers: [
+          ...classFixture.teachers,
+          {
+            teacherId: 'teacher-2',
+            status: 'active',
+            teacher: {
+              id: 'teacher-2',
+              user: {
+                first_name: 'Binh',
+                last_name: 'Tran',
+                email: 'binh@example.com',
+              },
+            },
+          },
+        ],
+      });
+      prisma.session.findMany.mockResolvedValue([
+        {
+          classId: 'class-1',
+          teacherId: 'teacher-2',
+          date: new Date(Date.UTC(2026, 5, 1)),
+          startTime: new Date('1970-01-01T09:00:00.000Z'),
+        },
+      ]);
+      prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.getMissedTeachingAlertsByClass('class-1', 7),
+      ).resolves.toEqual([]);
+    });
+
+    it('still raises alert when a teacher outside the class taught the slot', async () => {
+      prisma.class.findUnique.mockResolvedValue(classFixture);
+      prisma.session.findMany.mockResolvedValue([
+        {
+          classId: 'class-1',
+          teacherId: 'teacher-outsider',
+          date: new Date(Date.UTC(2026, 5, 1)),
+          startTime: new Date('1970-01-01T09:00:00.000Z'),
+        },
+      ]);
+      prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.getMissedTeachingAlertsByClass('class-1', 7),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          classId: 'class-1',
+          originalDate: '2026-06-01',
+        }),
+      ]);
+    });
   });
 
-  it('respects schedule entry active range (createdAt and deletedAt)', async () => {
+  it('respects schedule entry active range (effectiveFrom and effectiveTo)', async () => {
     prisma.class.findUnique.mockResolvedValue({
       id: 'class-1',
       name: 'IELTS Foundation',
       status: 'running',
       createdAt: new Date('2026-05-20T00:00:00.000Z'),
-      schedule: [
+      scheduleEntries: [
         {
           id: 'slot-1',
           dayOfWeek: 1, // Monday May 25
           from: '08:00:00',
           to: '09:30:00',
           teacherId: 'teacher-1',
-          createdAt: '2026-05-26T00:00:00.000Z', // Active from May 26 (after May 25)
+          effectiveFrom: new Date('2026-05-26T00:00:00.000Z'), // Active from May 26 (after May 25)
+          effectiveTo: null,
         },
         {
           id: 'slot-2',
@@ -493,7 +611,8 @@ describe('SessionScheduleRulesService', () => {
           from: '10:00:00',
           to: '11:30:00',
           teacherId: 'teacher-1',
-          deletedAt: '2026-05-24T00:00:00.000Z', // Deleted before May 25
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          effectiveTo: new Date('2026-05-24T00:00:00.000Z'), // Closed before May 25
         },
       ],
       teachers: [
@@ -514,34 +633,34 @@ describe('SessionScheduleRulesService', () => {
     prisma.session.findMany.mockResolvedValue([]);
     prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
 
-    // Checking last 7 days (May 23 to May 29). Both Monday slots should be omitted since one starts in future and one is deleted.
+    // Checking last 7 days (May 23 to May 29). Both Monday slots should be omitted since one starts in future and one is closed.
     await expect(
       service.getMissedTeachingAlertsByClass('class-1', 7),
     ).resolves.toEqual([]);
   });
 
-  it('still raises alert for deleted entry even when teacher is no longer active', async () => {
+  it('still raises alert for closed entry even when teacher is no longer active', async () => {
     // Dùng fake time sau MISSED_TEACHING_ALERT_MIN_DATE_KEY (2026-06-01)
     // Today = 2026-06-10 (Thứ 3), range 7 ngày = 2026-06-04 → 2026-06-10
     // Thứ 2 trong range: 2026-06-08
     jest.setSystemTime(new Date('2026-06-10T12:00:00'));
 
     // Scenario: teacher-old đã bị inactive, nhưng entry lịch của họ
-    // có deletedAt = 2026-06-10 → buổi thứ 2 (08/06) trước deletedAt vẫn phải raise alert.
+    // có effectiveTo = 2026-06-10 → buổi thứ 2 (08/06) trước effectiveTo vẫn phải raise alert.
     prisma.class.findUnique.mockResolvedValue({
       id: 'class-1',
       name: 'IELTS Foundation',
       status: 'running',
       createdAt: new Date('2026-05-01T00:00:00.000Z'),
-      schedule: [
+      scheduleEntries: [
         {
           id: 'slot-old',
           dayOfWeek: 1, // Monday June 8 2026
           from: '09:00:00',
           to: '10:30:00',
           teacherId: 'teacher-old',
-          createdAt: '2026-05-01T00:00:00.000Z',
-          deletedAt: '2026-06-10T00:00:00.000Z', // deleted on today → June 8 còn hợp lệ
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          effectiveTo: new Date('2026-06-10T00:00:00.000Z'), // closed today → June 8 còn hợp lệ
         },
       ],
       teachers: [
@@ -564,7 +683,7 @@ describe('SessionScheduleRulesService', () => {
     prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
 
     const alerts = await service.getMissedTeachingAlertsByClass('class-1', 7);
-    // June 8 (Mon) nằm trong range, trước deletedAt June 10 → phải có alert
+    // June 8 (Mon) nằm trong range, trước effectiveTo June 10 → phải có alert
     expect(alerts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -575,52 +694,5 @@ describe('SessionScheduleRulesService', () => {
         }),
       ]),
     );
-  });
-
-  it('uses class createdAt as lower bound for legacy entries without createdAt', async () => {
-    // Scenario: entry cũ không có createdAt field (legacy data trước khi tracking được thêm).
-    // Dùng fake time 2026-06-10 (Thứ 4), range 7 ngày = 2026-06-04 → 2026-06-10.
-    // Class tạo ngày 2026-06-09 (Thứ 2) → không được tạo alert cho ngày 2026-06-02 (Thứ 2 tuần trước).
-    jest.setSystemTime(new Date('2026-06-10T12:00:00'));
-
-    prisma.class.findUnique.mockResolvedValue({
-      id: 'class-1',
-      name: 'IELTS Advanced',
-      status: 'running',
-      createdAt: new Date('2026-06-09T00:00:00.000Z'), // lớp tạo ngày Thứ 2 tuần này
-      schedule: [
-        {
-          id: 'slot-legacy',
-          dayOfWeek: 1, // Monday
-          from: '08:00:00',
-          to: '09:30:00',
-          teacherId: 'teacher-1',
-          // Không có createdAt → legacy entry
-        },
-      ],
-      teachers: [
-        {
-          teacherId: 'teacher-1',
-          status: 'active',
-          teacher: {
-            id: 'teacher-1',
-            user: {
-              first_name: 'An',
-              last_name: 'Nguyen',
-              email: 'an@example.com',
-            },
-          },
-        },
-      ],
-    });
-    prisma.session.findMany.mockResolvedValue([]);
-    prisma.makeupScheduleEvent.findMany.mockResolvedValue([]);
-
-    const alerts = await service.getMissedTeachingAlertsByClass('class-1', 7);
-    const alertDates = alerts.map((a) => a.originalDate);
-
-    // June 9 = ngày tạo lớp, grace window chưa qua (class created = today) → tùy isPastTeachingGraceWindow
-    // Quan trọng: KHÔNG có alert cho thứ 2 tuần trước (June 2) vì class chưa tồn tại lúc đó
-    expect(alertDates).not.toContain('2026-06-02');
   });
 });

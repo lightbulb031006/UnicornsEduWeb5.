@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { PaymentStatus, StaffRole, StaffStatus } from 'generated/enums';
 import {
+  LessonOutputDifficultyBand,
   LessonOutputStatus,
   LessonTaskPriority,
   LessonTaskStatus,
@@ -11,6 +12,7 @@ import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsIn,
@@ -18,10 +20,10 @@ import {
   IsOptional,
   IsString,
   IsUrl,
-  IsUUID,
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import {
   IsStaffId,
@@ -218,6 +220,10 @@ export interface LessonOutputResponseDto {
   source: string | null;
   originalLink: string | null;
   level: string | null;
+  difficultyBand: LessonOutputDifficultyBand | null;
+  includesTest: boolean;
+  includesSolution: boolean;
+  includesLectureVideo: boolean;
   tags: string[];
   cost: number;
   date: string;
@@ -621,6 +627,44 @@ export class CreateLessonOutputDto {
   level?: string | null;
 
   @ApiPropertyOptional({
+    enum: LessonOutputDifficultyBand,
+    nullable: true,
+    description:
+      'Bậc độ khó giáo án — nguồn sự thật để backend tự tính `cost`. Khác `level` (lọc nội bộ).',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsEnum(LessonOutputDifficultyBand)
+  difficultyBand?: LessonOutputDifficultyBand | null;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Hạng mục Sinh test — cộng vào `cost` theo bậc đã chọn.',
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includesTest?: boolean;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Hạng mục Lời giải — cộng vào `cost` theo bậc đã chọn.',
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includesSolution?: boolean;
+
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Hạng mục Bài giảng video — cộng vào `cost` theo bậc đã chọn.',
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includesLectureVideo?: boolean;
+
+  @ApiPropertyOptional({
     type: [String],
     example: ['hsg', 'vinh-phuc', 'to-hop'],
   })
@@ -629,7 +673,13 @@ export class CreateLessonOutputDto {
   @IsString({ each: true })
   tags?: string[] | null;
 
-  @ApiPropertyOptional({ example: 250000, default: 0, minimum: 0 })
+  @ApiPropertyOptional({
+    example: 250000,
+    default: 0,
+    minimum: 0,
+    description:
+      'Bị backend bỏ qua. `cost` luôn tính từ bậc độ khó + tick hạng mục; dòng chưa có bậc giữ nguyên số cũ khi sửa.',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

@@ -13,6 +13,7 @@ import type {
 import { DateInput } from "@/components/ui/DateInput";
 import { TimeInput } from "@/components/ui/TimeInput";
 import ClassCard from "./ClassCard";
+import { formatVnDate } from "@/lib/formatters";
 
 const MISSED_ALERT_SCROLL_THRESHOLD = 4;
 /** ~4 collapsed accordion rows (header + gap). */
@@ -52,11 +53,7 @@ function getTodayDateValue() {
 function formatDateLabel(value: string) {
   const parsed = new Date(`${value}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(parsed);
+  return formatVnDate(parsed);
 }
 
 function formatTime(value?: string | null) {
@@ -289,6 +286,7 @@ export default function MissedTeachingAlertsCard({
                           onChange={(event) =>
                             updateDraft(alert, { reason: event.target.value })
                           }
+                          aria-label="Nhập lý do giải trình"
                           placeholder="Nhập lý do giải trình"
                           readOnly={!canEditExplanation}
                           className="min-h-20 w-full rounded-md border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition focus:border-border-focus focus:ring-2 focus:ring-border-focus/25 read-only:cursor-default read-only:opacity-80"

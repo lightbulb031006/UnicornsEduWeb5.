@@ -31,6 +31,93 @@ model RoleTaxDeductionRate {
   @@map("role_tax_deduction_rates")
 }
 
+/// Mức lương cứng mặc định theo role. Một row / StaffRole.
+/// Không có row, hoặc `amount` null = chưa cấu hình (không hiểu là 0đ).
+/// Độc lập với % vận hành lương cứng — xoá mức lương không xoá % vận hành.
+model RoleFixedSalaryDefault {
+  id        String    @id @default(uuid())
+  roleType  StaffRole @unique @map("role_type")
+  amount    Int?
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("role_fixed_salary_defaults")
+}
+
+/// % khấu trừ vận hành trên lương cứng, mặc định theo role. Một row / StaffRole.
+/// Không có row, hoặc `rate_percent` null = chưa cấu hình (không hiểu là 0%).
+/// Độc lập với mức lương cứng — xoá % không xoá số tiền lương.
+model RoleFixedSalaryOperatingRateDefault {
+  id          String    @id @default(uuid())
+  roleType    StaffRole @unique @map("role_type")
+  ratePercent Decimal?  @map("rate_percent") @db.Decimal(5, 2)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("role_fixed_salary_operating_rate_defaults")
+}
+
+/// Đè mức lương cứng theo cặp (nhân sự, role). Có row = đang đè, kể cả amount = 0
+/// (cố ý loại khỏi lương cứng của role). Không có row = theo mặc định role.
+/// Độc lập với đè % vận hành — tạo/sửa/xoá row này không chốt cứng trục %.
+model StaffFixedSalaryOverride {
+  id        String    @id @default(uuid())
+  staffId   String    @map("staff_id")
+  roleType  StaffRole @map("role_type")
+  amount    Int
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff     StaffInfo @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, roleType])
+  @@index([staffId])
+  @@index([roleType])
+  @@map("staff_fixed_salary_overrides")
+}
+
+/// Khoản lương cứng phải trả, đóng băng tại lúc chốt tháng.
+/// Unique (staff_id, role_type, month): chạy lại không tạo thêm / không sửa khoản cũ.
+model StaffFixedSalaryPayable {
+  id                         String        @id @default(uuid())
+  staffId                    String        @map("staff_id")
+  roleType                   StaffRole     @map("role_type")
+  month                      String
+  status                     PaymentStatus @default(pending)
+  grossAmount                Int           @map("gross_amount")
+  operatingRatePercent       Decimal       @map("operating_rate_percent") @db.Decimal(5, 2)
+  taxRatePercent             Decimal       @map("tax_rate_percent") @db.Decimal(5, 2)
+  operatingDeductionAmount   Int           @map("operating_deduction_amount")
+  taxDeductionAmount         Int           @map("tax_deduction_amount")
+  netAmount                  Int           @map("net_amount")
+  note                       String?
+  createdAt                  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff                      StaffInfo     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, roleType, month])
+  @@index([staffId])
+  @@index([month])
+  @@index([status, month])
+  @@map("staff_fixed_salary_payables")
+}
+
+/// Đè % vận hành lương cứng theo cặp (nhân sự, role). Có row = đang đè, kể cả 0%.
+/// Không có row = theo mặc định role. Độc lập với đè mức lương.
+model StaffFixedSalaryOperatingRateOverride {
+  id          String    @id @default(uuid())
+  staffId     String    @map("staff_id")
+  roleType    StaffRole @map("role_type")
+  ratePercent Decimal   @map("rate_percent") @db.Decimal(5, 2)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff       StaffInfo @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, roleType], map: "staff_fs_op_rate_ov_staff_role_key")
+  @@index([staffId])
+  @@index([roleType])
+  @@map("staff_fixed_salary_operating_rate_overrides")
+}
+
 model StaffTaxDeductionOverride {
   id            String    @id @default(uuid())
   staffId       String    @map("staff_id")

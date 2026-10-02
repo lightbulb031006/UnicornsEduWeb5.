@@ -21,7 +21,6 @@ export const NOTIFICATION_DELIVERY_KINDS = ['published', 'adjusted'] as const;
 export const NOTIFICATION_TARGET_ROLE_TYPES = [
   UserRole.admin,
   UserRole.staff,
-  UserRole.student,
 ] as const;
 
 export type NotificationStatusDto = (typeof NOTIFICATION_STATUSES)[number];
@@ -33,7 +32,7 @@ export type NotificationTargetRoleTypeDto =
 export class NotificationTargetingDto {
   @ApiPropertyOptional({
     description:
-      'When true, this notification targets every eligible admin, staff, and student account.',
+      'When true, this notification targets every eligible admin and staff account.',
     example: true,
     default: true,
   })
@@ -45,7 +44,7 @@ export class NotificationTargetingDto {
     description: 'Optional role types to include in the audience union.',
     enum: NOTIFICATION_TARGET_ROLE_TYPES,
     isArray: true,
-    example: [UserRole.staff, UserRole.student],
+    example: [UserRole.staff],
   })
   @IsOptional()
   @IsArray()

@@ -17,13 +17,14 @@ Instructions for coding agents working in this monorepo. Keep changes minimal, f
   - **Frontend**: `apps/web` (Next.js 16, React 19, Tailwind v4)
   - **Backend**: `apps/api` (NestJS)
 - **Preferred commands (from repo root)**
-  - Dev: `pnpm dev` (all) or `pnpm --filter web dev` / `pnpm --filter api dev`
+  - Dev: `pnpm dev` or `bun run dev` (all) or `pnpm --filter web dev` / `pnpm --filter api dev`
   - Types: `pnpm check-types` (and for web: `pnpm --filter web exec tsc --noEmit`)
   - Lint: `pnpm lint` or `pnpm --filter web lint`
 - **Dependency installation**
+  - Local: `bun install` or `pnpm install` from repo root. Root `package.json` lists `workspaces: ["apps/*", "packages/*"]` so Bun links `apps/web` and `apps/api` (same glob as `pnpm-workspace.yaml`). `bun.lock` is gitignored; committed lockfile remains `pnpm-lock.yaml`.
   - Install dependencies inside the app scope (recommended):
-    - `cd apps/web && pnpm add <pkg>`
-    - `cd apps/api && pnpm add <pkg>`
+    - `cd apps/web && pnpm add <pkg>` (or `bun add <pkg>`)
+    - `cd apps/api && pnpm add <pkg>` (or `bun add <pkg>`)
   - Do **not** create/use a project-local `.pnpm-store`. Prefer a global pnpm store.
 
 ## Documentation sync (mandatory)
@@ -42,8 +43,16 @@ If you change project workflow/conventions for agents (commands, required checks
 ## Agent skills
 
 - **Issue tracker**: use local markdown issues under `.scratch/` unless the user explicitly asks to publish to GitHub. See `docs/agents/issue-tracker.md`.
-- **Triage labels**: use the canonical triage labels documented in `docs/agents/triage-labels.md` (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`).
-- **Domain docs**: treat this as a single-context monorepo and use the docs listed in Source of truth first. See `docs/agents/domain.md`.
+- **Triage labels**: use the canonical triage labels documented in `docs/agents/triage-labels.md` (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). All five exist on the repo.
+- **Domain docs**: single-context — one `CONTEXT.md` glossary plus `docs/adr/` at the repo root, read alongside the docs listed in Source of truth. See `docs/agents/domain.md`.
+
+## Branching and upstream synchronization (Math fork)
+
+- Use `codex/` branches for new feature work unless the user specifies another branch.
+- A user-requested sync from the Tin repository may merge `upstream/main` into local `main`, after backing up the current Math tip and uncommitted work, resolving conflicts and running the relevant checks.
+- Keep Math branding, session permissions and deployment configuration. Do not run upstream data-repair migrations on the Math database without a read-only impact check and explicit deployment authorization. See `docs/ops/upstream-sync-math-2026-10-02.md`.
+- Pulling/merging source locally does not authorize pushing a release or deploying. GitHub Actions on this fork can deploy on push, so only push when the user requests publication/deployment.
+- The original Tin repo's `dev` slice/review workflow remains applicable to work targeting that upstream repository, not this Math source-sync operation.
 
 ## Frontend rules (`apps/web`) (mandatory)
 
@@ -60,7 +69,8 @@ If you change project workflow/conventions for agents (commands, required checks
 - **Mock data for UI-first work (preferred)**: if backend data is not required yet, create page-local mock data directly inside the relevant `apps/web/app/**/page.tsx` to render UI immediately. When switching to real data, replace the mock with TanStack Query + DTOs in `apps/web/dtos/`.
 - **Notifications**: use **Sonner** for success/error toasts (avoid inline alert blocks unless explicitly required).
 - **UI components**: prefer **shadcn/ui** components; compose/extend before hand-rolling new components.
-- **Native temporal inputs**: use shared `apps/web/components/ui/DateInput.tsx` and `MonthInput.tsx` for native date/month fields so clicking the whole input opens the picker. Use shared `TimeInput.tsx` for time-of-day fields: **24h** UI (display `HH:mm`, value `HH:mm:ss` with seconds `00`, minute grid 15′); empty/create start prefills via `currentTimePrefillValue()` (minutes snapped to nearest 15′); picker commits update the field draft immediately; clicking the whole field or the clock button opens an `UpgradedSelect` hour/minute menu; see `docs/adr/2026-07-28-timeinput-24h-minute-precision.md`.
+- **Dialogs / confirms**: do **not** hand-code overlay modals (`<div className="fixed inset-0">`) or `window.confirm`. Form/content overlays use `apps/web/components/ui/ResponsiveDialog.tsx` (role=dialog, focus trap, Escape, body scroll lock, mobile edge padding). Destructive/yes-no prompts use `apps/web/components/ui/ConfirmDialog.tsx` (composes shadcn `AlertDialog`). Backdrop/Escape on a dirty form must confirm before discarding.
+- **Native temporal inputs**: use shared `apps/web/components/ui/DateInput.tsx` and `MonthInput.tsx` for native date/month fields so clicking the whole input opens the picker. Use shared `TimeInput.tsx` for time-of-day fields: **24h** UI (display `HH:mm`, value `HH:mm:ss` with seconds `00`, minute grid 15′); empty/create start prefills via `currentTimePrefillValue()` (minutes snapped to nearest 15′) unless `prefillEmpty={false}` (optional open time, e.g. practice lần giao); picker commits update the field draft immediately; clicking the whole field or the clock button opens an inline dual scroll-column hour/minute picker (no nested select); typed/off-grid minutes (e.g. `10:07`) stay as-is — do not floor to the 15′ grid on load; see `docs/adr/2026-07-28-timeinput-24h-minute-precision.md`.
 - **Dropdowns**: for simple single-select dropdowns, use the shared upgraded dropdown at `apps/web/components/ui/UpgradedSelect.tsx` instead of native `<select>`.
   - Keep a custom combobox/listbox only when the UX truly needs search, multi-select, async suggestions, or richer option content.
 - **Mobile-first**: implement for small screens first, then add larger breakpoints.

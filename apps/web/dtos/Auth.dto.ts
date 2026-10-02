@@ -104,3 +104,31 @@ export interface LoginResponseDto {
 export interface SetupPasswordDto {
   password: string;
 }
+
+export interface StudentLoginInitResponse {
+  requestId: string;
+  activateSecret: string;
+  message: string;
+}
+
+export interface StudentLoginPollResponse {
+  verified: boolean;
+}
+
+export interface StudentActivateDto {
+  requestId: string;
+  activateSecret: string;
+  rememberMe?: boolean;
+}
+
+export interface StudentActivateResponse {
+  message: string;
+}
+
+export type VerifyLoginStatus = "verified" | "used" | "expired" | "invalid";
+
+export interface VerifyLoginResponse {
+  status: VerifyLoginStatus;
+  message: string;
+  verified: boolean;
+}

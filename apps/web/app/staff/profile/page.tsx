@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   StaffBonusCard,
+  StaffFixedSalaryIncomeCard,
   StaffCard,
   StaffIdentityOverview,
   SessionHistoryTableSkeleton,
@@ -48,15 +49,12 @@ import { ROLE_LABELS } from "@/lib/staff.constants";
 import { pickAvatarUrl } from "@/lib/avatar";
 import PreviewableUserAvatar from "@/components/ui/PreviewableUserAvatar";
 import { useAuth } from "@/context/AuthContext";
+import { formatVnDate } from "@/lib/formatters";
 
 function formatDate(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(iso));
+    return formatVnDate(new Date(iso));
   } catch {
     return "—";
   }
@@ -296,6 +294,7 @@ function toStaffUpdateSessionPayload(payload: SessionUpdatePayload) {
     lessonContent: payload.lessonContent,
     homework: payload.homework,
     tutorial: payload.tutorial,
+    recordingUrl: payload.recordingUrl ?? null,
     coefficient: payload.coefficient,
     attendance: payload.attendance?.map((item) => ({
       studentId: item.studentId,
@@ -820,6 +819,7 @@ export default function StaffSelfDetailPage() {
   const depositByClass = incomeSummary?.depositYearByClass ?? [];
   const bonusTotals = incomeSummary?.bonusMonthlyTotals ?? EMPTY_AMOUNT_SUMMARY;
   const otherRoleSummaries = incomeSummary?.otherRoleSummaries ?? [];
+  const fixedSalaryPayables = incomeSummary?.fixedSalaryPayables ?? [];
   const showAssistantDualRoleHelper =
     hasAssistantAndCustomerCareRoles(staff?.roles) &&
     otherRoleSummaries.some((item) => item.role === "assistant");
@@ -970,14 +970,14 @@ export default function StaffSelfDetailPage() {
 
       <div className="flex flex-col gap-4">
         <StaffIdentityOverview
+          staffId={staff.id}
+          achievementMode="self"
           birthDateLabel={formatDate(staff.birthDate)}
           province={province}
           ethnicity={staff.ethnicity}
           gender={staff.gender}
           currentAddress={staff.currentAddress}
           university={staff.university}
-          specialization={staff.specialization}
-          personalAchievementLink={staff.personalAchievementLink}
           googleMeetLink={staff.googleMeetLink}
           qrLink={resolvedQrLink}
           onQrEdit={() => setEditPopupOpen(true)}
@@ -1476,6 +1476,14 @@ export default function StaffSelfDetailPage() {
           })()}
         </StaffCard>
 
+        <StaffFixedSalaryIncomeCard
+          staffId={linkedStaffId}
+          payables={fixedSalaryPayables}
+          canEdit={false}
+          isLoading={isIncomeSummaryLoading && !incomeSummary}
+          isError={isIncomeSummaryError}
+        />
+
         <StaffCard title="Lịch sử buổi học">
           <div className="min-w-0 overflow-x-auto">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1592,6 +1600,7 @@ export default function StaffSelfDetailPage() {
                           type="search"
                           value={workTypeSearch}
                           onChange={(e) => setWorkTypeSearch(e.target.value)}
+                          aria-label="Tìm công việc"
                           placeholder="Tìm công việc…"
                           className="w-full rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                         />
@@ -1652,7 +1661,7 @@ export default function StaffSelfDetailPage() {
                 />
               </label>
 
-              <label className="block">
+              <div className="block">
                 <span className="mb-1 block text-sm font-medium text-text-secondary">
                   Trạng thái thanh toán
                 </span>
@@ -1676,7 +1685,7 @@ export default function StaffSelfDetailPage() {
                     chỉnh nội dung khoản thưởng.
                   </p>
                 </div>
-              </label>
+              </div>
 
               <label className="block">
                 <span className="mb-1 block text-sm font-medium text-text-secondary">

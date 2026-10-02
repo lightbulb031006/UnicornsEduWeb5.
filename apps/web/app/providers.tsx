@@ -47,6 +47,7 @@ import {
 } from "@/lib/query-invalidation";
 import { SidebarThemePicker } from "@/components/shell";
 import NextTopLoader from "nextjs-toploader";
+import { LazyMotion, domAnimation } from "framer-motion";
 
 const defaultUser: UserInfoDto = createGuestUser();
 
@@ -230,25 +231,17 @@ function NotificationSocketBridge() {
     user.access?.staff?.canAccess ??
       (hasEffectiveRole(user, Role.staff) && user.hasStaffProfile),
   );
-  const canOpenStudentChannel = Boolean(
-    user.access?.student?.canAccess ??
-      (hasEffectiveRole(user, Role.student) && user.hasStudentProfile),
-  );
   const canConnectRealtimeNotifications =
     isAuthReady &&
     hasAuthenticatedSession(user) &&
-    (canOpenAdminChannel || canOpenStaffChannel || canOpenStudentChannel);
+    (canOpenAdminChannel || canOpenStaffChannel);
 
   useEffect(() => {
     if (!canConnectRealtimeNotifications) {
       return;
     }
 
-    if (
-      !canOpenAdminChannel &&
-      !canOpenStaffChannel &&
-      !canOpenStudentChannel
-    ) {
+    if (!canOpenAdminChannel && !canOpenStaffChannel) {
       return;
     }
 
@@ -344,7 +337,6 @@ function NotificationSocketBridge() {
   }, [
     canOpenAdminChannel,
     canOpenStaffChannel,
-    canOpenStudentChannel,
     canConnectRealtimeNotifications,
     queryClient,
   ]);
@@ -427,19 +419,26 @@ export function Providers({
         speed={200}
         shadow="0 0 10px var(--ue-primary, #2563EB),0 0 5px var(--ue-primary, #2563EB)"
       />
-      <ThemeProvider>
-        <ActionHistoryInvalidationBridge />
-        <RateLimitToastBridge />
-        <AuthProvider initialUser={initialUser ?? defaultUser}>
-          <NotificationSocketBridge />
-          <DirectTopUpApprovalModal />
-          <AuthPasswordSetupGate />
-          <EmailVerificationAccessModal />
-          <PublicThemePickerBridge />
-          {children}
-          <Toaster richColors position="top-right" />
-        </AuthProvider>
-      </ThemeProvider>
+      {/*
+        LazyMotion + component `m` thay cho `motion`: `motion` kéo theo toàn bộ
+        feature bundle (~30kb). `strict` bắt lỗi ngay nếu có chỗ nào lỡ dùng lại
+        `motion.*` bên trong cây này.
+      */}
+      <LazyMotion features={domAnimation} strict>
+        <ThemeProvider>
+          <ActionHistoryInvalidationBridge />
+          <RateLimitToastBridge />
+          <AuthProvider initialUser={initialUser ?? defaultUser}>
+            <NotificationSocketBridge />
+            <DirectTopUpApprovalModal />
+            <AuthPasswordSetupGate />
+            <EmailVerificationAccessModal />
+            <PublicThemePickerBridge />
+            {children}
+            <Toaster richColors position="top-right" />
+          </AuthProvider>
+        </ThemeProvider>
+      </LazyMotion>
     </QueryClientProvider>
   );
 }

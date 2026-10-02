@@ -16,4 +16,17 @@ describe('calculateDeductionAmounts', () => {
       netAmount: 81_000,
     });
   });
+
+  it('applies tax to the remainder after operating deduction, not to gross', () => {
+    const result = calculateDeductionAmounts({
+      grossAmount: 1_000_000,
+      operatingRatePercent: 20,
+      taxRatePercent: 10,
+    });
+
+    expect(result.operatingDeductionAmount).toBe(200_000);
+    expect(result.taxDeductionAmount).toBe(80_000);
+    expect(result.taxDeductionAmount).not.toBe(100_000);
+    expect(result.netAmount).toBe(720_000);
+  });
 });

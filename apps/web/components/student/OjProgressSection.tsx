@@ -575,7 +575,10 @@ export default function OjProgressSection({ studentName }: Props) {
                     {filteredModules.map((module, idx) => {
                       const isCompleted = module.status === "Đã Hoàn Thành" || module.progress === 100;
                       return (
-                        <tr key={idx} className="hover:bg-bg-primary/50 text-text-primary">
+                        <tr
+                          key={`${module.levelName}-${module.moduleName}`}
+                          className="hover:bg-bg-primary/50 text-text-primary"
+                        >
                           <td className="p-3 text-center text-text-secondary">{idx + 1}</td>
                           <td className="p-3 font-medium">{module.levelName}</td>
                           <td className="p-3 font-semibold">{module.moduleName}</td>

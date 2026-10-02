@@ -316,3 +316,25 @@ export async function deleteStudentById(id: string) {
   const response = await api.delete(`/student/${safeId}`);
   return response.data;
 }
+
+/** POST /student/:id/avatar – upload linked-user avatar (clean + watermark twin). */
+export async function uploadStudentAvatar(
+  id: string,
+  file: File,
+): Promise<StudentDetail> {
+  const safeId = encodeURIComponent(id);
+  const formData = new FormData();
+  formData.append("avatar", file);
+  const response = await api.post<StudentDetail>(
+    `/student/${safeId}/avatar`,
+    formData,
+  );
+  return response.data;
+}
+
+/** DELETE /student/:id/avatar – remove linked-user avatar twins. */
+export async function deleteStudentAvatar(id: string): Promise<StudentDetail> {
+  const safeId = encodeURIComponent(id);
+  const response = await api.delete<StudentDetail>(`/student/${safeId}/avatar`);
+  return response.data;
+}

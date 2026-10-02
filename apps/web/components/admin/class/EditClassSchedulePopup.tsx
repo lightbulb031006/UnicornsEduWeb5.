@@ -22,6 +22,7 @@ import {
   classEditorModalTitleClassName,
 } from "./classEditorModalStyles";
 import { TimeInput } from "@/components/ui/TimeInput";
+import { DateInput } from "@/components/ui/DateInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 
@@ -32,6 +33,10 @@ type ScheduleRangeForm = {
   from: string;
   to: string;
   teacherId: string;
+  /** Ngày slot có hiệu lực (YYYY-MM-DD). Để trống = backend dùng hôm nay. */
+  effectiveFrom: string;
+  /** Giá trị effectiveFrom gốc từ server, dùng để phát hiện admin có sửa hay không. */
+  initialEffectiveFrom: string;
 };
 
 type ScheduleTeacherOption = {
@@ -44,6 +49,7 @@ const EMPTY_SCHEDULE_RANGE = {
   from: "",
   to: "",
   teacherId: "",
+  effectiveFrom: "",
 } as const;
 
 type Props = {
@@ -54,13 +60,22 @@ type Props = {
   allowTeacherSelection?: boolean;
   defaultTeacherId?: string;
   readOnly?: boolean;
-  onSubmitSchedule?: (data: { schedule: ClassScheduleItem[] }) => Promise<unknown>;
+  /** Chỉ Admin/Trợ lý được sửa "Ngày hiệu lực" backdate; gia sư tự sửa lịch luôn dùng now(). Mặc định true. */
+  allowEffectiveFromEdit?: boolean;
+  onSubmitSchedule?: (data: {
+    schedule: ClassScheduleItem[];
+    removedEntryIds?: string[];
+    expectedUpdatedAt?: string;
+  }) => Promise<unknown>;
   onScheduleSaved?: () => Promise<unknown> | void;
 };
 
 function createScheduleRange(
   range?: Partial<
-    Pick<ScheduleRangeForm, "id" | "dayOfWeek" | "from" | "to" | "teacherId">
+    Pick<
+      ScheduleRangeForm,
+      "id" | "dayOfWeek" | "from" | "to" | "teacherId" | "effectiveFrom"
+    >
   >,
   fallbackTeacherId?: string,
 ): ScheduleRangeForm {
@@ -71,6 +86,8 @@ function createScheduleRange(
     from: range?.from ?? EMPTY_SCHEDULE_RANGE.from,
     to: range?.to ?? EMPTY_SCHEDULE_RANGE.to,
     teacherId: range?.teacherId ?? fallbackTeacherId ?? EMPTY_SCHEDULE_RANGE.teacherId,
+    effectiveFrom: range?.effectiveFrom ?? EMPTY_SCHEDULE_RANGE.effectiveFrom,
+    initialEffectiveFrom: range?.effectiveFrom ?? EMPTY_SCHEDULE_RANGE.effectiveFrom,
   };
 }
 
@@ -82,11 +99,14 @@ function normalizeSchedule(
   return schedule.reduce<ScheduleRangeForm[]>((acc, item) => {
     if (!item || typeof item !== "object") return acc;
     const record = item as Record<string, unknown>;
+    if (record.deletedAt) return acc;
     const from = normalizeTimeOnly(typeof record.from === "string" ? record.from : "");
     const to = normalizeTimeOnly(typeof record.to === "string" ? record.to : "");
     const dayOfWeek = normalizeDayOfWeek(record.dayOfWeek, EMPTY_SCHEDULE_RANGE.dayOfWeek);
     const teacherId =
       typeof record.teacherId === "string" ? record.teacherId : fallbackTeacherId;
+    const effectiveFrom =
+      typeof record.effectiveFrom === "string" ? record.effectiveFrom : undefined;
     if (!from && !to) return acc;
     return [
       ...acc,
@@ -97,6 +117,7 @@ function normalizeSchedule(
           from,
           to,
           teacherId,
+          effectiveFrom,
         },
         fallbackTeacherId,
       ),
@@ -115,7 +136,10 @@ function parseTimeToSeconds(value: string): number | null {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-function buildSchedulePayload(scheduleRanges: ScheduleRangeForm[]): ClassScheduleItem[] {
+function buildSchedulePayload(
+  scheduleRanges: ScheduleRangeForm[],
+  allowEffectiveFromEdit: boolean,
+): ClassScheduleItem[] {
   return scheduleRanges.reduce<ClassScheduleItem[]>((acc, range) => {
     if (!range.from && !range.to) return acc;
     if ((range.from && !range.to) || (!range.from && range.to)) {
@@ -142,6 +166,9 @@ function buildSchedulePayload(scheduleRanges: ScheduleRangeForm[]): ClassSchedul
         from,
         to,
         teacherId: range.teacherId,
+        ...(allowEffectiveFromEdit && range.effectiveFrom !== range.initialEffectiveFrom
+          ? { effectiveFrom: range.effectiveFrom || undefined }
+          : {}),
       },
     ];
   }, []);
@@ -155,6 +182,7 @@ export default function EditClassSchedulePopup({
   allowTeacherSelection,
   defaultTeacherId,
   readOnly,
+  allowEffectiveFromEdit,
   onSubmitSchedule,
   onScheduleSaved,
 }: Props) {
@@ -168,6 +196,7 @@ export default function EditClassSchedulePopup({
       allowTeacherSelection={allowTeacherSelection}
       defaultTeacherId={defaultTeacherId}
       readOnly={readOnly}
+      allowEffectiveFromEdit={allowEffectiveFromEdit}
       onSubmitSchedule={onSubmitSchedule}
       onScheduleSaved={onScheduleSaved}
     />
@@ -181,18 +210,39 @@ function EditClassScheduleDialog({
   allowTeacherSelection = true,
   defaultTeacherId,
   readOnly = false,
+  allowEffectiveFromEdit = true,
   onSubmitSchedule,
   onScheduleSaved,
 }: Omit<Props, "open">) {
   const queryClient = useQueryClient();
   const resolvedDefaultTeacherId =
     defaultTeacherId ?? (teachers.length === 1 ? teachers[0]?.id ?? "" : "");
-  const [scheduleRanges, setScheduleRanges] = useState<ScheduleRangeForm[]>(() => {
-    const normalized = normalizeSchedule(classDetail.schedule, resolvedDefaultTeacherId);
+  // Chế độ gia sư tự sửa lịch (allowTeacherSelection=false + có defaultTeacherId): chỉ
+  // load/hiển thị đúng slot của gia sư đó, không đụng tới slot của gia sư khác trong lớp.
+  const scopeTeacherId =
+    !allowTeacherSelection && defaultTeacherId ? defaultTeacherId : undefined;
+  const buildInitialRanges = () => {
+    const normalized = normalizeSchedule(
+      classDetail.schedule,
+      resolvedDefaultTeacherId,
+    ).filter((range) => !scopeTeacherId || range.teacherId === scopeTeacherId);
     return normalized.length > 0
       ? normalized
       : [createScheduleRange(undefined, resolvedDefaultTeacherId)];
-  });
+  };
+  const [scheduleRanges, setScheduleRanges] =
+    useState<ScheduleRangeForm[]>(buildInitialRanges);
+  // Id các slot đang active lúc mở dialog (trong phạm vi được sửa) — dùng để tính
+  // slot nào bị người dùng chủ động xoá, gửi tường minh qua `removedEntryIds` thay
+  // vì suy luận "vắng mặt trong payload = bị xoá" (nguyên nhân gây lost-update).
+  const [initialPersistedIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        buildInitialRanges()
+          .map((range) => range.persistedId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+  );
   const teacherOptions = teachers.map((teacher) => ({
     value: teacher.id,
     label: teacher.fullName?.trim() || "—",
@@ -211,11 +261,19 @@ function EditClassScheduleDialog({
     }
     let schedulePayload: ClassScheduleItem[];
     try {
-      schedulePayload = buildSchedulePayload(scheduleRanges);
+      schedulePayload = buildSchedulePayload(scheduleRanges, allowEffectiveFromEdit);
     } catch (error) {
       toast.error((error as Error).message || "Không thể lưu lịch học.");
       return;
     }
+    const survivingPersistedIds = new Set(
+      scheduleRanges
+        .map((range) => range.persistedId)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const removedEntryIds = Array.from(initialPersistedIds).filter(
+      (id) => !survivingPersistedIds.has(id),
+    );
     onClose();
     runBackgroundSave({
       loadingMessage: "Đang lưu khung giờ học...",
@@ -223,9 +281,15 @@ function EditClassScheduleDialog({
       errorMessage: "Không thể cập nhật lịch học.",
       action: () =>
         onSubmitSchedule
-          ? onSubmitSchedule({ schedule: schedulePayload })
+          ? onSubmitSchedule({
+              schedule: schedulePayload,
+              removedEntryIds: removedEntryIds.length ? removedEntryIds : undefined,
+              expectedUpdatedAt: classDetail.updatedAt,
+            })
           : classApi.updateClassSchedule(classDetail.id, {
               schedule: schedulePayload,
+              removedEntryIds: removedEntryIds.length ? removedEntryIds : undefined,
+              expectedUpdatedAt: classDetail.updatedAt,
             }),
       onSuccess: async (result) => {
         const resObj = result as Record<string, unknown> | null;
@@ -239,6 +303,13 @@ function EditClassScheduleDialog({
           queryClient.invalidateQueries({ queryKey: ["class", "list"] }),
           Promise.resolve(onScheduleSaved?.()),
         ]);
+      },
+      onError: async () => {
+        // 409 = lịch vừa bị người khác cập nhật (optimistic lock) → refetch để
+        // người dùng thấy state mới nhất thay vì thao tác tiếp trên state cũ.
+        await queryClient.invalidateQueries({
+          queryKey: ["class", "detail", classDetail.id],
+        });
       },
     });
   };
@@ -282,6 +353,12 @@ function EditClassScheduleDialog({
   const handleTeacherChange = (id: string, teacherId: string) => {
     setScheduleRanges((prev) =>
       prev.map((item) => (item.id === id ? { ...item, teacherId } : item)),
+    );
+  };
+
+  const handleEffectiveFromChange = (id: string, effectiveFrom: string) => {
+    setScheduleRanges((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, effectiveFrom } : item)),
     );
   };
 
@@ -417,6 +494,24 @@ function EditClassScheduleDialog({
                       </div>
                     )}
                   </label>
+                  {!readOnly && allowEffectiveFromEdit ? (
+                    <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-4">
+                      <span className="text-[11px] uppercase tracking-wider text-text-muted">
+                        Ngày hiệu lực (tuỳ chọn)
+                      </span>
+                      <DateInput
+                        name={`edit-class-schedule-effective-from-${range.id}`}
+                        value={range.effectiveFrom}
+                        onChange={(e) =>
+                          handleEffectiveFromChange(range.id, e.target.value)
+                        }
+                        className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                      />
+                      <span className="text-[11px] text-text-muted">
+                        Bỏ trống = tính từ hôm nay.
+                      </span>
+                    </label>
+                  ) : null}
                 </div>
               </div>
             ))}

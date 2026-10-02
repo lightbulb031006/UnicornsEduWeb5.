@@ -1,3 +1,4 @@
+import type { StaffRoleFixedSalaryOverrideItem } from "@/dtos/fixed-salary-settings.dto";
 
 export type StaffStatus = "active" | "inactive";
 export type StaffGender = "male" | "female";
@@ -81,6 +82,7 @@ export interface StaffDetail {
     bankQrLink?: string | null;
     personalAchievementLink?: string | null;
     googleMeetLink?: string | null;
+    revenueSharePercent?: number | null;
     roles: string[];
     status: StaffStatus;
     createdAt?: string;
@@ -102,6 +104,33 @@ export interface StaffDetail {
     classAllowance?: StaffClassAllowanceItem[];
     customerCareManagedByStaffId?: string | null;
     customerCareManagedBy?: { id: string; fullName: string } | null;
+}
+
+export interface UpdateStaffPayload {
+    id: string;
+    full_name?: string;
+    cccd_number?: string;
+    ethnicity?: string;
+    gender?: StaffGender;
+    current_address?: string;
+    cccd_issued_date?: string;
+    cccd_issued_place?: string;
+    birth_date?: string;
+    university?: string;
+    high_school?: string;
+    specialization?: string;
+    bank_account?: string;
+    bank_qr_link?: string;
+    personal_achievement_link?: string | null;
+    revenue_share_percent?: number | null;
+    roles?: string[];
+    status?: StaffStatus;
+    customer_care_managed_by_staff_id?: string | null;
+}
+
+export interface UpdateStaffWithFixedSalaryOverridesPayload extends UpdateStaffPayload {
+    roles: string[];
+    roleFixedSalaryOverrides: StaffRoleFixedSalaryOverrideItem[];
 }
 
 export interface StaffAssignableUser {
@@ -139,6 +168,32 @@ export interface StaffIncomeClassSummary extends StaffIncomeAmountSummary {
 export interface StaffIncomeRoleSummary extends StaffIncomeAmountSummary {
     role: string;
     label: string;
+}
+
+export interface StaffFixedSalaryRoleSummary extends StaffIncomeRoleSummary {
+    grossTotal: number;
+    operatingDeductionTotal: number;
+    taxDeductionTotal: number;
+}
+
+export interface StaffFixedSalaryPayableItem {
+    id: string;
+    roleType: string;
+    roleLabel: string;
+    month: string;
+    status: "pending" | "paid";
+    note: string | null;
+    grossAmount: number;
+    operatingRatePercent: number;
+    taxRatePercent: number;
+    operatingDeductionAmount: number;
+    taxDeductionAmount: number;
+    netAmount: number;
+}
+
+export interface UpdateStaffFixedSalaryPayablePayload {
+    amount?: number;
+    note?: string | null;
 }
 
 export interface StaffIncomeDepositSession {
@@ -190,6 +245,16 @@ export interface StaffIncomeSummary {
     /** Thưởng tháng đang xem: sau khấu trừ thuế (không KH VH); gross/tax xem `monthlyGrossTotals` / `monthlyTaxTotals`. */
     bonusMonthlyTotals: StaffIncomeAmountSummary;
     otherRoleSummaries: StaffIncomeRoleSummary[];
+    fixedSalaryRoleSummaries: StaffFixedSalaryRoleSummary[];
+    fixedSalaryPayables: StaffFixedSalaryPayableItem[];
+}
+
+export interface StaffRevenueShare {
+    staffId: string;
+    month: string;
+    revenueSharePercent: number | null;
+    revenue: number;
+    amount: number;
 }
 
 export interface StaffPaymentPreviewTotals {
@@ -237,6 +302,7 @@ export interface StaffPaymentPreview {
 export interface StaffPayAllPaymentsPayload {
     month: string;
     year: string;
+    confirmOverdueSurveyReports?: boolean;
 }
 
 export type StaffPaymentSourceType =
@@ -245,7 +311,10 @@ export type StaffPaymentSourceType =
     | "assistant_share"
     | "lesson_output"
     | "extra_allowance"
-    | "bonus";
+    | "bonus"
+    | "revenue_share"
+    | "training_manager"
+    | "fixed_salary";
 
 export interface StaffPaySelectedPaymentItem {
     sourceType: StaffPaymentSourceType;
@@ -303,6 +372,22 @@ export interface StaffDepositPaymentPreview {
 
 export interface StaffPayDepositSessionsPayload {
     sessionIds: string[];
+    confirmOverdueSurveyReports?: boolean;
+}
+
+/** Chi tiết 1 bài khảo sát quá hạn mà nhân sự còn thiếu báo cáo (dùng cho dialog cảnh báo trước khi thanh toán). */
+export interface StaffOverdueSurveyWarningItem {
+    surveyId: string;
+    surveyName: string;
+    classNames: string[];
+}
+
+/** Response body khi backend trả 400 với code SURVEY_OVERDUE_WARNING (chưa xác nhận thanh toán). */
+export interface StaffOverdueSurveyWarningErrorResponse {
+    statusCode: number;
+    code: "SURVEY_OVERDUE_WARNING";
+    message: string;
+    warnings: StaffOverdueSurveyWarningItem[];
 }
 
 export interface StaffPayDepositSessionsResult {
@@ -329,6 +414,7 @@ export interface CreateStaffPayload {
     bank_account?: string;
     bank_qr_link?: string;
     personal_achievement_link?: string | null;
+    revenue_share_percent?: number | null;
     roles: string[];
     user_id: string;
     customer_care_managed_by_staff_id?: string | null;

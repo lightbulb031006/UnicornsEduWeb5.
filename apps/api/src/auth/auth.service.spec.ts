@@ -5,8 +5,12 @@ jest.mock('bcrypt', () => ({
   hash: jest.fn(),
   compare: jest.fn(),
 }));
+jest.mock('./user-device.service', () => ({
+  UserDeviceService: class UserDeviceServiceMock {},
+}));
 
 import * as bcrypt from 'bcrypt';
+import { createHash } from 'crypto';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { StaffRole, UserRole } from '../../generated/enums';
 import { AuthService, STAFF_DATA_CONSENT_VERSION } from './auth.service';
@@ -30,8 +34,13 @@ describe('AuthService', () => {
   const mockPrisma = {
     user: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       upsert: jest.fn(),
       update: jest.fn(),
+    },
+    loginRequest: {
+      findUnique: jest.fn(),
+      delete: jest.fn().mockResolvedValue({}),
     },
     $transaction: jest.fn(),
   };
@@ -59,9 +68,26 @@ describe('AuthService', () => {
     getAuthIdentity: jest.fn(),
     getStaffRoles: jest.fn(),
     invalidateUser: jest.fn(),
+    invalidateHasActiveDevice: jest.fn(),
   };
   const authAccessService = {
     resolveForIdentity: jest.fn(),
+  };
+  const userDeviceService = {
+    hashToken: jest.fn(),
+    generateDeviceToken: jest.fn(),
+    generateActivateSecret: jest.fn(),
+    createDevice: jest.fn().mockResolvedValue({ id: 'device-1' }),
+    removeAllDevicesForUser: jest.fn().mockResolvedValue({ count: 1 }),
+    removeDeviceById: jest.fn().mockResolvedValue({ count: 1 }),
+    hasActiveDevice: jest.fn(),
+    touchActiveDeviceForUser: jest.fn(),
+    bindRefreshToken: jest.fn().mockResolvedValue({}),
+    findDeviceByRefreshToken: jest.fn(),
+    findLiveDeviceById: jest.fn(),
+    assertLiveRefreshDevice: jest.fn(),
+    cleanupExpiredLoginRequests: jest.fn(),
+    cleanupInactiveDevices: jest.fn(),
   };
 
   let service: AuthService;
@@ -120,6 +146,7 @@ describe('AuthService', () => {
       actionHistoryService as never,
       authIdentityCacheService as never,
       authAccessService as never,
+      userDeviceService as never,
     );
   });
 
@@ -158,6 +185,7 @@ describe('AuthService', () => {
     expect(mailService.sendForgotPasswordEmail).toHaveBeenCalledWith(
       'user@example.com',
       'token',
+      undefined,
     );
   });
 
@@ -241,6 +269,7 @@ describe('AuthService', () => {
     expect(mailService.sendVerificationEmail).toHaveBeenCalledWith(
       'new-user@example.com',
       'token',
+      undefined,
     );
   });
 
@@ -721,6 +750,7 @@ describe('AuthService', () => {
     expect(mailService.sendVerificationEmail).toHaveBeenCalledWith(
       'new@example.com',
       'token',
+      undefined,
     );
   });
 
@@ -736,5 +766,210 @@ describe('AuthService', () => {
     await expect(service.resendVerificationEmail('user-1')).rejects.toThrow(
       ServiceUnavailableException,
     );
+  });
+
+  describe('activateStudentDevice', () => {
+    const baseRequest = {
+      id: 'req-1',
+      userId: 'student-1',
+      verified: true,
+      expiresAt: new Date(Date.now() + 60_000),
+      activateSecretHash: null as string | null,
+      deviceInfo: { userAgent: 'test' },
+      ipAddress: '127.0.0.1',
+    };
+
+    const studentUser = {
+      id: 'student-1',
+      accountHandle: 'hocsinh1',
+      roleType: UserRole.student,
+    };
+
+    beforeEach(() => {
+      userDeviceService.hashToken = jest.fn().mockReturnValue('hashed-secret');
+      userDeviceService.generateDeviceToken = jest
+        .fn()
+        .mockReturnValue('device-token');
+      userDeviceService.createDevice = jest
+        .fn()
+        .mockResolvedValue({ id: 'device-1' });
+      userDeviceService.removeAllDevicesForUser = jest
+        .fn()
+        .mockResolvedValue({});
+      authIdentityCacheService.invalidateHasActiveDevice = jest.fn();
+      jwtService.signAsync = jest.fn().mockResolvedValue('jwt-token');
+    });
+
+    it('rejects when activateSecret hash does not match', async () => {
+      mockPrisma.loginRequest.findUnique.mockResolvedValueOnce({
+        ...baseRequest,
+        activateSecretHash: 'expected-hash',
+      });
+
+      await expect(
+        service.activateStudentDevice('req-1', 'wrong-secret'),
+      ).rejects.toThrow('Invalid activation secret');
+    });
+
+    it('issues tokens when activateSecret matches', async () => {
+      mockPrisma.loginRequest.findUnique.mockResolvedValueOnce({
+        ...baseRequest,
+        activateSecretHash: 'hashed-secret',
+      });
+      mockPrisma.user.findUnique.mockResolvedValueOnce(studentUser);
+
+      await expect(
+        service.activateStudentDevice('req-1', 'correct-secret'),
+      ).resolves.toMatchObject({
+        accessToken: 'jwt-token',
+        refreshToken: 'jwt-token',
+      });
+
+      expect(userDeviceService.createDevice).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'student-1' }),
+      );
+      expect(
+        authIdentityCacheService.invalidateHasActiveDevice,
+      ).toHaveBeenCalledWith('student-1');
+    });
+
+    it('rejects when request is not verified', async () => {
+      mockPrisma.loginRequest.findUnique.mockResolvedValueOnce({
+        ...baseRequest,
+        verified: false,
+      });
+
+      await expect(
+        service.activateStudentDevice('req-1', 'any-secret'),
+      ).rejects.toThrow('Login request not verified yet');
+    });
+
+    it('rejects when request is expired', async () => {
+      mockPrisma.loginRequest.findUnique.mockResolvedValueOnce({
+        ...baseRequest,
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+
+      await expect(
+        service.activateStudentDevice('req-1', 'any-secret'),
+      ).rejects.toThrow('Login request expired');
+    });
+  });
+
+  describe('session revocation', () => {
+    const userSnapshot = {
+      id: 'user-1',
+      email: 'user@example.com',
+      phone: null,
+      passwordHash: 'current-password-hash',
+      refreshToken: 'old-refresh',
+      first_name: 'A',
+      last_name: 'B',
+      roleType: UserRole.staff,
+      province: null,
+      accountHandle: 'staff-1',
+      emailVerified: true,
+      phoneVerified: false,
+      linkId: null,
+      status: 'active',
+      createdAt: new Date('2026-03-20T10:00:00.000Z'),
+      updatedAt: new Date('2026-03-20T10:00:00.000Z'),
+      staffInfo: null,
+      studentInfo: null,
+    };
+
+    it('deletes the matching UserDevice on logout', async () => {
+      userDeviceService.findDeviceByRefreshToken.mockResolvedValueOnce({
+        id: 'device-9',
+        userId: 'user-1',
+      });
+
+      await service.revokeRefreshTokenBySession({
+        refreshToken: 'refresh-cookie',
+        accessToken: 'access-cookie',
+      });
+
+      expect(userDeviceService.removeDeviceById).toHaveBeenCalledWith(
+        'device-9',
+      );
+      expect(
+        authIdentityCacheService.invalidateHasActiveDevice,
+      ).toHaveBeenCalledWith('user-1');
+      expect(authIdentityCacheService.invalidateUser).toHaveBeenCalledWith(
+        'user-1',
+      );
+    });
+
+    it('ends every live device on changePassword', async () => {
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce({
+          id: 'user-1',
+          passwordHash: 'current-password-hash',
+        })
+        .mockResolvedValue(userSnapshot);
+      mockPrisma.user.update.mockResolvedValue({
+        id: 'user-1',
+        email: 'user@example.com',
+        roleType: UserRole.staff,
+      });
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+
+      await expect(
+        service.changePassword('user-1', 'old-secret', 'new-secret-123'),
+      ).resolves.toEqual({ message: 'Đổi mật khẩu thành công' });
+
+      expect(userDeviceService.removeAllDevicesForUser).toHaveBeenCalledWith(
+        'user-1',
+      );
+    });
+
+    it('ends every live device on resetPassword', async () => {
+      const passwordResetVersion = createHash('sha256')
+        .update('JWT_FORGOT_PASSWORD_SECRET-value')
+        .update(':')
+        .update('user@example.com')
+        .update(':')
+        .update('current-password-hash')
+        .digest('hex');
+
+      jwtService.verifyAsync.mockResolvedValueOnce({
+        email: 'user@example.com',
+        purpose: 'forgot-password',
+        passwordResetVersion,
+      });
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce({
+          id: 'user-1',
+          passwordHash: 'current-password-hash',
+        })
+        .mockResolvedValue(userSnapshot);
+      mockPrisma.user.update.mockResolvedValue({
+        id: 'user-1',
+        email: 'user@example.com',
+        roleType: UserRole.staff,
+      });
+
+      await expect(
+        service.resetPassword('reset-token', 'new-secret-123'),
+      ).resolves.toEqual({ message: 'Password reset successfully' });
+
+      expect(userDeviceService.removeAllDevicesForUser).toHaveBeenCalledWith(
+        'user-1',
+      );
+    });
+
+    it('returns no session profile when the refresh cookie is revoked', async () => {
+      jwtService.verifyAsync.mockResolvedValueOnce({
+        id: 'user-1',
+        accountHandle: 'staff-1',
+        roleType: UserRole.staff,
+        deviceId: 'device-9',
+      });
+      userDeviceService.assertLiveRefreshDevice.mockResolvedValueOnce(null);
+
+      await expect(
+        service.getSessionProfile('revoked-refresh'),
+      ).resolves.toBeNull();
+    });
   });
 });

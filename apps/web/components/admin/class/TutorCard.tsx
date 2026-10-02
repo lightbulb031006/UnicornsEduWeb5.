@@ -194,7 +194,7 @@ export default function TutorCard({
                     >
                       <div className="min-w-0">
                         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
-                          Trợ cấp
+                          Trợ cấp / học sinh
                         </p>
                         <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-primary">
                           {formatCurrency(teacher.customAllowance)}

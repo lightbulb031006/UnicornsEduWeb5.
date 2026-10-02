@@ -14,6 +14,8 @@ export interface CustomerCareStudentDto {
   classes: CustomerCareStudentClassDto[];
   recentTopUpTotalLast21Days: number;
   recentTopUpMeetsThreshold: boolean;
+  /** Phân số 0.00-0.99; FE hiển thị `Math.round(profitPercent * 100)}%`. */
+  profitPercent: number | null;
 }
 
 export interface CustomerCareStudentListMetaDto {
@@ -37,8 +39,7 @@ export interface CustomerCareTopUpHistoryItemDto {
   createdAt: string;
 }
 
-export interface CustomerCareTopUpHistoryListMetaDto
-  extends CustomerCareStudentListMetaDto {
+export interface CustomerCareTopUpHistoryListMetaDto extends CustomerCareStudentListMetaDto {
   totalAmount: number;
 }
 
@@ -96,4 +97,27 @@ export interface CustomerCareBulkPaymentStatusUpdateResultDto {
   staffId: string;
   requestedCount: number;
   updatedCount: number;
+}
+
+export interface CustomerCareBulkProfitPercentUpdateDto {
+  studentIds: string[];
+  /** Phân số 0.00-0.99 (FE convert từ input số nguyên 0-99). */
+  profitPercent: number;
+}
+
+export interface CustomerCareBulkProfitPercentUpdateResultDto {
+  staffId: string;
+  requestedCount: number;
+  updatedCount: number;
+}
+
+export interface CustomerCareStudentSummaryDto {
+  /** Tháng đang tính, dạng `YYYY-MM`. */
+  monthKey: string;
+  /** Số học sinh `status = active` đang được gán cho CSKH này. */
+  activeStudentsCount: number;
+  /** Số học sinh gán cho CSKH này có `dropOutDate` rơi trong tháng đang tính. */
+  droppedStudentsThisMonth: number;
+  /** Tổng học phí đã học (attendance present/excused) trong tháng, của mọi học sinh gán cho CSKH này. */
+  revenueThisMonth: number;
 }

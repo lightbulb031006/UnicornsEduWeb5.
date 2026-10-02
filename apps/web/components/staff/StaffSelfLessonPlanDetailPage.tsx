@@ -12,6 +12,7 @@ import type {
   LessonWorkOutputItem,
 } from "@/dtos/lesson.dto";
 import { getMyStaffLessonOutputStats } from "@/lib/apis/auth.api";
+import { formatVnNumber } from "@/lib/formatters";
 
 const RECENT_DAYS = 30;
 const EMPTY_OUTPUTS: LessonWorkOutputItem[] = [];
@@ -32,7 +33,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat("vi-VN").format(value);
+  return formatVnNumber(value);
 }
 
 function resolvePrimaryLink(output: LessonWorkOutputItem) {
@@ -272,7 +273,7 @@ export default function StaffSelfLessonPlanDetailPage() {
                     return (
                       <article
                         key={output.id}
-                        className="rounded-[1.35rem] border border-border-default bg-bg-surface p-3 shadow-sm transition-all duration-200"
+                        className="rounded-[1.35rem] border border-border-default bg-bg-surface p-3 shadow-sm transition-colors duration-200"
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/admin-shell-paths";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
 import { cn } from "@/lib/utils";
+import { formatVnCurrency } from "@/lib/formatters";
 
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 1000;
@@ -35,14 +36,10 @@ const STATUS_OPTIONS: Array<{ value: "" | StaffStatus; label: string }> = [
 
 function formatCurrency(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
+  return formatVnCurrency(value);
 }
 
-export default function AdminStaffPage() {
+function AdminStaffPageContent() {
   const { push, replace } = useRouter();
   const queryClient = useQueryClient();
   const pathname = usePathname();
@@ -992,5 +989,14 @@ export default function AdminStaffPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+export default function AdminStaffPage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <AdminStaffPageContent />
+    </Suspense>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent, Suspense } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -74,7 +74,7 @@ function UserListTableSkeleton({ rows = 5 }: { rows?: number }) {
   );
 }
 
-export default function AdminUsersPage() {
+function AdminUsersPageContent() {
   const queryClient = useQueryClient();
   const { replace } = useRouter();
   const pathname = usePathname();
@@ -375,7 +375,18 @@ export default function AdminUsersPage() {
                         </div>
                       </div>
                       <div className="mt-2 flex flex-col gap-1 text-sm text-text-secondary">
-                        <span className="truncate">Email: {u.email}</span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="truncate">Email: {u.email}</span>
+                          {u.emailVerified ? (
+                            <span className="inline-flex items-center rounded-full bg-success/15 px-1.5 py-0.5 text-[11px] font-medium text-success ring-1 ring-success/20">
+                              Đã xác thực
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[11px] font-medium text-warning ring-1 ring-warning/20">
+                              Chưa xác thực
+                            </span>
+                          )}
+                        </div>
                         <span className="truncate">Tên: {getUserDisplayName(u) || "—"}</span>
                         <span className="truncate">Trạng thái: {userStatusLabel(u.status)}</span>
                       </div>
@@ -443,6 +454,20 @@ export default function AdminUsersPage() {
                         </td>
                         <td className="px-4 py-3 text-text-primary">
                           <span className="block truncate">{u.email}</span>
+                          <span className="mt-1 block">
+                            {u.emailVerified ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success ring-1 ring-success/20">
+                                <svg className="size-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                </svg>
+                                Đã xác thực
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning ring-1 ring-warning/20">
+                                Chưa xác thực
+                              </span>
+                            )}
+                          </span>
                         </td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${roleBadgeClass(u.roleType)}`}>
@@ -473,7 +498,7 @@ export default function AdminUsersPage() {
                               title="Xóa user"
                               disabled={deleteMutation.isPending}
                               onClick={(e) => openDeleteFromList(u, e)}
-                              className="rounded-lg p-2 text-text-muted opacity-0 transition-all group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-error/10 hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
+                              className="rounded-lg p-2 text-text-muted opacity-0 transition-[opacity,background-color,color] group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-error/10 hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
                               aria-label={`Xóa user ${u.accountHandle}`}
                             >
                               <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -543,5 +568,14 @@ export default function AdminUsersPage() {
         />
       ) : null}
     </div>
+  );
+}
+
+export default function AdminUsersPage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <AdminUsersPageContent />
+    </Suspense>
   );
 }

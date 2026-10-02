@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode, Suspense } from "react";
 import { toast } from "sonner";
 import UpgradedSelect, {
   type UpgradedSelectOption,
@@ -13,6 +13,8 @@ import EmailVerificationInline from "@/components/user-profile/EmailVerification
 import PreviewableUserAvatar from "@/components/ui/PreviewableUserAvatar";
 import StaffSpecializationMarkdown from "@/components/staff/StaffSpecializationMarkdown";
 import DataConsentSection from "@/components/user-profile/DataConsentSection";
+import { StudentExamCard } from "@/components/admin/student";
+import ParentReceiptEmailSwitch from "@/components/student/ParentReceiptEmailSwitch";
 import { useAuth } from "@/context/AuthContext";
 import { resolveEmailVerified } from "@/mocks/user-profile-verification.mock";
 import * as authApi from "@/lib/apis/auth.api";
@@ -24,6 +26,8 @@ import type {
 } from "@/dtos/profile.dto";
 import { resolveCanonicalUserName } from "@/dtos/user-name.dto";
 import { OPEN_EMAIL_VERIFICATION_MODAL_EVENT } from "@/lib/email-verification-access";
+import { getUserWorkspaceHref } from "@/lib/auth-redirect";
+import { formatVnDate } from "@/lib/formatters";
 
 type Tone = "primary" | "success" | "warning" | "neutral";
 
@@ -77,11 +81,7 @@ const secondaryPillClassName =
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(iso));
+    return formatVnDate(new Date(iso));
   } catch {
     return "—";
   }
@@ -369,7 +369,7 @@ function SelectField({
   const labelId = `${id}-label`;
   return (
     <div>
-      <label id={labelId} className={labelClassName}>
+      <label id={labelId} htmlFor={id} className={labelClassName}>
         {label}
       </label>
       <UpgradedSelect
@@ -551,7 +551,7 @@ function ErrorState({ status }: { status?: number }) {
   );
 }
 
-export default function UserProfilePage() {
+function UserProfilePageContent() {
   const queryClient = useQueryClient();
   const { setUser } = useAuth();
   const searchParams = useSearchParams();
@@ -711,6 +711,21 @@ export default function UserProfilePage() {
         ax.response?.data?.message ??
           "Không gửi được yêu cầu xác minh. Thử lại sau.",
       );
+    },
+  });
+
+  const receiptEmailMutation = useMutation({
+    mutationFn: (enabled: boolean) =>
+      authApi.updateMyStudentProfile({ parent_receipt_email_enabled: enabled }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["profile", "full"] }),
+        queryClient.invalidateQueries({ queryKey: ["student", "self", "detail"] }),
+      ]);
+      toast.success("Đã cập nhật cài đặt gửi biên lai.");
+    },
+    onError: () => {
+      toast.error("Không thể cập nhật cài đặt gửi biên lai.");
     },
   });
 
@@ -1222,7 +1237,7 @@ export default function UserProfilePage() {
           </h1>
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <Link
-              href="/"
+              href={getUserWorkspaceHref(profile)}
               className="text-text-muted transition-colors hover:text-text-primary"
             >
               ← Trang chủ
@@ -1698,14 +1713,68 @@ export default function UserProfilePage() {
                       />
                     </form>
                   ) : (
-                    <DetailRows items={studentDetails ?? []} />
+                    <div className="space-y-6">
+                      <DetailRows items={studentDetails ?? []} />
+                      <div className="pt-2 border-t border-border-subtle">
+                        <ParentReceiptEmailSwitch
+                          enabled={profile.studentInfo.parentReceiptEmailEnabled !== false}
+                          disabled={receiptEmailMutation.isPending}
+                          onToggle={(enabled) => receiptEmailMutation.mutate(enabled)}
+                        />
+                      </div>
+                    </div>
                   )}
                 </ProfileSection>
+
+                <div className="mt-4">
+                  <Link
+                    href="/student/tuition"
+                    className="flex items-center justify-between gap-3 rounded-2xl bg-primary px-5 py-4 text-text-inverse shadow-sm transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">Học phí</span>
+                      <span className="mt-0.5 block text-xs text-text-inverse/80">
+                        Xem số dư, nạp học phí và lịch sử giao dịch.
+                      </span>
+                    </span>
+                    <svg
+                      className="size-5 shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </Link>
+                </div>
+
+                <div className="mt-4">
+                  <StudentExamCard
+                    studentId={profile.studentInfo.id}
+                    editable
+                    selfService
+                  />
+                </div>
               </>
             ) : null}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function UserProfilePage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <UserProfilePageContent />
+    </Suspense>
   );
 }

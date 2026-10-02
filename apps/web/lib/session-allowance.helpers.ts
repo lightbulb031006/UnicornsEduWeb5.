@@ -1,5 +1,28 @@
 export type SessionAllowancePreviewSource = "snapshot" | "live";
 
+export function blockCountFromClockRange(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): number | null {
+  if (typeof from !== "string" || typeof to !== "string") {
+    return null;
+  }
+  const parse = (value: string) => {
+    const match = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
+    if (!match) return null;
+    const hours = Number.parseInt(match[1], 10);
+    const minutes = Number.parseInt(match[2], 10);
+    if (hours > 23 || minutes > 59) return null;
+    return hours * 60 + minutes;
+  };
+  const start = parse(from);
+  const end = parse(to);
+  if (start == null || end == null) return null;
+  const duration = end - start;
+  if (duration <= 0 || duration % 30 !== 0) return null;
+  return duration / 30;
+}
+
 export function hasSessionAllowanceSnapshots(session: {
   snapshotPerStudentAllowance?: number | null;
   snapshotScaleAmount?: number | null;
@@ -10,6 +33,48 @@ export function hasSessionAllowanceSnapshots(session: {
   );
 }
 
+function positiveInt(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.floor(value);
+}
+
+/** Live per-student amount for preview. Snapshot path already stores session-equivalent. */
+export function resolveLivePreviewPerStudentAllowanceVnd(options: {
+  pricingMode?: string | null;
+  teacherCustomPerSession?: number | null;
+  classDefaultPerSession: number;
+  classDefaultPerBlock?: number | null;
+  blockCount?: number | null;
+}): number {
+  const customRaw = options.teacherCustomPerSession;
+  const custom =
+    customRaw != null && Number.isFinite(Number(customRaw))
+      ? Math.floor(Number(customRaw))
+      : null;
+  const classDefault = Math.max(0, Math.floor(options.classDefaultPerSession ?? 0));
+  if (options.pricingMode !== "per_block") {
+    return custom ?? classDefault;
+  }
+
+  const blocks = positiveInt(options.blockCount);
+  const perBlockDefault = positiveInt(options.classDefaultPerBlock);
+  if (blocks == null) {
+    return custom ?? classDefault;
+  }
+  if (custom != null && perBlockDefault != null && classDefault > 0) {
+    const standardBlocks = classDefault / perBlockDefault;
+    if (standardBlocks > 0) {
+      return Math.floor((custom / standardBlocks) * blocks);
+    }
+  }
+  if (perBlockDefault != null) {
+    return Math.floor(perBlockDefault * blocks);
+  }
+  return custom ?? classDefault;
+}
+
 /** Resolve allowance preview inputs from session snapshot or live class config. */
 export function resolveSessionAllowancePreviewInputs(options: {
   session?: {
@@ -18,11 +83,14 @@ export function resolveSessionAllowancePreviewInputs(options: {
   } | null;
   classDetail?: {
     allowancePerSessionPerStudent?: number;
+    allowancePerBlockPerStudent?: number | null;
     scaleAmount?: number | null;
+    pricingMode?: string | null;
     teachers?: Array<{ id: string; customAllowance?: number | null }>;
   } | null;
   teacherId?: string | null;
   chargeableStudentCount: number;
+  blockCount?: number | null;
 }): {
   source: SessionAllowancePreviewSource;
   perStudent: number;
@@ -52,10 +120,13 @@ export function resolveSessionAllowancePreviewInputs(options: {
     ? classDetail.teachers?.find((teacher) => teacher.id === teacherId)
         ?.customAllowance
     : null;
-  const perStudent =
-    teacherCustom != null && Number.isFinite(Number(teacherCustom))
-      ? Math.floor(Number(teacherCustom))
-      : (classDetail.allowancePerSessionPerStudent ?? 0);
+  const perStudent = resolveLivePreviewPerStudentAllowanceVnd({
+    pricingMode: classDetail.pricingMode,
+    teacherCustomPerSession: teacherCustom,
+    classDefaultPerSession: classDetail.allowancePerSessionPerStudent ?? 0,
+    classDefaultPerBlock: classDetail.allowancePerBlockPerStudent,
+    blockCount: options.blockCount,
+  });
   const scaleAmount = classDetail.scaleAmount ?? 0;
 
   return {
@@ -103,6 +174,9 @@ export function computeTeacherSessionAllowanceGrossPreviewVnd(options: {
   rawBase: number;
   coefficient: number;
   maxAllowancePerSession?: number | null;
+  maxAllowancePerBlock?: number | null;
+  snapshotBlockCount?: number | null;
+  pricingMode?: string | null;
 }): number {
   const coeff =
     Number.isFinite(options.coefficient) &&
@@ -111,6 +185,19 @@ export function computeTeacherSessionAllowanceGrossPreviewVnd(options: {
       ? options.coefficient
       : 1;
   const base = Math.floor(Math.max(0, options.rawBase) * coeff);
+  const blocks =
+    typeof options.snapshotBlockCount === "number" &&
+    Number.isFinite(options.snapshotBlockCount) &&
+    options.snapshotBlockCount > 0
+      ? Math.floor(options.snapshotBlockCount)
+      : null;
+  if (options.pricingMode === "per_block" && blocks != null) {
+    const maxPerBlock = options.maxAllowancePerBlock;
+    if (maxPerBlock != null && maxPerBlock > 0) {
+      return Math.min(Math.floor(maxPerBlock) * blocks, base);
+    }
+    return base;
+  }
   const maxCap = options.maxAllowancePerSession;
   if (maxCap != null && maxCap > 0) {
     return Math.min(maxCap, base);
@@ -133,10 +220,9 @@ export function rawBaseToGrossAllowanceVnd(options: {
   rawBase: number;
   coefficient: number;
   maxAllowancePerSession?: number | null;
+  maxAllowancePerBlock?: number | null;
+  snapshotBlockCount?: number | null;
+  pricingMode?: string | null;
 }): number {
-  return computeTeacherSessionAllowanceGrossPreviewVnd({
-    rawBase: options.rawBase,
-    coefficient: options.coefficient,
-    maxAllowancePerSession: options.maxAllowancePerSession,
-  });
+  return computeTeacherSessionAllowanceGrossPreviewVnd(options);
 }

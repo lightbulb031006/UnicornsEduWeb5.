@@ -93,9 +93,10 @@ export default async function SomePage() {
     - rate limit: `20` request / `5 phút` / IP.
   - `POST /auth/register` — **disabled**; luôn trả `403 Forbidden` với message đăng ký công khai không được hỗ trợ. Rate limit vẫn áp dụng nếu endpoint bị gọi.
   - `POST /auth/refresh` dùng `refresh_token` cookie
-    - backend verify chữ ký refresh JWT **và** đối chiếu hash token đang trình bày với `user.refreshToken` đã lưu; refresh token cũ/đã rotate sẽ bị từ chối.
+    - backend verify chữ ký refresh JWT **và** đối chiếu SHA-256 cookie với `user_devices.token_hash` cùng claim `deviceId` (`UserDevice.id`). Token cũ sau rotate / thiết bị đã xóa → **401**.
+    - `last_active_at` được cập nhật khi bind refresh mới.
     - rate limit: `120` request / `1 phút` / IP.
-  - `POST /auth/logout` — public (`@Public()`), không yêu cầu JWT guard; luôn xóa cookie `access_token` và `refresh_token`. Nếu request mang cookie auth hợp lệ, backend revoke refresh session tương ứng trước khi clear cookie.
+  - `POST /auth/logout` — public (`@Public()`), không yêu cầu JWT guard; luôn xóa cookie `access_token` và `refresh_token`. Nếu request mang cookie auth, backend **xóa `UserDevice` khớp refresh/access** trước khi clear cookie. Request kế tiếp (kể cả access token còn hạn) → **401**.
 - `GET /auth/session` — contract auth nhẹ cho frontend/server (`id`, `email`, `emailVerified`, `canAccessRestrictedRoutes`, `accountHandle`, `roleType`, `requiresPasswordSetup`, `avatarUrl`, `staffRoles`, `hasStaffProfile`, `hasStudentProfile`, `effectiveRoleTypes`, `staffProfileComplete`, `availableWorkspaces`, `defaultWorkspace`, `preferredRedirect`, `access.{admin,staff,student}`); guest trả về object cùng shape với default rỗng. `effectiveRoleTypes` là union của `users.role_type`, linked `staffInfo`, linked `studentInfo`, và full-admin staff role; FE/proxy phải dùng contract này thay vì chỉ so sánh `roleType`.
   - `GET /auth/profile` — backward-compatible alias của session resolver.
   - `GET /auth/me` — thông tin auth hiện tại từ DB theo `access_token`, trả cùng session shape.
@@ -113,14 +114,78 @@ export default async function SomePage() {
     - rate limit: `5` request / `1 giờ` / IP.
   - `POST /auth/reset-password` body: `{ token, password }`
     - token phải còn hợp lệ và khớp với password hash hiện tại; token cũ bị từ chối sau khi mật khẩu đã đổi.
+    - xóa **mọi** `UserDevice` của user đó — mọi thiết bị mất quyền ngay request kế.
     - rate limit: `10` request / `1 giờ` / IP.
   - `POST /auth/setup-password` body: `{ password }`
     - chỉ dùng cho user đã đăng nhập nhưng chưa có `passwordHash`
-    - backend sẽ hash mật khẩu, ghi audit, rotate lại cookies auth hiện tại
+    - backend sẽ hash mật khẩu, ghi audit, rotate lại cookies auth hiện tại (cùng `deviceId` nếu có)
     - rate limit: `10` request / `30 phút` / IP.
   - `POST /auth/change-password`
     - chỉ dùng khi tài khoản đã có mật khẩu và cần truyền `currentPassword`
+    - xóa **mọi** `UserDevice` của user đó (cùng hiệu lực với reset password)
     - rate limit: `10` request / `30 phút` / IP.
+
+### Student single-device login (ticket #65) + thu hồi tức thời (#101)
+
+Luật một thiết bị tại một thời điểm, chỉ áp dụng cho `UserRole.student`. Staff/admin **không** magic-link / một máy, nhưng **có** `UserDevice` để thu hồi theo thiết bị (ADR `docs/adr/2026-09-07-immediate-device-revocation.md`).
+
+Không dùng chữ "session" cho phiên đăng nhập: `Session` = Buổi học; phiên đăng nhập = `UserDevice` (`deviceId` trong JWT).
+
+- `POST /auth/student/login` body: `{ accountHandle, password, rememberMe? }`
+  - Validate credentials, kiểm tra đã `emailVerified`.
+  - Nếu `roleType !== student` → trả `400` với `error: NOT_STUDENT_ACCOUNT`.
+  - Nếu email chưa xác minh → trả `400` với `error: EMAIL_NOT_VERIFIED`.
+  - Nếu student đã có device active → trả `409` với `error: DEVICE_ACTIVE`.
+  - Tạo `login_requests` record, gửi magic link email tới student. Link mở `/auth/verify-login` trên origin public. Thứ tự: `FRONTEND_URL` nếu là HTTPS public; nếu giá trị đó còn là localhost thì `https://` + `VPS_PUBLIC_HOST`, rồi origin của `BACKEND_URL` (bỏ hậu tố `/api`), rồi `Host` + `X-Forwarded-Proto` khi host là `*.uniedu.vn` hoặc `*.unicornsedu.com`. Production không gửi link `localhost`. Host lạ bị từ chối.
+  - Response: `{ requestId, activateSecret, message }`. `activateSecret` là one-time secret dùng ở bước activate; frontend lưu trong memory, không lưu localStorage.
+  - Rate limit: `5` request / `60s` / IP.
+
+- `POST /auth/student/login/poll` body: `{ requestId }`
+  - Frontend poll mỗi 2s để kiểm tra trạng thái xác minh.
+  - Response: `{ verified: boolean }`.
+  - Khi `verified = true`, frontend gọi `POST /auth/student/activate` kèm `requestId` + `activateSecret`.
+  - Rate limit: `30` request / `60s` / IP.
+
+- `GET /auth/verify-login?token=...`
+  - Magic link trong email trỏ tới `/auth/verify-login` (FE), FE gọi endpoint này.
+  - Đánh dấu `login_requests.verified = true` (chỉ khi chưa verified và chưa hết hạn).
+  - **Không** set cookie/kích hoạt phiên trên máy bấm link — thiết bị được kích hoạt luôn là máy khởi tạo (màn chờ xác minh gọi `/auth/student/activate`).
+  - Trả `{ status, message, verified }` với `status` phân biệt để UI hiển thị thông báo riêng (ticket #66):
+    - `verified` — bấm lần đầu hợp lệ: "Đã xác minh thành công, quay lại thiết bị vừa đăng nhập".
+    - `used` — link đã được bấm trước đó (yêu cầu đã verified): "Liên kết đã được sử dụng".
+    - `expired` — quá `expires_at` (10 phút): "Liên kết đã hết hạn".
+    - `invalid` — token sai/thiếu/không tồn tại: "Liên kết không hợp lệ".
+  - FE `/auth/verify-login` gọi endpoint bằng TanStack `useQuery` (`authKeys.verifyLogin`, `retry: false`, `staleTime: Infinity`) — không `useEffect` + `authApi.then`. UI thêm trạng thái `system` khi request lỗi mạng/5xx ("Không xác minh được"), tách khỏi `invalid`.
+  - Rate limit: `30` request / `60s` / IP.
+
+- `POST /auth/student/activate` body: `{ requestId, activateSecret, rememberMe? }`
+  - Sau khi poll xác nhận `verified = true`.
+  - Xác minh `activateSecret` khớp hash trong `login_requests`.
+  - Xóa mọi device cũ của student (single-device rule).
+  - Tạo `user_devices` record mới, cấp JWT (`deviceId` = id thiết bị), lưu SHA-256 refresh JWT vào `token_hash`, set cookies.
+  - Response: `{ message }`.
+
+- `POST /auth/student/logout`
+  - Student tự đăng xuất. Xóa tất cả device records, invalidate refresh token.
+  - Response: `{ message }`.
+
+- `POST /auth/admin/students/:id/force-logout`
+  - Admin/CSKH/assistant buộc đăng xuất học sinh.
+  - Xóa mọi device records, invalidate refresh token, ghi audit trail.
+  - Request kế tiếp (access token còn hạn) → **401** `NO_ACTIVE_DEVICE`.
+  - Yêu cầu `@Roles(UserRole.admin, UserRole.staff)`.
+
+- `DELETE /device/:deviceId/force-logout`
+  - Xóa một `UserDevice` cụ thể; invalidate identity cache ngay để request kế không dùng cache `hasActiveDevice` cũ.
+  - FE `StudentDevicePopup`: hỏi `window.confirm` trước khi gọi (TODO #11 dialog dùng chung); nút dùng token `error`.
+
+- Kiểm tra phiên trên **mọi** request đã xác thực (`JwtAuthGuard` / `JwtStrategy` là `APP_GUARD`), không chỉ `/auth/refresh`:
+  - JWT mới: lookup `UserDevice` theo `deviceId`; không còn / idle 60 ngày → 401 `NO_ACTIVE_DEVICE`.
+  - JWT học sinh legacy (chưa có `deviceId`, tối đa ~15 phút): fallback `hasActiveDevice` (cache identity TTL 5s, invalidate khi xóa device).
+  - `POST /auth/refresh`: `JwtRefreshStrategy` so khớp refresh cookie với `token_hash` + `deviceId`. Replay cookie sau logout / force-logout / đổi mật khẩu → 401.
+  - `last_active_at` throttle 1 phút, không ghi DB mỗi request.
+
+- Lazy cleanup: khi tạo login request mới, tự động xóa login requests hết hạn và devices inactive > 60 ngày.
 - **Global rate limit:** các endpoint HTTP khác của API dùng limit mặc định `300` request / `60s` / endpoint / IP; health check `GET /` được `@SkipThrottle()`.
 - **Phản hồi khi vượt ngưỡng:** backend trả `429 Too Many Requests`; frontend nên surface message này qua Sonner toast như các lỗi auth khác.
 - **Contract:** Auth DTO và role enum aligned với backend.

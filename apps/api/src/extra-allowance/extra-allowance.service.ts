@@ -571,9 +571,11 @@ export class ExtraAllowanceService {
         };
       }
 
+      // Set: tra cứu O(1) thay vì Array.includes quét lại cả mảng mỗi phần tử.
+      const changedAllowanceIdSet = new Set(changedAllowanceIds);
       const beforeValueByAllowanceId = new Map(
         existingAllowances
-          .filter((allowance) => changedAllowanceIds.includes(allowance.id))
+          .filter((allowance) => changedAllowanceIdSet.has(allowance.id))
           .map((allowance) => [allowance.id, allowance]),
       );
 

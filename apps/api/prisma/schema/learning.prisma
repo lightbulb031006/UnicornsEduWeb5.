@@ -1,30 +1,207 @@
+enum ClassContentItemKind {
+  lesson
+}
+
+enum ClassTimelineItemKind {
+  session
+  class_survey
+  content_item
+}
+
+model ClassTimelineItem {
+  id                 String                @id @default(uuid())
+  classId            String                @map("class_id")
+  kind               ClassTimelineItemKind
+  sortOrder          Int                   @default(0) @map("sort_order")
+  sessionId          String?               @unique @map("session_id")
+  classSurveyId      String?               @unique @map("class_survey_id")
+  classContentItemId String?               @unique @map("class_content_item_id")
+  /// Null = hiện với học sinh. Có giá trị = ẩn mềm (gia sư vẫn xem/khôi phục).
+  hiddenAt           DateTime?             @map("hidden_at") @db.Timestamptz(6)
+  hiddenByStaffId    String?               @map("hidden_by_staff_id")
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  class            Class             @relation(fields: [classId], references: [id], onDelete: Cascade)
+  session          Session?          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  classSurvey      ClassSurvey?      @relation(fields: [classSurveyId], references: [id], onDelete: Cascade)
+  classContentItem ClassContentItem? @relation(fields: [classContentItemId], references: [id], onDelete: Cascade)
+  hiddenByStaff    StaffInfo?        @relation("ClassTimelineHiddenBy", fields: [hiddenByStaffId], references: [id], onDelete: SetNull)
+
+  @@index([classId, sortOrder])
+  @@index([hiddenByStaffId])
+  @@map("class_timeline_items")
+}
+
+model ClassContentItem {
+  id               String               @id @default(uuid())
+  classId          String               @map("class_id")
+  kind             ClassContentItemKind @default(lesson) @map("kind")
+  lessonId         String?              @map("lesson_id")
+  sortOrder        Int                  @default(0) @map("sort_order")
+  /// Thời điểm mở bài của lần giao (riêng lớp). Null với tiết lý thuyết.
+  openAt           DateTime?            @map("open_at") @db.Timestamptz(6)
+  /// Thời lượng làm bài (phút) của lần giao. Null với tiết lý thuyết.
+  durationMinutes  Int?                 @map("duration_minutes")
+  /// Null = hiện với học sinh. Có giá trị = ẩn mềm; không xoá Attempt.
+  hiddenAt         DateTime?            @map("hidden_at") @db.Timestamptz(6)
+  hiddenByStaffId  String?              @map("hidden_by_staff_id")
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
+  lesson Lesson? @relation(fields: [lessonId], references: [id], onDelete: Restrict)
+  hiddenByStaff StaffInfo? @relation("ClassContentHiddenBy", fields: [hiddenByStaffId], references: [id], onDelete: SetNull)
+  attempts Attempt[]
+  theoryLessonViews ClassTheoryLessonView[]
+  timelineItem ClassTimelineItem?
+
+  @@unique([classId, lessonId])
+  @@index([classId])
+  @@index([lessonId])
+  @@index([hiddenByStaffId])
+  @@map("class_content_items")
+}
+
+/// Lượt mở trang Tiết lý thuyết của học sinh trong phạm vi một lớp.
+model ClassTheoryLessonView {
+  id                 String           @id @default(uuid())
+  classContentItemId String           @map("class_content_item_id")
+  studentId          String           @map("student_id")
+  lastViewedAt       DateTime         @default(now()) @map("last_viewed_at") @db.Timestamptz(6)
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  classContentItem ClassContentItem @relation(fields: [classContentItemId], references: [id], onDelete: Cascade)
+  student          StudentInfo      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([classContentItemId, studentId], map: "ctlv_cci_student_id_key")
+  @@index([classContentItemId, lastViewedAt], map: "ctlv_cci_last_viewed_at_idx")
+  @@index([studentId], map: "class_theory_lesson_views_student_id_idx")
+  @@map("class_theory_lesson_views")
+}
+
 model Class {
-  id                             String                               @id
-  name                           String
-  type                           ClassType                            @default(basic)
-  status                         ClassStatus                          @default(running)
-  maxStudents                    Int                                  @default(15) @map("max_students")
-  allowancePerSessionPerStudent  Int                                  @default(0) @map("allowance_per_session_per_student")
-  maxAllowancePerSession         Int?                                 @map("max_allowance_per_session")
-  scaleAmount                    Int?                                 @map("scale_amount")
-  schedule                       Json                                 @default("[]")
-  studentTuitionPerSession       Int?                                 @map("student_tuition_per_session")
-  tuitionPackageTotal            Int?                                 @map("tuition_package_total")
-  tuitionPackageSession          Int?                                 @map("tuition_package_session")
-  trainingManagerStaffId         String?                              @map("training_manager_staff_id")
-  trainingManagerRatePercent     Decimal?                             @map("training_manager_rate_percent") @db.Decimal(5, 2)
-  createdAt                      DateTime                             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                      DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(6)
-  surveys                        ClassSurvey[]
-  teachers                       ClassTeacher[]
-  makeupScheduleEvents           MakeupScheduleEvent[]
-  missedTeachingExplanations     MissedTeachingExplanation[]
-  sessions                       Session[]
-  students                       StudentClass[]
-  trainingManager                StaffInfo?                           @relation("ClassTrainingManager", fields: [trainingManagerStaffId], references: [id])
+  id                            String                      @id
+  name                          String
+  courseId                       String                      @map("course_id")
+  status                        ClassStatus                 @default(running)
+  maxStudents                   Int                         @default(15) @map("max_students")
+  allowancePerSessionPerStudent Int                         @default(0) @map("allowance_per_session_per_student")
+  /// Expand: đơn giá trợ cấp mỗi HS mỗi block 30 phút. Payroll vẫn đọc cột per-session.
+  allowancePerBlockPerStudent   Int?                        @map("allowance_per_block_per_student")
+  maxAllowancePerSession        Int?                        @map("max_allowance_per_session")
+  /// Expand: trần trợ cấp mỗi block 30 phút. Payroll vẫn đọc `max_allowance_per_session`.
+  maxAllowancePerBlock          Int?                        @map("max_allowance_per_block")
+  scaleAmount                   Int?                        @map("scale_amount")
+  /// @deprecated Nguồn dữ liệu cũ, giữ lại làm backup lịch sử tại thời điểm migrate sang `ClassScheduleEntry`. Không ghi tiếp.
+  schedule                      Json                        @default("[]")
+  studentTuitionPerSession      Int?                        @map("student_tuition_per_session")
+  /// Học phí mỗi block 30 phút. Charge buổi học sinh không gói = cột này × `sessions.snapshot_block_count`.
+  studentTuitionPerBlock        Int?                        @map("student_tuition_per_block")
+  /// Opt-in: `per_session` (mặc định, hành vi cũ) | `per_block` (đơn giá / 30 phút). Cột `*_per_session` sống vĩnh viễn.
+  pricingMode                   ClassPricingMode            @default(per_session) @map("pricing_mode")
+  tuitionPackageTotal           Int?                        @map("tuition_package_total")
+  tuitionPackageSession         Int?                        @map("tuition_package_session")
+  noAttendance                  Boolean                     @default(false) @map("no_attendance")
+  /// Ngày hết hạn xem nội dung của lớp (tính theo lớp, không theo từng HS).
+  /// Null = vô hạn. Được chốt lúc tạo lớp từ Course.defaultDurationDays,
+  /// sau đó admin có thể sửa tay. Sửa Course.defaultDurationDays KHÔNG hồi tố.
+  contentAccessExpiresAt        DateTime?                   @map("content_access_expires_at") @db.Date
+  /// false = timeline theo thời gian (tự sắp khi tạo/sửa ngày). true = đã DnD, giữ sort_order.
+  timelineCustomOrder           Boolean                     @default(false) @map("timeline_custom_order")
+  trainingManagerStaffId        String?                     @map("training_manager_staff_id")
+  trainingManagerRatePercent    Decimal?                    @map("training_manager_rate_percent") @db.Decimal(5, 2)
+  createdAt                     DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                     DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  surveys                       ClassSurvey[]
+  surveyExclusions              SurveyExcludedClass[]
+  teachers                      ClassTeacher[]
+  makeupScheduleEvents          MakeupScheduleEvent[]
+  missedTeachingExplanations    MissedTeachingExplanation[]
+  scheduleEntries               ClassScheduleEntry[]
+  sessions                      Session[]
+  students                      StudentClass[]
+  contentItems ClassContentItem[]
+  lessons                       Lesson[]
+  timelineItems                 ClassTimelineItem[]
+  trainingManager               StaffInfo?                  @relation("ClassTrainingManager", fields: [trainingManagerStaffId], references: [id])
+  course                        Course                      @relation(fields: [courseId], references: [id])
 
   @@index([trainingManagerStaffId])
+  @@index([courseId])
+  @@index([contentAccessExpiresAt])
   @@map("classes")
+}
+
+/// Khoá học — chương trình học độc lập có nội dung học thuật riêng, ngân hàng câu hỏi riêng và thời hạn mặc định.
+model Course {
+  id                  String                @id @default(uuid())
+  name                String
+  defaultDurationDays Int?                  @map("default_duration_days")
+  sortOrder           Int                   @default(0) @map("sort_order")
+  isActive            Boolean               @default(true) @map("is_active")
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  classes             Class[]
+  modules             Module[]
+  lessons             Lesson[]
+  difficultyLevels    CourseDifficultyLevel[]
+  lessonPlanMembers   CourseLessonPlanMember[]
+  questions           Question[]           // <‑‑ back‑relation for question bank
+
+  @@map("courses")
+}
+
+/// Thang độ khó riêng của mỗi Khoá học.
+model CourseDifficultyLevel {
+  id        String   @id @default(uuid())
+  courseId   String   @map("course_id")
+  name      String
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  questions Question[] // back‑relation for question bank
+
+  @@unique([courseId, name])
+  @@index([courseId])
+  @@map("course_difficulty_levels")
+}
+
+/// Đội giáo án được gán vào một Khoá học để soạn nội dung học thuật và ngân hàng
+/// câu hỏi của khoá đó. Việc gán do admin, Trưởng giáo án (`lesson_plan_head`) hoặc
+/// Trợ lí (`assistant`) thực hiện. Thành viên `lesson_plan` chỉ thấy khoá mình được gán;
+/// `lesson_plan_head` thấy và sửa được nội dung của mọi khoá.
+model CourseLessonPlanMember {
+  id        String   @id @default(uuid())
+  courseId   String   @map("course_id")
+  staffId   String   @map("staff_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  staff     StaffInfo @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, staffId])
+  @@index([courseId])
+  @@index([staffId])
+  @@map("course_lesson_plan_members")
+}
+
+/// Chuyên đề — nhóm tiết học bên trong một Khoá học. Chỉ tồn tại ở cấp khoá.
+model Module {
+  id        String   @id @default(uuid())
+  courseId  String   @map("course_id")
+  title     String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons   Lesson[]
+  questions Question[] // back‑relation for question bank
+
+  @@index([courseId])
+  @@map("modules")
 }
 
 model ClassTeacher {
@@ -44,12 +221,43 @@ model ClassTeacher {
   @@map("class_teachers")
 }
 
+/// Lịch cố định của lớp (thay thế `Class.schedule` JSON). Mỗi dòng là 1 slot cố định
+/// (thứ + giờ) có hiệu lực trong khoảng [effectiveFrom, effectiveTo). `effectiveTo = null`
+/// nghĩa là slot đang active. Khi admin đổi giáo viên/giờ cho 1 slot, slot cũ được
+/// "đóng" bằng cách set `effectiveTo`, slot mới được insert với `effectiveFrom` tương ứng —
+/// không update đè để giữ lịch sử chính xác cho thuật toán cảnh báo "chưa dạy".
+model ClassScheduleEntry {
+  id                    String     @id @default(uuid())
+  classId               String     @map("class_id")
+  teacherId             String?    @map("teacher_id")
+  dayOfWeek             Int        @map("day_of_week")
+  from                  String
+  to                    String
+  meetLink              String?    @map("meet_link")
+  googleCalendarEventId String?    @map("google_calendar_event_id")
+  effectiveFrom         DateTime   @map("effective_from") @db.Date
+  effectiveTo           DateTime?  @map("effective_to") @db.Date
+  createdByStaffId      String?    @map("created_by_staff_id")
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  class                 Class      @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher               StaffInfo? @relation(fields: [teacherId], references: [id])
+
+  @@index([classId])
+  @@index([teacherId])
+  @@index([classId, effectiveTo])
+  @@index([classId, dayOfWeek, effectiveTo])
+  @@map("class_schedule_entries")
+}
+
 model StudentClass {
   id                             String              @id @default(uuid())
   studentId                      String              @map("student_id")
   classId                        String              @map("class_id")
   status                         StudentClassStatus?
   customStudentTuitionPerSession Int?                @map("custom_student_tuition_per_session")
+  /// Học phí riêng mỗi block 30 phút. Charge buổi học sinh không gói ưu tiên cột này × snapshot block.
+  customTuitionPerBlock          Int?                @map("custom_tuition_per_block")
   customTuitionPackageTotal      Int?                @map("custom_tuition_package_total")
   customTuitionPackageSession    Int?                @map("custom_tuition_package_session")
   totalAttendedSession           Int?                @map("total_attended_session")
@@ -66,40 +274,46 @@ model StudentClass {
 }
 
 model Session {
-  id                                   String               @id @default(uuid())
-  teacherId                            String               @map("teacher_id")
-  classId                              String               @map("class_id")
-  allowanceAmount                      Int?                 @map("allowance_amount")
-  snapshotPerStudentAllowance          Int?                 @map("snapshot_per_student_allowance")
-  snapshotScaleAmount                  Int?                 @map("snapshot_scale_amount")
-  teacherOperatingDeductionRatePercent Decimal              @default(0) @map("teacher_tax_rate_percent") @db.Decimal(5, 2)
-  teacherTaxDeductionRatePercent       Decimal              @default(0) @map("teacher_tax_deduction_rate_percent") @db.Decimal(5, 2)
-  teacherPaymentStatus                 String               @default("unpaid") @map("teacher_payment_status")
-  trainingManagerStaffId               String?              @map("training_manager_staff_id")
-  trainingManagerRatePercent           Decimal              @default(0) @map("training_manager_rate_percent") @db.Decimal(5, 2)
-  trainingManagerAllowanceAmount       Int?                 @map("training_manager_allowance_amount")
-  trainingManagerPaymentStatus         PaymentStatus?       @map("training_manager_payment_status")
-  trainingManagerTaxDeductionRatePercent Decimal            @default(0) @map("training_manager_tax_deduction_rate_percent") @db.Decimal(5, 2)
-  date                                 DateTime             @db.Date
-  startTime                            DateTime?            @map("start_time") @db.Time(6)
-  endTime                              DateTime?            @map("end_time") @db.Time(6)
-  coefficient                          Decimal              @default(1.0) @db.Decimal(3, 1)
-  notes                                String?
-  lessonContent                        String?              @map("lesson_content")
-  homework                             String?
-  tutorial                             String?
-  tuitionFee                           Int?                 @map("tuition_fee")
-  googleMeetLink                       String?              @map("google_meet_link")
-  googleCalendarEventId                String?              @map("google_calendar_event_id")
-  calendarSyncedAt                     DateTime?            @map("calendar_synced_at") @db.Timestamptz(6)
-  calendarSyncError                    String?              @map("calendar_sync_error")
-  createdAt                            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                            DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
-  attendance                           Attendance[]
-  class                                Class                @relation(fields: [classId], references: [id], onDelete: Cascade)
-  makeupScheduleEvent                  MakeupScheduleEvent?
-  teacher                              StaffInfo            @relation("SessionTeacher", fields: [teacherId], references: [id])
-  trainingManager                      StaffInfo?           @relation("SessionTrainingManager", fields: [trainingManagerStaffId], references: [id])
+  id                                     String               @id @default(uuid())
+  teacherId                              String               @map("teacher_id")
+  classId                                String               @map("class_id")
+  allowanceAmount                        Int?                 @map("allowance_amount")
+  snapshotPerStudentAllowance            Int?                 @map("snapshot_per_student_allowance")
+  snapshotScaleAmount                    Int?                 @map("snapshot_scale_amount")
+  /// Số block 30 phút của buổi tại thời điểm tạo. Không suy lại từ giờ buổi khi tính payroll lịch sử.
+  snapshotBlockCount                     Int?                 @map("snapshot_block_count")
+  teacherOperatingDeductionRatePercent   Decimal              @default(0) @map("teacher_tax_rate_percent") @db.Decimal(5, 2)
+  teacherTaxDeductionRatePercent         Decimal              @default(0) @map("teacher_tax_deduction_rate_percent") @db.Decimal(5, 2)
+  teacherPaymentStatus                   String               @default("unpaid") @map("teacher_payment_status")
+  trainingManagerStaffId                 String?              @map("training_manager_staff_id")
+  trainingManagerRatePercent             Decimal              @default(0) @map("training_manager_rate_percent") @db.Decimal(5, 2)
+  trainingManagerAllowanceAmount         Int?                 @map("training_manager_allowance_amount")
+  trainingManagerPaymentStatus           PaymentStatus?       @map("training_manager_payment_status")
+  trainingManagerTaxDeductionRatePercent Decimal              @default(0) @map("training_manager_tax_deduction_rate_percent") @db.Decimal(5, 2)
+  date                                   DateTime             @db.Date
+  startTime                              DateTime?            @map("start_time") @db.Time(6)
+  endTime                                DateTime?            @map("end_time") @db.Time(6)
+  /// Frozen at create from Class.noAttendance. Not overridable on the session payload.
+  snapshotNoAttendance                   Boolean              @default(false) @map("snapshot_no_attendance")
+  coefficient                            Decimal              @default(1.0) @db.Decimal(3, 1)
+  notes                                  String?
+  lessonContent                          String?              @map("lesson_content")
+  homework                               String?
+   tutorial                               String?
+   recordingUrl                           String?              @map("recording_url")
+   tuitionFee                             Int?                 @map("tuition_fee")
+  googleMeetLink                         String?              @map("google_meet_link")
+  googleCalendarEventId                  String?              @map("google_calendar_event_id")
+  calendarSyncedAt                       DateTime?            @map("calendar_synced_at") @db.Timestamptz(6)
+  calendarSyncError                      String?              @map("calendar_sync_error")
+  createdAt                              DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                              DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  attendance                             Attendance[]
+  class                                  Class                @relation(fields: [classId], references: [id], onDelete: Cascade)
+  timelineItem                           ClassTimelineItem?
+  makeupScheduleEvent                    MakeupScheduleEvent?
+  teacher                                StaffInfo            @relation("SessionTeacher", fields: [teacherId], references: [id])
+  trainingManager                        StaffInfo?           @relation("SessionTrainingManager", fields: [trainingManagerStaffId], references: [id])
 
   @@index([teacherId])
   @@index([classId])
@@ -115,26 +329,26 @@ model Session {
 }
 
 model MakeupScheduleEvent {
-  id                    String    @id @default(uuid()) @db.Text
-  classId               String    @map("class_id") @db.Text
-  teacherId             String    @map("teacher_id") @db.Text
-  linkedSessionId       String?   @unique @map("linked_session_id") @db.Text
-  date                  DateTime  @db.Date
-  startTime             DateTime? @map("start_time") @db.Time(6)
-  endTime               DateTime? @map("end_time") @db.Time(6)
+  id                      String    @id @default(uuid()) @db.Text
+  classId                 String    @map("class_id") @db.Text
+  teacherId               String    @map("teacher_id") @db.Text
+  linkedSessionId         String?   @unique @map("linked_session_id") @db.Text
+  date                    DateTime  @db.Date
+  startTime               DateTime? @map("start_time") @db.Time(6)
+  endTime                 DateTime? @map("end_time") @db.Time(6)
   baselineScheduleEntryId String?   @map("baseline_schedule_entry_id") @db.Text
-  originalDate          DateTime? @map("original_date") @db.Date
-  title                 String?
-  note                  String?
-  googleMeetLink        String?   @map("google_meet_link")
-  googleCalendarEventId String?   @map("google_calendar_event_id")
-  calendarSyncedAt      DateTime? @map("calendar_synced_at") @db.Timestamptz(6)
-  calendarSyncError     String?   @map("calendar_sync_error")
-  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  class                 Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
-  linkedSession         Session?  @relation(fields: [linkedSessionId], references: [id], onDelete: SetNull)
-  teacher               StaffInfo @relation(fields: [teacherId], references: [id])
+  originalDate            DateTime? @map("original_date") @db.Date
+  title                   String?
+  note                    String?
+  googleMeetLink          String?   @map("google_meet_link")
+  googleCalendarEventId   String?   @map("google_calendar_event_id")
+  calendarSyncedAt        DateTime? @map("calendar_synced_at") @db.Timestamptz(6)
+  calendarSyncError       String?   @map("calendar_sync_error")
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  class                   Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  linkedSession           Session?  @relation(fields: [linkedSessionId], references: [id], onDelete: SetNull)
+  teacher                 StaffInfo @relation(fields: [teacherId], references: [id])
 
   @@index([classId])
   @@index([teacherId])
@@ -148,17 +362,17 @@ model MakeupScheduleEvent {
 }
 
 model MissedTeachingExplanation {
-  id                      String   @id @default(uuid()) @db.Text
-  classId                 String   @map("class_id") @db.Text
-  teacherId               String   @map("teacher_id") @db.Text
-  baselineScheduleEntryId String   @map("baseline_schedule_entry_id") @db.Text
-  originalDate            DateTime @map("original_date") @db.Date
+  id                      String    @id @default(uuid()) @db.Text
+  classId                 String    @map("class_id") @db.Text
+  teacherId               String    @map("teacher_id") @db.Text
+  baselineScheduleEntryId String    @map("baseline_schedule_entry_id") @db.Text
+  originalDate            DateTime  @map("original_date") @db.Date
   reason                  String
-  explainedByStaffId      String?  @map("explained_by_staff_id") @db.Text
-  explainedByUserId       String?  @map("explained_by_user_id") @db.Text
-  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  class                   Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  explainedByStaffId      String?   @map("explained_by_staff_id") @db.Text
+  explainedByUserId       String?   @map("explained_by_user_id") @db.Text
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  class                   Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
   teacher                 StaffInfo @relation(fields: [teacherId], references: [id], onDelete: Restrict)
 
   @@unique([classId, baselineScheduleEntryId, originalDate])
@@ -189,6 +403,7 @@ model Attendance {
   session                             Session                    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   student                             StudentInfo                @relation(fields: [studentId], references: [id], onDelete: Cascade)
   transaction                         WalletTransactionsHistory? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  lessonPlanHeadCommissions           LessonPlanHeadCommission[]
 
   @@unique([sessionId, studentId])
   @@index([sessionId])
@@ -199,6 +414,24 @@ model Attendance {
   @@index([assistantManagerStaffId, assistantPaymentStatus])
   @@index([assistantManagerStaffId, assistantPaymentStatus, sessionId], map: "attendance_assistant_staff_payment_session_idx")
   @@map("attendance")
+}
+
+/// Snapshot hoa hồng doanh thu của Trưởng giáo án (`lesson_plan_head`) theo từng buổi học toàn hệ thống.
+/// Mỗi buổi học chargeable (tuitionFee > 0) sinh 1 dòng cho MỖI nhân sự `lesson_plan_head` active có `revenueSharePercent` tại thời điểm tạo/cập nhật buổi.
+model LessonPlanHeadCommission {
+  id            String        @id @default(uuid())
+  attendanceId  String        @map("attendance_id")
+  staffId       String        @map("staff_id")
+  coefPercent   Decimal       @map("coef_percent") @db.Decimal(5, 2)
+  amount        Int           @map("amount")
+  paymentStatus PaymentStatus @default(pending) @map("payment_status")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  attendance    Attendance    @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  staff         StaffInfo     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([attendanceId, staffId])
+  @@index([staffId, paymentStatus])
+  @@map("lesson_plan_head_commission")
 }
 
 model CfProblemTutorial {
@@ -212,4 +445,198 @@ model CfProblemTutorial {
   @@unique([contestId, problemIndex])
   @@index([contestId])
   @@map("cf_problem_tutorials")
+}
+
+/// Tiết học — đơn vị học sinh nhìn thấy. Lý thuyết mang video + nội dung + bài tập ôn nhẹ;
+/// thực hành chỉ là tập câu hỏi (CHECK SQL cấm video/content). XOR: thuộc chuyên đề cấp khoá
+/// (`course_id` + `module_id`) hoặc thuộc riêng một lớp (`class_id`) — không bao giờ cả hai.
+model Lesson {
+  id        String     @id @default(uuid())
+  kind      LessonKind
+  courseId  String?    @map("course_id")
+  moduleId  String?    @map("module_id")
+  classId   String?    @map("class_id")
+  title     String
+  videoUrl  String?    @map("video_url")
+  content   String?
+  order     Int        @default(0)
+  createdBy String?    @map("created_by")
+  updatedBy String?    @map("updated_by")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  course        Course?    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module        Module?    @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  class         Class?     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  contentItems  ClassContentItem[]
+  createdByUser User?      @relation("LessonCreatedBy", fields: [createdBy], references: [id])
+  updatedByUser User?      @relation("LessonUpdatedBy", fields: [updatedBy], references: [id])
+  quizzes       LessonQuiz[]
+  quizAnswers   LessonQuizAnswer[]
+  questionLinks QuestionLink[]
+
+  @@index([courseId])
+  @@index([moduleId])
+  @@index([classId])
+  @@map("lessons")
+}
+
+/// Liên kết câu hỏi từ ngân hàng vào bài tập ôn nhẹ của một tiết lý thuyết.
+model LessonQuiz {
+  id         String   @id @default(uuid())
+  lessonId   String   @map("lesson_id")
+  questionId String   @map("question_id")
+  order      Int      @default(0)
+
+  lesson   Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([lessonId, questionId])
+  @@index([lessonId])
+  @@index([questionId])
+  @@map("lesson_quizzes")
+}
+
+/// Trả lời bài tập ôn nhẹ — KHÔNG sinh Attempt, KHÔNG tính điểm.
+model LessonQuizAnswer {
+  id          String    @id @default(uuid())
+  lessonId    String    @map("lesson_id")
+  questionId  String    @map("question_id")
+  studentId   String    @map("student_id")
+  choiceIndex Int?      @map("choice_index")
+  essayAnswer String?   @map("essay_answer")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  lesson   Lesson      @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  question Question    @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  student  StudentInfo @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([lessonId, questionId, studentId])
+  @@index([lessonId])
+  @@index([questionId])
+  @@index([studentId])
+  @@map("lesson_quiz_answers")
+}
+
+// Question bank models
+
+/// Ngân hàng câu hỏi – mỗi câu thuộc một Module (chuyên đề) và một DifficultyLevel của course
+model Question {
+  id                String   @id @default(uuid())
+  courseId          String   @map("course_id")
+  moduleId          String   @map("module_id")
+  difficultyLevelId String   @map("difficulty_level_id")
+  type              QuestionType @default(single_choice)
+  content           String   // HTML from TipTap
+  options           Json?    // array of option strings (HTML or LaTeX) – only for single_choice
+  correctIndex      Int?     // zero‑based index into options – required for single_choice
+  explanation       String?  // optional explanation for answer (HTML)
+  answerGuide       String?  // for essay type – optional guide text (HTML)
+  deletedAt         DateTime? @map("deleted_at")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  course            Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module            Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  difficultyLevel   CourseDifficultyLevel @relation(fields: [difficultyLevelId], references: [id], onDelete: Restrict)
+
+  questionLinks        QuestionLink[]
+  lessonQuizzes        LessonQuiz[]
+  lessonQuizAnswers    LessonQuizAnswer[]
+  attemptAnswers       AttemptAnswer[]
+
+  @@index([courseId])
+  @@index([moduleId])
+  @@index([difficultyLevelId])
+  @@map("questions")
+}
+
+/// Liên kết câu hỏi với một tiết luyện tập — minimal for delete‑warning
+model QuestionLink {
+  id         String @id @default(uuid())
+  lessonId   String @map("lesson_id")
+  questionId String @map("question_id")
+  order      Int?   @map("order")
+  points     Int?   @map("points")
+
+  lesson   Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([lessonId, questionId])
+  @@index([lessonId])
+  @@index([questionId])
+  @@map("question_links")
+}
+
+enum QuestionType {
+  single_choice
+  essay
+}
+
+enum AttemptStatus {
+  in_progress
+  submitted
+  timed_out
+}
+
+/// Lượt làm bài của học sinh — gắn lần giao (`class_content_items`), không gắn tiết (`lessons`).
+model Attempt {
+  id                 String        @id @default(uuid())
+  assignmentId       String        @map("assignment_id")
+  studentId          String        @map("student_id")
+  startedAt          DateTime      @map("started_at") @db.Timestamptz(6)
+  /// Snapshot thời lượng lần giao lúc bấm bắt đầu — đồng hồ riêng HS, không đổi nếu gia sư sửa lịch sau đó.
+  durationMinutes    Int           @map("duration_minutes")
+  submittedAt        DateTime?     @map("submitted_at") @db.Timestamptz(6)
+  status             AttemptStatus @default(in_progress)
+  autoGradedScore    Int?          @map("auto_graded_score")
+  autoGradedMax      Int?          @map("auto_graded_max")
+  hasUngradedEssay   Boolean       @default(false) @map("has_ungraded_essay")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assignment ClassContentItem @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  student    StudentInfo      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  answers    AttemptAnswer[]
+
+  @@index([assignmentId, studentId])
+  @@index([studentId])
+  @@map("attempts")
+}
+
+/// Câu trả lời trong một Attempt. Snapshot toàn bộ đề lúc `start`; chấm không đọc `Question` live.
+model AttemptAnswer {
+  id              String       @id @default(uuid())
+  attemptId       String       @map("attempt_id")
+  questionId      String       @map("question_id")
+  order           Int          @default(0)
+  /// Thang điểm câu = 100/N (Hamilton) lúc start — không lấy `question_links.points`.
+  pointsPossible  Int          @map("points_possible")
+  /// Snapshot loại câu lúc start.
+  type            QuestionType
+  content         String       @db.Text
+  options         Json?
+  correctIndex    Int?         @map("correct_index")
+  explanation     String?      @db.Text
+  answerGuide     String?      @map("answer_guide") @db.Text
+  difficultyLabel String       @map("difficulty_label")
+  choiceIndex     Int?         @map("choice_index")
+  essayAnswer     String?      @map("essay_answer") @db.Text
+  /// Học sinh đánh dấu quay lại xem trước nộp — không ảnh hưởng chấm điểm.
+  markedForReview Boolean      @default(false) @map("marked_for_review")
+  isCorrect       Boolean?     @map("is_correct")
+  pointsAwarded   Int?         @map("points_awarded")
+  /// Nhận xét của gia sư cho câu tự luận này — chỉ có khi đã chấm.
+  feedback        String?      @db.Text
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  attempt  Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+  @@index([questionId])
+  @@map("attempt_answers")
 }

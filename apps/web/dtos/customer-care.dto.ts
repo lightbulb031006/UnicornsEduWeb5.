@@ -12,6 +12,8 @@ export interface CustomerCareStudentItem {
   classes: { id: string; name: string }[];
   recentTopUpTotalLast21Days: number;
   recentTopUpMeetsThreshold: boolean;
+  /** Phân số 0.00-0.99; hiển thị `Math.round(profitPercent * 100)}%`. */
+  profitPercent: number | null;
 }
 
 export interface CustomerCareStudentListMeta {
@@ -95,4 +97,24 @@ export interface CustomerCareBulkPaymentStatusUpdateResult {
   staffId: string;
   requestedCount: number;
   updatedCount: number;
+}
+
+export interface CustomerCareBulkProfitPercentUpdatePayload {
+  studentIds: string[];
+  /** Phân số 0.00-0.99 (convert từ input số nguyên 0-99 trước khi gửi). */
+  profitPercent: number;
+}
+
+export interface CustomerCareBulkProfitPercentUpdateResult {
+  staffId: string;
+  requestedCount: number;
+  updatedCount: number;
+}
+
+/** GET /customer-care/staff/:staffId/summary */
+export interface CustomerCareStudentSummary {
+  monthKey: string;
+  activeStudentsCount: number;
+  droppedStudentsThisMonth: number;
+  revenueThisMonth: number;
 }

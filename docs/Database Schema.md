@@ -1,5 +1,7 @@
 # Database Schema – Unicorns Edu (apps/api)
 
+> Đồng bộ Toán 02/10/2026 bổ sung 53 migration từ upstream, chưa áp dụng vào database. Hai migration sửa/xoá học sinh import thành tích có ID riêng Tin phải được kiểm tra trước rollout; xem [hướng dẫn đồng bộ Toán](ops/upstream-sync-math-2026-10-02.md). Enum nguồn khách giữ mã gốc, nhãn UI/API dùng thương hiệu Toán.
+
 Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `apps/api/prisma/schema/*.prisma`, dùng làm **context chuẩn cho model** khi làm việc với backend.
 
 ---
@@ -24,6 +26,8 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 ### Auth
 
 - `users`
+- `user_devices` (phiên đăng nhập gắn thiết bị; học sinh một máy, staff/admin nhiều máy)
+- `login_requests` (yêu cầu đăng nhập tạm, gắn với trình duyệt khởi tạo)
 
 ### People
 
@@ -33,16 +37,31 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 ### Learning
 
 - `classes`
+- `courses` (Khoá học, tuỳ chỉnh được qua CRUD `/courses`)
+- `course_difficulty_levels` (Mức độ khó của khoá học)
+- `course_lesson_plan_members` (đội giáo án của khoá học)
 - `class_teachers`
 - `student_classes`
 - `sessions`
 - `attendance`
 - `cf_problem_tutorials` (tutorial theo bài Codeforces)
+- `modules` (chuyên đề — nhóm tiết học bên trong khoá học)
+- `lessons` (tiết học — lý thuyết hoặc thực hành; thuộc chuyên đề XOR lớp)
+- `lesson_quizzes` (liên kết câu hỏi từ ngân hàng vào bài tập ôn nhẹ của tiết lý thuyết)
+- `lesson_quiz_answers` (trả lời bài tập ôn nhẹ — không sinh Attempt, không tính điểm)
+- `class_theory_lesson_views` (lượt mở trang tiết lý thuyết của học sinh trong phạm vi lớp)
+- `attempts` (lượt làm Chuyên đề luyện tập — FK `assignment_id` → `class_content_items.id`)
+- `attempt_answers` (câu trả lời của một Attempt; snapshot đề + `points_possible` = 100/N lúc start)
 
 ### Finance
 
 - `bonuses`
 - `role_tax_deduction_rates`
+- `role_fixed_salary_defaults`
+- `role_fixed_salary_operating_rate_defaults`
+- `staff_fixed_salary_overrides`
+- `staff_fixed_salary_operating_rate_overrides`
+- `staff_fixed_salary_payables`
 - `staff_tax_deduction_overrides`
 - `wallet_transactions_history`
 - `student_wallet_sepay_orders`
@@ -55,7 +74,10 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 ### Content / Audit
 
 - `class_surveys`
-- `survey_round`
+- `class_survey_student_assessments`
+- `survey_round` (Prisma model `Survey` — "Bài khảo sát")
+- `survey_excluded_classes`
+- `survey_warning_dismissals`
 - `action_history`
 - `documents`
 - `notifications`
@@ -73,6 +95,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 ## 3) Quan hệ chính (high-level)
 
 - **User ↔ StudentInfo / StaffInfo**: quan hệ 1-0/1 qua `student_info.user_id` và `staff_info.user_id` (mỗi hồ sơ học sinh/nhân sự gắn tối đa một user, và mỗi user có tối đa một hồ sơ của từng loại).
+- **User → UserDevice**: 1-N qua `user_devices.user_id`, `onDelete: Cascade`. Học sinh runtime chỉ giữ 1 row active; staff/admin được nhiều row.
 - **Class ↔ StaffInfo**: N-N qua `class_teachers`.
 - **Class ↔ StudentInfo**: N-N qua `student_classes`.
 - **Session → Class**: N-1 (`sessions.class_id`).
@@ -86,6 +109,10 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - **StaffMonthlyStat → StaffInfo**: N-1.
 - **ExtraAllowance → StaffInfo**: N-1.
 - **ClassSurvey → Class / StaffInfo**: optional FK, `onDelete: SetNull`.
+- **ClassSurvey → Survey**: optional FK `survey_id` (nullable cho data cũ trước khi có Bài khảo sát).
+- **ClassSurveyStudentAssessment → ClassSurvey / StudentInfo**: required FK, `onDelete: Cascade`; unique `(class_survey_id, student_id)`.
+- **SurveyExcludedClass → Survey / Class**: required FK, `onDelete: Cascade`; unique `(survey_id, class_id)`.
+- **SurveyWarningDismissal → Survey**: required FK `survey_id`, `onDelete: Cascade`; `user_id`/`staff_id` là plain id (không FK cứng, cùng convention với `action_history.user_id`); unique `(user_id, staff_id, survey_id)`.
 - **ActionHistory → User**: optional FK, `onDelete: SetNull`.
 - **Notification → User (createdBy)**: optional FK `created_by_user_id`, `onDelete: SetNull`.
 - **Regulation → User (createdBy / updatedBy)**: optional FK `created_by_user_id`, `updated_by_user_id`, `onDelete: SetNull`.
@@ -93,6 +120,15 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - **LessonTask → LessonResource**: 1-N optional (`lesson_resources.lessonTaskId`, `onDelete: SetNull`).
 - **LessonTask → LessonOutput**: 1-N optional (`lesson_outputs.lesson_task_id`, `onDelete: SetNull`).
 - **LessonOutput → StaffInfo**: optional FK, `onDelete: SetNull`; staff này là nhân sự nhận thanh toán / đứng tên output, không phải nhóm điều phối task.
+- **Module → Course**: N-1 (`modules.course_id` FK, `onDelete: Cascade`).
+- **Lesson → Course/Module**: optional FK, `onDelete: Cascade` — tiết cấp khoá khi có `course_id` + `module_id`.
+- **Lesson → Class**: optional FK, `onDelete: Cascade` — tiết tạo riêng trong lớp.
+- **Lesson CHECK constraint**: `lessons_owner_check` — tiết thuộc `(course_id+module_id)` OR `class_id`, never both. `lessons_practice_no_media_check` — tiết `practice` không có `video_url`/`content`.
+- **Question → Course**: N-1 (`questions.course_id` FK, `onDelete: Cascade`).
+- **Question → Module**: N-1 (`questions.module_id` FK, `onDelete: Cascade`).
+- **Question → CourseDifficultyLevel**: N-1 (`questions.difficulty_level_id` FK, `onDelete: Restrict`).
+- **Question → QuestionLink**: 1-N (`question_links.question_id` FK, `onDelete: Restrict`).
+- **QuestionLink → Lesson**: N-1 (`question_links.lesson_id` FK, `onDelete: Cascade`); unique `(lesson_id, question_id)`.
 
 ---
 
@@ -106,11 +142,42 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - RBAC runtime: `role_type` là role gốc/default của user, không phải nguồn quyền duy nhất. `GET /auth/session` và backend guards resolve quyền hiệu lực bằng union của `users.role_type`, linked `staff_info.user_id`, linked `student_info.user_id`, và `staff_info.roles`; vì vậy một user có thể đồng thời mở admin/staff/student workspace nếu có các linked profile/role tương ứng.
 - Trường tên canonical cho actor dạng staff: `first_name`, `last_name` (nullable). FE/BE dùng cặp này làm nguồn chuẩn để hiển thị tên staff trong rollout bỏ `staff_info.full_name`.
 - Avatar:
-  - `avatar_path` (`TEXT`, nullable): object path avatar trong bucket `avatars` theo format `users/{userId}/avatar`. DB nullable; bắt buộc cho gate hoàn thiện hồ sơ staff (`staffProfileComplete`) khi user có linked `staff_info` active (admin full bypass).
+  - `avatar_path` (`TEXT`, nullable): object path avatar sạch trong bucket private `avatars` theo format `users/{userId}/avatar`. DB nullable; bắt buộc cho gate hoàn thiện hồ sơ staff (`staffProfileComplete`) khi user có linked `staff_info` active (admin full bypass).
+  - `avatar_watermarked_path` (`TEXT`, nullable): twin watermarked (diagonal tile) trong bucket public `avatars-public`, path ổn định `users/{userId}/avatar.jpg`. Landing/CMS chỉ dùng twin này (public URL). Upload avatar bắt buộc tạo twin; thiếu twin → fail. ADR: `docs/adr/2026-08-11-landing-watermarked-public-images.md`.
 - Quan hệ profile không nằm trên `users`; link authoritative được lưu ngược ở `student_info.user_id` và `staff_info.user_id`.
 - `DELETE /users/:id` (admin/assistant): soft-delete tài khoản — gỡ `staff_info.user_id` / `student_info.user_id` về `null` (giữ hồ sơ), các FK nullable khác (`action_history.user_id`, `notifications.created_by_user_id`, `regulations.*_by_user_id`, wallet order/request creator, …) theo `ON DELETE SET NULL`, `notification_reads` cascade theo user; sau đó xóa row `users`.
 - Không còn field legacy `person_profile_id` trong schema được hỗ trợ.
 - Index: `email`, `phone`, `account_handle`, `link_id`, `role_type`, `status`, `created_at`
+
+Bảng `user_devices` và `login_requests` được tạo bởi migration `20260905120000_create_user_devices_and_login_requests` (production chưa có hai bảng này trước khi deploy chuỗi 20260905+). `activate_secret_hash` trên `login_requests` do `20260906000000_add_activate_secret_hash`. Bảng `questions` (ngân hàng, cột `chapter_id` lúc tạo) do `20260912500000_create_questions`; `20260921000000_rename_three_level_content` đổi `chapter_id` → `module_id`.
+
+### 4.1.1 `user_devices` (phiên đăng nhập gắn thiết bị)
+
+- PK: `id` (UUID default). Giá trị này được nhúng vào access/refresh JWT dưới claim `deviceId` (không dùng tên `sessionId` — `Session` là Buổi học).
+- FK: `user_id` → `users.id` (ON DELETE CASCADE)
+- Fields:
+  - `token_hash` (`TEXT`, unique): SHA-256 của refresh JWT hiện tại của thiết bị đó. Refresh cookie cũ sau rotate / logout không còn khớp.
+  - `device_info` (`JSONB`, nullable): thông tin trình duyệt/device (user-agent, accept-language)
+  - `ip_address` (`TEXT`, nullable): IP address khi đăng nhập
+  - `last_active_at` (`TIMESTAMPTZ(6)`): lần hoạt động cuối cùng, dùng để auto-expire sau 60 ngày; backend chỉ ghi lại khi cách lần trước ≥ 1 phút
+  - `created_at` (`TIMESTAMPTZ(6)`)
+- Luật: mỗi học sinh chỉ có đúng 1 device active tại một thời điểm. Staff/admin được nhiều device (thu hồi từng máy). Xóa row = thu hồi phiên tức thời trên request kế tiếp.
+- Auto-expire: device bị xóa sau 60 ngày không hoạt động (lazy cleanup khi tạo login request mới).
+- Index: `user_id`, `token_hash`, `last_active_at`
+
+### 4.1.2 `login_requests` (Magic link verification)
+
+- PK: `id` (UUID default)
+- FK: `user_id` → `users.id` (ON DELETE CASCADE)
+- Fields:
+  - `token_hash` (`TEXT`, unique): SHA-256 hash của login token
+  - `verified` (`BOOLEAN`, default false): đã bấm link xác minh chưa
+  - `device_info` (`JSONB`, nullable): thông tin trình duyệt khởi tạo
+  - `ip_address` (`TEXT`, nullable): IP address khi tạo request
+  - `expires_at` (`TIMESTAMPTZ(6)`): hết hạn sau 10 phút
+  - `created_at` (`TIMESTAMPTZ(6)`)
+- Flow: tạo request → gửi magic link email → user bấm link → `verified = true` → frontend poll nhận biết → activate device + cấp JWT tokens.
+- Cleanup: xóa bản ghi hết hạn khi tạo login request mới (lazy).
 
 ### 4.2 `staff_info`
 
@@ -130,9 +197,27 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - `cccd_issued_place` (`TEXT`, nullable): nơi cấp CCCD
   - Không còn lưu `cccd_front_path`, `cccd_back_path`, `cccd_verified_at`; ảnh CCCD legacy trong bucket `id-cards` không được schema hoặc API hiện tại sử dụng.
 - `google_meet_link` (`TEXT`, nullable): link Google Meet cố định của gia sư; là nguồn authoritative cho Meet link của tất cả lịch học và buổi bù mà gia sư này phụ trách. Được tạo tự động qua Google Calendar API lần đầu khi gia sư được gán vào lịch nếu chưa có; có thể regenerate thủ công qua `POST /staff/:id/regenerate-meet-link`.
-- `personal_achievement_link` (`TEXT`, nullable): link Google Drive hoặc URL lưu trữ thành tích cá nhân của nhân sự. DB nullable; bắt buộc cho gate hoàn thiện hồ sơ staff (`staffProfileComplete`). Chỉ accept URL hợp lệ dạng `http/https`. Hiển thị ở trang chi tiết nhân sự (admin + staff self-service) và cột bảng danh sách nhân sự.
+- `personal_achievement_link` (`TEXT`, nullable): **deprecated** — link Google Drive/URL thành tích cũ. Không còn nằm trong gate `staffProfileComplete`, không còn hiện trên UI form/overview; cột giữ đến khi có PR drop riêng. Hệ thống mới dùng `staff_achievements`.
+- `specialization` (`TEXT`, nullable): **deprecated** — text chuyên môn từng hiển thị nhầm dưới heading thành tích. Không còn bắt buộc trong gate / UI; migration `20260811100000_add_staff_student_achievements` backfill mỗi giá trị non-empty thành 1 row `staff_achievements` (title only). Drop cột ở PR sau.
 - `customer_care_managed_by_staff_id` (nullable FK → `staff_info.id`): trỏ tới trợ lí quản lí CSKH này; trợ lí được hưởng 3% học phí đã học của học sinh thuộc CSKH quản lí. Index: `(customer_care_managed_by_staff_id)`
-- Được tham chiếu bởi: `users`, `class_teachers`, `sessions`, `makeup_schedule_events`, `bonuses`, `lesson_outputs`, `customer_care_service`, `wallet_transactions_history` (customer care), `staff_monthly_stats`, `extra_allowances`, `class_surveys`, `staff_lesson_task`, `attendance` (assistant_manager)
+- `revenue_share_percent` (`DECIMAL(5,2)`, nullable): % hoa hồng trên tổng doanh thu gộp hệ thống, áp dụng cho nhân sự có role `lesson_plan_head` (Trưởng giáo án). Admin đặt riêng từng người qua popup **Sửa nhân sự** (`admin/staffs`). Số tiền thực nhận mỗi tháng = tổng `lesson_plan_head_commission.amount` (paid + pending) của staff trong tháng đó, đọc qua `GET /staff/:id/revenue-share` (xem `lesson_plan_head_commission` mục 4.6b). Số tháng quá khứ vẫn tính theo `revenue_share_percent` **hiện hành** vì `coef_percent` chỉ snapshot tại thời điểm buổi học được tạo/cập nhật, không backfill khi admin đổi %.
+- Được tham chiếu bởi: `users`, `class_teachers`, `sessions`, `makeup_schedule_events`, `bonuses`, `lesson_outputs`, `customer_care_service`, `wallet_transactions_history` (customer care), `staff_monthly_stats`, `extra_allowances`, `staff_fixed_salary_payables`, `class_surveys`, `staff_lesson_task`, `attendance` (assistant_manager), `staff_achievements`
+
+### 4.2.1 `staff_achievements`
+
+- Thành tích của nhân sự: nhiều row/title + ảnh minh chứng tuỳ chọn (1 ảnh/row).
+- Trường chính:
+  - `staff_id` (FK → `staff_info.id`, `ON DELETE CASCADE`)
+  - `title` (`TEXT`, bắt buộc, không giới hạn cứng)
+  - `image_path` (`TEXT`, nullable): path ảnh gốc (private) trong bucket `achievements` dạng `staff/{staffId}/{achievementId}.{ext}`
+  - `image_watermarked_path` (`TEXT`, nullable): twin watermarked public trong bucket `achievements-public`, path ổn định `staff/{staffId}/{achievementId}.jpg` (JPEG). Landing chỉ expose twin này.
+  - `sort_order` (`INT`, mặc định 0): thứ tự kéo-thả; API reorder yêu cầu **full permutation** của mọi id hiện có
+  - `created_at`, `updated_at`
+- Index: `(staff_id, sort_order)`
+- API: `GET/POST/PATCH/DELETE /staff/:staffId/achievements`, `PUT .../reorder`, `POST/DELETE .../:id/image`; self-service ` /users/me/achievements/*`. Không ghi `action_history`.
+- Backfill từ `staff_info.specialization`: tách bullet Markdown (`-` / `*` / `•`, kể cả `-Giải` không space; chèn newline trước pattern `.- ` bị dính), bỏ header ngắn kết thúc bằng `:`; nếu không có bullet thì mỗi dòng non-empty là 1 row; cuối cùng fallback cả khối text. Không backfill `personal_achievement_link`.
+- Watermark twins: script `apps/api/scripts/backfill-watermarked-images.ts`; ADR landing watermark.
+- ADR: `docs/adr/2026-08-11-achievement-separate-owner-tables.md`, `...-single-image-per-row.md`, `...-gate-and-legacy-columns.md`, `...-landing-watermarked-public-images.md`
 
 ### 4.3 `student_info`
 
@@ -143,7 +228,34 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - `drop_out_date` (`DATE`, nullable): ngày học sinh nghỉ học. Backend tự **đóng dấu** ngày này (UTC) khi chuyển `status` → `inactive` mà chưa có giá trị nhập tay, và **xoá** (`null`) khi mở lại `status` → `active`. Đây là nguồn authoritative cho chỉ số **"Học sinh nghỉ tháng này"** trên dashboard CSKH (`StaffDashboardCustomerCareSection.droppedStudentsThisMonth` đếm `drop_out_date` thuộc tháng đang xem). Dashboard CSKH/trợ lí: **Học phí đã học** và **Tiền nạp ví** chỉ tính giao dịch/buổi học trong tháng đang xem; **công nợ** đếm mọi HS được gán CSKH có `account_balance < 0` (không lọc `status` hay lớp `running`). Vẫn cho phép nhập tay `drop_out_date` ở popup sửa học sinh để override ngày mặc định. Migration `20260621150000_backfill_inactive_student_drop_out_dates` backfill các hồ sơ `inactive` thiếu ngày: ưu tiên `action_history` (mô tả *Chuyển học sinh sang nghỉ học* hoặc `after_value.status = inactive`), fallback `updated_at` (UTC).
 - `parent_email` là email nhận biên nhận nạp ví SePay của phụ huynh; không fallback sang email học sinh.
 - `parent_receipt_email_enabled` (`BOOLEAN`, mặc định `true`): khi `false`, webhook SePay **không** gửi email biên lai nạp ví cho phụ huynh lẫn CSKH (ví vẫn được cộng bình thường).
-- Được tham chiếu bởi: `users`, `student_classes`, `attendance`, `wallet_transactions_history`, `student_wallet_sepay_orders`, `customer_care_service`, `student_exam_schedules`
+- `customer_source` (`StudentCustomerSource`, nullable): **Nguồn khách** trên hồ sơ. Tập đóng `tiktok`, `fanpage_hoc_tin`, `fanpage_luyen_tin`, `referral`, `personal`, `other`. `NULL` là **Chưa gán**, không phải một giá trị enum. Hồ sơ tạo mới phải có giá trị. Migration `20260929220000_backfill_student_customer_source` gán mọi hồ sơ còn `NULL` thành `other` với `customer_source_note = 'Nguồn cũ'`.
+- `customer_source_note` (`VARCHAR(200)`, nullable): chú thích nguồn thực tế, chỉ khi `customer_source = other`. Đổi sang nguồn khác thì cột về `NULL`. Thống kê dashboard đọc nguồn hiện tại, không khóa nguồn tại buổi học.
+- Được tham chiếu bởi: `users`, `student_classes`, `attendance`, `wallet_transactions_history`, `student_wallet_sepay_orders`, `customer_care_service`, `student_exam_schedules`, `student_achievements`, `student_gallery_items`
+
+### 4.3.0 `student_achievements`
+
+- Thành tích học sinh — **structured** (khác `staff_achievements` chỉ có `title`): FK `student_id` → `student_info.id`.
+- Trường:
+  - `award` (`TEXT`, bắt buộc) — giải thưởng (vd. "Giải Khuyến khích")
+  - `exam` (`TEXT`, bắt buộc) — kỳ thi (vd. "HSG Quốc gia")
+  - `year` (`INT`, bắt buộc) — năm đạt giải
+  - `level` (`AchievementLevel`, bắt buộc) — `COMMUNE` | `PROVINCE` | `REGIONAL` | `NATIONAL` | `INTERNATIONAL` | `ADMISSION`
+  - `course_label` (`TEXT`, nullable) — nhãn khóa học landing (vd. "KHỐI THPT"); trống → landing tự gán theo cấp
+  - `image_path` / `image_watermarked_path` / `sort_order` — giống staff (1 ảnh minh chứng / row)
+- Path ảnh gốc: `student/{studentId}/{achievementId}.{ext}` trong bucket private `achievements`.
+- Path twin watermarked: `student/{studentId}/{achievementId}.jpg` trong bucket public `achievements-public`.
+- Index: `(student_id, sort_order)`, `(year, level)`.
+- Chỉ admin (và assistant/customer_care trên route admin mirror) quản lý qua `/student/:studentId/achievements/*`. Không có student self-service.
+- Landing: `GET /student/landing-profiles` trả `award/exam/year/level/courseLabel` + derived `title = "${award} · ${exam}"` cho compat.
+
+### 4.3.0b `student_gallery_items`
+
+- Gallery landing của học sinh: nhiều ảnh (không nhập nhận xét trên UI); FK `student_id` → `student_info.id`.
+- Trường: `caption` (nullable, **unused** — luôn `null` từ product UI), `image_path` (private), `image_watermarked_path` (public twin), `sort_order`, timestamps.
+- Path ảnh gốc: `student/{studentId}/{itemId}.{ext}` trong bucket private `student-gallery`.
+- Path twin watermarked: `student/{studentId}/{itemId}.jpg` trong bucket public `student-gallery-public`.
+- Admin-only CRUD `/student/:studentId/gallery/*` (assistant/customer_care trên admin-mirror). ADR: `docs/adr/2026-08-11-student-gallery-watermarked.md`.
+- Avatar học sinh cho landing vẫn lấy từ `users.avatar_*` (tạo HS bắt buộc `user_id`); admin upload qua `POST/DELETE /student/:id/avatar`.
 
 ### 4.3.1 `student_exam_schedules`
 
@@ -165,13 +277,15 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 
 - **PK format:** `UNICL-[0-9a-f]{10}` — ví dụ `UNICL-1a2b3c4d5e`. Đây là **mã định danh hệ thống** ngắn cho lớp; migration `20260523110000_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
 - Trường nghiệp vụ chính:
-  - `type` (`ClassType`), `status` (`ClassStatus`)
-  - `status`: `running` = lớp đang vận hành; `ended` = lớp đã kết thúc. `POST /class/:id/end` chỉ cho phép khi mọi `sessions` của lớp có `teacher_payment_status = paid` (case-insensitive); nếu còn `unpaid`/`pending`/`deposit` backend trả `400`. Khi kết thúc lớp, backend xóa lịch cố định hiện tại, chuyển membership học sinh đang học và phân công gia sư đang mở sang `inactive`, đồng thời dọn buổi bù tương lai của lớp. Response `GET /class/:id` trả thêm `endClassEligibility` (`canEnd`, `sessionCount`, `unpaidSessionCount`, `blockReason`) để FE disable nút **Kết thúc lớp**. Lịch sử session, attendance, ví và payroll đã phát sinh vẫn giữ nguyên.
+  - `course_id` (FK → `courses.id`, `onDelete: Restrict`), `status` (`ClassStatus`). Migration `20260818090000_add_class_category` thay enum cố định `ClassType` (`vip|basic|advance|hardcore`) bằng bảng `courses` để admin tự thêm/sửa/ẩn/xoá khoá học qua CRUD `/courses` (xem mục 4.4.0-cat). Khi tạo lớp không truyền `course_id`, backend fallback về khoá học `isActive=true` có `sort_order` nhỏ nhất (không còn hardcode `code='basic'`).
+  - `status`: `running` = lớp đang vận hành; `ended` = lớp đã kết thúc. `POST /class/:id/end` chỉ cho phép khi mọi `sessions` của lớp có `teacher_payment_status = paid` (case-insensitive); nếu còn `unpaid`/`pending`/`deposit` backend trả `400`. Khi kết thúc lớp, backend xóa lịch cố định hiện tại, chuyển membership học sinh đang học và phân công gia sư đang mở sang `inactive`, đồng thời dọn buổi bù tương lai của lớp. Response `GET /class/:id` trả thêm `endClassEligibility` (`canEnd`, `sessionCount`, `unpaidSessionCount`, `blockReason`) để FE disable nút **Kết thúc lớp** và chặn chọn trạng thái **Đã kết thúc** trong popup thông tin lớp khi chưa đủ điều kiện. `PATCH /class/:id/basic-info` **không** được dùng để chuyển `running → ended` (trả `400`; phải dùng `POST /end`). Lịch sử session, attendance, ví và payroll đã phát sinh vẫn giữ nguyên.
   - `max_students`, `allowance_per_session_per_student`, `max_allowance_per_session`, `scale_amount`
+  - **Chế độ tính tiền (`pricing_mode`, enum `ClassPricingMode`, NOT NULL, mặc định `per_session`):** `per_session` = theo buổi (hành vi cũ, backfill mọi lớp hiện có); `per_block` = opt-in đơn giá / 30 phút. Migration `20260909100000_class_pricing_mode`. Cột `*_per_session` sống vĩnh viễn (contract xoá #138 đã huỷ). `PATCH /class/:id/pricing-mode` đổi chế độ; từ chối bật `per_block` nếu không suy được số block chuẩn (thiếu lịch active, hoặc có khung giờ không phải bội số 30 phút — các khung giờ **không** cần dài bằng nhau, số block chuẩn là GCD). Buổi unpaid được tính lại; buổi paid/deposit/cọc không đổi.
+  - **Expand (song song):** `allowance_per_block_per_student`, `max_allowance_per_block`, `student_tuition_per_block` — đơn giá mỗi block 30 phút, backfill `ROUND(giá_cũ / số_block_chuẩn)` từ lịch cố định; `null` khi không suy được số block. Dual-write khi ghi cột per-session, trừ `student_tuition_per_block` khi admin gửi số tay trên `POST/PATCH /class` / `PATCH /class/:id/basic-info` (#141): số dương được giữ nguyên; `null`/omit thì vẫn suy từ `student_tuition_per_session`. Đổi lịch cố định dual-write lại trợ cấp per-block, không ghi đè học phí / 30 phút đã nhập tay. **Học phí học sinh không gói:** chỉ khi lớp `pricing_mode = per_block` thì charge buổi đọc `student_tuition_per_block × sessions.snapshot_block_count` (thiếu per-block hoặc số block thì fallback cột per-session). Lớp `per_session` luôn dùng chuỗi theo buổi. **Trợ cấp gia sư (#135):** lớp `per_block` snapshot `allowance_amount` = `đơn_giá_block × sĩ số present/excused × snapshot_block_count + scale_amount`; trần payroll `max_allowance_per_block × snapshot_block_count`. Lớp `per_session` giữ công thức và trần `max_allowance_per_session` cũ. Cột `*_per_session` không xoá. Xem ADR `docs/adr/2026-09-09-expand-block-pricing.md`.
   - `max_allowance_per_session` là nullable:
     - `null` hoặc `0` = không giới hạn trần trợ cấp theo buổi (aggregate SQL dùng `NULLIF(..., 0)`; API lưu `0` thành `null`)
     - số nguyên dương = áp trần đúng theo giá trị
-  - `schedule` (JSONB): mảng các entry lịch học định kỳ theo tuần. Dữ liệu lưu DB đang giữ backward compatibility với key `to`; ở lớp DTO/API admin, field đầu ra dùng `end` nhưng khi persist vẫn map về `to`. Mỗi entry có cấu trúc lưu trữ:
+  - `schedule` (JSONB, **@deprecated**): mảng entry lịch học cũ, giữ nguyên giá trị tại thời điểm migrate `class_schedule_entries` (2026-08-20) làm **backup lịch sử/đối chiếu**, không còn được backend đọc hoặc ghi. Nguồn dữ liệu lịch cố định chính thức hiện là bảng `class_schedule_entries` (mục 4.4.0a). Cấu trúc entry cũ (tham khảo):
     ```json
     {
       "id": "string (UUID)",
@@ -185,13 +299,21 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
       "deletedAt": "string? (optional ISO timestamp when this schedule entry was deleted/deactivated)"
     }
     ```
-    Mảng này định nghĩa mẫu lịch học lặp lại hàng tuần. Calendar admin có thể expand pattern này thành các occurrence để render lịch trong một khoảng ngày, và có thể đồng bộ từng entry thành recurring event trên Google Calendar.
+    Lý do chuyển đi: soft-delete cũ dùng `deletedAt = now()` tại thời điểm admin bấm lưu thay vì ngày slot thực sự ngừng hiệu lực → khi backdate đổi giáo viên, 2 entry (cũ + mới) active chồng lấn trên cùng khung giờ, khiến thuật toán **Cảnh báo chưa dạy** sinh cảnh báo giả cho slot cũ (không có Session khớp `teacherId` cũ).
   - Các trường học phí theo session/package
   - **Quản lý lớp (Đào tạo):**
     - `training_manager_staff_id` (nullable FK → `staff_info.id`): nhân sự ban Đào tạo được gán quản lý lớp; chỉnh qua `PATCH /class/:id/training-manager` (admin/assistant).
     - `training_manager_rate_percent` (`DECIMAL(5,2)`, nullable): % trợ cấp quản lý lớp trên tổng học phí buổi (attendance `present`/`excused`); `0` hoặc chưa gán QLL = không phát sinh khoản phải trả.
-- Mối quan hệ: teachers, students, sessions, makeupScheduleEvents, surveys, `trainingManager` (StaffInfo)
+  - **Không điểm danh (noAttendance):**
+    - `no_attendance` (`BOOLEAN`, default `false`): bật=True nghĩa là lớp **không điểm danh**; khi tạo buổi học hệ thống tự tạo `Attendance.present` cho tất cả học sinh active, bỏ qua form điểm danh. Gán/tắt chỉ bởi admin/assistant (`PATCH /class/:id/basic-info`). Session snapshot giá trị này vào `sessions.snapshot_no_attendance` để FE hiển thị đúng cho buổi đã tạo. Đổi cờ lớp **không** hồi tố buổi cũ.
+  - **Hạn xem nội dung (contentAccessExpiresAt):**
+    - `content_access_expires_at` (`DATE`, nullable): mốc tuyệt đối mà cả lớp cùng mất quyền xem nội dung. Được chốt lúc tạo lớp từ `Course.defaultDurationDays` (null = vô hạn). Sửa `Course.defaultDurationDays` sau đó **không hồi tố** cho lớp đã tạo. Admin có thể sửa tay qua `PATCH /class/:id/basic-info` (`content_access_expires_at`, YYYY-MM-DD hoặc null để xoá hạn).
+    - `timeline_custom_order` (`BOOLEAN`, default `false`): `false` = timeline lớp **mới nhất trên, cũ nhất dưới** (buổi = ngày+giờ, khảo sát = ngày báo cáo, chuyên đề = `open_at` hoặc `created_at`); tạo/sửa ngày tự xếp lại. `true` sau lần DnD đầu (`POST .../timeline/reorder`); mục mới khi đó append cuối. Migrations `20260916000000_timeline_sort_by_time`, `20260917000000_timeline_newest_first`.
+    - Học sinh quá hạn: bị chặn toàn bộ trang lớp (list + detail + sub-resources); lớp biến khỏi danh sách. Gia sư/admin vẫn xem được.
+    - `ClassStatus.ended` và hết hạn là **hai trục độc lập**: lớp `ended` còn hạn vẫn xem được; lớp `running` hết hạn vẫn bị chặn.
+- Mối quan hệ: teachers, students, sessions, makeupScheduleEvents, surveys, `trainingManager` (StaffInfo), `lessons` (tiết riêng lớp, via `class_id`)
 - Bảng liên kết `class_teachers` (Class ↔ StaffInfo) ngoài `custom_allowance` (nullable; **null** = kế thừa `classes.allowance_per_session_per_student`; số dương = override, không đổi khi chỉ sửa default lớp qua `PATCH /class/:id/basic-info`) còn có:
+  - Expand #134: `custom_allowance` **giữ tên**, backfill sang đơn vị mỗi block 30 phút (`ROUND(giá_cũ / số_block_chuẩn)`). API vẫn nhận/trả mức **theo buổi** (chia lúc ghi, nhân lúc đọc) để không đổi số tiền trên UI/payroll.
   - `status` (`TEXT`, nullable): `null` hoặc `active` được hiểu là phân công gia sư đang mở; `inactive` là **nghỉ dạy theo lớp**. Khi gia sư nghỉ dạy ở một lớp, record được giữ để bảo toàn lịch sử trợ cấp/payroll nhưng không còn là phân công hiện tại.
   - Data migration `20260617120000_inactivate_teachers_on_settled_ended_classes` (superseded): ban đầu yêu cầu cả học phí học sinh có `transaction_id`; `20260617130000_inactivate_teachers_on_teacher_paid_ended_classes` sửa lại — chỉ cần mọi `sessions.teacher_payment_status = paid` trên lớp `ended`, rồi inactive gia sư active trên `class_teachers`; không đụng `student_classes`. Runbook: `docs/ops/README.md`.
   - `tax_rate_percent` (`DECIMAL(5,2)`, default `0`, Prisma field `operatingDeductionRatePercent`): % **khấu trừ vận hành** của gia sư theo từng lớp.
@@ -202,6 +324,67 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - `teacherId` lưu gia sư chịu trách nhiệm của từng khung giờ. Từ luồng chỉnh lịch lớp, mỗi entry mới/cập nhật phải có `teacherId` và ID này phải thuộc `class_teachers` của chính lớp đó.
   - Khi API `PUT /admin/calendar/classes/:classId/schedule` nhận payload, mỗi entry dùng field `end`; backend sẽ map thành `to` trước khi lưu JSONB.
 
+### 4.4.0a `class_schedule_entries`
+
+- Migration `20260820100000_class_schedule_entry_table`. Thay thế `classes.schedule` JSONB (nay `@deprecated`, giữ làm backup) làm **nguồn dữ liệu chính** cho lịch học cố định hàng tuần.
+- Cột:
+  - `id` (PK, `TEXT`) — **giữ nguyên id gốc khi backfill** từ JSON cũ (không re-key), vì `makeup_schedule_events.baseline_schedule_entry_id`, `missed_teaching_explanations.baseline_schedule_entry_id` và Google Calendar `extendedProperties.scheduleEntryId` đều tham chiếu id này.
+  - `class_id` (FK → `classes.id`, `onDelete: Cascade`)
+  - `teacher_id` (nullable FK → `staff_info.id`) — gia sư chịu trách nhiệm slot
+  - `day_of_week` (`INT`, 0=Sunday..6=Saturday), `from`, `to` (`TEXT`, `HH:mm`)
+  - `meet_link`, `google_calendar_event_id` (nullable `TEXT`)
+  - `effective_from` (`DATE`) — ngày slot **thực sự** bắt đầu có hiệu lực
+  - `effective_to` (`DATE`, nullable) — `NULL` = slot đang active; có giá trị = slot ngừng hiệu lực từ ngày đó (soft-close)
+  - `created_by_staff_id` (nullable FK → `staff_info.id`), `created_at`, `updated_at`
+- Index: `(class_id)`, `(teacher_id)`, `(class_id, effective_to)`, `(class_id, day_of_week, effective_to)`.
+- **Cơ chế ghi (soft-close, không hard-delete/overwrite):**
+  - Đổi giờ/ngày/giáo viên hoặc gỡ slot → `UPDATE class_schedule_entries SET effective_to = :ngày_hiệu_lực WHERE id = :id` trên entry cũ, **không xoá**.
+  - Thêm slot mới hoặc thay thế slot đã đổi → `INSERT` bản ghi mới với `effective_from = :ngày_hiệu_lực`.
+  - Mọi write đi kèm bump thủ công `classes.updated_at` trong cùng transaction để giữ nguyên optimistic-lock hiện có của `PATCH /class/:id/schedule` (khoá dựa trên `Class.updatedAt`, không tự động theo bảng con).
+- **Cảnh báo chưa dạy** (`buildMissedTeachingAlerts`, `session-schedule-rules.service.ts`) đọc active-window từ bảng này (`effective_from ≤ ngày < effective_to`), tolerance khớp Session riêng `MISSED_ALERT_TIME_TOLERANCE_MINUTES = 60` phút (khác `SCHEDULE_TIME_TOLERANCE_MINUTES = 180` phút dùng khi validate nộp nhận xét). Cho phép **dạy thay trong lớp**: bất kỳ `class_teachers` đang active nào của lớp dạy đúng buổi cũng được tính là đã dạy, không bắt buộc đúng `teacher_id` gán cho slot.
+- **Validate nộp nhận xét** (`assertSessionMatchesDeclaredSchedule`/`getScheduleCandidates`) cũng áp dụng **dạy thay trong lớp**: nếu giáo viên nộp bài đang là `class_teachers` active của lớp (`status = 'active'` hoặc `null`), hệ thống match theo mọi slot active trong ngày của lớp bất kể `teacher_id` gán cho entry, không chỉ đúng entry của chính họ. Giáo viên đã bị gỡ khỏi lớp (`status = 'inactive'`) chỉ còn match được đúng entry ghi `teacher_id` của họ (thường không còn active sau khi bị gỡ) — tránh lợi dụng slot dạy thay của người khác.
+- `dashboard.service.ts` đếm "lớp chưa có lịch"/số slot lịch cố định dựa trên `class_schedule_entries WHERE effective_to IS NULL` thay vì parse JSON.
+
+### 4.4.0-cat `courses` (Khoá học)
+
+- Thay thế enum cố định `ClassType` (`vip|basic|advance|hardcore`) — migration `20260818090000_add_class_category`, đổi tên in-place sang `courses` ở migration `20260906000000_rename_class_category_to_course` (ADR `docs/adr/2026-09-05-class-category-becomes-course.md`). Admin tự quản lý danh sách qua CRUD `/courses` (`CourseController`/`CourseService`).
+- Cột: `id` (PK, `@default(uuid())` tự sinh), `name`, `default_duration_days` (INT nullable, `null` = vô hạn — thời hạn mặc định khi tạo lớp từ khoá), `sort_order` (số nguyên, default `0`, dùng để sắp xếp hiển thị), `is_active` (default `true`), `created_at`, `updated_at`. Migration `20260818130000_drop_class_category_code` bỏ cột `code` — không còn mã phân loại thủ công, chỉ cần điền tên khi tạo.
+- Quan hệ: `classes` (1-N, `classes.course_id` FK `onDelete: Restrict`), `course_difficulty_levels` (1-N), `course_lesson_plan_members` (1-N), `modules` (1-N), `lessons` (1-N).
+- **Thời hạn mặc định**: `default_duration_days` để trống/null nghĩa là vô hạn; sửa mặc định sau khi lớp đã tạo **không hồi tố** cho lớp cũ (mốc chốt `Class.contentAccessExpiresAt` theo lớp).
+- Hành vi API:
+  - `GET /courses?includeInactive=` — mặc định chỉ trả `is_active=true`; `includeInactive=true` trả cả bản ghi đã ẩn (dùng cho trang quản trị `/admin/courses`). Mỗi dòng kèm `_count` (`classes`, `lessonPlanMembers`, `difficultyLevels` — chỉ đếm mức khó `is_active=true`). **Lọc theo người gọi (server-side, không nhận cờ từ client):** `lesson_plan` thuần (có role `lesson_plan` mà không kèm `admin` / `assistant` / `lesson_plan_head`) chỉ nhận khoá mình được gán qua `course_lesson_plan_members`. Mọi role khác — gồm `admin`, `assistant`, `lesson_plan_head`, `training`, `teacher`, `accountant_income`, `accountant_expense`, `customer_care` — nhận toàn bộ danh sách như trước. Phạm vi này do `CourseAccessService.resolveListableCourseIds` (khác `resolveViewableCourseIds`, hàm kia là phạm vi *quản lý nội dung* và **không** dùng để lọc GET list). Endpoint vẫn yêu cầu auth admin/staff; thiếu staff profile không crash — không phải `lesson_plan` thuần thì vẫn nhận mọi khoá.
+  - `POST /courses` — cần `name`; `default_duration_days` (để trống = vô hạn) và `sort_order` tuỳ chọn; `id` tự sinh. Guard: admin đầy đủ, `assistant`, `lesson_plan_head`. `CourseService.create()` không nhận actor — controller guard là tầng bảo vệ duy nhất.
+  - `PATCH /courses/:id` — cập nhật `name`/`default_duration_days`/`sort_order`/`is_active` khi field được truyền; truyền `default_duration_days: null` để chuyển về vô hạn. Cùng guard với `POST`.
+  - `DELETE /courses/:id` — cùng guard với `POST`. `400` nếu còn lớp đang dùng khoá học này (`classes.count > 0`); message: `Không thể xoá: còn N lớp đang dùng khoá học này. Hãy chuyển lớp sang khoá khác hoặc chỉ ẩn (is_active=false) khoá học này.` `CourseService.remove()` không nhận actor.
+- Guard phân quyền nội dung khoá (reusable `CourseAccessService`, dùng lại cho mọi ticket nội dung khoá về sau): admin đầy đủ / trợ lí / trưởng giáo án quản lý được mọi khoá; thành viên `lesson_plan` chỉ thấy/sửa khoá mình được gán (qua `course_lesson_plan_members`); gia sư đang dạy lớp thuộc khoá X **không** vì thế mà sửa được nội dung cấp khoá của X. Các service resource trong `CourseContentModule` gọi `assertCanManageCourse` (qua `CourseContentSupportService`) trước mọi ghi Module / Lesson nhánh khoá / tiết thực hành cấp khoá và trước GET câu hỏi/quiz trả đáp án cấp khoá; `assertCanWriteCourseQuestions` chỉ áp dụng khi ghi **ngân hàng câu hỏi**.
+- Controller cây nội dung khoá (`course-modules`, `course-lessons` CRUD/reorder, chưa gồm quiz): `@AllowStaffRolesOnAdminRoutes(assistant, teacher, lesson_plan_head)`. **Không** mở `lesson_plan` thuần ở tầng controller (họ soạn câu hỏi/tiết thực hành, không soạn cây Chuyên đề). `StaffRole.teacher` vẫn nằm trên decorator; tầng service tiếp tục 403 nếu không thuộc đội giáo án. Chi tiết bảng: `docs/api/courses.md`.
+- Seed dữ liệu ban đầu gồm các mã cũ (`vip`, `basic`, `advance`, `hardcore`) cộng 3 mã mới: `thpt_basic` (THPT BASIC), `thpt_advanced` (THPT ADVANCED), `thpt_luyen_de` (THPT Luyện Đề).
+- Khi tạo lớp không truyền `course_id`, `ClassService.resolveDefaultCourseId` fallback về khoá học `is_active=true` có `sort_order` nhỏ nhất (tie-break theo `name`) — không còn hardcode `code='basic'` để tránh vỡ khi admin đổi/xoá phân loại mặc định cũ.
+
+### 4.4.0-cat-diff `course_difficulty_levels` (Mức độ khó của khoá học)
+
+- Mỗi `course` có nhiều mức độ khó (vd. "Dễ", "Trung bình", "Khó"), quản lý qua CRUD `/courses/:courseId/difficulty-levels`. Không dùng thang cố định Dễ/TB/Khó toàn hệ thống.
+- Cột: `id` (PK, `@default(uuid())` tự sinh), `course_id` (FK → `courses.id`, `onDelete: Cascade`), `name` (TEXT), `sort_order` (INT, default `0`), `is_active` (BOOLEAN, default `true`), `created_at`, `updated_at`.
+- Index: `(course_id)`, unique `(course_id, name)`.
+- Unique business logic: tên mức khó duy nhất trong cùng một khoá học (enforce ở service layer + unique index).
+- Hành vi API:
+  - `GET /courses/:courseId/difficulty-levels?includeInactive=` — mặc định chỉ trả `is_active=true`.
+  - `POST /courses/:courseId/difficulty-levels` — cần `name` (+ `sort_order` tuỳ chọn).
+  - `PATCH /courses/:courseId/difficulty-levels/:id` — cập nhật `name`/`sort_order`/`is_active`; `PATCH .../reorder` đổi thứ tự toàn bộ danh sách (mảng `{id, sort_order}`).
+  - `DELETE /courses/:courseId/difficulty-levels/:id` — xoá cứng mức khó (chưa có bảng nội dung tham chiếu ở ticket này; khi ngân hàng câu hỏi ra sau sẽ phải soft-delete).
+
+### 4.4.0-cat-members `course_lesson_plan_members` (đội giáo án của khoá học)
+
+- Bảng quan hệ N-N giữa `courses` và `staff_info`: nhân sự được gán soạn nội dung học thuật + ngân hàng câu hỏi của một khoá. Việc gán do admin, `lesson_plan_head` hoặc `assistant` thực hiện (giới hạn ở controller `CourseController`).
+- Cột: `id` (PK, `@default(uuid())` tự sinh), `course_id` (FK → `courses.id`, `onDelete: Cascade`), `staff_id` (FK → `staff_info.id`, `onDelete: Cascade`), `created_at`.
+- Index: unique `(course_id, staff_id)`, `(course_id)`, `(staff_id)`. Migration: `20260907000000_add_course_lesson_plan_members`.
+- Chỉ gán được nhân sự `staff_info.status = active` có `roles` chứa `lesson_plan` hoặc `lesson_plan_head`.
+- Hành vi API (`/courses/:courseId/lesson-plan-members`):
+  - `GET` — danh sách member kèm staff `{id, fullName, roles, status}`.
+  - `PUT` — body `{ staff_ids: string[] }`, thay thế toàn bộ danh sách hiện tại; `400` nếu có staff không hợp lệ.
+  - `GET /courses/lesson-plan-staff?search=&limit=` — nhân sự active có role `lesson_plan`/`lesson_plan_head` để fill picker gán đội giáo án.
+- `GET /courses/:id` — chi tiết khoá kèm `difficultyLevels` (mọi trạng thái, theo `sort_order`) + `lessonPlanMembers` + `_count.classes`; route mở cho admin/trợ lí/trưởng giáo án và thành viên `lesson_plan` của đúng khoá.
+
 ### 4.4.0 `student_classes` (Class ↔ StudentInfo)
 
 - Bảng N-N: mỗi hàng là một học sinh thuộc một lớp.
@@ -210,6 +393,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - Khi thêm/tái thêm học sinh vào lớp qua API quản trị, backend luôn ghi `status = active`; khi bỏ khỏi danh sách lớp, backend chuyển `status = inactive` thay vì xóa bản ghi membership.
 - Các cột override học phí (nullable int):
   - `custom_student_tuition_per_session`
+  - `custom_tuition_per_block` (học phí riêng mỗi block 30 phút; học sinh không gói: charge buổi = cột này × `sessions.snapshot_block_count` nếu có; `null` khi không có override hoặc lớp không có số block chuẩn)
   - `custom_tuition_package_total`
   - `custom_tuition_package_session`
 - **Semantics thống nhất với backend:** giá trị `0` trên các cột override được xử lý như **không override** (kế thừa học phí/gói từ `classes`), tương đương `null` trong logic tính `effective*` và trong SQL aggregate dashboard (`NULLIF(..., 0)` trên các cột custom). Khi cập nhật danh sách học sinh lớp hoặc `PATCH /class/:id/student-tuition`, API chuẩn hóa `0` → lưu `null` và **derive** `custom_student_tuition_per_session` từ gói riêng (`custom_tuition_package_total ÷ custom_tuition_package_session`, làm tròn) khi có gói hợp lệ.
@@ -219,6 +403,60 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - composite `(class_id, student_id)` (hot path cho validate roster/session update)
   - composite `(class_id, status, created_at)` (hot path cho danh sách roster theo lớp/trạng thái)
   - composite `(student_id, class_id)` (hot path cho membership lookups theo học sinh)
+
+### 4.4.0b `class_content_items` (Nội dung lớp học)
+
+- Bảng liên kết lớp ↔ nội dung: mỗi hàng là một mục nội dung (hiện tại chỉ `lesson`) được thêm vào danh sách nội dung của lớp. Với tiết luyện tập, hàng này chính là **lần giao** (xem `CONTEXT.md`): tiết (`lessons`/`question_links`) dùng chung nhiều lớp; lịch mở bài thuộc lớp.
+- `class_id` (FK → `classes.id`, `onDelete: Cascade`)
+- `kind` (`ClassContentItemKind`, default `lesson`) — phân loại nội dung. Hiện tại chỉ có `lesson`.
+- `lesson_id` (nullable FK → `lessons.id`, `onDelete: Restrict`) — FK đến tiết học. Nullable để hỗ trợ future kinds không cần lesson. Không Cascade/SetNull: xóa Chuyên đề / Tiết học cấp khoá khi còn lần giao (kể cả đã ẩn) bị chặn. ADR `docs/adr/2026-09-07-class-content-soft-hide-restrict-knowledge-tree.md`.
+- `sort_order` (`INT`, default 0) — thứ tự hiển thị trong danh sách nội dung lớp.
+- `open_at` (`TIMESTAMPTZ`, nullable) — thời điểm mở bài của **lần giao**. Chỉ dùng khi lesson `kind = practice`. Không nằm trên `lessons`. Khi `POST /class/:id/content` luyện tập **không** gửi `openAt`, backend ghi thời điểm tạo lần giao (đồng hồ server), không lấy giờ máy client.
+- `duration_minutes` (`INT`, nullable) — thời lượng làm bài (phút) của lần giao. 1–720. Chỉ dùng khi lesson `kind = practice`. Không nằm trên `lessons`.
+- `hidden_at` (`TIMESTAMPTZ`, nullable, default null) — thời điểm ẩn mềm khỏi học sinh. Null = đang hiện.
+- `hidden_by_staff_id` (nullable FK → `staff_info.id`, `onDelete: SetNull`) — staff đã ẩn.
+- Unique constraint: `(class_id, lesson_id)` — mỗi tiết chỉ xuất hiện tối đa 1 lần trong nội dung của một lớp; cùng một tiết vẫn giao được cho nhiều lớp (mỗi lớp một hàng độc lập). Item đã ẩn vẫn chiếm unique — khôi phục, không thêm lại.
+- Migration: `20260910000000_add_class_content_items` — tạo bảng + backfill các topic (cũ) `class_id IS NOT NULL`.
+- Migration: `20260912000000_add_class_content_assignment_schedule` — thêm `open_at` + `duration_minutes`.
+- Migration: `20260918000000_soft_hide_class_content` — `hidden_at` / `hidden_by_staff_id`; FK Cascade → Restrict; `attempts.assignment_id` Cascade → Restrict.
+- Migration: `20260921000000_rename_three_level_content` — `topic_id` → `lesson_id`; enum value `topic` → `lesson`; lớp từng gán một chuyên đề lý thuyết N bài có N hàng (ẩn/người ẩn copy nguyên trạng).
+
+### 4.4.0ba `class_theory_lesson_views` (Lượt xem tiết lý thuyết)
+
+- Một hàng ghi nhận một học sinh đã mở trang **Tiết lý thuyết** qua một `class_content_items` cụ thể. Không backfill lịch sử trước khi có tracking.
+- `class_content_item_id` (FK → `class_content_items.id`, `onDelete: Cascade`) — phạm vi lớp/tiết được xem.
+- `student_id` (FK → `student_info.id`, `onDelete: Cascade`)
+- `last_viewed_at` — lần mở gần nhất của học sinh cho tiết lý thuyết đó.
+- Unique constraint: `(class_content_item_id, student_id)` (`ctlv_cci_student_id_key`).
+- Index: `(class_content_item_id, last_viewed_at)` (`ctlv_cci_last_viewed_at_idx`) cho dialog tiến độ; index `student_id`.
+- Migration: `20260910181000_add_class_theory_topic_views` tạo bảng tên cũ; `20260921000000_rename_three_level_content` đổi tên bảng. Backfill: lượt xem cũ gắn vào **tiết đầu tiên** của chuyên đề lý thuyết cũ (content item gốc); các tiết sau bắt đầu chưa xem.
+
+### 4.4.0bb `class_timeline_items` (Timeline lớp)
+
+- Join riêng buổi học / báo cáo khảo sát / lần giao tiết học trên một lớp. Không thay `class_content_items`.
+- `class_id` (FK → `classes.id`, `onDelete: Cascade`)
+- `kind` (`ClassTimelineItemKind`): `session` | `class_survey` | `content_item`
+- XOR FK (CHECK + unique từng cột): `session_id`, `class_survey_id`, `class_content_item_id` — cascade khi xóa entity gốc.
+- `hidden_at` / `hidden_by_staff_id` — cùng nghĩa ẩn mềm với `class_content_items`. Ẩn lần giao đồng thời ẩn dòng timeline `content_item`. Học sinh `GET .../timeline/student` lọc `hidden_at IS NULL`.
+- `sort_order` — thứ tự DnD admin/staff; học sinh đọc cùng thứ tự (cursor = id dòng trước, lọc `sort_order >`).
+- Index: `(class_id, sort_order)`.
+- `classes.timeline_custom_order` (default `false`): chưa DnD thì `sort_order` **mới nhất trên, cũ nhất dưới** (buổi = ngày+giờ, khảo sát = ngày báo cáo, chuyên đề = `open_at` hoặc `created_at`); tạo/sửa ngày tự xếp lại. `true` sau lần DnD đầu. Migration `20260916000000_timeline_sort_by_time` (cột + mix theo giờ ASC) rồi `20260917000000_timeline_newest_first` (DESC).
+- Migration: `20260915000000_add_class_timeline_items` — bảng + CHECK + backfill ban đầu. `20260921000000_rename_three_level_content` chèn thêm dòng timeline khi một lần giao lý thuyết nở thành N tiết.
+
+### 4.4.0c `attempts` / `attempt_answers` (Bài làm)
+
+- Mỗi `attempts` là **một lượt** học sinh làm một lần giao luyện tập. FK `assignment_id` → `class_content_items.id` (không có `topic_id`) — cùng một đề giao nhiều lớp cho ra bảng điểm độc lập (ADR live-link). `onDelete: Restrict` — không xoá lịch sử khi ẩn/cố xoá lần giao.
+- `student_id` (FK → `student_info.id`, `onDelete: Cascade`)
+- `started_at` — mốc đồng hồ **của học sinh này** (lúc bấm bắt đầu), không phải `open_at` của lớp.
+- `duration_minutes` — snapshot thời lượng lần giao lúc bắt đầu; sửa lịch lớp sau đó không đổi đồng hồ lượt đang chạy.
+- `status` (`AttemptStatus`): `in_progress` | `submitted` | `timed_out`. Hết giờ → `timed_out`, chốt câu đã trả lời và chấm MCQ, **không huỷ**. `endsAt` là trường tính (`started_at + duration_minutes`), không lưu cột. Cron `@nestjs/schedule` `EVERY_MINUTE` (`AttemptExpiryJob` → `AttemptService.finalizeExpiredInProgress`) quét `in_progress` đã quá `endsAt` và gọi cùng `gradeAndClose` với GET/nộp — học sinh đóng tab không làm lượt kẹt. Claim bằng `updateMany` `WHERE id AND status = in_progress` trong transaction: trùng nút Nộp không double-grade. Job log số lượt đã chốt; 0 bản ghi không nổ. `ScheduleModule.forRoot` tắt cron khi `NODE_ENV=test`.
+- Unique partial: tối đa một `in_progress` trên `(assignment_id, student_id)`. Làm lại = tạo lượt mới; lượt cũ giữ nguyên.
+- `attempt_answers`: một hàng / câu. Lúc `start` snapshot toàn bộ đề: `type`, `content`, `options`, `correct_index`, `explanation`, `answer_guide`, `difficulty_label`, thứ tự, và `points_possible`. `points_possible` = chia 100 đều N câu (Hamilton: phần dư +1 từ câu đầu); **không** lấy `question_links.points`. Chấm MCQ/tự luận chỉ đọc snapshot, không join `questions` live. `onDelete: Restrict` với `questions`. Không cascade theo `question_links`.
+- Chấm tự động chỉ `single_choice` (so `choice_index` với snapshot `correct_index`). Tự luận để `points_awarded`/`is_correct` null (`has_ungraded_essay`).
+- `attempt_answers.feedback` (`TEXT`, nullable) — nhận xét của gia sư cho câu tự luận đó; chỉ có sau khi chấm. Ticket #63.
+- `attempt_answers.marked_for_review` (`BOOLEAN`, default `false`) — học sinh đánh dấu quay lại xem trước nộp trong lượt `in_progress`; autosave qua `PATCH .../answers`; không ảnh hưởng chấm điểm.
+- Chấm tự luận (#63): gia sư chấm từng câu qua `points_awarded` (0..`points_possible` snapshot 100/N, không đụng `auto_graded_score`/`auto_graded_max` vốn chỉ của MCQ) + `feedback`. `is_correct` giữ `null` cho tự luận (chấm theo thang điểm, không phải đúng/sai). Khi không còn câu tự luận `points_awarded IS NULL` trong lượt → set `has_ungraded_essay = false`. Hàng đợi chấm chỉ gồm câu tự luận chưa chấm của **lượt mới nhất** mỗi học sinh (`DISTINCT ON (student_id) ORDER BY started_at DESC`); lượt cũ tra cứu được nhưng không vào hàng đợi và bị từ chối chấm (404). N = 0 → `start` không tạo Attempt.
+- Migration: `20260913000000_add_attempts`, `20260914000000_add_attempt_answer_feedback` (thêm cột `feedback`), `20260918000000_attempt_answer_exam_snapshot` (snapshot đề + thang 100), `20260920000000_attempt_answer_marked_for_review` (cột `marked_for_review`). ADR `docs/adr/2026-09-07-attempt-exam-snapshot.md`.
 
 ### 4.4.1 `makeup_schedule_events`
 
@@ -269,12 +507,15 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 ### 4.5 `sessions`
 
 - Mỗi buổi học gắn với 1 lớp và 1 giáo viên
-- Trường chính: ngày học, start/end time, `coefficient` (hệ số buổi học 0.0–1.0), `allowance_amount`, `teacher_payment_status`, `tuition_fee`, `lesson_content`, `homework`, `tutorial`
-- `allowance_amount`: snapshot **trước hệ số** = tổng `(snapshot_per_student_allowance × số bản ghi điểm danh present/excused) + snapshot_scale_amount` (làm tròn VND theo logic API). Các truy vấn payroll **không** cộng thêm `classes.scale_amount` vào `allowance_amount`.
-- `snapshot_per_student_allowance` (`INTEGER`, nullable): trợ cấp mỗi học sinh đã resolve (`class_teachers.custom_allowance` ?? `classes.allowance_per_session_per_student`) tại thời điểm **tạo** buổi học; không ghi đè sau đó.
+- Trường chính: ngày học, start/end time, `coefficient` (hệ số buổi học 0.0–1.0), `allowance_amount`, `teacher_payment_status`, `tuition_fee`, `lesson_content`, `homework`, `tutorial`, `recording_url`
+- `start_time`, `end_time` (`TIME`, nullable trên DB cho dữ liệu cũ): **bắt buộc** khi tạo buổi (`POST /sessions`, `POST /staff-ops/classes/:classId/sessions`). Giờ kết thúc phải sau giờ bắt đầu. Khi sửa, nếu payload gửi giờ thì cả hai phải có và kết thúc phải sau bắt đầu. Buổi `paid`/`deposit` **không cho đổi giờ** (cùng lý do khóa card Trợ cấp buổi: giờ sẽ là căn cứ tính tiền). Script chỉ-đọc `pnpm --filter api sessions:list-missing-time` liệt kê buổi đang thiếu giờ (id, tên lớp, ngày).
+- `recording_url` (`TEXT`, nullable): link video YouTube ghi lại buổi học để học sinh xem lại bài giảng.
+- `allowance_amount`: snapshot **trước hệ số**. Lớp theo buổi: `(snapshot_per_student_allowance × sĩ số present/excused) + snapshot_scale_amount`. Lớp theo block: cùng phép cộng vì `snapshot_per_student_allowance` đã là `đơn_giá_block × snapshot_block_count` (tương đương cả buổi); `scale_amount` không nhân block. Payroll **không** cộng thêm `classes.scale_amount`.
+- `snapshot_per_student_allowance` (`INTEGER`, nullable): trợ cấp mỗi học sinh đã resolve tại lúc **tạo**/recalc unpaid. Lớp theo buổi: `custom_allowance` reconstruct per-session ?? default lớp. Lớp theo block: `đơn_giá_block × snapshot_block_count` (session-equivalent).
 - `snapshot_scale_amount` (`INTEGER`, nullable): `classes.scale_amount` tại thời điểm **tạo** buổi học; không ghi đè sau đó.
-- Khi sửa điểm danh buổi chưa thanh toán (`teacher_payment_status = unpaid`), API tự tính lại `allowance_amount` từ hai snapshot trên. Buổi cũ không có snapshot (null) fallback đọc live từ `classes` / `class_teachers`.
-- `max_allowance_per_session` không snapshot tại `sessions`; các aggregate payroll/report đọc động từ `classes.max_allowance_per_session` tại thời điểm query, nên thay đổi cấu hình lớp có thể ảnh hưởng kết quả historical aggregate.
+- `snapshot_block_count` (`INTEGER`, nullable): số block 30 phút của buổi tại thời điểm **tạo** (từ `start_time`/`end_time`, fallback số block chuẩn của lớp), **chỉ khi** lớp `pricing_mode = per_block`. Payroll lịch sử không được suy lại từ giờ buổi. Trần trợ cấp lớp theo block = `max_allowance_per_block × snapshot_block_count`.
+- Khi sửa điểm danh buổi chưa thanh toán (`teacher_payment_status = unpaid`), API tự tính lại `allowance_amount` từ snapshot per-student + scale (không nhân lại block). Buổi cũ không có snapshot (null) fallback đọc live từ `classes` / `class_teachers`.
+- Trần trợ cấp không snapshot tại `sessions`. Aggregate payroll/report: lớp `per_session` đọc `classes.max_allowance_per_session`; lớp `per_block` có `snapshot_block_count` đọc `max_allowance_per_block × snapshot_block_count`. `0`/`null` = không trần. Buổi frozen thiếu snapshot block vẫn dùng trần theo buổi dù lớp đã đổi sang per_block.
 - `lesson_content` (`TEXT`, nullable): nội dung bài học (LEVEL, CONTEST, kiến thức đã dạy); bắt buộc khi tạo/cập nhật buổi qua API.
 - `homework` (`TEXT`, nullable): bài tập về nhà; bắt buộc khi tạo/cập nhật buổi qua API.
 - `tutorial` (`TEXT`, nullable): **Tutorial các buổi học** (hướng dẫn/tài liệu tham khảo buổi); bắt buộc khi tạo/cập nhật buổi qua API. Khác `cf_problem_tutorials.tutorial` (tutorial bài Codeforces).
@@ -290,6 +531,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - `training_manager_allowance_amount` (`INTEGER`, nullable): `ROUND(tổng tuition_fee present/excused × rate / 100)`; `0`/null khi chưa gán QLL hoặc rate = 0.
   - `training_manager_payment_status` (`PaymentStatus`, default `pending`): thanh toán payroll theo buổi (pattern CSKH).
   - `training_manager_tax_deduction_rate_percent` (`DECIMAL(5,2)`, nullable): snapshot thuế khi chuyển `paid`.
+- `snapshot_no_attendance` (`BOOLEAN`, default `false`): snapshot từ `classes.noAttendance` tại thời điểm tạo buổi; `true` = buổi này tự tạo `Attendance.present` cho toàn bộ học sinh active (không cần nhập điểm danh). FE ẩn form điểm danh khi snapshot = true. Payload tạo/sửa buổi **không** nhận `noAttendance`. ADR: `docs/adr/2026-09-05-class-without-attendance-still-charges.md`.
 - Quan hệ con: `attendance`
 - Indexes chính:
   - đơn lẻ: `teacher_id`, `class_id`, `date`
@@ -319,11 +561,105 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - Các snapshot này được dùng để bucket theo mức thuế effective khi aggregate tax trên tổng commission/trợ cấp của kỳ.
 - Index: `(assistant_manager_staff_id, assistant_payment_status)` phục vụ aggregate unpaid
 
+### 4.6b `lesson_plan_head_commission`
+
+- Snapshot hoa hồng doanh thu của **Trưởng giáo án** (role `lesson_plan_head`) theo **từng buổi học toàn hệ thống** (pattern giống commission CSKH trên `attendance`, nhưng tách bảng riêng vì có thể có NHIỀU staff giữ role này cùng lúc, mỗi người % khác nhau).
+- Mỗi buổi học chargeable (`attendance.tuition_fee > 0`) sinh **1 dòng cho MỖI nhân sự `lesson_plan_head` đang active** có `staff_info.revenue_share_percent` khác null tại thời điểm buổi được tạo/cập nhật; đồng bộ idempotent qua `syncLessonPlanHeadCommissions()` (`apps/api/src/payroll/lesson-plan-head-commission.util.ts`), gọi trong transaction tạo/sửa session.
+- Cột:
+  - `attendance_id` (FK → `attendance.id`, cascade), `staff_id` (FK → `staff_info.id`, cascade)
+  - `coef_percent` (`DECIMAL(5,2)`): snapshot `revenue_share_percent` của staff tại thời điểm sync
+  - `amount` (`INTEGER`): `ROUND(attendance.tuition_fee × coef_percent / 100)`
+  - `payment_status` (`PaymentStatus`, default `pending`)
+  - `created_at`
+- Unique: `(attendance_id, staff_id)`. Index: `(staff_id, payment_status)` cho aggregate payroll.
+- Sync chỉ cập nhật dòng `pending` (không đụng dòng đã `paid`); buổi chuyển non-chargeable sẽ xóa dòng `pending` tương ứng.
+- Nguồn payroll `revenue_share` trong payment-preview (`GET /staff/:id/payment-preview`, `POST /staff/:id/payments/pay-all|pay-selected`) đọc/ghi trực tiếp bảng này; không áp thuế (`taxRatePercent = 0` cố định cho nguồn này).
+
+### 4.6c-b `modules` (Chuyên đề — nhóm tiết học trong khoá học)
+
+- Nhóm các tiết học bên trong một khoá học; mỗi module thuộc đúng 1 course. Không tồn tại ở cấp lớp.
+- Cột:
+  - `id` (PK, UUID default)
+  - `course_id` (FK → `courses.id`, cascade)
+  - `title` (`TEXT`): tiêu đề chuyên đề
+  - `sort_order` (`INTEGER`, default 0): thứ tự sắp xếp
+  - `created_at`, `updated_at` (`TIMESTAMPTZ`)
+- Index: `(course_id)`
+- Quan hệ: `courses` (1-N), `lessons` (1-N), `questions` (1-N — ngân hàng câu hỏi phân loại theo chuyên đề)
+- Đổi tên in-place từ `chapters` (Chủ đề cũ) ở migration `20260921000000_rename_three_level_content`. ADR `docs/adr/2026-09-15-three-level-content-model.md`.
+
+### 4.6c `lessons` (Tiết học — đơn vị nội dung học sinh nhìn thấy)
+
+- Ba cấp: **Khoá học → Chuyên đề → Tiết học**. Khái niệm Bài học (`lectures`) biến mất: mỗi lecture cũ là **một** tiết lý thuyết riêng, không gộp.
+- Thuộc một trong hai chế độ (CHECK `lessons_owner_check`):
+  - **Khoá học — trong Chuyên đề** (`course_id` + `module_id` không null, `class_id` null): nội dung chung cho mọi lớp dùng khoá đó.
+  - **Lớp** (`class_id` không null, `course_id` + `module_id` null): tiết tạo riêng trong lớp, không thuộc chuyên đề nào. Ngoại lệ có chủ ý của phát biểu "ba cấp".
+- `kind` (`LessonKind`): `theory` (lý thuyết — video + nội dung + bài tập ôn nhẹ tuỳ chọn) hoặc `practice` (thực hành — thuần tập câu hỏi). CHECK `lessons_practice_no_media_check`: `practice` thì `video_url` và `content` phải NULL.
+- Cột chính:
+  - `id` (UUID, PK) — practice / theory-không-lecture giữ id topic cũ; theory có lecture giữ id lecture cũ
+  - `kind` (`LessonKind`)
+  - `course_id` (FK → `courses.id`, cascade, nullable)
+  - `module_id` (FK → `modules.id`, cascade, nullable)
+  - `class_id` (FK → `classes.id`, cascade, nullable)
+  - `title` (`TEXT`)
+  - `video_url` (`TEXT`, nullable) — chỉ tiết lý thuyết
+  - `content` (`TEXT`, nullable) — chỉ tiết lý thuyết
+  - `order` (`INTEGER`, default 0) — thứ tự trong chuyên đề (hoặc trong lớp, với tiết riêng lớp)
+  - `created_by`, `updated_by` (nullable FK → `users.id`)
+  - `created_at`, `updated_at` (`TIMESTAMPTZ`)
+- Indexes: `(course_id)`, `(module_id)`, `(class_id)`
+- Quan hệ: `courses` (optional), `modules` (optional), `classes` (optional), `lesson_quizzes` (1-N), `question_links` (1-N), `class_content_items` (1-N)
+- Migration: `20260921000000_rename_three_level_content` — tạo `lessons`, backfill, DROP `topics` + `lectures`.
+
+### 4.6c-c `lesson_quizzes` / `lesson_quiz_answers` (Bài tập ôn nhẹ)
+
+- `lesson_quizzes`: câu hỏi ngân hàng gắn vào một tiết lý thuyết. Unique `(lesson_id, question_id)`. FK `lesson_id` cascade; `question_id` restrict.
+- `lesson_quiz_answers`: trả lời ôn nhẹ theo `(lesson_id, question_id, student_id)`. Không sinh Attempt, không tính điểm.
+- Đổi tên in-place từ `lecture_quizzes` / `lecture_quiz_answers` (`lecture_id` → `lesson_id`) ở `20260921000000_rename_three_level_content`.
+
+### 4.6d `questions` (Ngân hàng câu hỏi)
+
+- Ngân hàng câu hỏi, mỗi câu thuộc một Module (chuyên đề) và một DifficultyLevel của course.
+- Cột:
+  - `id` (PK, UUID default)
+  - `course_id` (FK → `courses.id`, cascade)
+  - `module_id` (FK → `modules.id`, cascade)
+  - `difficulty_level_id` (FK → `course_difficulty_levels.id`, restrict)
+  - `type` (`QuestionType`): `single_choice` | `essay`
+  - `content` (`TEXT`): nội dung câu hỏi (HTML từ TipTap)
+  - `options` (`JSONB`, nullable): mảng phương án (HTML hoặc LaTeX) — chỉ cho `single_choice`
+  - `correct_index` (`INT`, nullable): chỉ số 0-based của đáp án đúng — cần cho `single_choice`
+  - `explanation` (`TEXT`, nullable): giải thích sau khi trả lời (HTML)
+  - `answer_guide` (`TEXT`, nullable): hướng dẫn cho câu tự luận (HTML)
+  - `deleted_at` (`TIMESTAMPTZ`, nullable): soft-delete timestamp
+  - `created_at`, `updated_at` (`TIMESTAMPTZ`)
+- Indexes: `(course_id)`, `(module_id)`, `(difficulty_level_id)`
+- Quan hệ: `courses` (1-N), `modules` (1-N), `course_difficulty_levels` (1-N), `question_links` (1-N)
+- Table: `questions` (via `@@map`)
+
+### 4.6e `question_links` (Liên kết câu hỏi — tiết luyện tập)
+
+- Liên kết câu hỏi với một tiết `kind = practice`. CRUD qua `GET/POST/PATCH/DELETE /lessons/:lessonId/questions`.
+- Cột:
+  - `id` (PK, UUID default)
+  - `lesson_id` (FK → `lessons.id`, cascade)
+  - `question_id` (FK → `questions.id`, restrict)
+  - `order` (`INT`, nullable): thứ tự câu trong tiết
+  - `points` (`INT`, nullable): trọng số soạn đề (tuỳ chọn). **Không** dùng khi chấm Attempt — thang chấm = 100/N snapshot lúc start.
+- Unique: `(lesson_id, question_id)`
+- Indexes: `(lesson_id)`, `(question_id)`
+- Table: `question_links` (via `@@map`)
+
 ### 4.7 Finance models
 
 - `bonuses`: khoản thưởng/phạt theo staff/tháng/trạng thái thanh toán; `amount` có thể dương (thưởng) hoặc âm (phạt/điều chỉnh giảm).
   - API create bonus không còn nhận `id` từ frontend; backend/DB luôn tự sinh UUID authoritative bằng default của bảng.
 - `role_tax_deduction_rates`: lịch sử append-only mức khấu trừ thuế mặc định theo role + `effective_from`
+- `role_fixed_salary_defaults`: mức **lương cứng** mặc định theo `StaffRole` ăn lương cứng (unique `role_type`). Không gồm `teacher` — giáo viên chỉ nhận trợ cấp buổi học. Chỉ cột `amount` (nullable) — null / không có row = chưa cấu hình, không hiểu là 0đ. Độc lập với bảng % vận hành. Mặc định theo role áp cho mọi nhân sự đang hoạt động mang role đó, trừ khi có đè theo người trên đúng trục lương. Lịch sử chỉnh sửa ghi `action_history` (`entity_type = role_fixed_salary_default`). Migration `20260916100000_remove_teacher_fixed_salary_config` xoá dòng `teacher` (no-op nếu không có); không đụng `staff_fixed_salary_payables`.
+- `role_fixed_salary_operating_rate_defaults`: **% khấu trừ vận hành lương cứng** mặc định theo `StaffRole` ăn lương cứng (unique `role_type`; `teacher` không còn cấu hình trên tab Lương cứng). `rate_percent` nullable (0–100) — null / không có row = chưa cấu hình, khác 0%. Chỉ áp cho lương cứng của role đó; không đọc/ghi `class_teachers.tax_rate_percent` và không đổi `sessions.allowance_amount`. Xoá cấu hình lương không xoá row % (và ngược lại). Lịch sử: `action_history` (`entity_type = role_fixed_salary_operating_rate_default`).
+- `staff_fixed_salary_overrides`: đè **mức lương cứng** theo cặp `(staff_id, role_type)` (unique). Có row = đang đè, `amount` bắt buộc (0 = cố ý loại khỏi lương cứng của role). Không có row = theo `role_fixed_salary_defaults`. Chỉ được ghi khi nhân sự đang mang role đó **và** role thuộc danh sách lương cứng. FK cascade `staff_info`. Không đụng bảng đè %. Audit: `action_history` (`entity_type = staff_fixed_salary_override`). Cùng migration trên xoá dòng `teacher`.
+- `staff_fixed_salary_operating_rate_overrides`: đè **% vận hành lương cứng** theo cặp `(staff_id, role_type)` (unique). Có row = đang đè, `rate_percent` bắt buộc (0% hợp lệ). Không có row = theo mặc định role. Độc lập với đè lương. Audit: `action_history` (`entity_type = staff_fixed_salary_operating_rate_override`).
+- `staff_fixed_salary_payables`: **khoản lương cứng phải trả** đã đóng băng khi chốt tháng. Unique `(staff_id, role_type, month)` ở tầng DB — chạy lại không tạo thêm và không sửa khoản cũ. Snapshot `gross_amount`, `operating_rate_percent`, `tax_rate_percent`, `operating_deduction_amount`, `tax_deduction_amount`, `net_amount`; `note` nullable (ghi chú khi kế toán sửa khoản pending); `status` mặc định `pending`. Khoản pending được sửa số gộp/`note` (net tính lại từ % đóng băng); không có API xóa. Khoản paid không sửa được. Chỉ sinh cho nhân sự `active` đang mang role **ăn lương cứng** (`FIXED_SALARY_STAFF_ROLES`, không gồm `teacher`), với mức đã resolve > 0 (0 hoặc chưa cấu hình thì bỏ). Khoản `teacher` đã chốt trước đây **giữ nguyên**. Không chia ngày công. Khấu trừ dùng `calculateDeductionAmounts` (trừ vận hành trên gộp, thuế trên phần còn lại). Không tái dùng `extra_allowances`.
 - `staff_tax_deduction_overrides`: lịch sử append-only override khấu trừ thuế theo staff + role + `effective_from`
 - `class_teachers.tax_rate_percent`: source of truth duy nhất cho `% khấu trừ vận hành` theo cặp `class-teacher` (Prisma `operatingDeductionRatePercent`); dữ liệu lịch sử cũ đã được backfill vào cột này trước khi bỏ bảng lịch sử vận hành.
 - `wallet_transactions_history`: lịch sử ví học viên + thông tin chia lợi nhuận CSKH
@@ -338,24 +674,31 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - `student_wallet_sepay_orders`: unique `order_code`, unique `sepay_transaction_id`, unique `sepay_reference_code`, unique `wallet_transaction_id`; index `(student_id)`, `(status, created_at)`, và `(created_by_user_id)` cho reconcile/webhook và audit người tạo QR.
   - `student_wallet_direct_topup_requests`: unique `token_hash`, unique `wallet_transaction_id`; index `(student_id)`, `(status, expires_at)`, và `(requested_by_user_id)` cho preview/approval token, cleanup hết hạn và audit người yêu cầu.
   - `extra_allowances`: composite `(staff_id, month, status)` cho payroll preview/listing theo nhân sự-tháng-trạng thái; composite `(status, staff_id, month, role_type, tax_deduction_rate_percent)` cho aggregate allowance theo trạng thái/rate bucket
+  - `staff_fixed_salary_overrides`: unique `(staff_id, role_type)`; index `staff_id`, `role_type`
+  - `staff_fixed_salary_operating_rate_overrides`: unique `(staff_id, role_type)` (`staff_fs_op_rate_ov_staff_role_key`); index `staff_id`, `role_type`
+  - `staff_fixed_salary_payables`: unique `(staff_id, role_type, month)`; index `staff_id`, `month`, composite `(status, month)`
   - `dashboard_cache`: index `expires_at` cho dọn cache hết hạn
   - `cost_extend`: index `date`, `month`, và composite `(status, date)` cho lọc chi phí theo kỳ/trạng thái
 - Payroll semantics:
   - thuế áp dụng cho mọi staff; **thưởng (bonus)** trong `income-summary` / popup thanh toán áp **khấu trừ thuế** theo mức hiện hành của role ưu tiên trên hồ sơ (không có khấu trừ vận hành trên thưởng)
   - tax base được aggregate theo **từng nguồn thu nhập trong kỳ** và tách bucket theo snapshot rate đang effective
-  - khấu trừ vận hành chỉ áp dụng cho gia sư theo `class_teachers.tax_rate_percent`
-  - `snapshotUnpaidTotal` / `snapshotUnpaidNetTotal` trong staff income summary là toàn bộ khoản pending/unpaid hiện tại từ mọi nguồn, không giới hạn tháng hoặc cửa sổ `days`, và loại trừ session cọc; net của giáo viên trừ vận hành hiện hành theo lớp rồi tính thuế trên phần sau vận hành, còn role khác chỉ trừ thuế
+  - khấu trừ vận hành chỉ áp dụng cho gia sư theo `class_teachers.tax_rate_percent`, **và** cho lương cứng theo snapshot trên `staff_fixed_salary_payables`
+  - **% khấu trừ vận hành lương cứng** (`role_fixed_salary_operating_rate_defaults.rate_percent` / đè theo người) được snapshot vào `staff_fixed_salary_payables` khi chốt tháng, và **không** tham gia công thức trợ cấp buổi học
+  - `snapshotUnpaidTotal` / `snapshotUnpaidNetTotal` trong staff income summary là toàn bộ khoản pending/unpaid hiện tại từ mọi nguồn **gồm lương cứng**, không giới hạn tháng hoặc cửa sổ `days`, và loại trừ session cọc; net của giáo viên trừ vận hành hiện hành theo lớp rồi tính thuế trên phần sau vận hành; lương cứng dùng net đã đóng băng trên khoản; role khác chỉ trừ thuế
 - `dashboard_cache`: cache JSON theo key/type + `expires_at`; hiện được backend dùng làm server-side response cache cho các read endpoint nặng của admin dashboard
 - `cost_extend`: khoản chi mở rộng theo tháng/danh mục
   - `date`: dùng kiểu `DATE` (Prisma `DateTime? @db.Date`) để đồng bộ với các luồng hiển thị/lọc theo ngày
 
 ### 4.8 Content & audit
 
-- `class_surveys`: báo cáo/đánh giá lớp theo mốc test; index `class_id`, `teacher_id`, `(class_id, test_number)`, `(teacher_id, report_date)`
-- `survey_round`: bảng single-row (`id = 'current'`) lưu **lần khảo sát hiện tại** toàn cục (`current_round`, mặc định/seed = 6) do admin đặt; `updated_by_user_id` ghi admin chỉnh gần nhất. Mọi lớp `running` được kỳ vọng đã có `class_surveys.test_number = current_round`
+- `class_surveys`: báo cáo khảo sát của một lớp cho một Bài khảo sát (`survey_id`, nullable — chỉ null cho data lịch sử trước khi có Bài khảo sát). `knowledge_assessment` (text tự do) là đánh giá kiến thức **dùng chung cho cả báo cáo** (không phải theo từng học sinh). Field legacy `test_number`/`content` (lần khảo sát N toàn cục + nội dung rich text tự do) giữ nullable cho dữ liệu cũ, không còn set qua API mới; migration `20260816123000_survey_knowledge_assessment_per_report` đã backfill toàn bộ `content` cũ vào `knowledge_assessment` để không mất dữ liệu khi đổi model. Index `class_id`, `teacher_id`, `(class_id, test_number)`, `(teacher_id, report_date)`, `survey_id`, `(class_id, survey_id)`. Unique effective theo `(class_id, survey_id)` được enforce ở service layer (một báo cáo/lớp/bài khảo sát)
+- `class_survey_student_assessments`: nhận xét (`comment`, text tự do) của gia sư cho từng học sinh trong một `class_surveys` row (đánh giá kiến thức không lưu ở bảng này, xem `class_surveys.knowledge_assessment`); unique `(class_survey_id, student_id)`
+- `survey_round` (Prisma model `Survey`, "Bài khảo sát"): thay thế cơ chế "lần khảo sát N toàn cục" cũ bằng entity multi-row có `name`, `start_date`/`end_date`, `created_by_user_id`/`updated_by_user_id`, và thông báo kèm **dạng có cấu trúc** (5 field text riêng, không còn 1 rich text field): `notification_title` (mirror giá trị `name` khi tạo/sửa — FE không có input riêng vì trùng tên bài khảo sát), `notification_content` (Nội dung), `notification_instructions` (Hướng dẫn), `notification_notes` (Lưu ý), `notification_teacher_note` (Gia sư) — tất cả nullable, plain text nhiều dòng. Admin + đội giáo án (`lesson_plan`, `lesson_plan_head`) CRUD qua `/surveys` (FE: `/admin/surveys` cho admin, `/staff/surveys` cho đội giáo án — cùng dùng component `SurveysManager`). Lớp `running` được kỳ vọng có `class_surveys.survey_id = <bài đang mở>` trừ khi bị loại trừ qua `survey_excluded_classes`. Row lịch sử `id = 'current'` (field `current_round`) giữ nguyên qua migration, chỉ còn ý nghĩa legacy/không dùng cho luồng mới; `name IS NULL` dùng để phân biệt row legacy khỏi các Bài khảo sát thật khi list
+- `survey_excluded_classes`: lớp bị loại trừ khỏi yêu cầu báo cáo cho một Bài khảo sát cụ thể; unique `(survey_id, class_id)`
+- `survey_warning_dismissals`: kế toán chi bấm "Đóng và không hiển thị lại" cho cảnh báo một nhân sự (gia sư) chưa báo cáo Bài khảo sát đã quá hạn; unique `(user_id, staff_id, survey_id)`; `permanent` mặc định `false` nhưng flow hiện tại chỉ insert khi permanent (dismiss tạm thời "Đóng" là state phía FE, không persist)
 - `action_history`: audit log thay đổi dữ liệu (`before_value`, `after_value`, `changed_fields` là JSON)
 - `documents`: metadata tài liệu (`file_url`, `tags` JSON)
-- `notifications`: bản ghi thông báo admin push cho feed admin/staff/student; lưu draft/published, audience target động, version, số lần push và thời điểm push gần nhất
+- `notifications`: bản ghi thông báo admin push cho feed admin/staff; lưu draft/published, audience target động, version, số lần push và thời điểm push gần nhất (học sinh không nhận thông báo)
 - `notification_reads`: đánh dấu đã đọc theo từng user (`user_id` + `notification_id`, unique)
 - `regulations`: bài quy định dùng cho tab `Quy định` ở `notes-subject`, có role/audience tag và optional resource link
 
@@ -387,14 +730,14 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 
 ### 4.8.2 `notifications`
 
-- Lưu thông báo push từ admin cho admin/staff/student, dùng chung cho REST feed và NestJS gateway `/notifications`
+- Lưu thông báo push từ admin cho admin/staff, dùng chung cho REST feed và NestJS gateway `/notifications`
 - PK: `id` (UUID)
 - Trường chính:
   - `title` (`VARCHAR(160)`)
   - `message` (`TEXT`)
   - `status` (`NotificationStatus`: `draft | published`)
   - `target_all` (`BOOLEAN`, default `true`) để broadcast cho toàn bộ audience đủ điều kiện
-  - `target_role_types` (`UserRole[]`) cho tag role_type như `@admin`, `@staff`, `@student`
+  - `target_role_types` (`UserRole[]`) cho tag role_type như `@admin`, `@staff`
   - `target_staff_roles` (`StaffRole[]`) cho tag staff role như `@teacher`, `@assistant`, `@lesson_plan_head`, `@training`
   - `target_user_ids` (`TEXT[]`) cho direct user tag; feed/realtime sẽ match động theo `users.id` hiện tại
   - `version` (bản phát hiện tại; draft bắt đầu từ `0`, lần push đầu = `1`)
@@ -465,8 +808,12 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
   - index read path hiện có: `created_at`, `updated_at`
 - `lesson_outputs`: sản phẩm bài học gắn optional với `lesson_task`
   - **PK format:** `UNILOT-[0-9a-f]{10}` — ví dụ `UNILOT-a1b2c3d4e5`. Đây là **mã định danh hệ thống** ngắn cho output bài học; migration `20260524110000_lesson_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
-  - field chính cho work tab / popup chi tiết output: `lesson_task_id`, `lesson_name`, `contest_uploaded`, `date`, `status`, `payment_status`, `staff_id`, `cost`, `link`, `original_link`, `source`, `level`, `tags`
+  - field chính cho work tab / popup chi tiết output: `lesson_task_id`, `lesson_name`, `contest_uploaded`, `date`, `status`, `payment_status`, `staff_id`, `cost`, `difficulty_band`, `includes_test`, `includes_solution`, `includes_lecture_video`, `link`, `original_link`, `source`, `level`, `tags`
   - `staff_id` là nhân sự nhận thanh toán / đứng tên output
+  - `difficulty_band` (nullable enum `LessonOutputDifficultyBand`): bậc độ khó giáo án, nguồn sự thật để backend tự tính `cost`. Dòng legacy `NULL` giữ nguyên `cost` đã lưu.
+  - `includes_test` / `includes_solution` / `includes_lecture_video`: cờ hạng mục đã làm, mặc định `false`; cộng vào `cost` theo bảng giá hằng số khi có bậc.
+  - `level` vẫn dùng để lọc tab Bài tập (`GET /lesson-work?level=`), không liên quan tới tiền.
+  - `cost` không nhận giá trị client; tạo/sửa có bậc thì backend ghi tổng theo bảng giá (tick trống → `0`).
   - relation optional:
     - `lesson_task_id -> lesson_task.id`
     - `staff_id -> staff_info.id`
@@ -519,9 +866,14 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 ### Learning
 
 - `ClassStatus`: `running | ended`
-- `ClassType`: `vip | basic | advance | hardcore`
+- `ClassType`: **đã xoá** (migration `20260818090000_add_class_category`) — thay bằng bảng `courses` tuỳ chỉnh được, xem mục 4.4.0-cat.
 - `StudentClassStatus`: `active | inactive`
 - `AttendanceStatus`: `present | excused | absent`
+- `LessonKind`: `theory | practice` — phân loại tiết học: `theory` (lý thuyết, video + nội dung) hoặc `practice` (thực hành, thuần câu hỏi). Đổi tên enum từ `TopicKind` ở `20260921000000_rename_three_level_content`.
+- `ClassContentItemKind`: `lesson` — phân loại nội dung lớp học (đổi value từ `topic` cùng migration)
+- `ClassTimelineItemKind`: `session` | `class_survey` | `content_item` — loại mục trên timeline lớp (`class_timeline_items`)
+- `QuestionType`: `single_choice | essay` — phân loại câu hỏi trong ngân hàng câu hỏi
+- `AttemptStatus`: `in_progress | submitted | timed_out` — trạng thái lượt làm bài
 
 ### Finance
 
@@ -533,6 +885,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - `LessonTaskStatus`: `pending | in_progress | completed | cancelled`
 - `LessonTaskPriority`: `low | medium | high`
 - `LessonOutputStatus`: `pending | completed | cancelled`
+- `LessonOutputDifficultyBand`: `easy | medium | hard | very_hard | extreme` (nullable trên `lesson_outputs.difficulty_band`)
 
 ### Notification
 

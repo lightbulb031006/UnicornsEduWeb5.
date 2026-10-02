@@ -22,10 +22,17 @@ import {
   resolveAdminLikeRouteBase,
 } from "@/lib/admin-shell-paths";
 import * as lessonApi from "@/lib/apis/lesson.api";
+import { getStaffById, getStaffRevenueShare } from "@/lib/apis/staff.api";
+import type { StaffDetail, StaffRevenueShare } from "@/dtos/staff.dto";
+import { MonthInput } from "@/components/ui/MonthInput";
+import { getDefaultMonthKey, parseMonthKey } from "@/lib/month-format";
 import { toast } from "sonner";
+import { formatVnNumber } from "@/lib/formatters";
 
 const RECENT_DAYS = 30;
 const EMPTY_OUTPUTS: LessonWorkOutputItem[] = [];
+
+type LessonPlanDetailTab = "revenue" | "outputs";
 
 function getErrorMessage(error: unknown, fallback: string) {
   const message = (error as { response?: { data?: { message?: string | string[] } } })
@@ -43,7 +50,7 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat("vi-VN").format(value);
+  return formatVnNumber(value);
 }
 
 function resolvePrimaryLink(output: LessonWorkOutputItem) {
@@ -122,6 +129,21 @@ export default function AdminLessonPlanDetailPage() {
   const [bulkEditPopupOpen, setBulkEditPopupOpen] = useState(false);
   const [bulkPaymentStatusDraft, setBulkPaymentStatusDraft] =
     useState<LessonPaymentStatus>(DEFAULT_BULK_LESSON_PAYMENT_STATUS);
+  const [activeTab, setActiveTab] = useState<LessonPlanDetailTab>("revenue");
+
+  const staffQuery = useQuery<StaffDetail>({
+    queryKey: ["staff", "detail", staffId],
+    queryFn: () => getStaffById(staffId),
+    enabled: !!staffId,
+    staleTime: 60_000,
+  });
+  const isLessonPlanHead =
+    staffQuery.data?.roles?.includes("lesson_plan_head") ?? false;
+  const rolesResolved = staffQuery.isSuccess || staffQuery.isError;
+  const showRevenueTab =
+    rolesResolved && isLessonPlanHead && activeTab === "revenue";
+  const showOutputsTab =
+    rolesResolved && (!isLessonPlanHead || activeTab === "outputs");
 
   const {
     data,
@@ -135,9 +157,32 @@ export default function AdminLessonPlanDetailPage() {
       lessonApi.getLessonOutputStatsByStaff(staffId, {
         days: RECENT_DAYS,
       }),
-    enabled: !!staffId,
+    enabled: !!staffId && showOutputsTab,
   });
 
+  const [revenueShareMonthKey, setRevenueShareMonthKey] = useState(getDefaultMonthKey);
+  const revenueShareParsed = parseMonthKey(revenueShareMonthKey);
+  const revenueShareMonth = String(revenueShareParsed?.month ?? new Date().getMonth() + 1).padStart(2, "0");
+  const revenueShareYear = String(revenueShareParsed?.year ?? new Date().getFullYear());
+
+  const {
+    data: revenueShare,
+    isLoading: isRevenueShareLoading,
+    isError: isRevenueShareError,
+  } = useQuery<StaffRevenueShare>({
+    queryKey: ["staff", "revenue-share", staffId, revenueShareMonth, revenueShareYear],
+    queryFn: () =>
+      getStaffRevenueShare(staffId, { month: revenueShareMonth, year: revenueShareYear }),
+    enabled: !!staffId && isLessonPlanHead,
+  });
+
+  const selectTab = (tab: LessonPlanDetailTab) => {
+    setActiveTab(tab);
+    if (tab !== "outputs") {
+      setBulkEditPopupOpen(false);
+      setSelectedOutputIds(new Set());
+    }
+  };
   const outputs = data?.outputs ?? EMPTY_OUTPUTS;
   const summary = data?.summary;
   const backHref = buildAdminLikePath(
@@ -317,6 +362,117 @@ export default function AdminLessonPlanDetailPage() {
         Quay lại nhân sự
       </Link>
 
+      {staffQuery.isLoading ? (
+        <div className="h-12 w-full max-w-md animate-pulse rounded-[1.35rem] border border-border-default bg-bg-secondary/70" />
+      ) : isLessonPlanHead ? (
+        <div
+          className="inline-flex w-full rounded-[1.35rem] border border-border-default bg-gradient-to-b from-bg-surface to-bg-secondary/90 p-1 shadow-sm sm:w-fit"
+          role="tablist"
+          aria-label="Hoa hồng doanh thu hoặc Bài giáo án"
+        >
+          <div className="grid w-full min-w-0 grid-cols-2 sm:min-w-[320px]">
+            <button
+              id="lesson-plan-tab-revenue"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "revenue"}
+              aria-controls="lesson-plan-panel-revenue"
+              onClick={() => selectTab("revenue")}
+              className={`min-h-11 touch-manipulation rounded-[1rem] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface ${
+                activeTab === "revenue"
+                  ? "bg-primary text-text-inverse shadow-sm"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              Hoa hồng doanh thu
+            </button>
+            <button
+              id="lesson-plan-tab-outputs"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "outputs"}
+              aria-controls="lesson-plan-panel-outputs"
+              onClick={() => selectTab("outputs")}
+              className={`min-h-11 touch-manipulation rounded-[1rem] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface ${
+                activeTab === "outputs"
+                  ? "bg-primary text-text-inverse shadow-sm"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              Bài giáo án
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {showRevenueTab ? (
+      <section
+        id="lesson-plan-panel-revenue"
+        role="tabpanel"
+        aria-labelledby="lesson-plan-tab-revenue"
+        className="rounded-[1.25rem] border border-border-default bg-bg-surface p-4 shadow-sm sm:p-5"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-text-primary sm:text-lg">
+              Hoa hồng doanh thu tháng {revenueShareMonth}/{revenueShareYear}
+            </h2>
+            <p className="mt-1 text-sm text-text-muted">
+              Doanh thu là tổng học phí buổi chargeable trong tháng. Tỷ lệ % là mức đang
+              cấu hình (áp dụng cho buổi mới). Số tiền thực nhận là tổng hoa hồng đã
+              snapshot trong tháng — không tính live từ % × doanh thu, không khấu trừ thuế.
+            </p>
+          </div>
+          <MonthInput
+            value={revenueShareMonthKey}
+            onChange={(event) => setRevenueShareMonthKey(event.target.value)}
+            aria-label="Chọn tháng xem hoa hồng doanh thu"
+          />
+        </div>
+        {isRevenueShareLoading ? (
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div
+                key={`revenue-share-skeleton-${index}`}
+                className="h-24 animate-pulse rounded-xl border border-border-default bg-bg-secondary/70"
+              />
+            ))}
+          </div>
+        ) : isRevenueShareError ? (
+          <p className="mt-4 text-sm text-error">
+            Không tải được dữ liệu hoa hồng doanh thu.
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <SummaryCard
+              label="Tỷ lệ % hoa hồng"
+              value={
+                revenueShare?.revenueSharePercent == null
+                  ? "Chưa thiết lập"
+                  : `${revenueShare.revenueSharePercent}%`
+              }
+            />
+            <SummaryCard
+              label="Tổng doanh thu hệ thống"
+              value={`${formatCurrency(revenueShare?.revenue ?? 0)}đ`}
+            />
+            <SummaryCard
+              label="Số tiền thực nhận"
+              value={`${formatCurrency(revenueShare?.amount ?? 0)}đ`}
+              tone="success"
+            />
+          </div>
+        )}
+      </section>
+      ) : null}
+
+      {showOutputsTab ? (
+      <div
+        id="lesson-plan-panel-outputs"
+        role="tabpanel"
+        aria-labelledby={isLessonPlanHead ? "lesson-plan-tab-outputs" : undefined}
+        className="flex min-h-0 flex-1 flex-col gap-4"
+      >
       {isLoading ? (
         <>
           <section className="rounded-[2rem] border border-border-default bg-bg-surface p-5 shadow-sm lg:p-6">
@@ -447,7 +603,7 @@ export default function AdminLessonPlanDetailPage() {
                       type="button"
                       onClick={openBulkEditPopup}
                       disabled={bulkStatusMutation.isPending}
-                      className="touch-manipulation inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-text-inverse shadow-[0_14px_30px_-18px_color-mix(in_srgb,var(--ue-primary)_45%,transparent)] transition-all hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
+                      className="touch-manipulation inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-text-inverse shadow-[0_14px_30px_-18px_color-mix(in_srgb,var(--ue-primary)_45%,transparent)] transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
                       aria-label={`Sửa trạng thái thanh toán cho ${selectedCount} lesson output đã chọn`}
                     >
                       <svg
@@ -750,6 +906,8 @@ export default function AdminLessonPlanDetailPage() {
           </section>
         </>
       )}
+      </div>
+      ) : null}
 
       {bulkEditPopupOpen && selectedCount > 0 ? (
         <>

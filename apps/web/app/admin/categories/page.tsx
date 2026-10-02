@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getCosts } from "@/lib/apis/cost.api";
 import { formatCurrency } from "@/lib/class.helpers";
+import { formatVnDate } from "@/lib/formatters";
 
 type CategorySummary = {
   name: string;
@@ -19,11 +20,7 @@ function formatDate(value: string | null) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return formatVnDate(date);
 }
 
 export default function AdminCategoriesPage() {

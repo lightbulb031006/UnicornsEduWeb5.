@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type SyntheticEvent } from "react";
+import { useId, useState, type SyntheticEvent } from "react";
 import { toast } from "sonner";
 
 type Props = {
@@ -16,6 +16,7 @@ function QrLinkPopupContent({
   onSave,
 }: Omit<Props, "open">) {
   const [link, setLink] = useState(currentLink);
+  const qrLinkFieldId = useId();
   const [isSaving, setIsSaving] = useState(false);
 
   const handleSubmit = async (e: SyntheticEvent<HTMLFormElement>) => {
@@ -81,19 +82,23 @@ function QrLinkPopupContent({
           </button>
         </div>
         <form onSubmit={handleSubmit}>
-          <label className="mb-2 block text-sm font-medium text-text-secondary">
+          <label
+            htmlFor={qrLinkFieldId}
+            className="mb-2 block text-sm font-medium text-text-secondary"
+          >
             Link QR thanh toán
           </label>
           <input
+            id={qrLinkFieldId}
             type="url"
             value={link}
             onChange={(e) => setLink(e.target.value)}
-            placeholder="https://... hoặc link ảnh QR"
+            placeholder="https://…"
             className="mb-2 w-full rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
           />
           <p className="mb-4 text-xs text-text-muted">
-            Thêm link ảnh QR thanh toán hoặc link chuyển khoản (để trống nếu
-            muốn xóa).
+            Thêm link thanh toán hoặc link bất kỳ. Hệ thống luôn sinh mã QR từ
+            chính link này (để trống nếu muốn xóa).
           </p>
           <div className="flex justify-end gap-2">
             <button

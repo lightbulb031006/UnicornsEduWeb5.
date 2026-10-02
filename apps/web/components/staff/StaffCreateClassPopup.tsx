@@ -5,7 +5,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { TimeInput } from "@/components/ui/TimeInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
-import type { ClassScheduleItem, ClassStatus, ClassType } from "@/dtos/class.dto";
+import type { ClassScheduleItem, ClassStatus } from "@/dtos/class.dto";
+import CourseSelect from "@/components/shared/class/CourseSelect";
 import type { StaffOpsCreateClassPayload } from "@/dtos/staff-ops.dto";
 import * as staffOpsApi from "@/lib/apis/staff-ops.api";
 import {
@@ -41,13 +42,6 @@ type ScheduleRangeForm = {
 const STATUS_OPTIONS: Array<{ value: ClassStatus; label: string }> = [
   { value: "running", label: "Đang chạy" },
   { value: "ended", label: "Đã kết thúc" },
-];
-
-const TYPE_OPTIONS: Array<{ value: ClassType; label: string }> = [
-  { value: "basic", label: "Basic" },
-  { value: "vip", label: "VIP" },
-  { value: "advance", label: "Advance" },
-  { value: "hardcore", label: "Hardcore" },
 ];
 
 function createScheduleRange(
@@ -107,7 +101,7 @@ function StaffCreateClassDialog({
   const formId = "staff-create-class-form";
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
-  const [type, setType] = useState<ClassType>("basic");
+  const [courseId, setCourseId] = useState("");
   const [status, setStatus] = useState<ClassStatus>("running");
   const [scheduleRanges, setScheduleRanges] = useState<ScheduleRangeForm[]>([
     createScheduleRange(),
@@ -165,6 +159,10 @@ function StaffCreateClassDialog({
       toast.error("Tên lớp là bắt buộc.");
       return;
     }
+    if (!courseId) {
+      toast.error("Khoá học là bắt buộc.");
+      return;
+    }
 
     let schedule: ClassScheduleItem[] | undefined;
     try {
@@ -178,7 +176,7 @@ function StaffCreateClassDialog({
     try {
       await createMutation.mutateAsync({
         name: trimmedName,
-        type,
+        ...(courseId ? { course_id: courseId } : {}),
         status,
         schedule,
       });
@@ -238,12 +236,11 @@ function StaffCreateClassDialog({
               </label>
 
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
-                <span>Loại lớp</span>
-                <UpgradedSelect
+                <span>Khoá học</span>
+                <CourseSelect
                   name="staff-create-class-type"
-                  value={type}
-                  onValueChange={(nextValue) => setType(nextValue as ClassType)}
-                  options={TYPE_OPTIONS}
+                  value={courseId}
+                  onValueChange={setCourseId}
                   buttonClassName="rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>

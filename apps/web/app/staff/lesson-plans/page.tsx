@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AdminLessonPlansWorkspace } from "@/components/admin/lesson-plans";
 import { LessonWorkspaceLoadingSkeleton } from "@/components/admin/lesson-plans/LessonOverviewSkeleton";
@@ -29,15 +30,17 @@ export default function StaffLessonPlansPage() {
   }
 
   return (
-    <AdminLessonPlansWorkspace
-      basePath="/staff/lesson-plans"
-      manageDetailsPath="/staff/lesson-manage-details"
-      taskDetailBasePath="/staff/lesson-plans/tasks"
-      participantMode={participantMode}
-      workspacePolicy={workspacePolicy}
-      workAccessMode={workAccessMode ?? undefined}
-      createOutputAccessMode={createOutputAccessMode}
-      currentUserId={profile?.id ?? null}
-    />
+    <Suspense fallback={<LessonWorkspaceLoadingSkeleton />}>
+      <AdminLessonPlansWorkspace
+        basePath="/staff/lesson-plans"
+        manageDetailsPath="/staff/lesson-manage-details"
+        taskDetailBasePath="/staff/lesson-plans/tasks"
+        participantMode={participantMode}
+        workspacePolicy={workspacePolicy}
+        workAccessMode={workAccessMode ?? undefined}
+        createOutputAccessMode={createOutputAccessMode}
+        currentUserId={profile?.id ?? null}
+      />
+    </Suspense>
   );
 }

@@ -38,6 +38,7 @@ You are working in the UnicornsEduWeb5 monorepo.
 - **Mandatory:** Always extract and reuse UI into reusable React components when markup/logic repeats. Follow React best practices: small focused components, clear responsibilities, and composability.
 - **Mandatory (shadcn/ui first):** In `apps/web`, prefer using `shadcn/ui` components instead of hand-coding new UI components from scratch.
 - **shadcn/ui extension rule:** When customization is needed, compose/extend existing shadcn components first; hand-code a new component only when shadcn cannot satisfy a concrete requirement.
+- **Dialogs / confirms:** Do not hand-code overlay modals (`<div className="fixed inset-0">`) or `window.confirm`. Use `apps/web/components/ui/ResponsiveDialog.tsx` for form/content overlays and `apps/web/components/ui/ConfirmDialog.tsx` (shadcn AlertDialog) for yes/no / destructive confirms. Backdrop/Escape on a dirty form must confirm before discarding.
 - **Mandatory (upgraded dropdowns):** For simple single-select dropdowns in `apps/web`, always use the shared `apps/web/components/ui/UpgradedSelect.tsx` instead of native `<select>`.
 - **Dropdown exception rule:** Only keep or build a custom combobox/listbox when the UX genuinely needs search, multi-select, async suggestions, or richer option content than a simple dropdown.
 - **Mobile-first (Mandatory):** **ALWAYS CODE MOBILE-FIRST**. Design and implement UI for small screens first, then progressively enhance for tablet/desktop breakpoints.

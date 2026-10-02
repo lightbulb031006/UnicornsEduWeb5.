@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { QrCodeIcon } from "@heroicons/react/24/outline";
@@ -93,7 +93,17 @@ function recentTopUpTextClass(meetsThreshold?: boolean): string {
   return meetsThreshold ? "text-success" : "text-error";
 }
 
-export default function AdminStudentsPage() {
+function formatActiveClassNames(
+  studentClasses?: StudentListItem["studentClasses"],
+): string {
+  const names = (studentClasses ?? [])
+    .filter((sc) => sc.status === "active")
+    .map((sc) => sc.class?.name?.trim())
+    .filter((name): name is string => Boolean(name));
+  return names.length > 0 ? names.join(", ") : "Chưa xếp lớp";
+}
+
+function AdminStudentsPageContent() {
   const { push, replace } = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -580,6 +590,9 @@ export default function AdminStudentsPage() {
                   const recentTopUpClassName = recentTopUpTextClass(
                     student.recentTopUpMeetsThreshold,
                   );
+                  const activeClassNames = formatActiveClassNames(
+                    student.studentClasses,
+                  );
 
                   return (
                     <article
@@ -638,6 +651,11 @@ export default function AdminStudentsPage() {
                         <StudentLevelBadge fullName={student.fullName} />
                       </div>
 
+                      <p className="mt-2 line-clamp-2 text-sm text-text-secondary">
+                        <span className="font-medium text-text-secondary">Lớp:</span>{" "}
+                        <span className="text-text-primary">{activeClassNames}</span>
+                      </p>
+
                       <div className="mt-2.5 rounded-lg border border-border-default bg-bg-secondary/40 px-3 py-2">
                         <div className="flex items-center justify-between text-xs text-text-secondary">
                           <span className="font-medium">Số dư:</span>
@@ -662,21 +680,24 @@ export default function AdminStudentsPage() {
                 </div>
 
                 <div className="hidden overflow-x-auto md:block">
-<table className="w-full min-w-[1080px] table-fixed border-collapse text-left text-sm">
+<table className="w-full min-w-[1200px] table-fixed border-collapse text-left text-sm">
                   <caption className="sr-only">Danh sách học sinh</caption>
                   <thead>
                     <tr className="border-b border-border-default bg-bg-secondary/80">
                       <th scope="col" className="w-[3%] min-w-8 px-1 py-3" aria-label="Trạng thái" />
-                      <th scope="col" className="w-[30%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                      <th scope="col" className="w-[22%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Học sinh
                       </th>
                       <th scope="col" className="w-[3.5%] min-w-10 px-1 py-3 text-center text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         <span className="sr-only">QR</span>
                       </th>
-                      <th scope="col" className="w-[22%] min-w-0 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                      <th scope="col" className="w-[18%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                        Lớp
+                      </th>
+                      <th scope="col" className="w-[18%] min-w-0 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Số dư / Tiền vào
                       </th>
-                      <th scope="col" className="w-[25%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                      <th scope="col" className="w-[22%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Level
                       </th>
                       <th scope="col" className="w-[3.5%] min-w-8 px-1 py-3 text-right" aria-label="Xóa" />
@@ -690,6 +711,9 @@ export default function AdminStudentsPage() {
                       const recentTopUpTotal = student.recentTopUpTotalLast21Days ?? 0;
                       const recentTopUpClassName = recentTopUpTextClass(
                         student.recentTopUpMeetsThreshold,
+                      );
+                      const activeClassNames = formatActiveClassNames(
+                        student.studentClasses,
                       );
 
                       return (
@@ -735,6 +759,11 @@ export default function AdminStudentsPage() {
                               </button>
                             ) : null}
                           </td>
+                          <td className="px-4 py-3 align-middle text-text-secondary">
+                            <p className="line-clamp-2 text-sm text-text-primary" title={activeClassNames}>
+                              {activeClassNames}
+                            </p>
+                          </td>
                            <td className="px-4 py-3 text-right align-middle">
                             <div className="flex flex-col gap-1 text-right">
                               <div className="text-sm font-semibold tabular-nums text-text-primary">
@@ -757,7 +786,7 @@ export default function AdminStudentsPage() {
                                 title="Xóa học sinh"
                                 disabled={deleteMutation.isPending}
                                 onClick={() => openDeleteConfirm(student.id, student.fullName?.trim() || "")}
-                                className="rounded-lg p-2 text-text-muted opacity-0 transition-all duration-200 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-error/10 hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
+                                className="rounded-lg p-2 text-text-muted opacity-0 transition-[opacity,background-color,color] duration-200 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-error/10 hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-50"
                                 aria-label={`Xóa học sinh ${student.fullName?.trim() || ""}`}
                               >
                                 <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -867,5 +896,14 @@ export default function AdminStudentsPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function AdminStudentsPage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <AdminStudentsPageContent />
+    </Suspense>
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { Suspense } from "react";
+
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import ExtraAllowanceRoleDetailPage from "@/components/admin/extra-allowance/ExtraAllowanceRoleDetailPage";
@@ -30,7 +32,7 @@ function StaffRoleDetailLoadingShell() {
   );
 }
 
-export default function StaffAssistantDetailPage() {
+function StaffAssistantDetailPageContent() {
   const searchParams = useSearchParams();
   const getSearchParam = searchParams.get.bind(searchParams);
   const { data: profile, isLoading: isProfileLoading } = useQuery({
@@ -50,4 +52,13 @@ export default function StaffAssistantDetailPage() {
   }
 
   return <StaffSelfExtraAllowanceRoleDetailPage roleType="assistant" />;
+}
+
+export default function StaffAssistantDetailPage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={<StaffRoleDetailLoadingShell />}>
+      <StaffAssistantDetailPageContent />
+    </Suspense>
+  );
 }

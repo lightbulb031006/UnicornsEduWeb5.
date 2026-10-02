@@ -1,29 +1,108 @@
+/// Báo cáo khảo sát của một lớp. Field legacy `testNumber`/`content` (lần khảo sát N
+/// toàn cục + nội dung rich text tự do) giữ nguyên nullable cho dữ liệu cũ; báo cáo mới
+/// gắn `surveyId` (Bài khảo sát), có một `knowledgeAssessment` dùng chung cho cả lớp
+/// (không phải theo từng học sinh), và dùng roster `studentAssessments` chỉ để lưu
+/// `comment` (nhận xét) riêng cho từng học sinh.
 model ClassSurvey {
-  id         String     @id @default(uuid())
-  classId    String?    @map("class_id")
-  testNumber Int        @map("test_number")
-  teacherId  String?    @map("teacher_id")
-  reportDate DateTime   @map("report_date") @db.Date
-  content    String
-  createdAt  DateTime?  @map("created_at") @db.Timestamp(6)
-  class      Class?     @relation(fields: [classId], references: [id])
-  teacher    StaffInfo? @relation(fields: [teacherId], references: [id])
+  id                  String                         @id @default(uuid())
+  classId             String?                        @map("class_id")
+  surveyId            String?                        @map("survey_id")
+  testNumber          Int?                           @map("test_number")
+  teacherId           String?                        @map("teacher_id")
+  reportDate          DateTime                       @map("report_date") @db.Date
+  content             String?
+  knowledgeAssessment String?                        @map("knowledge_assessment")
+  createdAt           DateTime?                      @map("created_at") @db.Timestamp(6)
+  class               Class?                         @relation(fields: [classId], references: [id])
+  teacher             StaffInfo?                     @relation(fields: [teacherId], references: [id])
+  survey              Survey?                        @relation(fields: [surveyId], references: [id])
+  studentAssessments  ClassSurveyStudentAssessment[]
+  timelineItem        ClassTimelineItem?
 
   @@index([classId])
   @@index([classId, testNumber])
   @@index([teacherId])
   @@index([teacherId, reportDate])
+  @@index([surveyId])
+  @@index([classId, surveyId])
   @@map("class_surveys")
 }
 
-model SurveyRound {
-  id              String   @id @default("current")
-  currentRound    Int      @default(6) @map("current_round")
-  updatedByUserId String?  @map("updated_by_user_id")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+/// Nhận xét của gia sư cho một học sinh trong một báo cáo khảo sát lớp
+/// (`ClassSurvey`). Đánh giá kiến thức là field dùng chung cho cả báo cáo
+/// (xem `ClassSurvey.knowledgeAssessment`), không lưu theo từng học sinh ở đây.
+model ClassSurveyStudentAssessment {
+  id            String      @id @default(uuid())
+  classSurveyId String      @map("class_survey_id")
+  studentId     String      @map("student_id")
+  comment       String?
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  classSurvey   ClassSurvey @relation(fields: [classSurveyId], references: [id], onDelete: Cascade)
+  student       StudentInfo @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
+  @@unique([classSurveyId, studentId])
+  @@index([studentId])
+  @@map("class_survey_student_assessments")
+}
+
+/// Bài khảo sát do admin hoặc đội giáo án (`lesson_plan`/`lesson_plan_head`) tạo, có
+/// khoảng thời gian [startDate, endDate] và nội dung thông báo kèm theo. Thay thế cơ chế
+/// "lần khảo sát N toàn cục" cũ; row lịch sử cũ (`id = "current"`, `currentRound`) được
+/// giữ nguyên qua migration, field `currentRound` chỉ còn ý nghĩa lịch sử/legacy.
+model Survey {
+  id                       String                   @id @default(uuid())
+  name                     String?
+  startDate                DateTime?                @map("start_date") @db.Date
+  endDate                  DateTime?                @map("end_date") @db.Date
+  notificationTitle        String?                  @map("notification_title")
+  notificationContent      String?                  @map("notification_content")
+  notificationInstructions String?                  @map("notification_instructions")
+  notificationNotes        String?                  @map("notification_notes")
+  notificationTeacherNote  String?                  @map("notification_teacher_note")
+  createdByUserId          String?                  @map("created_by_user_id")
+  updatedByUserId          String?                  @map("updated_by_user_id")
+  currentRound             Int?                     @map("current_round")
+  createdAt                DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  excludedClasses          SurveyExcludedClass[]
+  classSurveys             ClassSurvey[]
+  warningDismissals        SurveyWarningDismissal[]
+
+  @@index([startDate])
+  @@index([endDate])
   @@map("survey_round")
+}
+
+/// Lớp bị admin/đội giáo án loại trừ khỏi yêu cầu báo cáo cho một Bài khảo sát cụ thể.
+model SurveyExcludedClass {
+  id        String   @id @default(uuid())
+  surveyId  String   @map("survey_id")
+  classId   String   @map("class_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  survey    Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([surveyId, classId])
+  @@index([classId])
+  @@map("survey_excluded_classes")
+}
+
+/// Kế toán chi bấm "Đóng và không hiển thị lại" cho cảnh báo một nhân sự (gia sư) chưa
+/// báo cáo khảo sát của lần gần nhất đã quá hạn. `userId`/`staffId` là plain id (không FK
+/// cứng) theo cùng convention với `ActionHistory.userId`.
+model SurveyWarningDismissal {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  staffId     String   @map("staff_id")
+  surveyId    String   @map("survey_id")
+  permanent   Boolean  @default(false)
+  dismissedAt DateTime @default(now()) @map("dismissed_at") @db.Timestamptz(6)
+  survey      Survey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, staffId, surveyId])
+  @@index([surveyId])
+  @@map("survey_warning_dismissals")
 }
 
 model ActionHistory {

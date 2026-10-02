@@ -14,6 +14,7 @@ model User {
   dataProcessingConsentVersion            String?                           @map("data_processing_consent_version")
   refreshToken                            String?                           @map("refresh_token")
   avatarPath                              String?                           @map("avatar_path")
+  avatarWatermarkedPath                   String?                           @map("avatar_watermarked_path")
   createdAt                               DateTime                          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                               DateTime                          @updatedAt @map("updated_at") @db.Timestamptz(6)
   first_name                              String?                           @db.VarChar
@@ -25,8 +26,12 @@ model User {
   regulationsUpdated                      Regulation[]                      @relation("RegulationUpdatedBy")
   studentWalletSepayOrdersCreated         StudentWalletSepayOrder[]         @relation("StudentWalletSepayOrdersCreatedBy")
   studentWalletDirectTopUpRequestsCreated StudentWalletDirectTopUpRequest[] @relation("StudentWalletDirectTopUpRequestsRequestedBy")
-  staffInfo                               StaffInfo?
+  lessonsCreated                         Lesson[]                         @relation("LessonCreatedBy")
+  lessonsUpdated                         Lesson[]                         @relation("LessonUpdatedBy")
+  staffInfo                              StaffInfo?
   studentInfo                             StudentInfo?
+  userDevices                            UserDevice[]
+  loginRequests                           LoginRequest[]
 
   @@index([email])
   @@index([accountHandle])

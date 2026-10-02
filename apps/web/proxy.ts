@@ -84,7 +84,12 @@ function hasAuthenticatedSession(user: Awaited<ReturnType<typeof getUser>>) {
 }
 
 function canAccessStudentShell(user: Awaited<ReturnType<typeof getUser>>) {
-  return Boolean(user.access?.student?.canAccess ?? user.hasStudentProfile);
+  return Boolean(
+    user.roleType === Role.student ||
+      user.effectiveRoleTypes?.includes(Role.student) ||
+      user.access?.student?.canAccess ||
+      user.hasStudentProfile,
+  );
 }
 
 function hasStudentWorkspaceHint(user: Awaited<ReturnType<typeof getUser>>) {
@@ -146,6 +151,21 @@ export async function proxy(req: NextRequest) {
   const user = await getUser(req.headers.get("cookie") ?? undefined);
   if (!hasAuthenticatedSession(user)) {
     return redirectGuestToLogin(req);
+  }
+
+  if (pathname === "/") {
+    const isPrimaryAdmin =
+      user.roleType === Role.admin || user.access?.admin?.tier === "full";
+    if (isPrimaryAdmin) {
+      return NextResponse.redirect(new URL("/admin", req.url));
+    }
+    if (canAccessStudentShell(user) || user.roleType === Role.student) {
+      return NextResponse.redirect(new URL("/student", req.url));
+    }
+    if (canAccessStaffShell(user) || user.roleType === Role.staff) {
+      return NextResponse.redirect(new URL("/staff", req.url));
+    }
+    return NextResponse.redirect(new URL("/auth/login", req.url));
   }
 
   const isStaffRoute = pathname === "/staff" || pathname.startsWith("/staff/");
@@ -229,6 +249,13 @@ export async function proxy(req: NextRequest) {
 
 export const config = {
   matcher: [
+    {
+      source: "/",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+      ],
+    },
     {
       source: "/admin/:path*",
       missing: [

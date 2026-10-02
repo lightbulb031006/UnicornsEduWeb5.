@@ -3,7 +3,7 @@ import { SurveyRoundService } from './survey-round.service';
 
 describe('SurveyRoundService', () => {
   const prisma = {
-    surveyRound: {
+    survey: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
     },
@@ -29,24 +29,24 @@ describe('SurveyRoundService', () => {
 
   describe('getCurrentRound', () => {
     it('returns the persisted round when the singleton exists', async () => {
-      prisma.surveyRound.findUnique.mockResolvedValue({ currentRound: 8 });
+      prisma.survey.findUnique.mockResolvedValue({ currentRound: 8 });
 
       await expect(service.getCurrentRound()).resolves.toBe(8);
-      expect(prisma.surveyRound.upsert).not.toHaveBeenCalled();
+      expect(prisma.survey.upsert).not.toHaveBeenCalled();
     });
 
     it('seeds the default round when the singleton is missing', async () => {
-      prisma.surveyRound.findUnique.mockResolvedValue(null);
-      prisma.surveyRound.upsert.mockResolvedValue({ currentRound: 6 });
+      prisma.survey.findUnique.mockResolvedValue(null);
+      prisma.survey.upsert.mockResolvedValue({ currentRound: 6 });
 
       await expect(service.getCurrentRound()).resolves.toBe(6);
-      expect(prisma.surveyRound.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.survey.upsert).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('getRoundSummary', () => {
     it('computes reported/missing counts for running classes', async () => {
-      prisma.surveyRound.findUnique.mockResolvedValue({ currentRound: 6 });
+      prisma.survey.findUnique.mockResolvedValue({ currentRound: 6 });
       prisma.class.count
         .mockResolvedValueOnce(10) // totalRunningClasses
         .mockResolvedValueOnce(4); // reportedCount
@@ -60,7 +60,7 @@ describe('SurveyRoundService', () => {
     });
 
     it('never returns a negative missing count', async () => {
-      prisma.surveyRound.findUnique.mockResolvedValue({ currentRound: 6 });
+      prisma.survey.findUnique.mockResolvedValue({ currentRound: 6 });
       prisma.class.count.mockResolvedValueOnce(2).mockResolvedValueOnce(5);
 
       const summary = await service.getRoundSummary();
@@ -70,7 +70,7 @@ describe('SurveyRoundService', () => {
 
   describe('getMissingClasses', () => {
     it('maps teachers, latest reported round and last report date', async () => {
-      prisma.surveyRound.findUnique.mockResolvedValue({ currentRound: 6 });
+      prisma.survey.findUnique.mockResolvedValue({ currentRound: 6 });
       prisma.class.count.mockResolvedValue(1);
       prisma.class.findMany.mockResolvedValue([
         {
@@ -108,12 +108,12 @@ describe('SurveyRoundService', () => {
     });
 
     it('persists the new round and audits the change', async () => {
-      prisma.surveyRound.findUnique
+      prisma.survey.findUnique
         .mockResolvedValueOnce({ currentRound: 6 }) // persistRound -> previous
         .mockResolvedValue({ currentRound: 7 }); // summary reads
       prisma.class.count.mockResolvedValue(0);
       const tx = {
-        surveyRound: { upsert: jest.fn() },
+        survey: { upsert: jest.fn() },
       };
       prisma.$transaction.mockImplementation(
         async (cb: (client: typeof tx) => Promise<void>) => cb(tx),
@@ -125,7 +125,7 @@ describe('SurveyRoundService', () => {
         roleType: 'admin' as never,
       });
 
-      expect(tx.surveyRound.upsert).toHaveBeenCalledTimes(1);
+      expect(tx.survey.upsert).toHaveBeenCalledTimes(1);
       expect(actionHistoryService.recordUpdate).toHaveBeenCalledWith(
         tx,
         expect.objectContaining({

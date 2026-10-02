@@ -38,9 +38,12 @@ function getPathname(path: string) {
   return path.split(/[?#]/, 1)[0] || "/";
 }
 
-function canAccessStudentShell(session: UserInfoDto) {
+export function canAccessStudentShell(session: UserInfoDto) {
   return Boolean(
-    session.access?.student?.canAccess ?? session.hasStudentProfile,
+    session.roleType === Role.student ||
+      session.effectiveRoleTypes?.includes(Role.student) ||
+      session.access?.student?.canAccess ||
+      session.hasStudentProfile,
   );
 }
 
@@ -66,10 +69,58 @@ function canAccessRequestedPath(session: UserInfoDto, nextPath: string) {
   }
 
   if (pathname === "/student" || pathname.startsWith("/student/")) {
-    return session.roleType === Role.student && canAccessStudentShell(session);
+    return canAccessStudentShell(session);
   }
 
   return true;
+}
+
+export function getUserWorkspaceHref(
+  session:
+    | {
+        roleType?: Role | string | null;
+        access?: {
+          student?: { canAccess?: boolean };
+          admin?: { tier?: string | null };
+          staff?: { canAccess?: boolean };
+        };
+        hasStudentProfile?: boolean;
+        hasStaffProfile?: boolean;
+      }
+    | null
+    | undefined,
+): string {
+  if (
+    !session?.roleType ||
+    session.roleType === Role.guest ||
+    session.roleType === "guest"
+  ) {
+    return "/auth/login";
+  }
+  if (
+    session.roleType === Role.student ||
+    session.roleType === "student" ||
+    session.access?.student?.canAccess ||
+    session.hasStudentProfile
+  ) {
+    return "/student";
+  }
+  if (
+    session.roleType === Role.admin ||
+    session.roleType === "admin" ||
+    session.access?.admin?.tier === "full"
+  ) {
+    return "/admin";
+  }
+  if (
+    session.roleType === Role.staff ||
+    session.roleType === "staff" ||
+    session.access?.staff?.canAccess ||
+    session.hasStaffProfile
+  ) {
+    return "/staff";
+  }
+  return "/auth/login";
 }
 
 export function resolvePostLoginRedirect(
@@ -99,9 +150,7 @@ export function resolvePostLoginRedirect(
   }
 
   if (session.roleType === Role.student) {
-    return canAccessStudentShell(session)
-      ? ROLE_REDIRECT.student
-      : "/user-profile";
+    return ROLE_REDIRECT.student;
   }
 
   const staffShellAccess = resolveStaffShellRouteAccess(
@@ -120,7 +169,7 @@ export function resolvePostLoginRedirect(
     return ROLE_REDIRECT.student;
   }
 
-  return ROLE_REDIRECT[session.roleType] ?? "/";
+  return getUserWorkspaceHref(session);
 }
 
 export function buildSetupPasswordHref(nextPath: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { StudentAccessGate, StudentSidebar } from "@/components/student";
+import { StudentAccessGate, StudentHeader } from "@/components/student";
 
 const STUDENT_LAYOUT_BACKGROUND_STYLE = {
   background:
@@ -14,7 +14,7 @@ export default function StudentLayout({
 }) {
   return (
     <StudentAccessGate>
-      <div className="min-h-screen bg-bg-primary">
+      <div className="flex h-screen min-h-0 flex-col bg-bg-primary supports-[height:100dvh]:h-dvh">
         <a
           href="#student-main-content"
           className="sr-only fixed left-4 top-4 z-[60] rounded-md bg-bg-surface px-3 py-2 text-sm font-medium text-text-primary shadow-lg focus:not-sr-only focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
@@ -26,16 +26,15 @@ export default function StudentLayout({
           aria-hidden
           style={STUDENT_LAYOUT_BACKGROUND_STYLE}
         />
-        <div className="relative flex min-h-screen">
-          <StudentSidebar />
-          <main
-            id="student-main-content"
-            className="relative min-w-0 flex-1 overflow-auto px-3 pb-8 pt-16 md:px-6 md:pb-8 md:pt-4 lg:px-8 lg:pt-6"
-          >
-            <div className="mx-auto w-full max-w-6xl">{children}</div>
-          </main>
-        </div>
+        <StudentHeader />
+        <main
+          id="student-main-content"
+          className="relative min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-8"
+        >
+          <div className="mx-auto w-full max-w-6xl">{children}</div>
+        </main>
       </div>
     </StudentAccessGate>
   );
 }
+

@@ -15,7 +15,6 @@ import {
   type Ref,
 } from "react";
 import { createPortal } from "react-dom";
-import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { cn } from "@/lib/utils";
 import {
   TIME_MINUTE_OPTIONS,
@@ -27,7 +26,10 @@ import {
   toTimeDisplay,
 } from "./time-input.helpers";
 
-export type TimeInputProps = Omit<ComponentProps<"input">, "type" | "step">;
+export type TimeInputProps = Omit<ComponentProps<"input">, "type" | "step"> & {
+  /** When true (default), empty fields prefill current time on focus/open. */
+  prefillEmpty?: boolean;
+};
 
 type MenuPosition = {
   left: number;
@@ -37,15 +39,22 @@ type MenuPosition = {
   bottom?: number;
 };
 
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => {
+type TimeOption = {
+  value: string;
+  label: string;
+};
+
+const HOUR_OPTIONS: TimeOption[] = Array.from({ length: 24 }, (_, hour) => {
   const label = String(hour).padStart(2, "0");
   return { value: label, label };
 });
 
-const BASE_MINUTE_OPTIONS = TIME_MINUTE_OPTIONS.map((minute) => {
+const BASE_MINUTE_OPTIONS: TimeOption[] = TIME_MINUTE_OPTIONS.map((minute) => {
   const label = String(minute).padStart(2, "0");
   return { value: label, label };
 });
+
+const COLUMN_SCROLL_HEIGHT = 220;
 
 function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
   if (!ref) return;
@@ -72,9 +81,65 @@ function isInsideTimePickerChrome(target: Node | null) {
   if (!target || !(target instanceof Element)) return false;
   return Boolean(
     target.closest("[data-time-input-root]") ||
-      target.closest("[data-time-input-menu]") ||
-      target.closest("[data-upgraded-select-trigger]") ||
-      target.closest("[data-upgraded-select-menu]"),
+      target.closest("[data-time-input-menu]"),
+  );
+}
+
+function scrollSelectedIntoView(list: HTMLElement | null) {
+  const selected = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+  selected?.scrollIntoView({ block: "nearest" });
+}
+
+function TimeScrollColumn({
+  label,
+  ariaLabel,
+  options,
+  value,
+  onSelect,
+  listRef,
+}: {
+  label: string;
+  ariaLabel: string;
+  options: TimeOption[];
+  value: string;
+  onSelect: (next: string) => void;
+  listRef: Ref<HTMLDivElement>;
+}) {
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <p className="px-0.5 text-xs font-medium text-text-muted">{label}</p>
+      <div
+        ref={listRef}
+        role="listbox"
+        aria-label={ariaLabel}
+        className="overflow-y-auto overscroll-contain rounded-xl border border-border-default bg-bg-secondary/40 p-1"
+        style={{ height: COLUMN_SCROLL_HEIGHT }}
+      >
+        {options.map((option) => {
+          const isSelected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={isSelected}
+              className={cn(
+                "flex w-full items-center justify-center rounded-lg px-2 py-2 font-mono text-sm tabular-nums transition-colors duration-150",
+                isSelected
+                  ? "bg-primary/10 font-medium text-text-primary"
+                  : "text-text-secondary hover:bg-bg-surface hover:text-text-primary",
+              )}
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={() => onSelect(option.value)}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -91,6 +156,7 @@ function TimeInputComponent({
   onFocus,
   onClick,
   onKeyDown,
+  prefillEmpty = true,
   ref,
   ...props
 }: TimeInputProps) {
@@ -109,6 +175,8 @@ function TimeInputComponent({
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const hourListRef = useRef<HTMLDivElement>(null);
+  const minuteListRef = useRef<HTMLDivElement>(null);
   const generatedId = useId();
   const pickerId = `${id ?? `time-input-${generatedId}`}-picker`;
 
@@ -158,6 +226,7 @@ function TimeInputComponent({
     const liveValue =
       draft != null ? (normalizeTypedTime(draft) ?? committedValue) : committedValue;
     if (liveValue.trim() !== "") return liveValue;
+    if (!prefillEmpty) return liveValue;
 
     const prefilled = currentTimePrefillValue();
     commitValue(prefilled);
@@ -218,13 +287,14 @@ function TimeInputComponent({
       );
       const spaceBelow = window.innerHeight - rect.bottom - viewportMargin;
       const spaceAbove = rect.top - viewportMargin;
-      const shouldOpenUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      const preferredHeight = COLUMN_SCROLL_HEIGHT + 48;
+      const shouldOpenUp = spaceBelow < preferredHeight && spaceAbove > spaceBelow;
 
       setMenuPosition({
         left,
         width,
         maxHeight: Math.max(
-          160,
+          preferredHeight,
           shouldOpenUp ? spaceAbove - gap : spaceBelow - gap,
         ),
         ...(shouldOpenUp
@@ -242,6 +312,16 @@ function TimeInputComponent({
       window.removeEventListener("scroll", updateMenuPosition, true);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    // Defer until portal layout paints so scrollTop is accurate.
+    const frame = requestAnimationFrame(() => {
+      scrollSelectedIntoView(hourListRef.current);
+      scrollSelectedIntoView(minuteListRef.current);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open, hourValue, minuteValue]);
 
   const handleFocus = (event: FocusEvent<HTMLInputElement>) => {
     const nextValue = ensurePrefillIfEmpty();
@@ -392,7 +472,7 @@ function TimeInputComponent({
               role="dialog"
               aria-label="Chọn giờ 24h"
               data-time-input-menu
-              className="fixed z-50 overflow-visible rounded-2xl border border-border-default bg-bg-surface p-3"
+              className="fixed z-[120] overflow-hidden rounded-2xl border border-border-default bg-bg-surface p-3 shadow-[0_24px_60px_-28px_color-mix(in_srgb,var(--ue-text-primary)_45%,transparent)]"
               style={{
                 left: menuPosition.left,
                 width: menuPosition.width,
@@ -402,32 +482,22 @@ function TimeInputComponent({
               }}
             >
               <div className="grid grid-cols-2 gap-2">
-                <div className="min-w-0 space-y-1.5">
-                  <p className="px-0.5 text-xs font-medium text-text-muted">
-                    Giờ
-                  </p>
-                  <UpgradedSelect
-                    ariaLabel="Chọn giờ"
-                    value={hourValue}
-                    onValueChange={selectHour}
-                    options={HOUR_OPTIONS}
-                    placeholder="--"
-                    buttonClassName="min-h-10 rounded-xl border border-border-default bg-bg-surface px-3 py-2 font-mono text-sm tabular-nums text-text-primary shadow-sm transition-colors duration-200 hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                  />
-                </div>
-                <div className="min-w-0 space-y-1.5">
-                  <p className="px-0.5 text-xs font-medium text-text-muted">
-                    Phút
-                  </p>
-                  <UpgradedSelect
-                    ariaLabel="Chọn phút"
-                    value={minuteValue}
-                    onValueChange={selectMinute}
-                    options={minuteOptions}
-                    placeholder="--"
-                    buttonClassName="min-h-10 rounded-xl border border-border-default bg-bg-surface px-3 py-2 font-mono text-sm tabular-nums text-text-primary shadow-sm transition-colors duration-200 hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                  />
-                </div>
+                <TimeScrollColumn
+                  label="Giờ"
+                  ariaLabel="Chọn giờ"
+                  options={HOUR_OPTIONS}
+                  value={hourValue}
+                  onSelect={selectHour}
+                  listRef={hourListRef}
+                />
+                <TimeScrollColumn
+                  label="Phút"
+                  ariaLabel="Chọn phút"
+                  options={minuteOptions}
+                  value={minuteValue}
+                  onSelect={selectMinute}
+                  listRef={minuteListRef}
+                />
               </div>
             </div>,
             document.body,

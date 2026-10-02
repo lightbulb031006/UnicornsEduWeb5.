@@ -36,6 +36,16 @@ enum StudentStatus {
   inactive
 }
 
+/// Kênh Nguồn khách trên hồ sơ học sinh. Null trên cột = Chưa gán, không phải giá trị enum.
+enum StudentCustomerSource {
+  tiktok
+  fanpage_hoc_tin
+  fanpage_luyen_tin
+  referral
+  personal
+  other
+}
+
 enum StudentClassStatus {
   active
   inactive
@@ -51,11 +61,10 @@ enum ClassStatus {
   ended
 }
 
-enum ClassType {
-  vip
-  basic
-  advance
-  hardcore
+/// Chế độ tính tiền của lớp. Mặc định theo buổi (hành vi cũ). Theo block 30 phút là opt-in.
+enum ClassPricingMode {
+  per_session
+  per_block
 }
 
 enum AttendanceStatus {
@@ -135,4 +144,32 @@ enum LessonOutputStatus {
   pending
   completed
   cancelled
+}
+
+/// Bậc độ khó giáo án — đầu vào tính tiền `lesson_outputs.cost`.
+/// Khác `lesson_outputs.level` (phân loại nội bộ để lọc/tìm kiếm).
+enum LessonOutputDifficultyBand {
+  easy
+  medium
+  hard
+  very_hard
+  extreme
+}
+
+/// Competition / award category for student landing achievements (/thanh-tich).
+/// Maps to the 7 tabs on the landing page: HSG Quốc gia, Duyên hải ĐB Bắc Bộ,
+/// Trại hè Hùng Vương, HSG Tỉnh-Thành phố, Đỗ Chuyên Tin, Tin học trẻ, Khác.
+enum AchievementLevel {
+  HSG_QUOC_GIA
+  DUYEN_HAI
+  TRAI_HE_HUNG_VUONG
+  HSG_TINH_THANH_PHO
+  DO_CHUYEN_TIN
+  TIN_HOC_TRE
+  KHAC
+}
+
+enum LessonKind {
+  theory
+  practice
 }

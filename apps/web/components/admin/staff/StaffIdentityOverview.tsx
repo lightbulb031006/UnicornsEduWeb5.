@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
-import StaffSpecializationMarkdown from "@/components/staff/StaffSpecializationMarkdown";
+import AchievementListEditor from "@/components/shared/achievement/AchievementListEditor";
 import StaffMeetActionButton from "./StaffMeetActionButton";
 import StaffQrCard from "./StaffQrCard";
 
@@ -27,19 +27,22 @@ const SECTION_HEADING =
   "text-sm font-semibold uppercase tracking-wide text-text-primary";
 
 export type StaffIdentityOverviewProps = {
+  staffId: string;
+  /** Admin detail uses admin APIs; staff self profile uses /users/me/achievements. */
+  achievementMode?: "admin" | "self";
   birthDateLabel: string;
   province: React.ReactNode;
   ethnicity?: string | null;
   gender?: string | null;
   currentAddress?: string | null;
   university?: string | null;
-  specialization?: string | null;
-  personalAchievementLink?: string | null;
   googleMeetLink?: string | null;
   qrLink: string | null;
   onQrEdit: () => void;
   /** When false, QR block is view-only (no edit / add link). Default true. */
   allowQrEdit?: boolean;
+  /** When false, achievements render read-only. Default follows allowQrEdit. */
+  allowAchievementEdit?: boolean;
 };
 
 function getGenderLabel(gender?: string | null): string {
@@ -49,24 +52,24 @@ function getGenderLabel(gender?: string | null): string {
 }
 
 export default function StaffIdentityOverview({
+  staffId,
+  achievementMode = "admin",
   birthDateLabel,
   province,
   ethnicity,
   gender,
   currentAddress,
   university,
-  specialization,
-  personalAchievementLink,
   googleMeetLink,
   qrLink,
   onQrEdit,
   allowQrEdit = true,
+  allowAchievementEdit,
 }: StaffIdentityOverviewProps) {
   const sectionTitleId = useId();
   const achievementsTitleId = useId();
-
-  const trimmedAchievementLink = personalAchievementLink?.trim() || null;
   const trimmedGoogleMeetLink = googleMeetLink?.trim() || null;
+  const canEditAchievements = allowAchievementEdit ?? allowQrEdit;
 
   return (
     <section
@@ -111,21 +114,6 @@ export default function StaffIdentityOverview({
         <InlineFact label="Địa chỉ hiện tại" value={currentAddress?.trim()} />
       </div>
 
-      {trimmedAchievementLink ? (
-        <div className="mt-3 flex items-center gap-2 text-sm">
-          <span className="shrink-0 text-text-secondary">Thành tích cá nhân:</span>
-          <a
-            href={trimmedAchievementLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="min-w-0 truncate font-medium text-primary underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface"
-            title={trimmedAchievementLink}
-          >
-            Xem thành tích
-          </a>
-        </div>
-      ) : null}
-
       <div className="mt-4 flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
@@ -146,13 +134,18 @@ export default function StaffIdentityOverview({
 
       <div className="mt-5 border-t border-border-default pt-4">
         <h3 id={achievementsTitleId} className={SECTION_HEADING}>
-          Thành tích chuyên môn
+          Thành tích
         </h3>
-        <div
-          className="mt-3 rounded-lg border border-border-default bg-bg-secondary/40 px-3 py-3 sm:px-4 sm:py-4"
-          aria-labelledby={achievementsTitleId}
-        >
-          <StaffSpecializationMarkdown text={specialization} />
+        <div className="mt-3" aria-labelledby={achievementsTitleId}>
+          <AchievementListEditor
+            owner={
+              achievementMode === "self"
+                ? { kind: "staff", mode: "self" }
+                : { kind: "staff", mode: "admin", staffId }
+            }
+            editable={canEditAchievements}
+            heading=""
+          />
         </div>
       </div>
     </section>

@@ -2,6 +2,10 @@ jest.mock('./auth.service', () => ({
   AuthService: class AuthServiceMock {},
 }));
 
+jest.mock('./user-device.service', () => ({
+  UserDeviceService: class UserDeviceServiceMock {},
+}));
+
 import { ForbiddenException } from '@nestjs/common';
 import { UserRole } from '../../generated/enums';
 import { AuthController } from './auth.controller';
@@ -28,6 +32,7 @@ describe('AuthController', () => {
   const jwtService = {
     verify: jest.fn(),
   };
+  const userDeviceService = {} as never;
 
   let controller: AuthController;
   let response: {
@@ -51,6 +56,7 @@ describe('AuthController', () => {
       authService as never,
       configService as never,
       jwtService as never,
+      userDeviceService,
     );
     response = {
       cookie: jest.fn(),
@@ -220,6 +226,7 @@ describe('AuthController', () => {
     expect(authService.resendVerificationEmail).toHaveBeenCalledWith(
       'user-1',
       undefined,
+      { host: undefined, protocol: undefined },
     );
   });
 

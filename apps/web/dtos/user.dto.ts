@@ -26,6 +26,7 @@ export interface CreateUserPayload {
   accountHandle: string;
   roleType?: UserRoleType;
   staffRoles?: StaffRole[];
+  emailVerified?: boolean;
 }
 
 export type StudentGender = "male" | "female";
@@ -47,6 +48,7 @@ export interface CreateStudentUserPayload {
   goal?: string;
   status?: StudentStatus;
   class_ids: string[];
+  emailVerified?: boolean;
 }
 
 export interface CreateUserResponse {

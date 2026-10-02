@@ -88,6 +88,11 @@ export default function StaffCalendarFilterBar({
         .filter((option): option is ClassFilterOption => Boolean(option)),
     [filters.classIds, selectedClassMap],
   );
+  // Set: danh sách lớp có thể rất dài, tra cứu O(1) thay vì quét mảng mỗi option.
+  const selectedClassIdSet = useMemo(
+    () => new Set(filters.classIds),
+    [filters.classIds],
+  );
 
   const handleClassToggle = useCallback((nextClass: ClassFilterOption) => {
     setSearchInput("");
@@ -275,7 +280,7 @@ export default function StaffCalendarFilterBar({
                     </p>
                   ) : (
                     classOptions.map((option) => {
-                      const isSelected = filters.classIds.includes(option.id);
+                      const isSelected = selectedClassIdSet.has(option.id);
                       return (
                         <button
                           key={option.id}

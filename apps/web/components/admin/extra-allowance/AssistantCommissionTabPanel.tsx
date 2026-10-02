@@ -20,6 +20,7 @@ import * as assistantCommissionApi from "@/lib/apis/assistant-commission.api";
 import { formatCurrency } from "@/lib/class.helpers";
 import { formatMonthKeyLabel, getDefaultMonthKey } from "@/lib/month-format";
 import { cn } from "@/lib/utils";
+import { formatVnDate } from "@/lib/formatters";
 
 const DEFAULT_BULK_PAYMENT_STATUS: AssistantCommissionPaymentStatus = "paid";
 const BULK_PAYMENT_STATUS_OPTIONS = [
@@ -46,11 +47,7 @@ type FilterMode = "pending" | "month";
 function formatDate(iso?: string | null) {
   if (!iso) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(iso));
+    return formatVnDate(new Date(iso));
   } catch {
     return "—";
   }

@@ -66,3 +66,26 @@ test("buildCreateUserPayload sends canonical student name parts", () => {
     last_name: "Vũ Minh",
   });
 });
+
+test("buildCreateUserPayload sends emailVerified when set", () => {
+  const payload = buildCreateUserPayload({
+    accountHandle: "assistant.hien",
+    email: "hien@example.com",
+    password: "secret123",
+    confirmPassword: "secret123",
+    roleType: "staff",
+    staffRoles: ["assistant"],
+    studentName: "",
+    emailVerified: true,
+  });
+
+  assert.deepEqual(payload, {
+    accountHandle: "assistant.hien",
+    email: "hien@example.com",
+    password: "secret123",
+    roleType: "staff",
+    staffRoles: ["assistant"],
+    emailVerified: true,
+  });
+});
+

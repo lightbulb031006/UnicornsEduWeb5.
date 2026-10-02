@@ -72,7 +72,6 @@ const PRESET_TARGET_TAGS: AudiencePresetTag[] = [
   { key: "@all", label: "@all", kind: "all" },
   { key: "@admin", label: "@admin", kind: "roleType", value: "admin" },
   { key: "@staff", label: "@staff", kind: "roleType", value: "staff" },
-  { key: "@student", label: "@student", kind: "roleType", value: "student" },
   { key: "@teacher", label: "@teacher", kind: "staffRole", value: "teacher" },
   {
     key: "@assistant",
@@ -660,9 +659,9 @@ export default function AdminNotificationPage() {
 
   const filteredRecipientOptions = useMemo(() => {
     const options = recipientOptionsQuery.data ?? [];
-    return options.filter(
-      (option) => !recipients.targetUserIds.includes(option.userId),
-    );
+    // Set: tra cứu O(1) thay vì quét lại targetUserIds cho từng option.
+    const selectedUserIds = new Set(recipients.targetUserIds);
+    return options.filter((option) => !selectedUserIds.has(option.userId));
   }, [recipientOptionsQuery.data, recipients.targetUserIds]);
   const showRecipientDropdown = isAtSearch || canSearchUsers;
   const hasTagMatches = filteredPresetTags.length > 0;
@@ -751,8 +750,7 @@ export default function AdminNotificationPage() {
       }
       if (
         tagLabel === "@admin" ||
-        tagLabel === "@staff" ||
-        tagLabel === "@student"
+        tagLabel === "@staff"
       ) {
         return {
           ...current,
@@ -773,11 +771,14 @@ export default function AdminNotificationPage() {
   const togglePresetTag = (tagKey: string) => {
     const tag = PRESET_TARGET_TAGS.find((item) => item.key === tagKey);
     if (!tag) return;
+    // Side effect phải nằm ngoài updater: React có thể chạy updater nhiều lần.
+    if (tag.kind === "all" && !recipients.targetAll) {
+      setSelectedUsers([]);
+    }
     setRecipients((current) => {
       if (tag.kind === "all") {
         const nextTargetAll = !current.targetAll;
         if (nextTargetAll) {
-          setSelectedUsers([]);
           return {
             targetAll: true,
             targetRoleTypes: [],
@@ -1141,11 +1142,12 @@ export default function AdminNotificationPage() {
                 />
               </label>
 
-              <label className="block">
+              <div className="block">
                 <span className="mb-2 block text-sm font-medium text-text-secondary">
                   Nội dung
                 </span>
                 <RichTextEditor
+                  ariaLabel="Nội dung"
                   value={form.message}
                   onChange={(nextValue) =>
                     setForm((current) => ({
@@ -1155,7 +1157,7 @@ export default function AdminNotificationPage() {
                   }
                   minHeight="min-h-[200px]"
                 />
-              </label>
+              </div>
 
               <div className="flex flex-wrap gap-3">
                 <button

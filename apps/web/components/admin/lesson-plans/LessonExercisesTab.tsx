@@ -698,7 +698,7 @@ export default function LessonExercisesTab({
                 onClick={
                   expandedView ? goBackToLessonPlans : goToExpandedManageDetails
                 }
-                className="group inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-border-default bg-bg-surface px-4 text-sm font-medium text-text-secondary shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:size-10 sm:w-10 sm:px-0"
+                className="group inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-border-default bg-bg-surface px-4 text-sm font-medium text-text-secondary shadow-sm transition-[transform,color,background-color,border-color] hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:size-10 sm:w-10 sm:px-0"
                 aria-label={
                   expandedView
                     ? "Thu gọn về trang Giáo Án"

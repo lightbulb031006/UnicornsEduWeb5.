@@ -9,6 +9,10 @@ import * as lessonApi from "@/lib/apis/lesson.api";
 import LessonDeleteConfirmPopup from "./LessonDeleteConfirmPopup";
 import LessonOutputEditorForm from "./LessonOutputEditorForm";
 import {
+  formatVnDateTime,
+  formatVnNumber,
+} from "@/lib/formatters";
+import {
   LESSON_PAYMENT_STATUS_LABELS,
   LESSON_PAYMENT_STATUS_OPTIONS,
   lessonPaymentStatusChipClass,
@@ -47,13 +51,7 @@ function formatDateTime(value: string | null | undefined) {
   if (Number.isNaN(date.getTime())) {
     return "—";
   }
-  return new Intl.DateTimeFormat("vi-VN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return formatVnDateTime(date);
 }
 
 export default function LessonOutputQuickPopup({
@@ -258,7 +256,7 @@ export default function LessonOutputQuickPopup({
                       Chi phí
                     </p>
                     <p className="mt-1 text-sm font-medium text-text-primary">
-                      {new Intl.NumberFormat("vi-VN").format(outputDetail.cost ?? 0)} đ
+                      {formatVnNumber(outputDetail.cost ?? 0)} đ
                     </p>
                   </div>
                   <div className="sm:col-span-2">

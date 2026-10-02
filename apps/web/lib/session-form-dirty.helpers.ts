@@ -14,7 +14,9 @@ export type SessionFormDirtySnapshot = {
   lessonContent: string;
   homework: string;
   tutorial: string;
+  recordingUrl?: string;
   isTrialLesson: boolean;
+  skipAttendance?: boolean;
   teacherPaymentStatus: string;
   teacherId: string;
   manualAllowanceGrossOverride: number | null;
@@ -31,7 +33,9 @@ export function buildSessionFormDirtySnapshot(
     lessonContent: input.lessonContent,
     homework: input.homework,
     tutorial: input.tutorial,
+    recordingUrl: (input.recordingUrl ?? "").trim(),
     isTrialLesson: input.isTrialLesson,
+    skipAttendance: Boolean(input.skipAttendance),
     teacherPaymentStatus: input.teacherPaymentStatus.trim(),
     teacherId: input.teacherId.trim(),
     manualAllowanceGrossOverride: input.manualAllowanceGrossOverride,

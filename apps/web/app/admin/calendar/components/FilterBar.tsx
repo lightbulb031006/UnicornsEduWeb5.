@@ -170,6 +170,11 @@ export default function FilterBar({
         .filter((option): option is ClassFilterOption => Boolean(option)),
     [filters.classIds, selectedClassMap],
   );
+  // Set: danh sách lớp có thể rất dài, tra cứu O(1) thay vì quét mảng mỗi option.
+  const selectedClassIdSet = useMemo(
+    () => new Set(filters.classIds),
+    [filters.classIds],
+  );
   const selectedStudentMap = useMemo(() => {
     const map = new Map<string, StudentFilterOption>();
     for (const option of studentOptions) {
@@ -484,7 +489,7 @@ export default function FilterBar({
                     </p>
                   ) : (
                     classOptions.map((option) => {
-                      const isSelected = filters.classIds.includes(option.id);
+                      const isSelected = selectedClassIdSet.has(option.id);
                       return (
                         <button
                           key={option.id}

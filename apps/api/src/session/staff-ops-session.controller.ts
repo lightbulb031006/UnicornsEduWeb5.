@@ -174,7 +174,7 @@ export class StaffOpsSessionController {
   @ApiOperation({
     summary: 'Create class session for staff operations',
     description:
-      'Creates a session allowing date/time/notes/attendance and coefficient only. Teacher, allowance and tuition overrides are not accepted.',
+      'Creates a session allowing date/time/notes/attendance and coefficient. No-attendance classes snapshot Class.noAttendance; the payload has no noAttendance override. startTime and endTime are required; endTime must be after startTime. Teacher, allowance and tuition overrides are not accepted.',
   })
   @ApiParam({ name: 'classId', description: 'Class id' })
   @ApiBody({ type: CreateStaffOpsSessionDto })
@@ -188,7 +188,21 @@ export class StaffOpsSessionController {
       user.id,
       user.roleType,
       classId,
-      dto,
+      {
+        date: dto.date,
+        startTime: dto.startTime,
+        endTime: dto.endTime,
+        notes: dto.notes,
+        lessonContent: dto.lessonContent,
+        homework: dto.homework,
+        tutorial: dto.tutorial,
+        coefficient: dto.coefficient,
+        attendance: dto.attendance?.map((a) => ({
+          studentId: a.studentId,
+          status: a.status,
+          notes: a.notes,
+        })),
+      },
       {
         userId: user.id,
         userEmail: user.email,
@@ -201,7 +215,7 @@ export class StaffOpsSessionController {
   @ApiOperation({
     summary: 'Update class session for staff operations',
     description:
-      'Updates session date/time/notes/attendance and coefficient only. Teacher, allowance and tuition fields are not accepted.',
+      'Updates session date/time/notes/attendance and coefficient only. Sending startTime/endTime requires both and end after start. Paid/deposit sessions reject time changes. Teacher, allowance and tuition fields are not accepted.',
   })
   @ApiParam({ name: 'id', description: 'Session id' })
   @ApiBody({ type: UpdateStaffOpsSessionDto })

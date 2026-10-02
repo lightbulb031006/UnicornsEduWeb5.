@@ -20,6 +20,12 @@ import {
 } from 'generated/enums';
 import { PaginationQueryDto } from 'src/dtos/pagination.dto';
 import { StaffLandingProfileQueryDto } from 'src/dtos/landing-profile.dto';
+import { mapLandingAchievements } from 'src/achievements/achievement-landing.mapper';
+import { AVATAR_PUBLIC_BUCKET } from 'src/storage/media-buckets';
+import {
+  createPublicStorageUrl,
+  createSignedStorageUrl,
+} from 'src/storage/supabase-storage';
 import {
   CreateStaffDto,
   type StaffDepositPaymentPreviewClassDto,
@@ -38,28 +44,45 @@ import {
   type StaffIncomeAmountSummaryDto,
   type StaffIncomeClassSummaryDto,
   type StaffIncomeDepositClassSummaryDto,
+  type StaffFixedSalaryPayableItemDto,
+  type StaffFixedSalaryRoleSummaryDto,
   type StaffIncomeRoleSummaryDto,
   type StaffIncomeSummaryDto,
+  type UpdateStaffFixedSalaryPayableDto,
+  type StaffOverdueSurveyWarningItemDto,
   UpdateStaffDto,
+  UpdateStaffWithFixedSalaryOverridesDto,
   UpdateStaffStatusDto,
   PatchStaffClassTeacherOperatingDeductionDto,
 } from 'src/dtos/staff.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { FixedSalarySettingsService } from 'src/fixed-salary-settings/fixed-salary-settings.service';
 import {
   generateStaffId,
   isEntityIdUniqueConstraintError,
 } from 'src/common/entity-id';
-import { createSignedStorageUrl } from 'src/storage/supabase-storage';
 import {
   getPreferredUserFullName,
   getUserFullNameFromParts,
   splitFullName,
 } from 'src/common/user-name.util';
 import {
+  SQL_TEACHER_SESSION_CAPPED_GROSS,
+  SQL_TEACHER_SESSION_CAPPED_GROSS_FROM_ALLOWANCE_CTE,
+  SQL_TEACHER_SESSION_CAP_GROUP_BY,
+} from 'src/common/teacher-session-allowance-sql.util';
+import {
   normalizePercent,
   resolveTaxDeductionRate,
   roundMoney,
 } from 'src/payroll/deduction-rates';
+import {
+  FIXED_SALARY_PAYMENT_SOURCE,
+  FIXED_SALARY_SOURCE_LABEL,
+  mapFixedSalaryPayableToPreviewRecord,
+  recalcFixedSalaryPayableAmounts,
+  type FixedSalaryPayableRow,
+} from './staff-fixed-salary-payable.util';
 import {
   ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL,
   isSelfManagedCustomerCareStaff,
@@ -90,17 +113,18 @@ function withOptionalReason(description: string, reason?: string | null) {
     : description;
 }
 
-function getScheduleEntriesForStaff(
-  schedule: Prisma.JsonValue | null | undefined,
-) {
-  if (!Array.isArray(schedule)) {
+function parseCommaSeparatedIds(raw?: string): string[] {
+  if (!raw?.trim()) {
     return [];
   }
-
-  return schedule.filter(
-    (entry): entry is Prisma.JsonObject =>
-      typeof entry === 'object' && entry !== null && !Array.isArray(entry),
-  );
+  return [
+    ...new Set(
+      raw
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function buildNameSearchWhere(search?: string): Prisma.StaffInfoWhereInput {
@@ -222,6 +246,38 @@ function mergeAmountSummary(
     total: summary.total + addition.total,
     paid: summary.paid + addition.paid,
     unpaid: summary.unpaid + addition.unpaid,
+  };
+}
+
+function summarizeFixedSalaryPayableRows(rows: FixedSalaryPayableRow[]) {
+  const grossTotals = makeAmountSummary();
+  const taxTotals = makeAmountSummary();
+  const operatingTotals = makeAmountSummary();
+  const totalDeductionTotals = makeAmountSummary();
+  const netTotals = makeAmountSummary();
+
+  rows.forEach((row) => {
+    addAmountToSummary(grossTotals, row.status, row.grossAmount);
+    addAmountToSummary(taxTotals, row.status, row.taxDeductionAmount);
+    addAmountToSummary(
+      operatingTotals,
+      row.status,
+      row.operatingDeductionAmount,
+    );
+    addAmountToSummary(
+      totalDeductionTotals,
+      row.status,
+      row.taxDeductionAmount + row.operatingDeductionAmount,
+    );
+    addAmountToSummary(netTotals, row.status, row.netAmount);
+  });
+
+  return {
+    grossTotals,
+    taxTotals,
+    operatingTotals,
+    totalDeductionTotals,
+    netTotals,
   };
 }
 
@@ -449,8 +505,10 @@ type StaffPaymentSourceType =
   | 'assistant_share'
   | 'training_manager'
   | 'lesson_output'
+  | 'revenue_share'
   | 'extra_allowance'
-  | 'bonus';
+  | 'bonus'
+  | 'fixed_salary';
 
 type StaffPaymentPreviewRecord = {
   id: string;
@@ -519,8 +577,10 @@ const STAFF_PAYMENT_SOURCE_ORDER: Record<StaffPaymentSourceType, number> = {
   assistant_share: 30,
   training_manager: 35,
   lesson_output: 40,
+  revenue_share: 45,
   extra_allowance: 50,
   bonus: 60,
+  fixed_salary: 15,
 };
 
 function makeDepositPaymentPreviewTotals(): StaffDepositPaymentPreviewTotalsDto {
@@ -646,7 +706,104 @@ export class StaffService {
     private readonly actionHistoryService: ActionHistoryService,
     private readonly googleCalendarService: GoogleCalendarService,
     private readonly authIdentityCacheService: AuthIdentityCacheService,
+    private readonly fixedSalarySettingsService: FixedSalarySettingsService,
   ) {}
+
+  /**
+   * Danh sách bài khảo sát đã **quá hạn** (`endDate < hôm nay`) mà lớp
+   * `running` của nhân sự (gia sư) này còn thiếu báo cáo. Dùng để cảnh báo
+   * kế toán trước khi thanh toán (pay-all/pay-selected/pay-deposit) — không
+   * áp dụng bộ lọc dismissal của banner kế toán chi (dismissal chỉ ẩn UI
+   * thông báo, không liên quan tới cảnh báo tại thời điểm thanh toán). Xem
+   * thêm `SurveyService.getAccountantWarnings` cho logic tương tự.
+   */
+  private async getOverdueSurveyWarningsForPayment(
+    staffId: string,
+  ): Promise<StaffOverdueSurveyWarningItemDto[]> {
+    const today = toDateOnly();
+
+    const closedSurveys = await this.prisma.survey.findMany({
+      where: { name: { not: null }, endDate: { lt: today } },
+      select: {
+        id: true,
+        name: true,
+        excludedClasses: { select: { classId: true } },
+      },
+    });
+    if (!closedSurveys.length) return [];
+
+    const runningClasses = await this.prisma.class.findMany({
+      where: {
+        status: 'running',
+        teachers: { some: { teacherId: staffId } },
+      },
+      select: { id: true, name: true },
+    });
+    if (!runningClasses.length) return [];
+
+    const classIds = runningClasses.map((item) => item.id);
+    const reportedRows = await this.prisma.classSurvey.findMany({
+      where: {
+        classId: { in: classIds },
+        surveyId: { in: closedSurveys.map((survey) => survey.id) },
+      },
+      select: { classId: true, surveyId: true },
+    });
+    const reportedKeys = new Set(
+      reportedRows.map((row) => `${row.classId}::${row.surveyId}`),
+    );
+
+    const warnings: StaffOverdueSurveyWarningItemDto[] = [];
+    for (const survey of closedSurveys) {
+      const excludedIds = new Set(
+        survey.excludedClasses.map((entry) => entry.classId),
+      );
+      const classNames = runningClasses
+        .filter((classItem) => !excludedIds.has(classItem.id))
+        .filter(
+          (classItem) => !reportedKeys.has(`${classItem.id}::${survey.id}`),
+        )
+        .map((classItem) => classItem.name);
+
+      if (classNames.length) {
+        warnings.push({
+          surveyId: survey.id,
+          surveyName: survey.name ?? '',
+          classNames,
+        });
+      }
+    }
+
+    return warnings;
+  }
+
+  /**
+   * Cảnh báo (không chặn cứng) nếu nhân sự còn báo cáo khảo sát quá hạn khi
+   * kế toán thanh toán. Nếu `confirmed` chưa được kế toán xác nhận (bấm "Vẫn
+   * thanh toán" trên dialog cảnh báo ở FE), throw `400` với `code:
+   * SURVEY_OVERDUE_WARNING` kèm chi tiết `warnings` để FE hiển thị dialog;
+   * khi `confirmed = true`, bỏ qua và cho thanh toán tiếp tục.
+   */
+  private async guardOverdueSurveyReports(
+    staffId: string,
+    confirmed: boolean | undefined,
+  ): Promise<void> {
+    if (confirmed) return;
+
+    const warnings = await this.getOverdueSurveyWarningsForPayment(staffId);
+    if (!warnings.length) return;
+
+    const detail = warnings
+      .map((item) => `${item.surveyName} (${item.classNames.join(', ')})`)
+      .join('; ');
+
+    throw new BadRequestException({
+      statusCode: 400,
+      code: 'SURVEY_OVERDUE_WARNING',
+      message: `Nhân sự còn báo cáo khảo sát quá hạn chưa hoàn thành: ${detail}. Xác nhận nếu vẫn muốn thanh toán.`,
+      warnings,
+    });
+  }
 
   private invalidateStaffAuthIdentities(
     ...userIds: Array<string | null | undefined>
@@ -670,57 +827,40 @@ export class StaffService {
       },
       select: {
         id: true,
-        schedule: true,
         teachers: {
           select: {
             teacherId: true,
           },
         },
+        scheduleEntries: {
+          where: { effectiveTo: null },
+          select: { id: true, teacherId: true, meetLink: true },
+        },
       },
     });
 
+    const entryIdsToUpdate: string[] = [];
     for (const cls of classes) {
-      if (!Array.isArray(cls.schedule)) {
-        continue;
-      }
-
       const soleTeacherId =
         cls.teachers.length === 1 ? cls.teachers[0].teacherId : undefined;
-      let scheduleChanged = false;
-      const nextSchedule = cls.schedule.map((rawEntry) => {
-        if (
-          typeof rawEntry !== 'object' ||
-          rawEntry === null ||
-          Array.isArray(rawEntry)
-        ) {
-          return rawEntry;
-        }
 
-        const entry = rawEntry;
-        const entryTeacherId =
-          typeof entry.teacherId === 'string' ? entry.teacherId : undefined;
+      for (const entry of cls.scheduleEntries) {
         const isResponsibleEntry =
-          entryTeacherId === staffId ||
-          (!entryTeacherId && soleTeacherId === staffId);
+          entry.teacherId === staffId ||
+          (!entry.teacherId && soleTeacherId === staffId);
 
         if (!isResponsibleEntry || entry.meetLink === meetLink) {
-          return rawEntry;
+          continue;
         }
 
-        scheduleChanged = true;
-        return {
-          ...entry,
-          meetLink,
-        };
-      });
-
-      if (!scheduleChanged) {
-        continue;
+        entryIdsToUpdate.push(entry.id);
       }
+    }
 
-      await this.prisma.class.update({
-        where: { id: cls.id },
-        data: { schedule: nextSchedule as Prisma.InputJsonValue },
+    if (entryIdsToUpdate.length > 0) {
+      await this.prisma.classScheduleEntry.updateMany({
+        where: { id: { in: entryIdsToUpdate } },
+        data: { meetLink },
       });
     }
 
@@ -1301,18 +1441,20 @@ export class StaffService {
   }
 
   async getLandingProfiles(query: StaffLandingProfileQueryDto) {
-    const status = query.status ?? StaffStatus.active;
-    const role = query.role ?? StaffRole.teacher;
+    // Landing sync intentionally ignores status + role (all staff rows).
     const limit =
       typeof query.limit === 'number' && Number.isInteger(query.limit)
         ? Math.min(Math.max(query.limit, 1), 100)
         : 50;
+    const page =
+      typeof query.page === 'number' && Number.isInteger(query.page)
+        ? Math.max(query.page, 1)
+        : 1;
+    const skip = (page - 1) * limit;
+    const ids = parseCommaSeparatedIds(query.ids);
 
     const where: Prisma.StaffInfoWhereInput = {
-      status,
-      roles: {
-        has: role,
-      },
+      ...(ids.length > 0 ? { id: { in: ids } } : {}),
       ...buildNameSearchWhere(query.search),
     };
 
@@ -1320,6 +1462,7 @@ export class StaffService {
       this.prisma.staffInfo.count({ where }),
       this.prisma.staffInfo.findMany({
         where,
+        skip,
         take: limit,
         orderBy: [
           { user: { first_name: 'asc' } },
@@ -1329,29 +1472,42 @@ export class StaffService {
           id: true,
           university: true,
           specialization: true,
+          status: true,
+          achievements: {
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            select: {
+              id: true,
+              title: true,
+              imageWatermarkedPath: true,
+              sortOrder: true,
+            },
+          },
           user: {
             select: {
               first_name: true,
               last_name: true,
               accountHandle: true,
               email: true,
-              avatarPath: true,
+              avatarWatermarkedPath: true,
             },
           },
         },
       }),
     ]);
 
-    const data = await Promise.all(
-      rows.map(async (staff) => ({
-        id: staff.id,
-        name: getPreferredUserFullName(staff.user) ?? '',
-        avatarUrl: await this.createAvatarSignedUrl(staff.user?.avatarPath),
-        avatarPath: staff.user?.avatarPath ?? null,
-        university: staff.university,
-        specialization: staff.specialization,
-      })),
-    );
+    const data = rows.map((staff) => ({
+      id: staff.id,
+      name: getPreferredUserFullName(staff.user) ?? '',
+      status: staff.status,
+      avatarUrl: createPublicStorageUrl({
+        bucket: AVATAR_PUBLIC_BUCKET,
+        path: staff.user?.avatarWatermarkedPath,
+      }),
+      avatarPath: staff.user?.avatarWatermarkedPath ?? null,
+      university: staff.university,
+      specialization: staff.specialization,
+      achievements: mapLandingAchievements(staff.achievements),
+    }));
 
     return { data, total };
   }
@@ -1456,6 +1612,9 @@ export class StaffService {
             ELSE COALESCE(sessions.teacher_tax_rate_percent, 0)
           END AS teacher_operating_deduction_rate_percent,
           classes.max_allowance_per_session,
+          classes.pricing_mode,
+          classes.max_allowance_per_block,
+          sessions.snapshot_block_count,
           COALESCE(sessions.coefficient, 1) AS coefficient,
           COUNT(*) FILTER (
             WHERE attendance.status IN ('present', 'excused')
@@ -1473,6 +1632,9 @@ export class StaffService {
           sessions.allowance_amount,
           sessions.teacher_tax_rate_percent,
           classes.max_allowance_per_session,
+          classes.pricing_mode,
+          classes.max_allowance_per_block,
+          sessions.snapshot_block_count,
           sessions.coefficient
       ),
       teacher_session_gross AS (
@@ -1485,19 +1647,16 @@ export class StaffService {
           teacher_tax_deduction_rate_percent,
           teacher_operating_deduction_rate_percent,
           max_allowance_per_session,
+          pricing_mode,
+          max_allowance_per_block,
+          snapshot_block_count,
           CASE
             WHEN LOWER(COALESCE(teacher_payment_status, '')) IN (${Prisma.join(
               NORMALIZED_DEPOSIT_PAYMENT_STATUSES,
             )}) THEN
               allowance_per_session * coefficient
             ELSE
-              LEAST(
-                COALESCE(
-                  NULLIF(max_allowance_per_session, 0),
-                  allowance_per_session * coefficient
-                ),
-                allowance_per_session * coefficient
-              )
+              ${SQL_TEACHER_SESSION_CAPPED_GROSS_FROM_ALLOWANCE_CTE}
           END AS teacher_gross_total
         FROM session_attendance_allowances
       ),
@@ -2209,6 +2368,191 @@ export class StaffService {
     });
   }
 
+  private toFixedSalaryPayableRow(row: {
+    id: string;
+    roleType: StaffRole;
+    month: string;
+    status: PaymentStatus;
+    note: string | null;
+    grossAmount: number;
+    operatingRatePercent: Prisma.Decimal | number | string;
+    taxRatePercent: Prisma.Decimal | number | string;
+    operatingDeductionAmount: number;
+    taxDeductionAmount: number;
+    netAmount: number;
+  }): FixedSalaryPayableRow {
+    return {
+      id: row.id,
+      roleType: row.roleType,
+      month: row.month,
+      status: row.status,
+      note: row.note,
+      grossAmount: normalizeMoneyAmount(row.grossAmount),
+      operatingRatePercent: normalizePercent(row.operatingRatePercent),
+      taxRatePercent: normalizePercent(row.taxRatePercent),
+      operatingDeductionAmount: normalizeMoneyAmount(
+        row.operatingDeductionAmount,
+      ),
+      taxDeductionAmount: normalizeMoneyAmount(row.taxDeductionAmount),
+      netAmount: normalizeMoneyAmount(row.netAmount),
+    };
+  }
+
+  private async getPendingFixedSalaryPreviewRecords(
+    db: StaffPaymentClient,
+    staffId: string,
+  ): Promise<StaffPaymentPreviewRecord[]> {
+    const rows = await db.staffFixedSalaryPayable.findMany({
+      where: {
+        staffId,
+        status: PaymentStatus.pending,
+      },
+      orderBy: [{ month: 'desc' }, { roleType: 'asc' }],
+    });
+
+    return rows.map((row) => {
+      const payable = this.toFixedSalaryPayableRow(row);
+      const roleLabel = STAFF_ROLE_LABELS[payable.roleType] ?? payable.roleType;
+      return mapFixedSalaryPayableToPreviewRecord(payable, roleLabel);
+    });
+  }
+
+  private async getFixedSalaryPayableSnapshots(
+    db: StaffPaymentClient,
+    payableIds: string[],
+  ) {
+    if (payableIds.length === 0) {
+      return new Map<string, unknown>();
+    }
+
+    const payables = await db.staffFixedSalaryPayable.findMany({
+      where: {
+        id: {
+          in: payableIds,
+        },
+      },
+    });
+
+    return new Map(payables.map((payable) => [payable.id, payable]));
+  }
+
+  async updateStaffFixedSalaryPayable(
+    staffId: string,
+    payableId: string,
+    data: UpdateStaffFixedSalaryPayableDto,
+    auditActor?: ActionHistoryActor,
+  ) {
+    if (data.amount === undefined && data.note === undefined) {
+      throw new BadRequestException(
+        'Cần gửi số tiền hoặc ghi chú để cập nhật lương cứng.',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const payable = await tx.staffFixedSalaryPayable.findFirst({
+        where: {
+          id: payableId,
+          staffId,
+        },
+      });
+
+      if (!payable) {
+        throw new NotFoundException('Không tìm thấy khoản lương cứng.');
+      }
+
+      if (payable.status === PaymentStatus.paid) {
+        throw new BadRequestException(
+          'Khoản lương cứng đã thanh toán không thể sửa số tiền hoặc ghi chú.',
+        );
+      }
+
+      const nextAmounts =
+        data.amount === undefined
+          ? this.toFixedSalaryPayableRow(payable)
+          : recalcFixedSalaryPayableAmounts({
+              grossAmount: data.amount,
+              operatingRatePercent: Number(payable.operatingRatePercent),
+              taxRatePercent: Number(payable.taxRatePercent),
+            });
+
+      const updated = await tx.staffFixedSalaryPayable.update({
+        where: { id: payable.id },
+        data: {
+          grossAmount: nextAmounts.grossAmount,
+          operatingDeductionAmount: nextAmounts.operatingDeductionAmount,
+          taxDeductionAmount: nextAmounts.taxDeductionAmount,
+          netAmount: nextAmounts.netAmount,
+          ...(data.note !== undefined ? { note: data.note } : {}),
+        },
+      });
+
+      if (auditActor) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'staff_fixed_salary_payable',
+          entityId: payable.id,
+          description: 'Cập nhật khoản lương cứng chờ thanh toán',
+          beforeValue: payable,
+          afterValue: updated,
+        });
+      }
+
+      return this.toFixedSalaryPayableRow({
+        ...updated,
+        note: updated.note ?? null,
+      });
+    });
+  }
+
+  private async getRevenueShareAllPendingPreviewRecords(
+    db: StaffPaymentClient,
+    staffId: string,
+  ): Promise<StaffPaymentPreviewDraftRecord[]> {
+    const rows = await db.lessonPlanHeadCommission.findMany({
+      where: {
+        staffId,
+        paymentStatus: PaymentStatus.pending,
+      },
+      select: {
+        id: true,
+        amount: true,
+        coefPercent: true,
+        paymentStatus: true,
+        attendance: {
+          select: {
+            session: {
+              select: {
+                date: true,
+                class: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return rows.map((row) => {
+      const grossAmount = normalizeMoneyAmount(row.amount);
+      const className = row.attendance.session.class.name?.trim() || 'Lớp';
+
+      return {
+        id: row.id,
+        role: StaffRole.lesson_plan_head,
+        sourceType: 'revenue_share',
+        sourceLabel: 'Hoa hồng doanh thu',
+        label: `Hoa hồng buổi học · ${className}`,
+        secondaryLabel: `${normalizePercent(row.coefPercent)}%`,
+        date: row.attendance.session.date.toISOString(),
+        currentStatus: row.paymentStatus,
+        grossAmount,
+        operatingAmount: 0,
+      };
+    });
+  }
+
   private async getCustomerCarePaymentPreviewRecords(
     db: StaffPaymentClient,
     params: {
@@ -2655,9 +2999,11 @@ export class StaffService {
       const taxRatePercent =
         record.sourceType === 'bonus'
           ? bonusIncomeTaxRatePercent
-          : record.role == null
+          : record.sourceType === 'revenue_share'
             ? 0
-            : (taxRateByRole.get(record.role) ?? 0);
+            : record.role == null
+              ? 0
+              : (taxRateByRole.get(record.role) ?? 0);
       const normalizedTaxableBaseAmount = normalizeMoneyAmount(
         taxableBaseAmount ?? record.grossAmount,
       );
@@ -2717,6 +3063,9 @@ export class StaffService {
         ? this.getTrainingManagerAllPendingPreviewRecords(db, staffId)
         : Promise.resolve<StaffPaymentPreviewDraftRecord[]>([]),
       this.getExtraAllowanceAllPendingPreviewRecords(db, staffId),
+      roles.includes(StaffRole.lesson_plan_head)
+        ? this.getRevenueShareAllPendingPreviewRecords(db, staffId)
+        : Promise.resolve<StaffPaymentPreviewDraftRecord[]>([]),
     ]);
 
     return draftRecordGroups.flat();
@@ -2747,6 +3096,9 @@ export class StaffService {
         ? this.getTrainingManagerAllPendingPreviewRecords(db, staffId)
         : Promise.resolve<StaffPaymentPreviewDraftRecord[]>([]),
       this.getExtraAllowanceAllPendingPreviewRecords(db, staffId),
+      roles.includes(StaffRole.lesson_plan_head)
+        ? this.getRevenueShareAllPendingPreviewRecords(db, staffId)
+        : Promise.resolve<StaffPaymentPreviewDraftRecord[]>([]),
     ]);
 
     return draftRecordGroups.flat();
@@ -2852,19 +3204,22 @@ export class StaffService {
       id,
       staff.roles,
     );
-    const { records, taxAsOfDate } =
-      await this.finalizePendingPaymentPreviewRecords(
-        db,
-        id,
-        staff.roles,
-        draftRecords,
-      );
+    const [{ records, taxAsOfDate }, frozenFixedSalaryRecords] =
+      await Promise.all([
+        this.finalizePendingPaymentPreviewRecords(
+          db,
+          id,
+          staff.roles,
+          draftRecords,
+        ),
+        this.getPendingFixedSalaryPreviewRecords(db, id),
+      ]);
 
     return {
       staff,
       monthKey: range.monthKey,
       taxAsOfDate,
-      records,
+      records: [...records, ...frozenFixedSalaryRecords],
     };
   }
 
@@ -2962,7 +3317,7 @@ export class StaffService {
           })
           .map((source) => ({
             ...source,
-            items: [...source.items].sort(comparePaymentPreviewItems),
+            items: source.items.toSorted(comparePaymentPreviewItems),
           }));
 
         return {
@@ -3056,6 +3411,27 @@ export class StaffService {
     });
 
     return new Map(bonuses.map((bonus) => [bonus.id, bonus]));
+  }
+
+  private async getRevenueShareSnapshots(
+    db: StaffPaymentClient,
+    revenueShareIds: string[],
+  ) {
+    if (revenueShareIds.length === 0) {
+      return new Map<string, unknown>();
+    }
+
+    const commissions = await db.lessonPlanHeadCommission.findMany({
+      where: {
+        id: {
+          in: revenueShareIds,
+        },
+      },
+    });
+
+    return new Map(
+      commissions.map((commission) => [commission.id, commission]),
+    );
   }
 
   private async getExtraAllowanceSnapshots(
@@ -3258,7 +3634,7 @@ export class StaffService {
       )
       .map((bucket) => ({
         ...bucket,
-        sessions: [...bucket.sessions].sort((left, right) => {
+        sessions: bucket.sessions.toSorted((left, right) => {
           const leftTime = Date.parse(left.date);
           const rightTime = Date.parse(right.date);
 
@@ -3335,9 +3711,11 @@ export class StaffService {
     id: string,
     data: {
       sessionIds: string[];
+      confirmOverdueSurveyReports?: boolean;
     },
     auditActor?: ActionHistoryActor,
   ): Promise<StaffPayDepositSessionsResultDto> {
+    await this.guardOverdueSurveyReports(id, data.confirmOverdueSurveyReports);
     return this.prisma.$transaction(async (tx) => {
       const sessionIds = Array.from(
         new Set(
@@ -3446,9 +3824,11 @@ export class StaffService {
     query: {
       month: string;
       year: string;
+      confirmOverdueSurveyReports?: boolean;
     },
     auditActor?: ActionHistoryActor,
   ): Promise<StaffPayAllPaymentsResultDto> {
+    await this.guardOverdueSurveyReports(id, query.confirmOverdueSurveyReports);
     return this.prisma.$transaction(async (tx) => {
       const { monthKey, records } = await this.loadStaffPaymentPreviewRecords(
         tx,
@@ -3473,6 +3853,7 @@ export class StaffService {
     data: StaffPaySelectedPaymentsDto,
     auditActor?: ActionHistoryActor,
   ): Promise<StaffPayAllPaymentsResultDto> {
+    await this.guardOverdueSurveyReports(id, data.confirmOverdueSurveyReports);
     return this.prisma.$transaction(async (tx) => {
       const { monthKey, records: previewRecords } =
         await this.loadStaffPaymentPreviewRecords(tx, id, data);
@@ -3544,6 +3925,12 @@ export class StaffService {
       .map((record) => record.id);
     const bonusIds = records
       .filter((record) => record.sourceType === 'bonus')
+      .map((record) => record.id);
+    const revenueShareIds = records
+      .filter((record) => record.sourceType === 'revenue_share')
+      .map((record) => record.id);
+    const fixedSalaryIds = records
+      .filter((record) => record.sourceType === FIXED_SALARY_PAYMENT_SOURCE)
       .map((record) => record.id);
     const teacherTaxRatePercent =
       records.find((record) => record.sourceType === 'teacher_session')
@@ -3617,6 +4004,14 @@ export class StaffService {
         auditScope === 'all'
           ? 'Thanh toán toàn bộ khoản thưởng'
           : 'Thanh toán khoản thưởng đã chọn',
+      revenue_share:
+        auditScope === 'all'
+          ? 'Thanh toán toàn bộ hoa hồng doanh thu Trưởng giáo án'
+          : 'Thanh toán hoa hồng doanh thu Trưởng giáo án đã chọn',
+      fixed_salary:
+        auditScope === 'all'
+          ? 'Thanh toán toàn bộ lương cứng'
+          : 'Thanh toán lương cứng đã chọn',
     } as const;
 
     const [
@@ -3626,6 +4021,8 @@ export class StaffService {
       lessonOutputBeforeSnapshots,
       extraAllowanceBeforeSnapshots,
       bonusBeforeSnapshots,
+      revenueShareBeforeSnapshots,
+      fixedSalaryBeforeSnapshots,
     ] = await Promise.all([
       this.getSessionPaymentSnapshots(tx, teacherSessionIds),
       this.getAttendancePaymentSnapshots(tx, customerCareAttendanceIds),
@@ -3633,6 +4030,8 @@ export class StaffService {
       this.getLessonOutputSnapshots(tx, lessonOutputIds),
       this.getExtraAllowanceSnapshots(tx, extraAllowanceIds),
       this.getBonusSnapshots(tx, bonusIds),
+      this.getRevenueShareSnapshots(tx, revenueShareIds),
+      this.getFixedSalaryPayableSnapshots(tx, fixedSalaryIds),
     ]);
 
     const sourceResults: StaffPaymentSourceResult[] = [];
@@ -3788,6 +4187,44 @@ export class StaffService {
       });
     }
 
+    if (revenueShareIds.length > 0) {
+      const updateResult = await tx.lessonPlanHeadCommission.updateMany({
+        where: {
+          id: {
+            in: revenueShareIds,
+          },
+        },
+        data: {
+          paymentStatus: PaymentStatus.paid,
+        },
+      });
+      sourceResults.push({
+        sourceType: 'revenue_share',
+        sourceLabel: 'Hoa hồng doanh thu',
+        updatedCount: updateResult.count,
+      });
+    }
+
+    if (fixedSalaryIds.length > 0) {
+      const updateResult = await tx.staffFixedSalaryPayable.updateMany({
+        where: {
+          id: {
+            in: fixedSalaryIds,
+          },
+          staffId: id,
+          status: PaymentStatus.pending,
+        },
+        data: {
+          status: PaymentStatus.paid,
+        },
+      });
+      sourceResults.push({
+        sourceType: FIXED_SALARY_PAYMENT_SOURCE,
+        sourceLabel: FIXED_SALARY_SOURCE_LABEL,
+        updatedCount: updateResult.count,
+      });
+    }
+
     if (auditActor) {
       const [
         sessionAfterSnapshots,
@@ -3796,6 +4233,8 @@ export class StaffService {
         lessonOutputAfterSnapshots,
         extraAllowanceAfterSnapshots,
         bonusAfterSnapshots,
+        revenueShareAfterSnapshots,
+        fixedSalaryAfterSnapshots,
       ] = await Promise.all([
         this.getSessionPaymentSnapshots(tx, teacherSessionIds),
         this.getAttendancePaymentSnapshots(tx, customerCareAttendanceIds),
@@ -3803,6 +4242,8 @@ export class StaffService {
         this.getLessonOutputSnapshots(tx, lessonOutputIds),
         this.getExtraAllowanceSnapshots(tx, extraAllowanceIds),
         this.getBonusSnapshots(tx, bonusIds),
+        this.getRevenueShareSnapshots(tx, revenueShareIds),
+        this.getFixedSalaryPayableSnapshots(tx, fixedSalaryIds),
       ]);
 
       await Promise.all([
@@ -3887,6 +4328,34 @@ export class StaffService {
               })),
             })
           : Promise.resolve(),
+
+        revenueShareIds.length > 0
+          ? this.actionHistoryService.recordUpdates(tx, {
+              actor: auditActor,
+              entityType: 'lesson_plan_head_commission',
+              description: auditDescriptions.revenue_share,
+              updates: revenueShareIds.map((revenueShareId) => ({
+                entityId: revenueShareId,
+                beforeValue:
+                  revenueShareBeforeSnapshots.get(revenueShareId) ?? null,
+                afterValue:
+                  revenueShareAfterSnapshots.get(revenueShareId) ?? null,
+              })),
+            })
+          : Promise.resolve(),
+
+        fixedSalaryIds.length > 0
+          ? this.actionHistoryService.recordUpdates(tx, {
+              actor: auditActor,
+              entityType: 'staff_fixed_salary_payable',
+              description: auditDescriptions.fixed_salary,
+              updates: fixedSalaryIds.map((payableId) => ({
+                entityId: payableId,
+                beforeValue: fixedSalaryBeforeSnapshots.get(payableId) ?? null,
+                afterValue: fixedSalaryAfterSnapshots.get(payableId) ?? null,
+              })),
+            })
+          : Promise.resolve(),
       ]);
     }
 
@@ -3916,27 +4385,31 @@ export class StaffService {
     isAssistant: boolean,
   ): Promise<number> {
     const db = this.prisma;
-    const draftRecords = await this.loadAllPendingPaymentPreviewDraftRecords(
-      db,
-      staffId,
-      roles,
-    );
+    const [draftRecords, frozenFixedSalaryRecords] = await Promise.all([
+      this.loadAllPendingPaymentPreviewDraftRecords(db, staffId, roles),
+      this.getPendingFixedSalaryPreviewRecords(db, staffId),
+    ]);
 
-    if (draftRecords.length === 0) {
-      return 0;
+    let liveNetTotal = 0;
+    if (draftRecords.length > 0) {
+      const finalized = await this.finalizePendingPaymentPreviewRecords(
+        db,
+        staffId,
+        roles,
+        draftRecords,
+      );
+      liveNetTotal = finalized.records.reduce(
+        (sum, record) => sum + normalizeMoneyAmount(record.netAmount),
+        0,
+      );
     }
 
-    const finalized = await this.finalizePendingPaymentPreviewRecords(
-      db,
-      staffId,
-      roles,
-      draftRecords,
-    );
-
-    return finalized.records.reduce(
+    const frozenNetTotal = frozenFixedSalaryRecords.reduce(
       (sum, record) => sum + normalizeMoneyAmount(record.netAmount),
       0,
     );
+
+    return liveNetTotal + frozenNetTotal;
   }
 
   /**
@@ -4022,15 +4495,7 @@ export class StaffService {
       teacher_session_rows AS (
         SELECT
           sessions.teacher_id AS staff_id,
-          LEAST(
-            COALESCE(
-              NULLIF(classes.max_allowance_per_session, 0),
-              COALESCE(sessions.allowance_amount, 0) *
-                COALESCE(sessions.coefficient, 1)
-            ),
-            COALESCE(sessions.allowance_amount, 0) *
-              COALESCE(sessions.coefficient, 1)
-          ) AS gross_amount
+          ${SQL_TEACHER_SESSION_CAPPED_GROSS} AS gross_amount
         FROM attendance
         INNER JOIN sessions ON attendance.session_id = sessions.id
         INNER JOIN classes ON classes.id = sessions.class_id
@@ -4042,7 +4507,7 @@ export class StaffService {
           sessions.teacher_id,
           sessions.id,
           sessions.allowance_amount,
-          classes.max_allowance_per_session,
+          ${SQL_TEACHER_SESSION_CAP_GROUP_BY},
           sessions.coefficient
       ),
       session_unpaid AS (
@@ -4142,6 +4607,15 @@ export class StaffService {
         FROM training_manager_unpaid_rows
         GROUP BY staff_id
       ),
+      fixed_salary_unpaid AS (
+        SELECT
+          staff_fixed_salary_payables.staff_id AS staff_id,
+          COALESCE(SUM(staff_fixed_salary_payables.gross_amount), 0) AS amount
+        FROM staff_fixed_salary_payables
+        INNER JOIN target_staff ON target_staff.id = staff_fixed_salary_payables.staff_id
+        WHERE staff_fixed_salary_payables.status::text = 'pending'
+        GROUP BY staff_fixed_salary_payables.staff_id
+      ),
       all_unpaid AS (
         SELECT staff_id, amount FROM session_unpaid
         UNION ALL
@@ -4156,6 +4630,8 @@ export class StaffService {
         SELECT staff_id, amount FROM extra_allowance_unpaid
         UNION ALL
         SELECT staff_id, amount FROM training_manager_unpaid
+        UNION ALL
+        SELECT staff_id, amount FROM fixed_salary_unpaid
       )
       SELECT
         target_staff.id AS "staffId",
@@ -4229,6 +4705,7 @@ export class StaffService {
       trainingManagerYearRows,
       unpaidSnapshotTotalsByStaffId,
       bonusIncomeTaxRatePercent,
+      allFixedSalaryPayables,
     ] = await Promise.all([
       this.getTeacherAllowanceSourceRowsByStatusAndTaxBucket({
         teacherId: id,
@@ -4351,6 +4828,10 @@ export class StaffService {
         : Promise.resolve<SourcePaymentTaxBucketRow[]>([]),
       this.getUnpaidTotalsByStaffIds([id]),
       this.resolveBonusIncomeTaxRatePercent(id, staff.roles),
+      this.prisma.staffFixedSalaryPayable.findMany({
+        where: { staffId: id },
+        orderBy: [{ month: 'desc' }, { roleType: 'asc' }],
+      }),
     ]);
 
     const snapshotUnpaidNetTotal = await this.computeSnapshotUnpaidNetTotal(
@@ -4509,6 +4990,29 @@ export class StaffService {
     const trainingManagerMonthlyTaxTotals =
       trainingManagerMonthlySummary.taxTotals;
 
+    const fixedSalaryPayableRows = allFixedSalaryPayables.map((row) =>
+      this.toFixedSalaryPayableRow(row),
+    );
+    const monthlyFixedSalaryRows = fixedSalaryPayableRows.filter(
+      (row) => row.month === range.monthKey,
+    );
+    const yearFixedSalaryRows = fixedSalaryPayableRows.filter((row) =>
+      row.month.startsWith(`${query.year}-`),
+    );
+    const pendingFixedSalaryRows = fixedSalaryPayableRows.filter(
+      (row) => row.status === PaymentStatus.pending,
+    );
+    const fixedSalaryMonthlySummary = summarizeFixedSalaryPayableRows(
+      monthlyFixedSalaryRows,
+    );
+    const fixedSalaryYearSummary =
+      summarizeFixedSalaryPayableRows(yearFixedSalaryRows);
+    const fixedSalaryMonthlyTotals = fixedSalaryMonthlySummary.netTotals;
+    const fixedSalaryMonthlyGrossTotals = fixedSalaryMonthlySummary.grossTotals;
+    const fixedSalaryMonthlyTaxTotals = fixedSalaryMonthlySummary.taxTotals;
+    const fixedSalaryMonthlyOperatingTotals =
+      fixedSalaryMonthlySummary.operatingTotals;
+
     const monthlyIncomeTotals = [
       sessionMonthlyTotals,
       bonusMonthlyTotals,
@@ -4517,6 +5021,7 @@ export class StaffService {
       lessonOutputMonthlyTotals,
       assistantShareMonthlyTotals,
       trainingManagerMonthlyTotals,
+      fixedSalaryMonthlyTotals,
     ].reduce(mergeAmountSummary, makeAmountSummary());
     const snapshotUnpaidTotal = unpaidSnapshotTotalsByStaffId.get(id) ?? 0;
 
@@ -4528,6 +5033,7 @@ export class StaffService {
       lessonOutputMonthlyGrossTotals,
       assistantShareMonthlyGrossTotals,
       trainingManagerMonthlyGrossTotals,
+      fixedSalaryMonthlyGrossTotals,
     ].reduce(mergeAmountSummary, makeAmountSummary());
 
     const monthlyTaxTotals = [
@@ -4538,10 +5044,12 @@ export class StaffService {
       lessonOutputMonthlyTaxTotals,
       assistantShareMonthlyTaxTotals,
       trainingManagerMonthlyTaxTotals,
+      fixedSalaryMonthlyTaxTotals,
     ].reduce(mergeAmountSummary, makeAmountSummary());
 
     const monthlyOperatingDeductionTotals = [
       sessionMonthlyOperatingDeductionTotals,
+      fixedSalaryMonthlyOperatingTotals,
     ].reduce(mergeAmountSummary, makeAmountSummary());
 
     const monthlyTotalDeductionTotals = [
@@ -4569,8 +5077,7 @@ export class StaffService {
       assistantShareYearSummary.grossTotals.total;
     const assistantShareYearTaxTotal =
       assistantShareYearSummary.taxTotals.total;
-    const trainingManagerYearTotal =
-      trainingManagerYearSummary.netTotals.total;
+    const trainingManagerYearTotal = trainingManagerYearSummary.netTotals.total;
     const trainingManagerYearGrossTotal =
       trainingManagerYearSummary.grossTotals.total;
     const trainingManagerYearTaxTotal =
@@ -4579,7 +5086,8 @@ export class StaffService {
     const sessionYearGrossTotal = sessionYearSummary.grossTotals.total;
     const sessionYearTaxTotal = sessionYearSummary.taxTotals.total;
     const yearOperatingDeductionTotal =
-      sessionYearSummary.operatingTotals.total;
+      sessionYearSummary.operatingTotals.total +
+      fixedSalaryYearSummary.operatingTotals.total;
     const yearIncomeTotal =
       sessionYearTotal +
       bonusYearTotal +
@@ -4587,7 +5095,8 @@ export class StaffService {
       customerCareYearTotal +
       lessonOutputYearTotal +
       assistantShareYearTotal +
-      trainingManagerYearTotal;
+      trainingManagerYearTotal +
+      fixedSalaryYearSummary.netTotals.total;
     const yearGrossIncomeTotal =
       sessionYearGrossTotal +
       bonusYearBreakdown.grossTotals.total +
@@ -4595,7 +5104,8 @@ export class StaffService {
       customerCareYearGrossTotal +
       lessonOutputYearGrossTotal +
       assistantShareYearGrossTotal +
-      trainingManagerYearGrossTotal;
+      trainingManagerYearGrossTotal +
+      fixedSalaryYearSummary.grossTotals.total;
     const yearTaxTotal =
       sessionYearTaxTotal +
       bonusYearBreakdown.taxTotals.total +
@@ -4603,7 +5113,8 @@ export class StaffService {
       customerCareYearTaxTotal +
       lessonOutputYearTaxTotal +
       assistantShareYearTaxTotal +
-      trainingManagerYearTaxTotal;
+      trainingManagerYearTaxTotal +
+      fixedSalaryYearSummary.taxTotals.total;
     const yearTotalDeductionTotal = yearTaxTotal + yearOperatingDeductionTotal;
 
     const yearPaidNetTotal =
@@ -4613,7 +5124,8 @@ export class StaffService {
       customerCareYearSummary.netTotals.paid +
       lessonOutputYearSummary.netTotals.paid +
       assistantShareYearSummary.netTotals.paid +
-      trainingManagerYearSummary.netTotals.paid;
+      trainingManagerYearSummary.netTotals.paid +
+      fixedSalaryYearSummary.netTotals.paid;
 
     const totalReceivedNet = yearPaidNetTotal + snapshotUnpaidNetTotal;
 
@@ -4710,6 +5222,69 @@ export class StaffService {
         );
       });
 
+    const fixedSalaryUnpaidNetByRole = new Map<StaffRole, number>();
+    pendingFixedSalaryRows.forEach((row) => {
+      fixedSalaryUnpaidNetByRole.set(
+        row.roleType,
+        (fixedSalaryUnpaidNetByRole.get(row.roleType) ?? 0) + row.netAmount,
+      );
+    });
+
+    const fixedSalaryRoleSummaryMap = new Map<
+      StaffRole,
+      StaffFixedSalaryRoleSummaryDto
+    >();
+    const seedFixedSalaryRoles = new Set<StaffRole>([
+      ...monthlyFixedSalaryRows.map((row) => row.roleType),
+      ...pendingFixedSalaryRows.map((row) => row.roleType),
+    ]);
+    seedFixedSalaryRoles.forEach((role) => {
+      const monthlyRows = monthlyFixedSalaryRows.filter(
+        (row) => row.roleType === role,
+      );
+      const monthly = summarizeFixedSalaryPayableRows(monthlyRows);
+      fixedSalaryRoleSummaryMap.set(role, {
+        role,
+        label: `Lương cứng · ${STAFF_ROLE_LABELS[role] ?? role}`,
+        total: monthly.netTotals.total,
+        paid: monthly.netTotals.paid,
+        unpaid: fixedSalaryUnpaidNetByRole.get(role) ?? 0,
+        grossTotal: monthly.grossTotals.total,
+        operatingDeductionTotal: monthly.operatingTotals.total,
+        taxDeductionTotal: monthly.taxTotals.total,
+      });
+    });
+
+    const roleOrder = staff.roles.filter((role) => role !== StaffRole.admin);
+    const fixedSalaryRoleSummaries = Array.from(
+      fixedSalaryRoleSummaryMap.values(),
+    ).sort((left, right) => {
+      const leftIndex = roleOrder.findIndex((role) => role === left.role);
+      const rightIndex = roleOrder.findIndex((role) => role === right.role);
+      return (leftIndex === -1 ? 999 : leftIndex) -
+        (rightIndex === -1 ? 999 : rightIndex);
+    });
+
+    const visibleFixedSalaryPayables = fixedSalaryPayableRows.filter(
+      (row) =>
+        row.month === range.monthKey || row.status === PaymentStatus.pending,
+    );
+    const fixedSalaryPayables: StaffFixedSalaryPayableItemDto[] =
+      visibleFixedSalaryPayables.map((row) => ({
+        id: row.id,
+        roleType: row.roleType,
+        roleLabel: STAFF_ROLE_LABELS[row.roleType] ?? row.roleType,
+        month: row.month,
+        status: row.status,
+        note: row.note,
+        grossAmount: row.grossAmount,
+        operatingRatePercent: row.operatingRatePercent,
+        taxRatePercent: row.taxRatePercent,
+        operatingDeductionAmount: row.operatingDeductionAmount,
+        taxDeductionAmount: row.taxDeductionAmount,
+        netAmount: row.netAmount,
+      }));
+
     const depositByClass = new Map<string, StaffIncomeDepositClassSummaryDto>();
     depositSessionRows.forEach((row) => {
       const classId = row.classId?.trim();
@@ -4773,6 +5348,8 @@ export class StaffService {
       ),
       bonusMonthlyTotals,
       otherRoleSummaries,
+      fixedSalaryRoleSummaries,
+      fixedSalaryPayables,
     };
   }
 
@@ -4824,30 +5401,14 @@ export class StaffService {
           sessions.class_id,
           COALESCE(sessions.allowance_amount, 0) AS allowance_amount,
           sessions.teacher_payment_status,
-          LEAST(
-            COALESCE(
-              NULLIF(classes.max_allowance_per_session, 0),
-              COALESCE(sessions.coefficient, 1) *
-                COALESCE(sessions.allowance_amount, 0)
-            ),
-            COALESCE(sessions.coefficient, 1) *
-              COALESCE(sessions.allowance_amount, 0)
-          ) -
+          ${SQL_TEACHER_SESSION_CAPPED_GROSS} -
           CASE
             WHEN LOWER(COALESCE(sessions.teacher_payment_status, '')) IN (${Prisma.join(
               NORMALIZED_DEPOSIT_PAYMENT_STATUSES,
             )}) THEN 0
             ELSE ROUND(
               (
-                LEAST(
-                  COALESCE(
-                    NULLIF(classes.max_allowance_per_session, 0),
-                    COALESCE(sessions.coefficient, 1) *
-                      COALESCE(sessions.allowance_amount, 0)
-                  ),
-                  COALESCE(sessions.coefficient, 1) *
-                    COALESCE(sessions.allowance_amount, 0)
-                ) * COALESCE(sessions.teacher_tax_rate_percent, 0)
+                ${SQL_TEACHER_SESSION_CAPPED_GROSS} * COALESCE(sessions.teacher_tax_rate_percent, 0)
               ) / 100.0,
               0
             )
@@ -4856,7 +5417,7 @@ export class StaffService {
         join sessions on attendance.session_id = sessions.id
         join classes on classes.id = sessions.class_id
         where sessions.teacher_id=${id}
-        group by sessions.class_id, attendance.session_id, sessions.allowance_amount, sessions.teacher_payment_status, classes.max_allowance_per_session, sessions.coefficient, sessions.teacher_tax_rate_percent) as tab
+        group by sessions.class_id, attendance.session_id, sessions.allowance_amount, sessions.teacher_payment_status, ${SQL_TEACHER_SESSION_CAP_GROUP_BY}, sessions.coefficient, sessions.teacher_tax_rate_percent) as tab
       join classes on classes.id = class_id
       group by tab.class_id, teacher_payment_status , classes.name
       `;
@@ -4883,11 +5444,69 @@ export class StaffService {
                 ),
               }
             : null,
+        revenueSharePercent:
+          staff.revenueSharePercent == null
+            ? null
+            : normalizePercent(staff.revenueSharePercent),
         classAllowance,
       };
     });
 
     return tx;
+  }
+
+  async getStaffRevenueShare(staffId: string, month: string, year: string) {
+    const staff = await this.prisma.staffInfo.findUnique({
+      where: { id: staffId },
+      select: { id: true, revenueSharePercent: true, roles: true },
+    });
+
+    if (!staff) {
+      throw new NotFoundException('Staff not found');
+    }
+
+    const { monthKey, start, end } = buildMonthRange(month, year);
+
+    const [row] = await this.prisma.$queryRaw<{ revenue: bigint | number }[]>(
+      Prisma.sql`
+        SELECT COALESCE(SUM(COALESCE(attendance.tuition_fee, 0)), 0) AS revenue
+        FROM attendance
+        INNER JOIN sessions ON sessions.id = attendance.session_id
+        WHERE attendance.status IN ('present', 'excused')
+          AND sessions.date >= ${start}
+          AND sessions.date < ${end}
+      `,
+    );
+
+    const revenue = Number(row?.revenue ?? 0);
+    const percent =
+      staff.revenueSharePercent == null
+        ? 0
+        : normalizePercent(staff.revenueSharePercent);
+
+    const [commissionRow] = await this.prisma.$queryRaw<
+      { amount: bigint | number }[]
+    >(
+      Prisma.sql`
+        SELECT COALESCE(SUM(lesson_plan_head_commission.amount), 0) AS amount
+        FROM lesson_plan_head_commission
+        INNER JOIN attendance ON attendance.id = lesson_plan_head_commission.attendance_id
+        INNER JOIN sessions ON sessions.id = attendance.session_id
+        WHERE lesson_plan_head_commission.staff_id = ${staffId}
+          AND sessions.date >= ${start}
+          AND sessions.date < ${end}
+      `,
+    );
+
+    const amount = Number(commissionRow?.amount ?? 0);
+
+    return {
+      staffId: staff.id,
+      month: monthKey,
+      revenueSharePercent: staff.revenueSharePercent == null ? null : percent,
+      revenue,
+      amount,
+    };
   }
 
   async patchStaffClassTeacherOperatingDeduction(
@@ -4976,42 +5595,34 @@ export class StaffService {
     staffId: string,
   ) {
     const today = toDateOnly();
-    const classes = await tx.class.findMany({
+    const activeEntries = await tx.classScheduleEntry.findMany({
       where: {
-        teachers: {
-          some: {
-            teacherId: staffId,
-            OR: [{ status: null }, { status: 'active' }],
+        teacherId: staffId,
+        effectiveTo: null,
+        class: {
+          teachers: {
+            some: {
+              teacherId: staffId,
+              OR: [{ status: null }, { status: 'active' }],
+            },
           },
         },
       },
-      select: { id: true, schedule: true },
+      select: { id: true, googleCalendarEventId: true },
     });
 
     const googleCalendarEventIds: string[] = [];
-    for (const classRecord of classes) {
-      const scheduleEntries = getScheduleEntriesForStaff(classRecord.schedule);
-      let scheduleChanged = false;
-      const nextSchedule = scheduleEntries.map((entry) => {
-        if (entry.teacherId !== staffId) return entry;
-        if (entry.deletedAt) return entry;
-
-        scheduleChanged = true;
-        if (typeof entry.googleCalendarEventId === 'string') {
-          googleCalendarEventIds.push(entry.googleCalendarEventId);
-        }
-        return {
-          ...entry,
-          deletedAt: new Date().toISOString(),
-        };
-      });
-
-      if (scheduleChanged) {
-        await tx.class.update({
-          where: { id: classRecord.id },
-          data: { schedule: nextSchedule as Prisma.InputJsonValue },
-        });
+    for (const entry of activeEntries) {
+      if (entry.googleCalendarEventId) {
+        googleCalendarEventIds.push(entry.googleCalendarEventId);
       }
+    }
+
+    if (activeEntries.length > 0) {
+      await tx.classScheduleEntry.updateMany({
+        where: { id: { in: activeEntries.map((entry) => entry.id) } },
+        data: { effectiveTo: today },
+      });
     }
 
     const futureMakeupEvents = await tx.makeupScheduleEvent.findMany({
@@ -5109,7 +5720,13 @@ export class StaffService {
     return this.getStaffById(id);
   }
 
-  async updateStaff(data: UpdateStaffDto, auditActor?: ActionHistoryActor) {
+  async updateStaff(
+    data: UpdateStaffDto,
+    auditActor?: ActionHistoryActor,
+    options?: {
+      roleFixedSalaryOverrides?: UpdateStaffWithFixedSalaryOverridesDto['roleFixedSalaryOverrides'];
+    },
+  ) {
     const existingStaff = await this.getStaffAuditSnapshot(
       this.prisma,
       data.id,
@@ -5117,6 +5734,18 @@ export class StaffService {
 
     if (!existingStaff) {
       throw new NotFoundException('Staff not found');
+    }
+
+    if (options?.roleFixedSalaryOverrides) {
+      if (data.roles == null) {
+        throw new BadRequestException(
+          'Cần gửi danh sách vai trò khi lưu mức đè lương cứng.',
+        );
+      }
+      this.fixedSalarySettingsService.assertStaffOverrideItems(
+        data.roles,
+        options.roleFixedSalaryOverrides,
+      );
     }
 
     const userNamePayload = this.normalizeStaffUserNameInput(data);
@@ -5143,6 +5772,8 @@ export class StaffService {
       payload.personalAchievementLink = data.personal_achievement_link ?? null;
     if (data.google_meet_link !== undefined)
       payload.googleMeetLink = data.google_meet_link ?? null;
+    if (data.revenue_share_percent !== undefined)
+      payload.revenueSharePercent = data.revenue_share_percent ?? null;
     if (data.roles != null) payload.roles = data.roles;
     if (data.user_id != null) payload.userId = data.user_id;
     if (data.status != null) payload.status = data.status;
@@ -5266,18 +5897,30 @@ export class StaffService {
           data: payload as Prisma.StaffInfoUpdateArgs['data'],
         });
 
-        if (auditActor) {
-          const afterValue = await this.getStaffAuditSnapshot(tx, data.id);
-          if (afterValue) {
-            await this.actionHistoryService.recordUpdate(tx, {
-              actor: auditActor,
-              entityType: 'staff',
-              entityId: data.id,
-              description: 'Cập nhật nhân sự',
-              beforeValue: existingStaff,
-              afterValue,
-            });
-          }
+        const afterValue =
+          auditActor || options?.roleFixedSalaryOverrides
+            ? await this.getStaffAuditSnapshot(tx, data.id)
+            : null;
+
+        if (auditActor && afterValue) {
+          await this.actionHistoryService.recordUpdate(tx, {
+            actor: auditActor,
+            entityType: 'staff',
+            entityId: data.id,
+            description: 'Cập nhật nhân sự',
+            beforeValue: existingStaff,
+            afterValue,
+          });
+        }
+
+        if (options?.roleFixedSalaryOverrides && data.roles) {
+          await this.fixedSalarySettingsService.syncStaffRoleOverridesInTx(tx, {
+            staffId: data.id,
+            nextRoles: data.roles,
+            items: options.roleFixedSalaryOverrides,
+            staff: afterValue ?? existingStaff,
+            actor: auditActor,
+          });
         }
 
         return data.id;
@@ -5292,6 +5935,21 @@ export class StaffService {
       }
       throw error;
     }
+  }
+
+  async updateStaffWithFixedSalaryOverrides(
+    id: string,
+    data: UpdateStaffWithFixedSalaryOverridesDto,
+    auditActor?: ActionHistoryActor,
+  ) {
+    return this.updateStaff(
+      {
+        ...data,
+        id,
+      },
+      auditActor,
+      { roleFixedSalaryOverrides: data.roleFixedSalaryOverrides },
+    );
   }
 
   async deleteStaff(id: string, auditActor?: ActionHistoryActor) {
@@ -5414,6 +6072,7 @@ export class StaffService {
             bankAccount: data.bank_account,
             bankQrLink: data.bank_qr_link,
             personalAchievementLink: data.personal_achievement_link ?? null,
+            revenueSharePercent: data.revenue_share_percent ?? null,
             roles: data.roles,
             userId: data.user_id,
             customerCareManagedByStaffId: managedByStaffId,

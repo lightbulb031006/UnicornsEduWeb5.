@@ -17,6 +17,7 @@ import * as deductionSettingsApi from "@/lib/apis/deduction-settings.api";
 import {
   EditStaffPopup,
   StaffBonusCard,
+  StaffFixedSalaryIncomeCard,
   StaffCard,
   StaffIdentityOverview,
   QrLinkPopup,
@@ -33,6 +34,7 @@ import {
   StaffDepositPaymentPreview,
   StaffDetail,
   StaffIncomeSummary,
+  StaffOverdueSurveyWarningItem,
   StaffPayDepositSessionsResult,
   StaffPayAllPaymentsResult,
   StaffPaymentPreview,
@@ -61,15 +63,12 @@ import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import PreviewableUserAvatar from "@/components/ui/PreviewableUserAvatar";
 import { pickAvatarUrl } from "@/lib/avatar";
 import { useAuth } from "@/context/AuthContext";
+import { formatVnDate } from "@/lib/formatters";
 
 function formatDate(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(iso));
+    return formatVnDate(new Date(iso));
   } catch {
     return "—";
   }
@@ -86,11 +85,7 @@ function RetiredTeachingLabel() {
 function formatCompactDate(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(new Date(iso));
+    return formatVnDate(new Date(iso));
   } catch {
     return "—";
   }
@@ -264,6 +259,30 @@ function getApiErrorMessage(error: unknown, fallbackMessage: string) {
   }
 
   return fallbackMessage;
+}
+
+/**
+ * Nếu backend chặn thanh toán vì cảnh báo báo cáo khảo sát quá hạn
+ * (`code: SURVEY_OVERDUE_WARNING`, xem `StaffService.guardOverdueSurveyReports`),
+ * trả về danh sách cảnh báo để hiển thị dialog xác nhận; ngược lại trả `null`
+ * để nơi gọi tiếp tục xử lý lỗi như bình thường (toast.error).
+ */
+function extractOverdueSurveyWarning(
+  error: unknown,
+): StaffOverdueSurveyWarningItem[] | null {
+  const data = (
+    error as {
+      response?: {
+        data?: { code?: string; warnings?: StaffOverdueSurveyWarningItem[] };
+      };
+    }
+  )?.response?.data;
+
+  if (data?.code === "SURVEY_OVERDUE_WARNING" && Array.isArray(data.warnings)) {
+    return data.warnings;
+  }
+
+  return null;
 }
 
 function parseRatePercentOrThrow(rawValue: string) {
@@ -754,6 +773,7 @@ export default function AdminStaffDetailPage({
   const depositByClass = incomeSummary?.depositYearByClass ?? [];
   const bonusTotals = incomeSummary?.bonusMonthlyTotals ?? EMPTY_AMOUNT_SUMMARY;
   const otherRoleSummaries = incomeSummary?.otherRoleSummaries ?? [];
+  const fixedSalaryPayables = incomeSummary?.fixedSalaryPayables ?? [];
   const showAssistantDualRoleHelper =
     hasAssistantAndCustomerCareRoles(staff?.roles) &&
     otherRoleSummaries.some((item) => item.role === "assistant");
@@ -1058,17 +1078,30 @@ export default function AdminStaffDetailPage({
 
   const isSavingTaxSettings = createStaffTaxOverrideMutation.isPending;
 
+  /**
+   * Dialog cảnh báo khi backend chặn thanh toán vì nhân sự còn báo cáo khảo
+   * sát quá hạn (`SURVEY_OVERDUE_WARNING`). Kế toán có thể "Bỏ qua, vẫn thanh
+   * toán" (retry request với `confirmOverdueSurveyReports: true`) hoặc hủy.
+   */
+  const [overdueSurveyWarning, setOverdueSurveyWarning] = useState<{
+    warnings: StaffOverdueSurveyWarningItem[];
+    onConfirm: () => void;
+  } | null>(null);
+  const closeOverdueSurveyWarning = () => setOverdueSurveyWarning(null);
+
   const payAllPaymentsMutation = useMutation<
     StaffPayAllPaymentsResult,
     unknown,
-    void
+    { confirm?: boolean } | undefined
   >({
-    mutationFn: () =>
+    mutationFn: (vars) =>
       staffApi.payAllStaffPayments(id, {
         month: selectedMonthValue,
         year: selectedYear,
+        confirmOverdueSurveyReports: vars?.confirm,
       }),
     onSuccess: async (result) => {
+      closeOverdueSurveyWarning();
       if (result.updatedCount > 0) {
         toast.success(
           `Đã chuyển ${result.updatedCount} khoản sang trạng thái đã thanh toán.`,
@@ -1104,6 +1137,14 @@ export default function AdminStaffDetailPage({
       ]);
     },
     onError: (error) => {
+      const warnings = extractOverdueSurveyWarning(error);
+      if (warnings) {
+        setOverdueSurveyWarning({
+          warnings,
+          onConfirm: () => payAllPaymentsMutation.mutate({ confirm: true }),
+        });
+        return;
+      }
       toast.error(
         getApiErrorMessage(error, "Không thể thanh toán tất cả các khoản."),
       );
@@ -1112,9 +1153,9 @@ export default function AdminStaffDetailPage({
   const paySelectedPaymentsMutation = useMutation<
     StaffPayAllPaymentsResult,
     unknown,
-    void
+    { confirm?: boolean } | undefined
   >({
-    mutationFn: () => {
+    mutationFn: (vars) => {
       const items = selectedPaymentItemKeys.map((key) => {
         const separatorIndex = key.indexOf(":");
         const sourceType = key.slice(0, separatorIndex) as StaffPaymentSourceType;
@@ -1126,9 +1167,11 @@ export default function AdminStaffDetailPage({
         month: selectedMonthValue,
         year: selectedYear,
         items,
+        confirmOverdueSurveyReports: vars?.confirm,
       });
     },
     onSuccess: async (result) => {
+      closeOverdueSurveyWarning();
       if (result.updatedCount > 0) {
         toast.success(
           `Đã chuyển ${result.updatedCount} khoản đã chọn sang trạng thái đã thanh toán.`,
@@ -1164,6 +1207,15 @@ export default function AdminStaffDetailPage({
       ]);
     },
     onError: (error) => {
+      const warnings = extractOverdueSurveyWarning(error);
+      if (warnings) {
+        setOverdueSurveyWarning({
+          warnings,
+          onConfirm: () =>
+            paySelectedPaymentsMutation.mutate({ confirm: true }),
+        });
+        return;
+      }
       toast.error(
         getApiErrorMessage(error, "Không thể thanh toán các khoản đã chọn."),
       );
@@ -1172,13 +1224,15 @@ export default function AdminStaffDetailPage({
   const payDepositSessionsMutation = useMutation<
     StaffPayDepositSessionsResult,
     unknown,
-    string[]
+    { sessionIds: string[]; confirm?: boolean }
   >({
-    mutationFn: (sessionIds) =>
+    mutationFn: ({ sessionIds, confirm }) =>
       staffApi.payStaffDepositSessions(id, {
         sessionIds,
+        confirmOverdueSurveyReports: confirm,
       }),
     onSuccess: async (result) => {
+      closeOverdueSurveyWarning();
       if (result.updatedCount > 0) {
         toast.success(
           `Đã thanh toán ${result.updatedCount} buổi cọc không áp vận hành, không áp thuế.`,
@@ -1207,7 +1261,19 @@ export default function AdminStaffDetailPage({
         }),
       ]);
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      const warnings = extractOverdueSurveyWarning(error);
+      if (warnings) {
+        setOverdueSurveyWarning({
+          warnings,
+          onConfirm: () =>
+            payDepositSessionsMutation.mutate({
+              sessionIds: variables.sessionIds,
+              confirm: true,
+            }),
+        });
+        return;
+      }
       toast.error(
         getApiErrorMessage(error, "Không thể thanh toán các buổi cọc đã chọn."),
       );
@@ -1280,7 +1346,7 @@ export default function AdminStaffDetailPage({
       return;
     }
 
-    paySelectedPaymentsMutation.mutate();
+    paySelectedPaymentsMutation.mutate(undefined);
   };
   const closeDepositPopup = () => {
     if (payDepositSessionsMutation.isPending) return;
@@ -1326,7 +1392,9 @@ export default function AdminStaffDetailPage({
       return;
     }
 
-    payDepositSessionsMutation.mutate(selectedDepositSessionIds);
+    payDepositSessionsMutation.mutate({
+      sessionIds: selectedDepositSessionIds,
+    });
   };
 
   const deleteBonusMutation = useMutation({
@@ -1761,18 +1829,20 @@ export default function AdminStaffDetailPage({
 
       <div className="flex flex-col gap-4">
         <StaffIdentityOverview
+          staffId={staff.id}
           birthDateLabel={formatDate(staff.birthDate)}
           province={province}
           ethnicity={staff.ethnicity}
           gender={staff.gender}
           currentAddress={staff.currentAddress}
           university={staff.university}
-          specialization={staff.specialization}
-          personalAchievementLink={staff.personalAchievementLink}
           googleMeetLink={staff.googleMeetLink}
           qrLink={qrLink ?? resolvedQrLink}
           onQrEdit={() => setQrPopupOpen(true)}
           allowQrEdit={!viewingOwnStaffRecordOnStaffShell}
+          allowAchievementEdit={
+            (isAdmin || isAssistant) && !viewingOwnStaffRecordOnStaffShell
+          }
         />
 
         <section
@@ -2414,6 +2484,13 @@ export default function AdminStaffDetailPage({
             );
           })()}
         </StaffCard>
+        <StaffFixedSalaryIncomeCard
+          staffId={id}
+          payables={fixedSalaryPayables}
+          canEdit={canCreateBonus}
+          isLoading={isIncomeSummaryLoading && !incomeSummary}
+          isError={isIncomeSummaryError}
+        />
         <StaffCard title="Thống kê thuế theo role">
           {canEditTaxSettings ? (
             <div className="mb-4 flex justify-end">
@@ -3215,7 +3292,7 @@ export default function AdminStaffDetailPage({
                   {paymentPreviewSummary?.itemCount ? (
                     <button
                       type="button"
-                      onClick={() => payAllPaymentsMutation.mutate()}
+                      onClick={() => payAllPaymentsMutation.mutate(undefined)}
                       disabled={
                         payAllPaymentsMutation.isPending ||
                         paySelectedPaymentsMutation.isPending ||
@@ -3317,6 +3394,7 @@ export default function AdminStaffDetailPage({
                           type="search"
                           value={workTypeSearch}
                           onChange={(e) => setWorkTypeSearch(e.target.value)}
+                          aria-label="Tìm công việc"
                           placeholder="Tìm công việc…"
                           className="w-full rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                         />
@@ -3993,6 +4071,78 @@ export default function AdminStaffDetailPage({
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        </>
+      ) : null}
+
+      {overdueSurveyWarning ? (
+        <>
+          <div
+            className="fixed inset-0 z-[70] bg-bg-primary/80"
+            aria-hidden
+            onClick={closeOverdueSurveyWarning}
+          />
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="overdue-survey-warning-title"
+            className="fixed left-1/2 top-1/2 z-[71] flex max-h-[85vh] w-[calc(100vw-1.5rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-danger/40 bg-bg-surface shadow-2xl sm:w-full"
+          >
+            <div className="border-b border-border-default bg-danger/10 px-5 py-4">
+              <h2
+                id="overdue-survey-warning-title"
+                className="text-base font-semibold text-text-primary"
+              >
+                🔴 Nhân sự còn báo cáo khảo sát quá hạn
+              </h2>
+              <p className="mt-1 text-sm text-text-secondary">
+                Nhân sự này đang phụ trách lớp còn thiếu báo cáo cho bài khảo
+                sát đã quá hạn. Bạn có thể bỏ qua và vẫn thanh toán, hoặc hủy
+                để nhắc gia sư báo cáo trước.
+              </p>
+            </div>
+
+            <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
+              {overdueSurveyWarning.warnings.map((item) => (
+                <div
+                  key={item.surveyId}
+                  className="rounded-lg border border-border-default bg-bg-secondary/40 p-3"
+                >
+                  <p className="text-sm font-semibold text-text-primary">
+                    {item.surveyName}
+                  </p>
+                  <p className="mt-1 text-xs text-text-secondary">
+                    Lớp còn thiếu: {item.classNames.join(", ")}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t border-border-default px-5 py-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeOverdueSurveyWarning}
+                className="min-h-11 rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary hover:bg-bg-secondary"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={overdueSurveyWarning.onConfirm}
+                disabled={
+                  payAllPaymentsMutation.isPending ||
+                  paySelectedPaymentsMutation.isPending ||
+                  payDepositSessionsMutation.isPending
+                }
+                className="min-h-11 rounded-md bg-danger px-4 py-2 text-sm font-semibold text-text-inverse transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {payAllPaymentsMutation.isPending ||
+                paySelectedPaymentsMutation.isPending ||
+                payDepositSessionsMutation.isPending
+                  ? "Đang xử lý…"
+                  : "Bỏ qua, vẫn thanh toán"}
+              </button>
             </div>
           </div>
         </>

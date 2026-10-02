@@ -17,6 +17,7 @@ import {
   ActionHistoryService,
 } from 'src/action-history/action-history.service';
 import { AuthService } from 'src/auth/auth.service';
+import type { PublicRequestOrigin } from 'src/mail/public-frontend-url';
 import { STAFF_DATA_CONSENT_VERSION } from 'src/auth/constants';
 import {
   UpdateMyProfileDto,
@@ -32,11 +33,20 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   createSignedStorageUrl,
-  getSupabaseAdminClient,
   normalizeHttpHttpsUrl,
+  removeStorageObjects,
+  uploadStorageObject,
   type UploadableFile,
   validateImageFile,
 } from 'src/storage/supabase-storage';
+import {
+  bakeDiagonalWatermark,
+  buildAvatarWatermarkedPath,
+} from 'src/storage/image-watermark';
+import {
+  AVATAR_PUBLIC_BUCKET,
+  AVATAR_STORAGE_BUCKET,
+} from 'src/storage/media-buckets';
 import {
   getUserFullNameFromParts,
   getPreferredUserFullName,
@@ -44,7 +54,6 @@ import {
 } from 'src/common/user-name.util';
 
 type UserAuditClient = Prisma.TransactionClient | PrismaService;
-const AVATAR_STORAGE_BUCKET = 'avatars';
 const AVATAR_STORAGE_PATH_SEGMENT = 'avatar';
 const AVATAR_SIGNED_URL_TTL_SECONDS = 60 * 60;
 
@@ -52,6 +61,9 @@ function normalizeOptionalText(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 }
+
+// Hoist ở module scope: tránh dựng lại Object.values(StaffRole) mỗi phần tử filter.
+const STAFF_ROLE_VALUES = new Set<StaffRole>(Object.values(StaffRole));
 
 @Injectable()
 export class UserService {
@@ -278,7 +290,7 @@ export class UserService {
     const normalizedRoles = Array.from(
       new Set(
         staffRoles.filter((role): role is StaffRole =>
-          Object.values(StaffRole).includes(role),
+          STAFF_ROLE_VALUES.has(role as StaffRole),
         ),
       ),
     );
@@ -397,7 +409,11 @@ export class UserService {
     return this.serializeUserDetail(user);
   }
 
-  async createUser(data: AdminCreateUserDto, auditActor?: ActionHistoryActor) {
+  async createUser(
+    data: AdminCreateUserDto,
+    auditActor?: ActionHistoryActor,
+    emailLinkOrigin?: PublicRequestOrigin,
+  ) {
     const nextRoleType = data.roleType ?? UserRole.guest;
     if (nextRoleType === UserRole.student && !getUserFullNameFromParts(data)) {
       throw new BadRequestException('Vui lòng nhập tên học sinh.');
@@ -408,7 +424,11 @@ export class UserService {
         auditActor,
         createDescription: 'Tạo người dùng từ trang quản trị',
         updateDescription: 'Cập nhật user pending từ trang quản trị',
-        successMessage: 'Tạo user thành công. Email xác thực đã được gửi.',
+        successMessage: data.emailVerified
+          ? 'Tạo user thành công (đã xác thực email).'
+          : 'Tạo user thành công. Email xác thực đã được gửi.',
+        emailVerified: data.emailVerified,
+        emailLinkOrigin,
       });
 
     if (nextRoleType === UserRole.guest) {
@@ -433,6 +453,9 @@ export class UserService {
         ...(nextRoleType === UserRole.staff && data.staffRoles
           ? { staffRoles: data.staffRoles }
           : {}),
+        ...(data.emailVerified !== undefined
+          ? { emailVerified: data.emailVerified }
+          : {}),
       },
       auditActor,
     );
@@ -443,6 +466,7 @@ export class UserService {
   async createStudentUser(
     data: AdminCreateStudentUserDto,
     auditActor?: ActionHistoryActor,
+    emailLinkOrigin?: PublicRequestOrigin,
   ) {
     const classIds = Array.from(new Set(data.class_ids));
     if (classIds.length > 0) {
@@ -460,7 +484,11 @@ export class UserService {
         auditActor,
         createDescription: 'Tạo học sinh đầy đủ từ trang quản trị',
         updateDescription: 'Cập nhật user pending từ luồng tạo học sinh',
-        successMessage: 'Tạo học sinh thành công. Email xác thực đã được gửi.',
+        successMessage: data.emailVerified
+          ? 'Tạo học sinh thành công (đã xác thực email).'
+          : 'Tạo học sinh thành công. Email xác thực đã được gửi.',
+        emailVerified: data.emailVerified,
+        emailLinkOrigin,
       });
 
     const createdUser = await this.prisma.user.findUnique({
@@ -561,6 +589,7 @@ export class UserService {
               data: {
                 status: StudentClassStatus.active,
                 customStudentTuitionPerSession: null,
+                customTuitionPerBlock: null,
                 customTuitionPackageTotal: null,
                 customTuitionPackageSession: null,
               },
@@ -1052,24 +1081,37 @@ export class UserService {
     }
 
     const avatarPath = this.buildAvatarStoragePath(userId);
-    const supabase = getSupabaseAdminClient();
-    const uploadResult = await supabase.storage
-      .from(AVATAR_STORAGE_BUCKET)
-      .upload(avatarPath, file.buffer, {
-        upsert: true,
-        contentType: file.mimetype,
-      });
+    const avatarWatermarkedPath = buildAvatarWatermarkedPath(userId);
+    const watermarked = await bakeDiagonalWatermark(file.buffer);
 
-    if (uploadResult.error) {
-      throw new BadRequestException(
-        uploadResult.error.message || 'Không thể tải ảnh đại diện lên.',
-      );
+    await uploadStorageObject({
+      bucket: AVATAR_STORAGE_BUCKET,
+      path: avatarPath,
+      body: file.buffer,
+      contentType: file.mimetype,
+      upsert: true,
+    });
+
+    try {
+      await uploadStorageObject({
+        bucket: AVATAR_PUBLIC_BUCKET,
+        path: avatarWatermarkedPath,
+        body: watermarked.buffer,
+        contentType: watermarked.contentType,
+        upsert: true,
+      });
+    } catch (error) {
+      await removeStorageObjects({
+        bucket: AVATAR_STORAGE_BUCKET,
+        paths: [avatarPath],
+      }).catch(() => undefined);
+      throw error;
     }
 
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },
-        data: { avatarPath },
+        data: { avatarPath, avatarWatermarkedPath },
       });
 
       if (auditActor) {
@@ -1097,25 +1139,23 @@ export class UserService {
       throw new UnauthorizedException('User not found');
     }
 
-    if (!existing.avatarPath) {
+    if (!existing.avatarPath && !existing.avatarWatermarkedPath) {
       return this.getFullProfile(userId);
     }
 
-    const supabase = getSupabaseAdminClient();
-    const deleteResult = await supabase.storage
-      .from(AVATAR_STORAGE_BUCKET)
-      .remove([existing.avatarPath]);
-
-    if (deleteResult.error) {
-      throw new BadRequestException(
-        deleteResult.error.message || 'Không thể xoá ảnh đại diện hiện tại.',
-      );
-    }
+    await removeStorageObjects({
+      bucket: AVATAR_STORAGE_BUCKET,
+      paths: [existing.avatarPath],
+    });
+    await removeStorageObjects({
+      bucket: AVATAR_PUBLIC_BUCKET,
+      paths: [existing.avatarWatermarkedPath],
+    });
 
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },
-        data: { avatarPath: null },
+        data: { avatarPath: null, avatarWatermarkedPath: null },
       });
 
       if (auditActor) {

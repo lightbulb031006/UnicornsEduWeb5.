@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
 import { toast } from "sonner";
 import * as authApi from "@/lib/apis/auth.api";
 import type { LoginDto } from "@/dtos/Auth.dto";
@@ -26,6 +27,8 @@ function hasAuthenticatedSession(user: { id: string; accountHandle: string }) {
   return Boolean(user.id && user.accountHandle);
 }
 
+type LoginStep = "form" | "pending" | "blocked";
+
 function LoginPageContent() {
   const { replace } = useRouter();
   const queryClient = useQueryClient();
@@ -37,40 +40,63 @@ function LoginPageContent() {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const { setUser, user, isAuthReady } = useAuth();
 
+  // Student login flow state
+  const [loginStep, setLoginStep] = useState<LoginStep>(() => {
+    const err = getSearchParam("error");
+    return err === "device_blocked" ? "blocked" : "form";
+  });
+  const [activateSecret, setActivateSecret] = useState<string | null>(null);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const existingSessionRedirectRef = useRef<string | null>(null);
+  const [isActivating, setIsActivating] = useState(false);
+
   useEffect(() => {
     const err = getSearchParam("error");
     if (err === "registration_disabled") {
       toast.error("Tài khoản chưa tồn tại trong hệ thống. Vui lòng liên hệ quản trị viên để được cấp tài khoản.");
-      return;
     }
     if (err === "google_no_user") toast.error("Không lấy được thông tin từ Google. Vui lòng thử lại.");
   }, [getSearchParam]);
 
-  const loginMutation = useMutation({
+  // Cleanup poll timer on unmount
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Staff/admin login (existing flow)
+  const staffLoginMutation = useMutation({
     mutationFn: async (body: LoginDto) => {
       const loginResponse = await authApi.logIn(body);
       return loginResponse;
     },
     onSuccess: async (loginResponse) => {
       setIsRedirecting(true);
-      toast.success("Đăng nhập thành công.");
+      try {
+        const fallbackSession = buildLoginFallbackSession(loginResponse);
+        setUser(fallbackSession);
+        queryClient.setQueryData(["auth", "session"], fallbackSession);
 
-      const fallbackSession = buildLoginFallbackSession(loginResponse);
-      setUser(fallbackSession);
-      queryClient.setQueryData(["auth", "session"], fallbackSession);
+        const { session, redirectHref } = await bootstrapPostLoginSession({
+          fallbackUser: fallbackSession,
+          queryClient,
+          setUser,
+          requestedNextPath: getSearchParam("next"),
+        });
 
-      const { session, redirectHref } = await bootstrapPostLoginSession({
-        fallbackUser: fallbackSession,
-        queryClient,
-        setUser,
-        requestedNextPath: getSearchParam("next"),
-      });
-
-      replace(
-        session.requiresPasswordSetup
-          ? buildSetupPasswordHref(redirectHref)
-          : redirectHref,
-      );
+        toast.success("Đăng nhập thành công.");
+        replace(
+          session.requiresPasswordSetup
+            ? buildSetupPasswordHref(redirectHref)
+            : redirectHref,
+        );
+      } catch (error) {
+        setIsRedirecting(false);
+        toast.error(getLoginErrorToastMessage(error));
+      }
     },
     onError: (error) => {
       setIsRedirecting(false);
@@ -78,8 +104,110 @@ function LoginPageContent() {
     },
   });
 
+  // Student login init
+  const studentLoginInitMutation = useMutation({
+    mutationFn: async (body: LoginDto) => {
+      return authApi.studentLoginInit(body);
+    },
+    onSuccess: (response) => {
+      setActivateSecret(response.activateSecret);
+      setLoginStep("pending");
+      toast.success("Đã gửi email xác minh. Vui lòng kiểm tra hộp thư.");
+      startPolling(response.requestId);
+    },
+    onError: (error) => {
+      if (isAxiosError(error) && error.response?.status === 400) {
+        const errorCode = error.response.data?.error;
+        if (errorCode === "NOT_STUDENT_ACCOUNT") {
+          // Non-student account → fallback to staff/admin login
+          staffLoginMutation.mutate({ accountHandle, password, rememberMe });
+          return;
+        }
+        // EMAIL_NOT_VERIFIED or other 400 → show backend message
+        toast.error(
+          error.response.data?.message || "Đăng nhập thất bại.",
+        );
+        return;
+      }
+      if (isAxiosError(error) && error.response?.status === 409) {
+        setLoginStep("blocked");
+        return;
+      }
+      toast.error(getLoginErrorToastMessage(error));
+    },
+  });
+
+  // Student activate
+  const studentActivateMutation = useMutation({
+    mutationFn: async (reqId: string) => {
+      if (!activateSecret) throw new Error("Missing activation secret");
+      return authApi.studentActivate({
+        requestId: reqId,
+        activateSecret,
+        rememberMe,
+      });
+    },
+    onSuccess: async () => {
+      setIsActivating(true);
+      try {
+        const session = await authApi.getSession();
+        const fallbackSession = buildLoginFallbackSession({
+          id: session.id,
+          accountHandle: session.accountHandle,
+          roleType: session.roleType,
+          avatarUrl: session.avatarUrl,
+        });
+        setUser(fallbackSession);
+        queryClient.setQueryData(["auth", "session"], fallbackSession);
+
+        const { redirectHref } = await bootstrapPostLoginSession({
+          fallbackUser: fallbackSession,
+          queryClient,
+          setUser,
+          requestedNextPath: getSearchParam("next"),
+        });
+
+        toast.success("Đăng nhập thành công.");
+        replace(redirectHref);
+      } catch (error) {
+        setIsActivating(false);
+        toast.error(getLoginErrorToastMessage(error));
+      }
+    },
+    onError: (error) => {
+      setIsActivating(false);
+      toast.error(getLoginErrorToastMessage(error));
+    },
+  });
+
+  const startPolling = (reqId: string) => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+    }
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const result = await authApi.studentLoginPoll(reqId);
+        if (result.verified) {
+          if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+          }
+          // Activate device
+          studentActivateMutation.mutate(reqId);
+        }
+      } catch {
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+        toast.error("Phiên đăng nhập đã hết hạn. Vui lòng thử lại.");
+        setLoginStep("form");
+      }
+    }, 2000); // Poll every 2 seconds
+  };
+
   useEffect(() => {
-    if (!isAuthReady || loginMutation.isPending || isRedirecting) {
+    if (!isAuthReady || staffLoginMutation.isPending || isRedirecting || isActivating) {
       return;
     }
 
@@ -87,7 +215,8 @@ function LoginPageContent() {
       return;
     }
 
-    setIsRedirecting(true);
+    if (existingSessionRedirectRef.current === user.id) return;
+    existingSessionRedirectRef.current = user.id;
     const nextPath = readSafeNextPath(getSearchParam("next"));
     void bootstrapPostLoginSession({
       fallbackUser: user,
@@ -95,13 +224,18 @@ function LoginPageContent() {
       setUser,
       requestedNextPath: nextPath,
     }).then(({ redirectHref }) => {
+      setIsRedirecting(true);
       replace(redirectHref);
+    }).catch((error: unknown) => {
+      existingSessionRedirectRef.current = null;
+      toast.error(getLoginErrorToastMessage(error));
     });
   }, [
     getSearchParam,
     isAuthReady,
     isRedirecting,
-    loginMutation.isPending,
+    isActivating,
+    staffLoginMutation.isPending,
     queryClient,
     replace,
     setUser,
@@ -110,9 +244,112 @@ function LoginPageContent() {
 
   const handleSubmit = (e: SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
-    loginMutation.mutate({ accountHandle, password, rememberMe });
+
+    // Try student login first (it will fail with 400 for non-students)
+    studentLoginInitMutation.mutate({ accountHandle, password, rememberMe });
   };
 
+  const handleBackToForm = () => {
+    setLoginStep("form");
+    setActivateSecret(null);
+    setAccountHandle("");
+    setPassword("");
+    setRememberMe(false);
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  const isLoading =
+    staffLoginMutation.isPending ||
+    studentLoginInitMutation.isPending ||
+    isRedirecting ||
+    isActivating;
+
+  // Blocked device screen
+  if (loginStep === "blocked") {
+    return (
+      <div className="flex min-h-dvh items-start justify-center bg-bg-primary px-4 py-6 sm:items-center sm:py-10">
+        <div className="w-full max-w-md motion-fade-up">
+          <div className="rounded-2xl border border-border-default bg-bg-surface p-5 shadow-lg motion-hover-lift sm:p-8">
+            <div className="mb-6 flex justify-center px-1 sm:mb-8">
+              <BrandLogoLockup
+                variant="auth"
+                className="max-w-full flex-wrap justify-center"
+                priority
+              />
+            </div>
+            <h1 className="text-2xl font-semibold text-text-primary text-center mb-4">
+              Tài khoản đang bị chặn
+            </h1>
+            <div className="rounded-lg bg-error/10 border border-error/20 p-4 mb-6">
+              <p className="text-sm text-error text-center">
+                Tài khoản này đang đăng nhập ở thiết bị khác. Mỗi học sinh chỉ được phép đăng nhập trên một thiết bị tại một thời điểm.
+              </p>
+            </div>
+            <div className="space-y-3 text-sm text-text-secondary">
+              <p className="font-medium text-text-primary">Cách khắc phục:</p>
+              <ul className="list-disc list-inside space-y-1.5">
+                <li>Đăng xuất trên thiết bị đang dùng</li>
+                <li>Liên hệ giáo viên hoặc quản trị viên để buộc đăng xuất</li>
+              </ul>
+            </div>
+            <button
+              onClick={handleBackToForm}
+              className="mt-6 w-full rounded-lg bg-primary py-2.5 font-medium text-text-inverse hover:bg-primary-hover active:bg-primary-active focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 transition-colors duration-200"
+            >
+              Thử lại
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Pending verification screen
+  if (loginStep === "pending") {
+    return (
+      <div className="flex min-h-dvh items-start justify-center bg-bg-primary px-4 py-6 sm:items-center sm:py-10">
+        <div className="w-full max-w-md motion-fade-up">
+          <div className="rounded-2xl border border-border-default bg-bg-surface p-5 shadow-lg motion-hover-lift sm:p-8">
+            <div className="mb-6 flex justify-center px-1 sm:mb-8">
+              <BrandLogoLockup
+                variant="auth"
+                className="max-w-full flex-wrap justify-center"
+                priority
+              />
+            </div>
+            <h1 className="text-2xl font-semibold text-text-primary text-center mb-4">
+              Kiểm tra email của bạn
+            </h1>
+            <div className="rounded-lg bg-primary/10 border border-primary/20 p-4 mb-6">
+              <p className="text-sm text-primary text-center">
+                Chúng tôi đã gửi liên kết xác minh đến email của bạn. Vui lòng kiểm tra hộp thư và bấm liên kết để hoàn tất đăng nhập.
+              </p>
+            </div>
+            <div className="text-center text-sm text-text-secondary mb-6">
+              <p>Đang chờ xác minh…</p>
+              <div className="mt-3 flex justify-center">
+                <div className="size-6 animate-spin rounded-full border-2 border-border-default border-t-primary" />
+              </div>
+            </div>
+            <p className="text-xs text-text-muted text-center mb-4">
+              Liên kết hết hạn sau 10 phút.
+            </p>
+            <button
+              onClick={handleBackToForm}
+              className="w-full rounded-lg border border-border-default bg-bg-surface py-2.5 font-medium text-text-primary hover:bg-bg-tertiary focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 transition-colors duration-200"
+            >
+              Hủy và quay lại
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Login form
   return (
     <div className="flex min-h-dvh items-start justify-center bg-bg-primary px-4 py-6 sm:items-center sm:py-10">
       <div className="w-full max-w-md motion-fade-up">
@@ -185,10 +422,10 @@ function LoginPageContent() {
 
             <button
               type="submit"
-              disabled={loginMutation.isPending || isRedirecting}
+              disabled={isLoading}
               className="w-full rounded-lg bg-primary py-2.5 font-medium text-text-inverse hover:bg-primary-hover active:bg-primary-active focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 disabled:opacity-60 transition-colors duration-200"
             >
-              {loginMutation.isPending ? "Đang đăng nhập…" : isRedirecting ? "Đang chuyển tiếp…" : "Đăng nhập"}
+              {isLoading ? "Đang đăng nhập…" : "Đăng nhập"}
             </button>
 
             <div className="relative my-4">

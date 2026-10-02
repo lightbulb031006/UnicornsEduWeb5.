@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DateInput } from "@/components/ui/DateInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import AchievementListEditor from "@/components/shared/achievement/AchievementListEditor";
 import type { FullProfileDto } from "@/dtos/profile.dto";
 import type { StaffGender } from "@/dtos/staff.dto";
 import {
@@ -45,7 +46,7 @@ export default function StaffSelfEditPopup({
   const staffInfo = profile.staffInfo;
 
   const [fullName, setFullName] = useState(
-    resolveCanonicalUserName(profile, staffInfo?.fullName),
+    () => resolveCanonicalUserName(profile, staffInfo?.fullName),
   );
   const [cccdNumber, setCccdNumber] = useState(staffInfo?.cccdNumber ?? "");
   const [ethnicity, setEthnicity] = useState(staffInfo?.ethnicity ?? "");
@@ -56,22 +57,18 @@ export default function StaffSelfEditPopup({
     staffInfo?.currentAddress ?? "",
   );
   const [cccdIssuedDateInput, setCccdIssuedDateInput] = useState(
-    formatDateInput(staffInfo?.cccdIssuedDate),
+    () => formatDateInput(staffInfo?.cccdIssuedDate),
   );
   const [cccdIssuedPlace, setCccdIssuedPlace] = useState(
     staffInfo?.cccdIssuedPlace ?? "",
   );
   const [birthDateInput, setBirthDateInput] = useState(
-    formatDateInput(staffInfo?.birthDate),
+    () => formatDateInput(staffInfo?.birthDate),
   );
   const [university, setUniversity] = useState(staffInfo?.university ?? "");
   const [highSchool, setHighSchool] = useState(staffInfo?.highSchool ?? "");
-  const [specialization, setSpecialization] = useState(
-    staffInfo?.specialization ?? "",
-  );
   const [bankAccount, setBankAccount] = useState(staffInfo?.bankAccount ?? "");
   const [bankQrLink, setBankQrLink] = useState(staffInfo?.bankQrLink ?? "");
-  const [personalAchievementLink, setPersonalAchievementLink] = useState(staffInfo?.personalAchievementLink ?? "");
 
   const isSaving = false;
 
@@ -106,10 +103,8 @@ export default function StaffSelfEditPopup({
           birth_date: birthDateInput.trim() || undefined,
           university: university.trim(),
           high_school: highSchool.trim(),
-          specialization: specialization.trim(),
           bank_account: bankAccount.trim(),
           bank_qr_link: bankQrLink.trim(),
-          personal_achievement_link: personalAchievementLink.trim() || null,
         });
       },
       onSuccess: async () => {
@@ -347,24 +342,12 @@ export default function StaffSelfEditPopup({
                 />
               </label>
 
-              <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-                <span>Mô tả chuyên môn</span>
-                <textarea
-                  name="specialization"
-                  value={specialization}
-                  onChange={(event) => setSpecialization(event.target.value)}
-                  rows={4}
-                  autoComplete="off"
-                  disabled={isSaving}
-                  className="min-h-[6.5rem] resize-y rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 leading-relaxed text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                  placeholder="Ví dụ: Toán, Lý, luyện thi, chăm sóc học viên…"
+              <div className="sm:col-span-2">
+                <AchievementListEditor
+                  owner={{ kind: "staff", mode: "self" }}
+                  heading="Thành tích"
                 />
-                <p className="text-xs text-text-muted">
-                  Hiển thị bằng Markdown từ nội dung đã lưu (gạch đầu dòng <code className="rounded bg-bg-tertiary px-1">-</code> /{" "}
-                  <code className="rounded bg-bg-tertiary px-1">*</code>, in đậm <code className="rounded bg-bg-tertiary px-1">**…**</code>, liên kết{" "}
-                  <code className="rounded bg-bg-tertiary px-1">[text](url)</code>).
-                </p>
-              </label>
+              </div>
 
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Số tài khoản ngân hàng</span>
@@ -394,26 +377,6 @@ export default function StaffSelfEditPopup({
                   className="rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   placeholder="https://…"
                 />
-              </label>
-
-              <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-                <span>Minh chứng thành tích</span>
-                <input
-                  name="personalAchievementLink"
-                  type="url"
-                  required
-                  value={personalAchievementLink}
-                  onChange={(event) => setPersonalAchievementLink(event.target.value)}
-                  autoComplete="url"
-                  spellCheck={false}
-                  disabled={isSaving}
-                  className="rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                  placeholder="https://drive.google.com/…"
-                />
-                <p className="text-xs text-text-muted">
-                  Link Google Drive hoặc trang http(s) lưu minh chứng thành tích.
-                  Bắt buộc để hoàn tất hồ sơ nhân sự.
-                </p>
               </label>
             </div>
           </section>

@@ -27,6 +27,7 @@ import type {
   UpdateLessonResourcePayload,
   UpdateLessonTaskPayload,
 } from "@/dtos/lesson.dto";
+import { isLessonOutputDifficultyBand } from "@/lib/lesson-output-pricing";
 import { api } from "../client";
 
 function normalizeStringList(value: unknown): string[] {
@@ -256,6 +257,13 @@ function normalizeLessonOutputItem(
     source: value?.source ?? null,
     originalLink: value?.originalLink ?? null,
     level: value?.level ?? null,
+    difficultyBand: (() => {
+      const band = value?.difficultyBand;
+      return isLessonOutputDifficultyBand(band) ? band : null;
+    })(),
+    includesTest: value?.includesTest === true,
+    includesSolution: value?.includesSolution === true,
+    includesLectureVideo: value?.includesLectureVideo === true,
     tags: normalizeStringList(value?.tags),
     cost:
       typeof value?.cost === "number" && Number.isFinite(value.cost)

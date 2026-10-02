@@ -1,8 +1,12 @@
+import path from "path";
 import type { NextConfig } from "next";
 import { PUBLIC_API_BASE } from "./lib/api-base-url";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  turbopack: {
+    root: path.join(__dirname, "../.."),
+  },
   images: {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920],

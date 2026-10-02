@@ -35,9 +35,24 @@ function decodeHtmlEntities(value: string): string {
     .replace(/\u00a0/g, " ");
 }
 
+/** Chuyển <a href="URL">label</a> thành "label (URL)" (hoặc chỉ URL nếu label trùng URL) trước khi các bước sau strip mất href. */
+function replaceAnchorsWithPlainText(value: string): string {
+  return value.replace(
+    /<a\b[^>]*\bhref=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    (_match, hrefRaw: string, innerHtml: string) => {
+      const url = decodeHtmlEntities(hrefRaw).trim();
+      const label = stripInlineHtml(innerHtml);
+
+      if (!url) return label;
+      if (!label || label === url) return url;
+      return `${label} (${url})`;
+    },
+  );
+}
+
 function stripInlineHtml(value: string): string {
   return decodeHtmlEntities(
-    value
+    replaceAnchorsWithPlainText(value)
       .replace(/<br\s*\/?>/gi, " ")
       .replace(/<[^>]+>/g, "")
       .replace(/\s+/g, " "),
@@ -57,7 +72,7 @@ export function richTextToPlainTextPreservingStructure(
 ): string {
   if (!value) return "";
 
-  let html = String(value);
+  let html = replaceAnchorsWithPlainText(String(value));
 
   html = html.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, listContent: string) => {
     let index = 0;

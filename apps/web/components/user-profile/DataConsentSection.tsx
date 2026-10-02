@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import type { UserInfoDto } from "@/dtos/Auth.dto";
 import type { FullProfileDto } from "@/dtos/profile.dto";
 import * as authApi from "@/lib/apis/auth.api";
+import { formatVnDateTime } from "@/lib/formatters";
 
 const CONSENT_MARKDOWN = `# ĐIỀU KHOẢN ĐỒNG Ý TẠO TÀI KHOẢN, THU THẬP VÀ XỬ LÝ DỮ LIỆU CÁ NHÂN
 
@@ -172,13 +173,7 @@ type DataConsentSectionProps = {
 function formatConsentDate(value?: string | null) {
   if (!value) return "chưa có thời điểm xác nhận";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return formatVnDateTime(new Date(value));
   } catch {
     return "chưa có thời điểm xác nhận";
   }

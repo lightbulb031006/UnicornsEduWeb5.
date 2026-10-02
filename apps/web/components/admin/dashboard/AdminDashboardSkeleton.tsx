@@ -108,6 +108,22 @@ function FinancialReportTableSkeleton() {
   );
 }
 
+export function CustomerSourceSectionSkeleton() {
+  return (
+    <section className="overflow-hidden rounded-xl border border-border-default bg-bg-surface shadow-sm" aria-hidden>
+      <div className="space-y-2 px-5 py-4 sm:px-6 sm:py-5">
+        <SkeletonLine className="h-5 w-36" />
+        <SkeletonLine className="h-4 w-72 max-w-full" />
+      </div>
+      <div className="space-y-3 border-t border-border-default p-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <SkeletonLine key={`customer-source-skeleton-${index}`} className="h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function AdminDashboardFinancialReportSkeleton() {
   return (
     <section className="overflow-hidden rounded-xl border border-border-default bg-bg-surface shadow-sm">
@@ -215,6 +231,7 @@ export function AdminDashboardSkeleton({
           <>
             <KpiCardsSkeleton />
             <AdminDashboardFinancialReportSkeleton />
+            <CustomerSourceSectionSkeleton />
             <AlertGroupsSkeleton />
             <QuickViewSkeleton />
           </>

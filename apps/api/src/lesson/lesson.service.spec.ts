@@ -7,6 +7,7 @@ jest.mock('../../generated/client', () => ({
 
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
+  LessonOutputDifficultyBand,
   LessonOutputStatus,
   LessonTaskPriority,
   LessonTaskStatus,
@@ -1768,7 +1769,7 @@ describe('LessonService', () => {
       originalLink: 'https://example.com/original-output',
       level: 'HSG tỉnh',
       tags: ['hsg', 'hinh-hoc'],
-      cost: 250000,
+      cost: 0,
       date: new Date('2026-03-28T00:00:00.000Z'),
       contestUploaded: 'Vĩnh Phúc HSG 2024',
       link: 'https://example.com/final-output',
@@ -1822,8 +1823,12 @@ describe('LessonService', () => {
           source: 'Vĩnh Phúc HSG 2024',
           originalLink: 'https://example.com/original-output',
           level: 'HSG tỉnh',
+          difficultyBand: null,
+          includesTest: false,
+          includesSolution: false,
+          includesLectureVideo: false,
           tags: ['hsg', 'hinh-hoc'],
-          cost: 250000,
+          cost: 0,
           paymentStatus: PaymentStatus.pending,
           date: new Date('2026-03-28T00:00:00.000Z'),
           contestUploaded: 'Vĩnh Phúc HSG 2024',
@@ -1844,8 +1849,12 @@ describe('LessonService', () => {
       source: 'Vĩnh Phúc HSG 2024',
       originalLink: 'https://example.com/original-output',
       level: 'HSG tỉnh',
+      difficultyBand: null,
+      includesTest: false,
+      includesSolution: false,
+      includesLectureVideo: false,
       tags: ['hsg', 'hinh-hoc'],
-      cost: 250000,
+      cost: 0,
       date: '2026-03-28',
       contestUploaded: 'Vĩnh Phúc HSG 2024',
       link: 'https://example.com/final-output',
@@ -1920,6 +1929,10 @@ describe('LessonService', () => {
           source: 'Codeforces',
           originalLink: 'https://example.com/original-taskless',
           level: 'Level 5',
+          difficultyBand: null,
+          includesTest: false,
+          includesSolution: false,
+          includesLectureVideo: false,
           tags: ['checker'],
           cost: 0,
           paymentStatus: PaymentStatus.pending,
@@ -1941,6 +1954,10 @@ describe('LessonService', () => {
       source: 'Codeforces',
       originalLink: 'https://example.com/original-taskless',
       level: 'Level 5',
+      difficultyBand: null,
+      includesTest: false,
+      includesSolution: false,
+      includesLectureVideo: false,
       tags: ['checker'],
       cost: 0,
       date: '2026-03-29',
@@ -2133,6 +2150,10 @@ describe('LessonService', () => {
       source: 'Codeforces',
       originalLink: 'https://example.com/original',
       level: 'Level 2',
+      difficultyBand: null,
+      includesTest: false,
+      includesSolution: false,
+      includesLectureVideo: false,
       tags: ['graph'],
       cost: 120000,
       date: '2026-03-31',
@@ -2495,16 +2516,269 @@ describe('LessonService', () => {
         priority: LessonTaskPriority.medium,
       },
     });
+    mockPrisma.lessonOutput.update.mockResolvedValue({
+      id: 'output-56',
+      lessonTaskId: 'task-participant-56',
+      lessonName: 'Bài khóa cost',
+      originalTitle: null,
+      source: null,
+      originalLink: null,
+      level: null,
+      tags: [],
+      cost: 150000,
+      date: new Date('2026-03-30T00:00:00.000Z'),
+      contestUploaded: null,
+      link: null,
+      staffId: 'staff-output-56',
+      status: LessonOutputStatus.pending,
+      paymentStatus: PaymentStatus.pending,
+      createdAt: new Date('2026-03-30T08:00:00.000Z'),
+      updatedAt: new Date('2026-03-30T09:00:00.000Z'),
+      staff: {
+        id: 'staff-output-56',
+        fullName: 'Le Thi D',
+        roles: ['lesson_plan'],
+        status: 'active',
+      },
+      lessonTask: {
+        id: 'task-participant-56',
+        title: 'Task participant 56',
+        status: LessonTaskStatus.pending,
+        priority: LessonTaskPriority.medium,
+      },
+    });
+
+    const result = await service.updateOutput(
+      'output-56',
+      {
+        cost: 160000,
+      },
+      undefined,
+      {
+        id: 'user-participant',
+        roleType: UserRole.staff,
+      } as never,
+    );
+
+    expect(mockPrisma.lessonOutput.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({
+          cost: 160000,
+        }) as unknown,
+      }) as unknown,
+    );
+    expect(result.cost).toBe(150000);
+  });
+
+  it('computes create cost from difficulty band and ticks and ignores client cost', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue(null);
+    mockPrisma.lessonOutput.create.mockResolvedValue({
+      id: 'output-priced-1',
+      lessonTaskId: null,
+      lessonName: 'Bài tính tiền',
+      originalTitle: null,
+      source: null,
+      originalLink: null,
+      level: 'Level 2',
+      difficultyBand: LessonOutputDifficultyBand.hard,
+      includesTest: true,
+      includesSolution: true,
+      includesLectureVideo: false,
+      tags: ['priced'],
+      cost: 45000,
+      date: new Date('2026-09-09T00:00:00.000Z'),
+      contestUploaded: null,
+      link: null,
+      staffId: null,
+      status: LessonOutputStatus.pending,
+      paymentStatus: PaymentStatus.pending,
+      createdAt: new Date('2026-09-09T08:00:00.000Z'),
+      updatedAt: new Date('2026-09-09T08:00:00.000Z'),
+      staff: null,
+      lessonTask: null,
+    });
+
+    const result = await service.createOutput({
+      lessonName: 'Bài tính tiền',
+      date: '2026-09-09',
+      tags: ['priced'],
+      cost: 999999,
+      difficultyBand: LessonOutputDifficultyBand.hard,
+      includesTest: true,
+      includesSolution: true,
+      includesLectureVideo: false,
+    });
+
+    expect(mockPrisma.lessonOutput.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          difficultyBand: LessonOutputDifficultyBand.hard,
+          includesTest: true,
+          includesSolution: true,
+          includesLectureVideo: false,
+          cost: 45000,
+        }) as unknown,
+      }) as unknown,
+    );
+    expect(result.cost).toBe(45000);
+  });
+
+  it('saves cost 0 when a band is chosen but no pricing items are ticked', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue(null);
+    mockPrisma.lessonOutput.create.mockResolvedValue({
+      id: 'output-priced-0',
+      lessonTaskId: null,
+      lessonName: 'Bài chưa tick',
+      originalTitle: null,
+      source: null,
+      originalLink: null,
+      level: null,
+      difficultyBand: LessonOutputDifficultyBand.easy,
+      includesTest: false,
+      includesSolution: false,
+      includesLectureVideo: false,
+      tags: ['empty'],
+      cost: 0,
+      date: new Date('2026-09-09T00:00:00.000Z'),
+      contestUploaded: null,
+      link: null,
+      staffId: null,
+      status: LessonOutputStatus.pending,
+      paymentStatus: PaymentStatus.pending,
+      createdAt: new Date('2026-09-09T08:00:00.000Z'),
+      updatedAt: new Date('2026-09-09T08:00:00.000Z'),
+      staff: null,
+      lessonTask: null,
+    });
+
+    await service.createOutput({
+      lessonName: 'Bài chưa tick',
+      date: '2026-09-09',
+      tags: ['empty'],
+      difficultyBand: LessonOutputDifficultyBand.easy,
+    });
+
+    expect(mockPrisma.lessonOutput.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          difficultyBand: LessonOutputDifficultyBand.easy,
+          cost: 0,
+        }) as unknown,
+      }) as unknown,
+    );
+  });
+
+  it('keeps legacy cost when updating an output that has no difficulty band', async () => {
+    mockPrisma.lessonOutput.findUnique.mockResolvedValue({
+      id: 'output-legacy-1',
+      lessonTaskId: null,
+      lessonName: 'Bài cũ',
+      originalTitle: null,
+      source: null,
+      originalLink: null,
+      level: 'Level 1',
+      difficultyBand: null,
+      includesTest: false,
+      includesSolution: false,
+      includesLectureVideo: false,
+      tags: ['legacy'],
+      cost: 180000,
+      date: new Date('2026-03-01T00:00:00.000Z'),
+      contestUploaded: null,
+      link: 'https://example.com/legacy',
+      staffId: null,
+      status: LessonOutputStatus.pending,
+      paymentStatus: PaymentStatus.paid,
+      createdAt: new Date('2026-03-01T08:00:00.000Z'),
+      updatedAt: new Date('2026-03-01T08:00:00.000Z'),
+      staff: null,
+      lessonTask: null,
+    });
+    mockPrisma.lessonOutput.update.mockResolvedValue({
+      id: 'output-legacy-1',
+      lessonTaskId: null,
+      lessonName: 'Bài cũ đã sửa tên',
+      originalTitle: null,
+      source: null,
+      originalLink: null,
+      level: 'Level 1',
+      difficultyBand: null,
+      includesTest: false,
+      includesSolution: false,
+      includesLectureVideo: false,
+      tags: ['legacy'],
+      cost: 180000,
+      date: new Date('2026-03-01T00:00:00.000Z'),
+      contestUploaded: null,
+      link: 'https://example.com/legacy',
+      staffId: null,
+      status: LessonOutputStatus.pending,
+      paymentStatus: PaymentStatus.paid,
+      createdAt: new Date('2026-03-01T08:00:00.000Z'),
+      updatedAt: new Date('2026-03-01T10:00:00.000Z'),
+      staff: null,
+      lessonTask: null,
+    });
+
+    const result = await service.updateOutput('output-legacy-1', {
+      lessonName: 'Bài cũ đã sửa tên',
+      cost: 1,
+    });
+
+    expect(mockPrisma.lessonOutput.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lessonName: 'Bài cũ đã sửa tên',
+        }) as unknown,
+      }) as unknown,
+    );
+    expect(mockPrisma.lessonOutput.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({
+          cost: 1,
+        }) as unknown,
+      }) as unknown,
+    );
+    expect(result.cost).toBe(180000);
+  });
+
+  it('rejects expense accountant updates to difficulty band', async () => {
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-accountant',
+      roles: ['accountant_expense'],
+    });
+    mockPrisma.lessonOutput.findUnique.mockResolvedValue({
+      id: 'output-acc-1',
+      lessonTaskId: null,
+      lessonName: 'Bài kế toán',
+      originalTitle: null,
+      source: null,
+      originalLink: null,
+      level: null,
+      difficultyBand: null,
+      tags: [],
+      cost: 100000,
+      date: new Date('2026-03-01T00:00:00.000Z'),
+      contestUploaded: null,
+      link: null,
+      staffId: null,
+      status: LessonOutputStatus.pending,
+      paymentStatus: PaymentStatus.pending,
+      createdAt: new Date('2026-03-01T08:00:00.000Z'),
+      updatedAt: new Date('2026-03-01T08:00:00.000Z'),
+      staff: null,
+      lessonTask: null,
+    });
 
     await expect(
       service.updateOutput(
-        'output-56',
+        'output-acc-1',
         {
-          cost: 160000,
+          difficultyBand: LessonOutputDifficultyBand.medium,
         },
         undefined,
         {
-          id: 'user-participant',
+          id: 'user-accountant',
           roleType: UserRole.staff,
         } as never,
       ),

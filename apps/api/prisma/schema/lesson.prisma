@@ -53,14 +53,18 @@ model LessonResource {
 }
 
 model LessonOutput {
-  id                      String             @id @default(dbgenerated("CONCAT('UNILOT-', encode(gen_random_bytes(5), 'hex'))"))
+  id                      String                         @id @default(dbgenerated("CONCAT('UNILOT-', encode(gen_random_bytes(5), 'hex'))"))
   level                   String?
-  lessonName              String             @map("lesson_name")
-  originalTitle           String?            @map("original_title")
+  difficultyBand          LessonOutputDifficultyBand?    @map("difficulty_band")
+  includesTest            Boolean                        @default(false) @map("includes_test")
+  includesSolution        Boolean                        @default(false) @map("includes_solution")
+  includesLectureVideo    Boolean                        @default(false) @map("includes_lecture_video")
+  lessonName              String                         @map("lesson_name")
+  originalTitle           String?                        @map("original_title")
   source                  String?
-  originalLink            String?            @map("original_link")
-  cost                    Int                @default(0)
-  date                    DateTime           @db.Date
+  originalLink            String?                        @map("original_link")
+  cost                    Int                            @default(0)
+  date                    DateTime                       @db.Date
   contestUploaded         String?            @map("contest_uploaded")
   link                    String?
   staffId                 String?            @map("staff_id")

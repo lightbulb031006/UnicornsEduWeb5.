@@ -502,6 +502,10 @@ test("split accountant roles get only their route families", () => {
     false,
   );
   assert.equal(
+    staffShellAccess.resolveStaffShellRouteAccess(expenseAccountant, "/staff/system-settings").isAllowed,
+    false,
+  );
+  assert.equal(
     adminShellAccess.canAccessAdminShellRoute(
       adminShellAccess.resolveAdminShellAccess(incomeAccountant),
       "/admin/students/student-1",
@@ -588,6 +592,10 @@ test("combined accountant roles get additive income and expense routes without s
   );
   assert.equal(
     adminShellAccess.canAccessAdminShellRoute(access, "/admin/deductions"),
+    false,
+  );
+  assert.equal(
+    adminShellAccess.canAccessAdminShellRoute(access, "/admin/system-settings"),
     false,
   );
 });
@@ -704,11 +712,35 @@ test("assistant keeps admin shell access to deductions and notifications but not
     true,
   );
   assert.equal(
+    adminShellAccess.canAccessAdminShellRoute(access, "/admin/system-settings"),
+    true,
+  );
+  assert.equal(
     adminShellAccess.canAccessAdminShellRoute(
       access,
       "/admin/wallet-direct-topup-requests",
     ),
     false,
+  );
+});
+
+test("assistant staff shell can open system settings and legacy deductions redirect path", () => {
+  const assistant = {
+    roleType: "staff",
+    staffRoles: ["assistant"],
+    hasStaffProfile: true,
+    ...completedStaffAccess,
+  };
+
+  assert.equal(
+    staffShellAccess.resolveStaffShellRouteAccess(assistant, "/staff/system-settings")
+      .isAllowed,
+    true,
+  );
+  assert.equal(
+    staffShellAccess.resolveStaffShellRouteAccess(assistant, "/staff/deductions")
+      .isAllowed,
+    true,
   );
 });
 

@@ -15,7 +15,7 @@ Reference from `archived/UniEdu-Web-3.9/frontend/` for rebuilding pages in Unico
 | `/teachers` | `/admin` (personnel) | admin | Teachers list |
 | `/staff`, `/staff/:id`, `/staff/:id/cskh` | `/admin` (nhân sự), mentor profile | admin, teacher (own staff card) | Staff list + StaffDetail + StaffCSKHDetail |
 | `/costs` | `/admin` (chi phí) | admin | Costs CRUD |
-| `/categories` | `/admin` (phân loại lớp) | admin | Categories CRUD |
+| `/categories` | `/admin` (Khoá học) | admin | Categories CRUD |
 | `/lesson-plans` | `/mentor` (giáo án) | admin, teacher (staff role: lesson_plan) | Lesson plans |
 | `/action-history` | `/admin` (lịch sử) | admin only | Action history |
 | `/coding` | Shared / optional | admin, teacher, student | Coding feature |
@@ -24,7 +24,7 @@ Reference from `archived/UniEdu-Web-3.9/frontend/` for rebuilding pages in Unico
 
 ## Layout and navigation (archived)
 
-- **Admin:** Full sidebar (`Layout` + `Sidebar`), no top bar. Sidebar: Dashboard, Trang chủ (Home), Nhân sự, Lớp học, Lập trình, Học sinh, Chi phí, Phân loại lớp, Giáo Án, Lịch sử. Collapsible; profile + logout in sidebar.
+- **Admin:** Full sidebar (`Layout` + `Sidebar`), no top bar. Sidebar: Dashboard, Trang chủ (Home), Nhân sự, Lớp học, Lập trình, Học sinh, Chi phí, Khoá học, Giáo Án, Lịch sử. Collapsible; profile + logout in sidebar.
 - **Teacher:** Top nav only (no sidebar). Tabs: Trang chủ, Lớp học, Giáo Án, Lập trình, etc. Theme switcher (light/dark/sakura), user card, logout. Teacher has “Trang chủ” instead of Dashboard.
 - **Student:** Same top-nav pattern as teacher; Dashboard visible (admin/student get Dashboard, teacher excluded).
 - **Storage keys:** `unicorns.token`, `unicorns.currentUser`; optional `refreshToken`; dashboard state: `unicorns.dashboard.state`.

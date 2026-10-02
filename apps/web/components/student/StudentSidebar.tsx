@@ -10,7 +10,7 @@ import { Role } from "@/dtos/Auth.dto";
 import { useAuth } from "@/context/AuthContext";
 import * as authApi from "@/lib/apis/auth.api";
 import { clearLogoutScopedQueries } from "@/lib/query-invalidation";
-import { SidebarNotificationTray, SidebarThemePicker } from "@/components/shell";
+import { SidebarThemePicker } from "@/components/shell";
 import UserAvatar from "@/components/ui/UserAvatar";
 import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 
@@ -158,7 +158,7 @@ export default function StudentSidebar() {
     : "translateX(0)";
 
   const logoutMutation = useMutation({
-    mutationFn: authApi.logout,
+    mutationFn: authApi.studentLogout,
     onSuccess: async () => {
       await clearLogoutScopedQueries(queryClient);
       setUser({
@@ -221,7 +221,7 @@ export default function StudentSidebar() {
               variant="navbar"
               showWordmark={!compact}
               dense={compact}
-              className="w-full min-w-0 transition-all duration-300 ease-out"
+              className="w-full min-w-0 transition-[width,opacity] duration-300 ease-out"
               wordmarkClassName="truncate"
             />
           </div>
@@ -282,14 +282,14 @@ export default function StudentSidebar() {
 
         <div className="shrink-0 border-t border-border-default p-2">
           <Link
-            href="/"
+            href="/student"
             prefetch={false}
             onClick={async () => {
               handleMobileClose();
-              setActiveHrefState("/");
+              setActiveHrefState("/student");
               await Promise.resolve();
             }}
-            className={`sidebar-item flex items-center rounded-lg py-2.5 text-sm font-medium transition-[gap,padding,background-color,color] duration-300 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-secondary ${compact ? "gap-0 px-2.5" : "gap-3 px-3"} ${(activeHrefState ? activeHrefState === "/" : pathname === "/") ? "bg-primary text-text-inverse" : "text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"}`}
+            className={`sidebar-item flex items-center rounded-lg py-2.5 text-sm font-medium transition-[gap,padding,background-color,color] duration-300 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-secondary ${compact ? "gap-0 px-2.5" : "gap-3 px-3"} ${(activeHrefState ? activeHrefState === "/student" : pathname === "/student") ? "bg-primary text-text-inverse" : "text-text-secondary hover:bg-bg-tertiary hover:text-text-primary"}`}
             aria-label={collapsed && !isMobile ? "Trang chủ" : undefined}
             title={collapsed && !isMobile ? "Trang chủ" : undefined}
           >
@@ -322,8 +322,6 @@ export default function StudentSidebar() {
             </Link>
 
             <SidebarThemePicker compact={compact} onMobileClose={handleMobileClose} />
-
-            <SidebarNotificationTray compact={compact} />
 
             <div className={`min-w-0 flex-1 ${compact ? "hidden" : ""}`} aria-hidden />
 

@@ -7,6 +7,6 @@ import { ReceiptPdfService } from './receipt-pdf.service';
 @Module({
   imports: [ConfigModule],
   providers: [MailService, ReceiptPdfService, ReceiptAssetsService],
-  exports: [MailService],
+  exports: [MailService, ReceiptPdfService],
 })
 export class MailModule {}

@@ -81,3 +81,11 @@ backup/
 BienLai/
 
 sub-modules
+
+# Scratch, thoughts & local workspaces
+.scratch/
+.opencode/
+thoughts/
+bun.lock
+asset/
+Screenshot*

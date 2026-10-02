@@ -4,16 +4,52 @@ jest.mock('../prisma/prisma.service', () => ({
 jest.mock('../../generated/client', () => ({
   Prisma: {},
 }));
+jest.mock('src/storage/supabase-storage', () => ({
+  createSignedStorageUrl: jest.fn(async (options: { path?: string | null }) =>
+    options.path ? `signed:${options.path}` : null,
+  ),
+  createPublicStorageUrl: jest.fn(
+    (options: { bucket: string; path?: string | null }) =>
+      options.path ? `public:${options.bucket}:${options.path}` : null,
+  ),
+  getSupabaseAdminClient: jest.fn(),
+  tryGetSupabaseAdminClient: jest.fn(() => null),
+  validateImageFile: jest.fn(),
+  uploadStorageObject: jest.fn(async () => undefined),
+  removeStorageObjects: jest.fn(async () => undefined),
+}));
+
+jest.mock('src/storage/image-watermark', () => ({
+  bakeDiagonalWatermark: jest.fn(async () => ({
+    buffer: Buffer.from('wm'),
+    contentType: 'image/jpeg',
+  })),
+  buildAvatarWatermarkedPath: jest.fn(
+    (userId: string) => `users/${userId}/avatar.jpg`,
+  ),
+}));
 
 import { BadRequestException, Logger } from '@nestjs/common';
 import {
+  AchievementLevel,
   StaffRole,
   StudentWalletDirectTopUpRequestStatus,
+  StudentCustomerSource,
   StudentStatus,
   UserRole,
   WalletTransactionType,
 } from '../../generated/enums';
+import {
+  createPublicStorageUrl,
+  createSignedStorageUrl,
+} from 'src/storage/supabase-storage';
 import { StudentService } from './student.service';
+
+const mockCreatePublicStorageUrl =
+  createPublicStorageUrl as jest.MockedFunction<typeof createPublicStorageUrl>;
+
+const mockCreateSignedStorageUrl =
+  createSignedStorageUrl as jest.MockedFunction<typeof createSignedStorageUrl>;
 
 describe('StudentService', () => {
   const mockPrisma = {
@@ -28,6 +64,10 @@ describe('StudentService', () => {
       delete: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
+    studentAchievement: {
       count: jest.fn(),
       findMany: jest.fn(),
     },
@@ -101,6 +141,14 @@ describe('StudentService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    mockCreateSignedStorageUrl.mockImplementation(
+      async (options: { path?: string | null }) =>
+        options.path ? `signed:${options.path}` : null,
+    );
+    mockCreatePublicStorageUrl.mockImplementation(
+      (options: { bucket: string; path?: string | null }) =>
+        options.path ? `public:${options.bucket}:${options.path}` : null,
+    );
     delete process.env.SEPAY_TOPUP_MODE;
     delete process.env.SEPAY_API_ACCESS_TOKEN;
     delete process.env.SEPAY_BANK_ACCOUNT_XID;
@@ -237,6 +285,7 @@ describe('StudentService', () => {
         gender: 'male',
         goal: 'Top 1',
         user_id: 'user-1',
+        customer_source: StudentCustomerSource.tiktok,
       },
       {
         userId: 'admin-1',
@@ -278,6 +327,7 @@ describe('StudentService', () => {
       service.createStudent({
         full_name: 'Nguyen Van A',
         user_id: 'user-1',
+        customer_source: StudentCustomerSource.tiktok,
       }),
     ).rejects.toThrow(
       'User này đang có hồ sơ nhân sự nên không thể gán làm học sinh.',
@@ -1509,6 +1559,11 @@ describe('StudentService', () => {
     });
     mockPrisma.studentClass.updateMany.mockResolvedValue({ count: 2 });
 
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-assistant-1',
+      roles: [StaffRole.assistant],
+    });
+
     await expect(
       service.updateStudentStatus(
         'student-1',
@@ -1584,6 +1639,11 @@ describe('StudentService', () => {
       status: StudentStatus.active,
     });
 
+    mockPrisma.staffInfo.findUnique.mockResolvedValue({
+      id: 'staff-assistant-1',
+      roles: [StaffRole.assistant],
+    });
+
     await expect(
       service.updateStudentStatus(
         'student-1',
@@ -1599,7 +1659,7 @@ describe('StudentService', () => {
     expect(mockPrisma.studentClass.updateMany).not.toHaveBeenCalled();
   });
 
-  it('returns sanitized student landing profiles with default active filter', async () => {
+  it('returns sanitized student landing profiles without status filter', async () => {
     mockPrisma.studentInfo.count.mockResolvedValue(1);
     mockPrisma.studentInfo.findMany.mockResolvedValue([
       {
@@ -1607,6 +1667,30 @@ describe('StudentService', () => {
         fullName: 'Nguyen Van A',
         school: 'THPT Nguyen Du',
         province: 'Ha Noi',
+        status: StudentStatus.inactive,
+        achievements: [
+          {
+            id: 'sach-1',
+            award: 'HCV',
+            exam: 'Tin học trẻ',
+            year: 2024,
+            level: AchievementLevel.HSG_QUOC_GIA,
+            courseLabel: 'KHỐI THPT',
+            imageWatermarkedPath: 'student/student-1/sach-1.jpg',
+            sortOrder: 0,
+          },
+        ],
+        galleryItems: [
+          {
+            id: 'gal-1',
+            caption: null,
+            imageWatermarkedPath: 'student/student-1/gal-1.jpg',
+            sortOrder: 0,
+          },
+        ],
+        user: {
+          avatarWatermarkedPath: 'users/user-s1/avatar.jpg',
+        },
       },
     ]);
 
@@ -1616,26 +1700,140 @@ describe('StudentService', () => {
         {
           id: 'student-1',
           name: 'Nguyen Van A',
+          status: StudentStatus.inactive,
           school: 'THPT Nguyen Du',
           province: 'Ha Noi',
+          avatarUrl: 'public:avatars-public:users/user-s1/avatar.jpg',
+          avatarPath: 'users/user-s1/avatar.jpg',
+          achievements: [
+            {
+              id: 'sach-1',
+              award: 'HCV',
+              exam: 'Tin học trẻ',
+              year: 2024,
+              level: AchievementLevel.HSG_QUOC_GIA,
+              courseLabel: 'KHỐI THPT',
+              title: 'HCV · Tin học trẻ',
+              imagePath: 'student/student-1/sach-1.jpg',
+              imageUrl:
+                'public:achievements-public:student/student-1/sach-1.jpg',
+              sortOrder: 0,
+            },
+          ],
+          gallery: [
+            {
+              id: 'gal-1',
+              caption: null,
+              imagePath: 'student/student-1/gal-1.jpg',
+              imageUrl:
+                'public:student-gallery-public:student/student-1/gal-1.jpg',
+              sortOrder: 0,
+            },
+          ],
         },
       ],
     });
 
     expect(mockPrisma.studentInfo.count).toHaveBeenCalledWith({
-      where: { status: StudentStatus.active },
+      where: {},
     });
     expect(mockPrisma.studentInfo.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { status: StudentStatus.active },
-        take: 100,
-        select: {
+        where: {},
+        skip: 0,
+        take: 50,
+        select: expect.objectContaining({
           id: true,
           fullName: true,
           school: true,
           province: true,
+          status: true,
+          achievements: expect.any(Object),
+          galleryItems: expect.any(Object),
+        }),
+      }),
+    );
+  });
+
+  it('getLandingProfiles paginates ids mode instead of returning all matches unbounded', async () => {
+    mockPrisma.studentInfo.count.mockResolvedValue(101);
+    mockPrisma.studentInfo.findMany.mockResolvedValue([]);
+
+    const ids = Array.from({ length: 101 }, (_, i) => `UNIST-${i}`);
+
+    await expect(
+      service.getLandingProfiles({ ids: ids.join(','), page: 2, limit: 100 }),
+    ).resolves.toEqual({ data: [], total: 101 });
+
+    expect(mockPrisma.studentInfo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ids } },
+        skip: 100,
+        take: 100,
+      }),
+    );
+  });
+
+  it('getLandingProfiles applies page skip, capped limit, and search', async () => {
+    mockPrisma.studentInfo.count.mockResolvedValue(80);
+    mockPrisma.studentInfo.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.getLandingProfiles({
+        page: 3,
+        limit: 200,
+        search: '  Le Van  ',
+      }),
+    ).resolves.toEqual({ data: [], total: 80 });
+
+    expect(mockPrisma.studentInfo.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 200,
+        take: 100,
+        where: {
+          AND: [
+            { fullName: { contains: 'Le', mode: 'insensitive' } },
+            { fullName: { contains: 'Van', mode: 'insensitive' } },
+          ],
         },
       }),
+    );
+  });
+
+  it('getLandingAchievements returns empty page when sourceIds missing and includeUnpublished is not set', async () => {
+    await expect(service.getLandingAchievements({})).resolves.toEqual({
+      data: [],
+      total: 0,
+    });
+    expect(mockPrisma.studentAchievement.count).not.toHaveBeenCalled();
+    expect(mockPrisma.studentAchievement.findMany).not.toHaveBeenCalled();
+  });
+
+  it('getLandingAchievements filters by sourceIds by default', async () => {
+    mockPrisma.studentAchievement.count.mockResolvedValue(0);
+    mockPrisma.studentAchievement.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.getLandingAchievements({ sourceIds: 'UNIST-1,UNIST-2' }),
+    ).resolves.toEqual({ data: [], total: 0 });
+
+    expect(mockPrisma.studentAchievement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { studentId: { in: ['UNIST-1', 'UNIST-2'] } },
+      }),
+    );
+  });
+
+  it('getLandingAchievements ignores sourceIds and publish gate when includeUnpublished is true', async () => {
+    mockPrisma.studentAchievement.count.mockResolvedValue(0);
+    mockPrisma.studentAchievement.findMany.mockResolvedValue([]);
+
+    await expect(
+      service.getLandingAchievements({ includeUnpublished: true }),
+    ).resolves.toEqual({ data: [], total: 0 });
+
+    expect(mockPrisma.studentAchievement.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: {} }),
     );
   });
 });

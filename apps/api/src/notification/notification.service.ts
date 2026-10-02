@@ -10,7 +10,6 @@ import {
   NotificationStatus,
   StaffRole,
   StaffStatus,
-  StudentStatus,
   UserRole,
   UserStatus,
 } from 'generated/enums';
@@ -62,11 +61,6 @@ const NOTIFICATION_RECIPIENT_SELECT = {
     select: {
       status: true,
       roles: true,
-    },
-  },
-  studentInfo: {
-    select: {
-      status: true,
     },
   },
 } satisfies Prisma.UserSelect;
@@ -401,15 +395,6 @@ export class NotificationService {
             },
           },
         },
-        {
-          roleType: UserRole.student,
-          status: UserStatus.active,
-          studentInfo: {
-            is: {
-              status: StudentStatus.active,
-            },
-          },
-        },
       ],
     };
   }
@@ -461,26 +446,6 @@ export class NotificationService {
         userId: actor.id,
         roleType: UserRole.staff,
         staffRoles: staff.roles ?? [],
-      };
-    }
-
-    if (actor.roleType === UserRole.student) {
-      const student = await this.prisma.studentInfo.findUnique({
-        where: { userId: actor.id },
-        select: {
-          id: true,
-          status: true,
-        },
-      });
-
-      if (!student || student.status !== StudentStatus.active) {
-        throw new ForbiddenException('Student profile is not available');
-      }
-
-      return {
-        userId: actor.id,
-        roleType: UserRole.student,
-        staffRoles: [],
       };
     }
 
@@ -765,7 +730,7 @@ export class NotificationService {
         : {
             id: { in: uniqueUserIds },
             roleType: {
-              in: [UserRole.admin, UserRole.staff, UserRole.student],
+              in: [UserRole.admin, UserRole.staff],
             },
           },
       select: NOTIFICATION_RECIPIENT_SELECT,
@@ -812,9 +777,7 @@ export class NotificationService {
   ): NotificationTargetRoleTypeDto[] {
     return roleTypes.filter(
       (roleType): roleType is NotificationTargetRoleTypeDto =>
-        roleType === UserRole.admin ||
-        roleType === UserRole.staff ||
-        roleType === UserRole.student,
+        roleType === UserRole.admin || roleType === UserRole.staff,
     );
   }
 

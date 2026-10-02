@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -10,12 +11,13 @@ import * as classApi from "@/lib/apis/class.api";
 import { AddClassPopup, ClassListTableSkeleton } from "@/components/admin/class";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
-import { ClassListResponse, ClassStatus, ClassType } from "@/dtos/class.dto";
+import { ClassListResponse, ClassStatus } from "@/dtos/class.dto";
 import {
   buildAdminLikePath,
   resolveAdminLikeRouteBase,
 } from "@/lib/admin-shell-paths";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
+import { resolveCourseWorkspaceCapabilities } from "@/lib/course-workspace-access";
 import { authKeys, classKeys, uniojKeys } from "@/lib/query-keys";
 import { getClassesLevels } from "@/lib/apis/unioj.api";
 import { LevelBadge } from "@/components/ui/LevelBadge";
@@ -29,13 +31,6 @@ function normalizePage(rawPage: string | null): number {
   if (!Number.isFinite(parsed) || parsed < 1) return 1;
   return Math.floor(parsed);
 }
-
-const TYPE_LABELS: Record<ClassType, string> = {
-  basic: "Basic",
-  vip: "VIP",
-  advance: "Advance",
-  hardcore: "Hardcore",
-};
 
 const STATUS_LABELS: Record<ClassStatus, string> = {
   running: "Đang chạy",
@@ -86,7 +81,7 @@ function seatBadgeClass(studentCount: number | null, maxStudents: number | null)
 type ClassRow = {
   id: string;
   name: string;
-  type: ClassType;
+  courseName: string;
   status: ClassStatus;
   studentCount: number | null;
   maxStudents: number | null;
@@ -97,7 +92,7 @@ type ClassListFetcher = (params: {
   limit: number;
   search?: string;
   status?: "" | ClassStatus;
-  type?: "" | ClassType;
+  courseId?: string;
 }) => Promise<ClassListResponse>;
 
 type AdminClassesPageProps = {
@@ -106,7 +101,7 @@ type AdminClassesPageProps = {
   pageSubtitle?: string;
 };
 
-export default function AdminClassesPage({
+function AdminClassesPageContent({
   classListFetcher = classApi.getClasses,
   forceReadOnlyList = false,
   pageSubtitle = "Theo dõi trạng thái và điều phối danh sách lớp nhanh hơn.",
@@ -136,6 +131,10 @@ export default function AdminClassesPage({
     staleTime: 60_000,
   });
   const { isAdmin, isAssistant, isAccountant } = resolveAdminShellAccess(fullProfile);
+  const canOpenAdminCourses = resolveCourseWorkspaceCapabilities(
+    fullProfile,
+    "/admin",
+  ).canEnterWorkspace;
   const canCreateClass = !forceReadOnlyList && (isAdmin || isAssistant);
   const canDeleteClass = !forceReadOnlyList && !isAccountant;
 
@@ -192,7 +191,7 @@ export default function AdminClassesPage({
     return (classListResponse?.data ?? []).map((item) => ({
       id: item.id,
       name: item.name,
-      type: item.type,
+      courseName: item.course?.name ?? "—",
       status: item.status,
       studentCount: normalizeSeatValue(item.studentCount),
       maxStudents: normalizeSeatValue(item.maxStudents),
@@ -296,20 +295,33 @@ export default function AdminClassesPage({
                 {pageSubtitle}
               </p>
             </div>
-            {canCreateClass ? (
-              <button
-                type="button"
-                onClick={() => setAddPopupOpen(true)}
-                className="self-end inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-text-inverse shadow-sm transition-colors duration-200 hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:min-h-10 sm:self-auto"
-                aria-label="Thêm lớp học"
-                title="Thêm lớp học"
+            <div className="flex shrink-0 flex-wrap items-center gap-2 self-end sm:self-auto">
+              {canOpenAdminCourses ? (
+              <Link
+                href="/admin/courses"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-border-default bg-bg-surface px-4 py-2 text-sm font-medium text-text-primary shadow-sm transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:min-h-10"
               >
                 <svg className="size-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
                 </svg>
-                <span>Thêm lớp học</span>
-              </button>
-            ) : null}
+                <span>Khoá học</span>
+              </Link>
+              ) : null}
+              {canCreateClass ? (
+                <button
+                  type="button"
+                  onClick={() => setAddPopupOpen(true)}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-text-inverse shadow-sm transition-colors duration-200 hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:min-h-10"
+                  aria-label="Thêm lớp học"
+                  title="Thêm lớp học"
+                >
+                  <svg className="size-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>Thêm lớp học</span>
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="relative mt-4">
@@ -436,7 +448,7 @@ export default function AdminClassesPage({
                     </div>
                     <div className="mt-2 grid grid-cols-[56px_1fr] gap-x-2 gap-y-1 text-xs items-center">
                       <span className="text-text-muted">Loại</span>
-                      <span className="text-text-secondary">{TYPE_LABELS[row.type] ?? row.type}</span>
+                      <span className="text-text-secondary">{row.courseName}</span>
                       <span className="text-text-muted">Sĩ số</span>
                       <div>
                         <span
@@ -468,7 +480,7 @@ export default function AdminClassesPage({
                         Tên lớp
                       </th>
                       <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                        Loại lớp
+                        Khoá học
                       </th>
                       <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Sĩ số / tối đa
@@ -511,7 +523,7 @@ export default function AdminClassesPage({
                         </td>
                         <td className="px-4 py-3 text-text-secondary">
                           <span className="inline-flex rounded-full bg-bg-secondary px-2 py-0.5 text-xs font-medium text-text-secondary ring-1 ring-border-default">
-                            {TYPE_LABELS[row.type] ?? row.type}
+                            {row.courseName}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-text-secondary">
@@ -675,5 +687,14 @@ export default function AdminClassesPage({
         </>
       ) : null}
     </div>
+  );
+}
+
+export default function AdminClassesPage(props: AdminClassesPageProps = {}) {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <AdminClassesPageContent {...props} />
+    </Suspense>
   );
 }

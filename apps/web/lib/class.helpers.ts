@@ -1,6 +1,9 @@
-import type { ClassStatus, ClassType } from "@/dtos/class.dto";
+import type { ClassStatus } from "@/dtos/class.dto";
 import { parseMoneyInput } from "@/lib/money-input.helpers";
-
+import {
+  formatVnCurrency,
+  formatVnDateTime,
+} from "@/lib/formatters";
 export const CLASS_SCHEDULE_DAY_OPTIONS = [
   { value: "1", label: "Thứ Hai", selectedLabel: "T2" },
   { value: "2", label: "Thứ Ba", selectedLabel: "T3" },
@@ -15,11 +18,7 @@ export const CLASS_SCHEDULE_DAY_LABELS = ["CN", "T2", "T3", "T4", "T5", "T6", "T
 
 export function formatCurrency(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(value);
+  return formatVnCurrency(value);
 }
 
 /** `0` và `null` đều là không giới hạn (đồng bộ backend). */
@@ -51,13 +50,7 @@ export function normalizeMaxAllowanceForCompare(value: number | null | undefined
 export function formatDateTime(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(iso));
+    return formatVnDateTime(new Date(iso));
   } catch {
     return "—";
   }
@@ -71,12 +64,6 @@ export function normalizePage(rawPage: string | null): number {
 
 export function normalizeClassStatus(rawStatus: string | null): "" | ClassStatus {
   return rawStatus === "running" || rawStatus === "ended" ? rawStatus : "";
-}
-
-export function normalizeClassType(rawType: string | null): "" | ClassType {
-  return rawType === "basic" || rawType === "vip" || rawType === "advance" || rawType === "hardcore"
-    ? rawType
-    : "";
 }
 
 function padTimeSegment(value: number): string {

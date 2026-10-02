@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState, Suspense } from "react";
 import {
   keepPreviousData,
   useMutation,
@@ -555,11 +555,9 @@ export function LessonTaskDetailPage({
                         <button
                           type="button"
                           onClick={() => {
-                            setAttachResourceOpen((prev) => {
-                              const next = !prev;
-                              if (!next) setResourceSearch("");
-                              return next;
-                            });
+                            const next = !attachResourceOpen;
+                            setAttachResourceOpen(next);
+                            if (!next) setResourceSearch("");
                           }}
                           className={`inline-flex h-9 items-center justify-center rounded-xl border px-4 text-xs font-semibold transition-colors focus:outline-none ${
                             attachResourceOpen
@@ -590,6 +588,7 @@ export function LessonTaskDetailPage({
                         type="text"
                         value={resourceSearch}
                         onChange={(e) => setResourceSearch(e.target.value)}
+                        aria-label="Tìm theo tiêu đề hoặc link tài nguyên"
                         placeholder="Tìm theo tiêu đề hoặc link tài nguyên…"
                         className="w-full min-h-10 rounded-lg border border-border-default bg-bg-surface px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
                       />
@@ -854,6 +853,15 @@ export function LessonTaskDetailPage({
   );
 }
 
-export default function AdminLessonTaskDetailPage() {
+function AdminLessonTaskDetailPageContent() {
   return <LessonTaskDetailPage />;
+}
+
+export default function AdminLessonTaskDetailPage() {
+  // useSearchParams cần <Suspense>, nếu không Next.js sẽ bỏ static render cả route.
+  return (
+    <Suspense fallback={null}>
+      <AdminLessonTaskDetailPageContent />
+    </Suspense>
+  );
 }

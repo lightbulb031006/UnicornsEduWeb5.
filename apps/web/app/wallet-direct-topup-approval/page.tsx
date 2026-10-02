@@ -8,18 +8,12 @@ import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 import type { StudentWalletDirectTopUpRequestResponse } from "@/dtos/student.dto";
 import * as studentApi from "@/lib/apis/student.api";
 import { formatCurrency } from "@/lib/class.helpers";
+import { formatVnDateTime } from "@/lib/formatters";
 
 function formatDateTime(value?: string | null): string {
   if (!value) return "—";
   try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      timeZone: "Asia/Ho_Chi_Minh",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
+    return formatVnDateTime(new Date(value));
   } catch {
     return "—";
   }

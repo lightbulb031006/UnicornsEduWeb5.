@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -29,6 +30,14 @@ import { RegulationModule } from './regulation/regulation.module';
 import { GoogleCalendarModule } from './google-calendar/google-calendar.module';
 import { CalendarModule } from './calendar/calendar.module';
 import { DeductionSettingsModule } from './deduction-settings/deduction-settings.module';
+import { FixedSalarySettingsModule } from './fixed-salary-settings/fixed-salary-settings.module';
+import { AchievementModule } from './achievements/achievement.module';
+import { StudentGalleryModule } from './student-gallery/student-gallery.module';
+import { DeviceModule } from './device/device.module';
+import { QuestionModule } from './question/question.module';
+import { AttemptModule } from './attempt/attempt.module';
+import { ClassTimelineModule } from './class-timeline/class-timeline.module';
+import { CourseContentModule } from './course-content/course-content.module';
 
 function parsePositiveIntegerEnv(
   value: string | undefined,
@@ -45,6 +54,10 @@ function parsePositiveIntegerEnv(
 
 @Module({
   imports: [
+    ScheduleModule.forRoot({
+      // Jest boots AppModule in e2e; keep cron timers off so existing tests stay isolated.
+      cronJobs: process.env.NODE_ENV !== 'test',
+    }),
     ThrottlerModule.forRoot([
       {
         ttl: parsePositiveIntegerEnv(
@@ -58,6 +71,7 @@ function parsePositiveIntegerEnv(
         ),
       },
     ]),
+    ScheduleModule.forRoot(),
     AuthModule,
     UserModule,
     StudentModule,
@@ -82,6 +96,14 @@ function parsePositiveIntegerEnv(
     GoogleCalendarModule,
     CalendarModule,
     DeductionSettingsModule,
+    FixedSalarySettingsModule,
+    AchievementModule,
+    StudentGalleryModule,
+    DeviceModule,
+    QuestionModule,
+    CourseContentModule,
+    AttemptModule,
+    ClassTimelineModule,
   ],
   controllers: [AppController],
   providers: [

@@ -1,13 +1,15 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
+  AttendanceStatus,
+  ClassPricingMode,
   ClassStatus,
-  ClassType,
   StaffRole,
   StaffStatus,
   StudentClassStatus,
@@ -22,8 +24,10 @@ import {
   CreateClassDto,
   CreateStaffOpsClassDto,
   ClassStatusActionDto,
+  ScheduleSlotDto,
   UpdateClassBasicInfoDto,
   UpdateClassDto,
+  UpdateClassPricingModeDto,
   UpdateClassScheduleDto,
   UpdateClassStudentsDto,
   UpdateClassStudentTuitionDto,
@@ -46,8 +50,25 @@ import {
   normalizeNullableMoney,
   normalizeStudentClassCustomTuitionMoney,
   resolveDerivedTuitionPerSession,
+  resolveEffectivePackageFields,
   resolveEffectiveTuitionPerSession,
+  resolveSessionChargeTuitionFee,
 } from 'src/common/student-class-tuition.util';
+import {
+  assertCanEnableBlockPricing,
+  clockHmsFromUnknown,
+  isBlockPricingMode,
+  isFrozenSessionPaymentStatus,
+  resolveAllowanceReconstructionBlockCount,
+  resolveSnapshotBlockCountForPricingMode,
+} from 'src/common/class-pricing-mode.util';
+import {
+  dualWritePerBlockClassFields,
+  perSessionToPerBlock,
+  presentCustomAllowanceAsPerSession,
+  standardBlockCountFromSlots,
+  storeCustomAllowanceFromPerSessionInput,
+} from 'src/common/block-pricing.util';
 import { resolveClassTeacherCustomAllowanceOnWrite } from './class-teacher-allowance.util';
 import {
   redactClassForAccountantView,
@@ -65,6 +86,9 @@ import {
   buildClassEndEligibility,
   getClassTeacherSessionSettlement,
 } from 'src/common/class-teacher-session-settlement.util';
+import { resolveLiveSessionAllowanceSnapshots } from 'src/session/session-allowance.util';
+import { computeTrainingManagerSessionSnapshot } from 'src/training-manager/training-manager.utils';
+import { syncLessonPlanHeadCommissions } from 'src/payroll/lesson-plan-head-commission.util';
 
 /** `0` is stored as unlimited (same semantics as `null`) across SQL aggregates. */
 function normalizeMaxAllowancePerSessionWrite(
@@ -164,6 +188,11 @@ export class ClassService {
 
   private readonly logger = new Logger(ClassService.name);
 
+  // In-memory lock theo classId để chặn 2 request update lịch cùng lớp
+  // chạy chồng nhau trong cùng 1 process (bổ sung cho optimistic lock ở DB,
+  // vốn là chốt chặn chính cho trường hợp nhiều pod).
+  private readonly activeScheduleUpdates = new Set<string>();
+
   private buildStaffDisplayName(staff: {
     user: {
       first_name: string | null;
@@ -173,7 +202,13 @@ export class ClassService {
     return getUserFullNameFromParts(staff.user) ?? '';
   }
 
-  private mapTeacherAssignment(record: TeacherAssignmentRecord) {
+  private mapTeacherAssignment(
+    record: TeacherAssignmentRecord,
+    options?: {
+      standardBlockCount?: number | null;
+      storedAsPerBlock?: boolean;
+    },
+  ) {
     if (!record.teacher) {
       this.logger.warn(
         `Skipping class teacher assignment with missing teacher relation: classId=${record.classId ?? 'unknown'} teacherId=${record.teacherId ?? 'unknown'}`,
@@ -197,16 +232,37 @@ export class ClassService {
       fullName: this.buildStaffDisplayName(record.teacher),
       status: record.teacher.status,
       assignmentStatus: record.status,
-      customAllowance: record.customAllowance,
+      customAllowance: presentCustomAllowanceAsPerSession(
+        record.customAllowance,
+        options?.standardBlockCount,
+        options?.storedAsPerBlock === true,
+      ),
       operatingDeductionRatePercent,
     };
   }
 
-  private mapTeacherAssignments(records: TeacherAssignmentRecord[]) {
+  private mapTeacherAssignments(
+    records: TeacherAssignmentRecord[],
+    options?: {
+      standardBlockCount?: number | null;
+      storedAsPerBlock?: boolean;
+    },
+  ) {
     return records.flatMap((record) => {
-      const assignment = this.mapTeacherAssignment(record);
+      const assignment = this.mapTeacherAssignment(record, options);
       return assignment ? [assignment] : [];
     });
+  }
+
+  private async loadStandardBlockCount(
+    db: Pick<PrismaService, 'classScheduleEntry'> | Prisma.TransactionClient,
+    classId: string,
+  ): Promise<number | null> {
+    const rows = await db.classScheduleEntry.findMany({
+      where: { classId, effectiveTo: null },
+      select: { from: true, to: true },
+    });
+    return standardBlockCountFromSlots(rows);
   }
 
   private isTeacherActor(roles: string[]) {
@@ -237,73 +293,43 @@ export class ClassService {
     );
   }
 
-  private getStoredClassScheduleEntries(
-    schedule: Prisma.JsonValue | null | undefined,
-  ): StoredClassScheduleEntry[] {
-    if (!Array.isArray(schedule)) {
-      return [];
-    }
-
-    return schedule
-      .filter(
-        (entry) =>
-          typeof entry === 'object' && entry !== null && !Array.isArray(entry),
-      )
-      .map((rawEntry) => {
-        const entry = rawEntry as Prisma.JsonObject;
-
-        return {
-          id: typeof entry.id === 'string' ? entry.id : undefined,
-          dayOfWeek:
-            typeof entry.dayOfWeek === 'number' ? entry.dayOfWeek : undefined,
-          from: typeof entry.from === 'string' ? entry.from : undefined,
-          to: typeof entry.to === 'string' ? entry.to : undefined,
-          end: typeof entry.end === 'string' ? entry.end : undefined,
-          teacherId:
-            typeof entry.teacherId === 'string' ? entry.teacherId : undefined,
-          googleCalendarEventId:
-            typeof entry.googleCalendarEventId === 'string'
-              ? entry.googleCalendarEventId
-              : undefined,
-          meetLink:
-            typeof entry.meetLink === 'string' ? entry.meetLink : undefined,
-          createdAt:
-            typeof entry.createdAt === 'string' ? entry.createdAt : undefined,
-          deletedAt:
-            typeof entry.deletedAt === 'string' ? entry.deletedAt : undefined,
-        };
-      });
+  /**
+   * Class.schedule JSON không còn được ghi (chỉ giữ backup lịch sử tại thời
+   * điểm migrate sang bảng class_schedule_entries). Chuyển 1 row DB sang
+   * shape StoredClassScheduleEntry cũ để tái dùng với CalendarService (vẫn
+   * nhận StoredClassScheduleEntry[] cho phần đồng bộ Google Calendar).
+   */
+  private toStoredScheduleEntry(row: {
+    id: string;
+    dayOfWeek: number;
+    from: string;
+    to: string;
+    teacherId: string | null;
+    googleCalendarEventId: string | null;
+    meetLink: string | null;
+    createdAt: Date;
+    effectiveTo?: Date | null;
+  }): StoredClassScheduleEntry {
+    return {
+      id: row.id,
+      dayOfWeek: row.dayOfWeek,
+      from: row.from,
+      to: row.to,
+      teacherId: row.teacherId ?? undefined,
+      googleCalendarEventId: row.googleCalendarEventId ?? undefined,
+      meetLink: row.meetLink ?? undefined,
+      createdAt: row.createdAt.toISOString(),
+      deletedAt: row.effectiveTo
+        ? new Date(row.effectiveTo).toISOString()
+        : undefined,
+    };
   }
 
-  private serializeStoredClassScheduleEntries(
-    entries: Array<{
-      id?: string;
-      dayOfWeek?: number;
-      from?: string;
-      to?: string;
-      end?: string;
-      teacherId?: string;
-      googleCalendarEventId?: string;
-      meetLink?: string;
-      createdAt?: string;
-      deletedAt?: string;
-    }>,
-  ): Prisma.InputJsonValue {
-    return entries.map((entry) => ({
-      ...(entry.id ? { id: entry.id } : {}),
-      ...(typeof entry.dayOfWeek === 'number'
-        ? { dayOfWeek: entry.dayOfWeek }
-        : {}),
-      ...(entry.from ? { from: entry.from } : {}),
-      ...(entry.to || entry.end ? { to: entry.to ?? entry.end } : {}),
-      ...(entry.teacherId ? { teacherId: entry.teacherId } : {}),
-      ...(entry.googleCalendarEventId
-        ? { googleCalendarEventId: entry.googleCalendarEventId }
-        : {}),
-      ...(entry.meetLink ? { meetLink: entry.meetLink } : {}),
-      ...(entry.createdAt ? { createdAt: entry.createdAt } : {}),
-      ...(entry.deletedAt ? { deletedAt: entry.deletedAt } : {}),
-    })) as Prisma.InputJsonValue;
+  private parseEffectiveFromDate(value?: string): Date {
+    if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return new Date(`${value}T00:00:00.000Z`);
+    }
+    return toDateOnly();
   }
 
   private normalizeTimeValue(
@@ -328,146 +354,170 @@ export class ClassService {
     return `${hours}:${minutes}:${seconds}`;
   }
 
-  private mergeScheduleEntriesWithExisting(
+  /**
+   * Diff `dto.schedule`/`dto.removedEntryIds` với các row `class_schedule_entries`
+   * đang active (effectiveTo=null) của lớp, rồi áp trực tiếp lên DB trong transaction:
+   * slot đổi nội dung/bị xoá → soft-close (effectiveTo), slot mới/thay thế → insert
+   * row mới với effectiveFrom tường minh. Không đụng Class.schedule JSON (deprecated).
+   */
+  private async applyScheduleUpdateTx(
+    tx: Prisma.TransactionClient,
+    classId: string,
     nextEntries: UpdateClassScheduleDto['schedule'],
-    existingSchedule: Prisma.JsonValue | null | undefined,
-    classCreatedAt?: Date | string | null,
-  ) {
-    // Fallback lower bound cho legacy entries không có createdAt
-    const classCreatedAtISO =
-      classCreatedAt instanceof Date
-        ? classCreatedAt.toISOString()
-        : typeof classCreatedAt === 'string'
-          ? classCreatedAt
-          : undefined;
-
+    removedEntryIds: string[] | undefined,
+  ): Promise<{
+    finalActiveTeacherIds: string[];
+    closedEntries: StoredClassScheduleEntry[];
+  }> {
+    const removedEntryIdSet = new Set(removedEntryIds ?? []);
+    const existingActive = await tx.classScheduleEntry.findMany({
+      where: { classId, effectiveTo: null },
+    });
     const existingById = new Map(
-      this.getStoredClassScheduleEntries(existingSchedule)
-        .filter(
-          (entry): entry is StoredClassScheduleEntry & { id: string } =>
-            typeof entry.id === 'string' && entry.id.length > 0,
-        )
-        .map((entry) => [entry.id, entry]),
+      existingActive.map((entry) => [entry.id, entry]),
     );
 
-    const deletedEntries: StoredClassScheduleEntry[] = [];
-    const activeEntries: StoredClassScheduleEntry[] = [];
-    const handledExistingIds = new Set<string>();
+    const closeIds = new Map<string, Date>();
+    const createRows: Prisma.ClassScheduleEntryCreateManyInput[] = [];
+    const keptActiveTeacherIds: string[] = [];
 
     for (const entry of nextEntries) {
       const existingEntry =
         entry.id != null ? existingById.get(entry.id) : undefined;
+      const fromNormalized = this.normalizeTimeValue(entry.from) ?? entry.from;
+      const toNormalized = this.normalizeTimeValue(entry.to) ?? entry.to;
+      const effectiveFromDate = this.parseEffectiveFromDate(
+        entry.effectiveFrom,
+      );
+
+      const existingEffectiveFrom =
+        existingEntry?.effectiveFrom instanceof Date
+          ? `${existingEntry.effectiveFrom.getUTCFullYear()}-${String(existingEntry.effectiveFrom.getUTCMonth() + 1).padStart(2, '0')}-${String(existingEntry.effectiveFrom.getUTCDate()).padStart(2, '0')}`
+          : null;
+      const incomingEffectiveFrom = entry.effectiveFrom ?? null;
+      const effectiveFromChanged =
+        existingEntry &&
+        (incomingEffectiveFrom
+          ? incomingEffectiveFrom !== existingEffectiveFrom
+          : existingEffectiveFrom !== null);
+
+      const unchanged =
+        existingEntry &&
+        existingEntry.dayOfWeek === entry.dayOfWeek &&
+        existingEntry.from === fromNormalized &&
+        existingEntry.to === toNormalized &&
+        existingEntry.teacherId === (entry.teacherId ?? null) &&
+        !effectiveFromChanged;
+
+      if (unchanged) {
+        if (entry.teacherId) keptActiveTeacherIds.push(entry.teacherId);
+        continue;
+      }
 
       if (existingEntry) {
-        const fromNormalized = this.normalizeTimeValue(entry.from);
-        const toNormalized = this.normalizeTimeValue(entry.to);
-        const existingFrom = this.normalizeTimeValue(existingEntry.from);
-        const existingTo = this.normalizeTimeValue(
-          existingEntry.to || existingEntry.end,
-        );
-
-        const hasChanged =
-          existingEntry.dayOfWeek !== entry.dayOfWeek ||
-          existingFrom !== fromNormalized ||
-          existingTo !== toNormalized ||
-          existingEntry.teacherId !== entry.teacherId;
-
-        if (hasChanged) {
-          deletedEntries.push({
-            ...existingEntry,
-            // Backfill createdAt trước khi soft-delete nếu entry chưa có
-            createdAt: existingEntry.createdAt ?? classCreatedAtISO,
-            deletedAt: existingEntry.deletedAt ?? new Date().toISOString(),
-          });
-          handledExistingIds.add(existingEntry.id);
-
-          activeEntries.push({
-            id: randomUUID(),
-            dayOfWeek: entry.dayOfWeek,
-            from: fromNormalized,
-            to: toNormalized,
-            teacherId: entry.teacherId,
-            googleCalendarEventId: undefined,
-            meetLink: undefined,
-            createdAt: new Date().toISOString(),
-          });
-          continue;
-        }
+        closeIds.set(existingEntry.id, effectiveFromDate);
       }
 
-      activeEntries.push({
-        id: entry.id ?? randomUUID(),
+      createRows.push({
+        id: randomUUID(),
+        classId,
+        teacherId: entry.teacherId ?? null,
         dayOfWeek: entry.dayOfWeek,
-        from: this.normalizeTimeValue(entry.from),
-        to: this.normalizeTimeValue(entry.to),
-        teacherId: entry.teacherId,
-        googleCalendarEventId: existingEntry?.googleCalendarEventId,
-        meetLink: existingEntry?.meetLink,
-        // Uu tiên: existing createdAt → FE createdAt → ngày tạo lớp (legacy) → now
-        createdAt:
-          existingEntry?.createdAt ??
-          entry.createdAt ??
-          classCreatedAtISO ??
-          new Date().toISOString(),
+        from: fromNormalized,
+        to: toNormalized,
+        effectiveFrom: effectiveFromDate,
       });
+      if (entry.teacherId) keptActiveTeacherIds.push(entry.teacherId);
     }
 
-    const nextEntryIds = new Set(
-      activeEntries.map((entry) => entry.id).filter(Boolean),
-    );
-    for (const existingEntry of existingById.values()) {
-      if (
-        !nextEntryIds.has(existingEntry.id) &&
-        !handledExistingIds.has(existingEntry.id)
-      ) {
-        deletedEntries.push({
-          ...existingEntry,
-          // Backfill createdAt trước khi soft-delete nếu entry chưa có
-          createdAt: existingEntry.createdAt ?? classCreatedAtISO,
-          deletedAt: existingEntry.deletedAt ?? new Date().toISOString(),
-        });
-      }
+    const today = toDateOnly();
+    for (const removeId of removedEntryIdSet) {
+      if (closeIds.has(removeId)) continue;
+      if (!existingById.has(removeId)) continue;
+      closeIds.set(removeId, today);
     }
 
-    return [...activeEntries, ...deletedEntries];
+    const closedEntries: StoredClassScheduleEntry[] = [];
+    for (const [entryId, effectiveTo] of closeIds) {
+      const row = existingById.get(entryId);
+      if (!row) continue;
+      await tx.classScheduleEntry.updateMany({
+        where: { id: entryId, classId, effectiveTo: null },
+        data: { effectiveTo },
+      });
+      closedEntries.push(this.toStoredScheduleEntry({ ...row, effectiveTo }));
+    }
+
+    if (createRows.length > 0) {
+      await tx.classScheduleEntry.createMany({ data: createRows });
+    }
+
+    return {
+      finalActiveTeacherIds: Array.from(new Set(keptActiveTeacherIds)),
+      closedEntries,
+    };
   }
 
-  private removeScheduleEntriesForTeachers(
-    schedule: Prisma.JsonValue | null | undefined,
+  /**
+   * Soft-close (effectiveTo = hôm nay) toàn bộ slot lịch cố định đang active
+   * của các giáo viên vừa bị gỡ khỏi lớp. Thay cho việc soft-delete trong
+   * Class.schedule JSON trước đây.
+   */
+  private async closeScheduleEntriesForTeachers(
+    tx: Prisma.TransactionClient,
+    classId: string,
     removedTeacherIds: Set<string>,
-  ): {
-    oldSchedule: StoredClassScheduleEntry[];
-    nextSchedule: StoredClassScheduleEntry[];
+  ): Promise<{
+    closedEntries: StoredClassScheduleEntry[];
     removedScheduleEntries: number;
-  } {
-    const oldSchedule = this.getStoredClassScheduleEntries(schedule);
+  }> {
     if (removedTeacherIds.size === 0) {
-      return {
-        oldSchedule,
-        nextSchedule: oldSchedule,
-        removedScheduleEntries: 0,
-      };
+      return { closedEntries: [], removedScheduleEntries: 0 };
     }
 
-    let removedCount = 0;
-    const nextSchedule = oldSchedule.map((entry) => {
-      if (entry.teacherId && removedTeacherIds.has(entry.teacherId)) {
-        if (!entry.deletedAt) {
-          removedCount++;
-          return {
-            ...entry,
-            deletedAt: new Date().toISOString(),
-          };
-        }
-      }
-      return entry;
+    const rows = await tx.classScheduleEntry.findMany({
+      where: {
+        classId,
+        effectiveTo: null,
+        teacherId: { in: Array.from(removedTeacherIds) },
+      },
+    });
+    if (rows.length === 0) {
+      return { closedEntries: [], removedScheduleEntries: 0 };
+    }
+
+    const effectiveTo = toDateOnly();
+    await tx.classScheduleEntry.updateMany({
+      where: { id: { in: rows.map((row) => row.id) } },
+      data: { effectiveTo },
     });
 
     return {
-      oldSchedule,
-      nextSchedule,
-      removedScheduleEntries: removedCount,
+      closedEntries: rows.map((row) =>
+        this.toStoredScheduleEntry({ ...row, effectiveTo }),
+      ),
+      removedScheduleEntries: rows.length,
     };
+  }
+
+  /** Soft-close toàn bộ slot lịch cố định đang active của 1 lớp (dùng khi kết thúc lớp). */
+  private async closeAllScheduleEntriesForClass(
+    tx: Prisma.TransactionClient,
+    classId: string,
+  ): Promise<StoredClassScheduleEntry[]> {
+    const rows = await tx.classScheduleEntry.findMany({
+      where: { classId, effectiveTo: null },
+    });
+    if (rows.length === 0) return [];
+
+    const effectiveTo = toDateOnly();
+    await tx.classScheduleEntry.updateMany({
+      where: { id: { in: rows.map((row) => row.id) } },
+      data: { effectiveTo },
+    });
+    return rows.map((row) =>
+      this.toStoredScheduleEntry({ ...row, effectiveTo }),
+    );
   }
 
   private getActiveClassTeacherWhere(
@@ -503,20 +553,14 @@ export class ClassService {
     return futureMakeupEvents.length;
   }
 
-  private ensureScheduleEntryIds(
-    schedule: UpdateClassScheduleDto['schedule'],
-  ): UpdateClassScheduleDto['schedule'] {
-    return schedule.map((entry) => ({
-      ...entry,
-      id: entry.id ?? randomUUID(),
-      createdAt: entry.createdAt ?? new Date().toISOString(),
-    }));
-  }
-
   private async getClassDetailSnapshot(
     db: Pick<
       PrismaService,
-      'class' | 'classTeacher' | 'studentClass' | '$queryRaw'
+      | 'class'
+      | 'classTeacher'
+      | 'studentClass'
+      | 'classScheduleEntry'
+      | '$queryRaw'
     >,
     id: string,
   ) {
@@ -534,6 +578,7 @@ export class ClassService {
             },
           },
         },
+        course: true,
       },
     });
 
@@ -568,8 +613,6 @@ export class ClassService {
       },
       orderBy: [{ createdAt: 'asc' }, { teacherId: 'asc' }],
     });
-
-    const teachers = this.mapTeacherAssignments(classRecord);
 
     const classStudents = await db.studentClass.findMany({
       where: { classId: id },
@@ -639,6 +682,7 @@ export class ClassService {
         accountBalance: student.student.accountBalance ?? 0,
         customerCareStaff,
         customTuitionPerSession,
+        customTuitionPerBlock: student.customTuitionPerBlock ?? null,
         customTuitionPackageTotal,
         customTuitionPackageSession,
         effectiveTuitionPerSession,
@@ -668,8 +712,33 @@ export class ClassService {
       teacherSessionSettlement,
     );
 
+    // Class.schedule JSON không còn được ghi — build schedule trả về từ
+    // bảng class_schedule_entries (nguồn dữ liệu chính) để tương thích
+    // ngược với FE.
+    const scheduleEntryRows = await db.classScheduleEntry.findMany({
+      where: { classId: id, effectiveTo: null },
+      orderBy: [{ dayOfWeek: 'asc' }, { from: 'asc' }],
+    });
+    const standardBlockCount = standardBlockCountFromSlots(scheduleEntryRows);
+    const teachers = this.mapTeacherAssignments(classRecord, {
+      standardBlockCount,
+      storedAsPerBlock: classInfo.allowancePerBlockPerStudent != null,
+    });
+    const schedule = scheduleEntryRows.map((row) => ({
+      id: row.id,
+      dayOfWeek: row.dayOfWeek,
+      from: row.from,
+      to: row.to,
+      teacherId: row.teacherId ?? undefined,
+      googleCalendarEventId: row.googleCalendarEventId ?? undefined,
+      meetLink: row.meetLink ?? undefined,
+      createdAt: row.createdAt.toISOString(),
+      effectiveFrom: row.effectiveFrom.toISOString().slice(0, 10),
+    }));
+
     return {
       ...classInfo,
+      schedule,
       trainingManager: classInfo.trainingManager
         ? {
             id: classInfo.trainingManager.id,
@@ -694,7 +763,11 @@ export class ClassService {
   private async getClassAuditSnapshot(
     db: Pick<
       PrismaService,
-      'class' | 'classTeacher' | 'studentClass' | '$queryRaw'
+      | 'class'
+      | 'classTeacher'
+      | 'studentClass'
+      | 'classScheduleEntry'
+      | '$queryRaw'
     >,
     id: string,
   ) {
@@ -705,7 +778,7 @@ export class ClassService {
     query: PaginationQueryDto & {
       search?: string;
       status?: string;
-      type?: string;
+      courseId?: string;
       teacherId?: string;
       trainingManagerStaffId?: string;
     },
@@ -721,7 +794,7 @@ export class ClassService {
 
     const trimmedSearch = query.search?.trim();
     const normalizedStatus = query.status?.trim();
-    const normalizedType = query.type?.trim();
+    const courseId = query.courseId?.trim();
     const teacherId = query.teacherId?.trim();
     const trainingManagerStaffId = query.trainingManagerStaffId?.trim();
 
@@ -731,17 +804,6 @@ export class ClassService {
         : normalizedStatus === ClassStatus.ended
           ? ClassStatus.ended
           : undefined;
-
-    const typeFilter: ClassType | undefined =
-      normalizedType === ClassType.vip
-        ? ClassType.vip
-        : normalizedType === ClassType.basic
-          ? ClassType.basic
-          : normalizedType === ClassType.advance
-            ? ClassType.advance
-            : normalizedType === ClassType.hardcore
-              ? ClassType.hardcore
-              : undefined;
 
     const where = {
       ...(trimmedSearch
@@ -753,7 +815,7 @@ export class ClassService {
           }
         : {}),
       ...(statusFilter ? { status: statusFilter } : {}),
-      ...(typeFilter ? { type: typeFilter } : {}),
+      ...(courseId ? { courseId } : {}),
       ...(teacherId
         ? {
             teachers: {
@@ -765,9 +827,7 @@ export class ClassService {
             },
           }
         : {}),
-      ...(trainingManagerStaffId
-        ? { trainingManagerStaffId }
-        : {}),
+      ...(trainingManagerStaffId ? { trainingManagerStaffId } : {}),
     };
 
     const total = await this.prisma.class.count({ where });
@@ -779,9 +839,14 @@ export class ClassService {
       where,
       skip,
       take: limit,
+      include: {
+        course: true,
+      },
       orderBy: [
         {
-          type: 'desc',
+          course: {
+            sortOrder: 'asc',
+          },
         },
         {
           name: 'asc',
@@ -856,12 +921,39 @@ export class ClassService {
       {},
     );
 
+    const scheduleRows =
+      classIds.length > 0
+        ? await this.prisma.classScheduleEntry.findMany({
+            where: { classId: { in: classIds }, effectiveTo: null },
+            select: { classId: true, from: true, to: true },
+          })
+        : [];
+    const slotsByClassId = scheduleRows.reduce<
+      Record<string, Array<{ from: string; to: string }>>
+    >((acc, row) => {
+      const current = acc[row.classId] ?? [];
+      current.push({ from: row.from, to: row.to });
+      acc[row.classId] = current;
+      return acc;
+    }, {});
+
     return {
-      data: data.map((item) => ({
-        ...item,
-        studentCount: studentCountByClassId[item.id] ?? 0,
-        teachers: this.mapTeacherAssignments(teachersByClassId[item.id] ?? []),
-      })),
+      data: data.map((item) => {
+        const standardBlockCount = standardBlockCountFromSlots(
+          slotsByClassId[item.id] ?? [],
+        );
+        return {
+          ...item,
+          studentCount: studentCountByClassId[item.id] ?? 0,
+          teachers: this.mapTeacherAssignments(
+            teachersByClassId[item.id] ?? [],
+            {
+              standardBlockCount,
+              storedAsPerBlock: item.allowancePerBlockPerStudent != null,
+            },
+          ),
+        };
+      }),
       meta: {
         total,
         page: safePage,
@@ -878,6 +970,36 @@ export class ClassService {
     }
 
     return classInfo;
+  }
+
+  async listClassesMissingStandardBlockCount() {
+    const classes = await this.prisma.class.findMany({
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        scheduleEntries: {
+          where: { effectiveTo: null },
+          select: { from: true, to: true },
+        },
+      },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    });
+
+    return classes
+      .filter(
+        (item) => standardBlockCountFromSlots(item.scheduleEntries) == null,
+      )
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        status: item.status,
+        activeSlotCount: item.scheduleEntries.length,
+        reason:
+          item.scheduleEntries.length === 0
+            ? 'no_active_schedule'
+            : 'mixed_or_invalid_slot_duration',
+      }));
   }
 
   private getTeacherPayload(data: {
@@ -981,7 +1103,7 @@ export class ClassService {
     query: PaginationQueryDto & {
       search?: string;
       status?: string;
-      type?: string;
+      courseId?: string;
     },
   ) {
     const actor = await this.staffOperationsAccess.resolveActor(
@@ -1075,7 +1197,7 @@ export class ClassService {
     return this.createClass(
       {
         name: dto.name,
-        type: dto.type,
+        course_id: dto.course_id,
         status: dto.status,
         schedule: dto.schedule,
       },
@@ -1099,24 +1221,162 @@ export class ClassService {
         actor.id,
         id,
       );
+      await this.assertTeacherOnlyOwnScheduleEntries(actor.id, id, dto);
+      // Chỉ Admin/Trợ lý được backdate ngày hiệu lực; gia sư tự sửa lịch của
+      // chính mình luôn dùng now() -- bỏ qua effectiveFrom nếu có gửi lên,
+      // tránh gia sư tự backdate qua gọi thẳng API (bypass UI).
+      dto = {
+        ...dto,
+        schedule: dto.schedule.map((entry) => ({
+          ...entry,
+          effectiveFrom: undefined,
+        })),
+      };
     }
     return this.updateClassSchedule(id, dto, auditActor);
+  }
+
+  /**
+   * Gia sư tự cập nhật lịch (qua /staff-ops) chỉ được thêm/sửa/xoá đúng slot
+   * của chính mình — không được đụng tới slot của gia sư khác trong cùng lớp.
+   */
+  private async assertTeacherOnlyOwnScheduleEntries(
+    teacherId: string,
+    classId: string,
+    dto: UpdateClassScheduleDto,
+  ) {
+    const foreignEntry = dto.schedule.find(
+      (entry) => entry.teacherId && entry.teacherId !== teacherId,
+    );
+    if (foreignEntry) {
+      throw new ForbiddenException(
+        'Gia sư chỉ được thêm/sửa lịch của chính mình.',
+      );
+    }
+
+    if (dto.removedEntryIds && dto.removedEntryIds.length > 0) {
+      const entries = await this.prisma.classScheduleEntry.findMany({
+        where: { classId, id: { in: dto.removedEntryIds }, effectiveTo: null },
+        select: { id: true, teacherId: true },
+      });
+      const entriesById = new Map(entries.map((entry) => [entry.id, entry]));
+      const foreignRemoval = dto.removedEntryIds.find((entryId) => {
+        const entry = entriesById.get(entryId);
+        return !entry || entry.teacherId !== teacherId;
+      });
+      if (foreignRemoval) {
+        throw new ForbiddenException(
+          'Gia sư chỉ được xoá lịch của chính mình.',
+        );
+      }
+    }
   }
 
   async createClass(data: CreateClassDto, auditActor?: ActionHistoryActor) {
     return this.withEntityIdRetry(() => this.createClassOnce(data, auditActor));
   }
 
+  private async resolveDefaultCourseId(
+    db: Prisma.TransactionClient | PrismaService,
+  ) {
+    const defaultCourse = await db.course.findFirst({
+      where: { isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      select: { id: true },
+    });
+    if (!defaultCourse) {
+      throw new NotFoundException(
+        'Không có khoá học nào đang hoạt động. Vui lòng chọn khoá học.',
+      );
+    }
+    return defaultCourse.id;
+  }
+
+  /**
+   * Resolve courseId and fetch the course's defaultDurationDays.
+   * Returns null for defaultDurationDays when the course is unlimited.
+   */
+  private async resolveCourseWithDuration(
+    db: Prisma.TransactionClient | PrismaService,
+    courseId?: string,
+  ): Promise<{ courseId: string; defaultDurationDays: number | null }> {
+    if (courseId) {
+      const course = await db.course.findUnique({
+        where: { id: courseId },
+        select: { id: true, defaultDurationDays: true },
+      });
+      if (!course) {
+        throw new NotFoundException('Khoá học không tồn tại.');
+      }
+      return {
+        courseId: course.id,
+        defaultDurationDays: course.defaultDurationDays,
+      };
+    }
+    const defaultCourse = await db.course.findFirst({
+      where: { isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      select: { id: true, defaultDurationDays: true },
+    });
+    if (!defaultCourse) {
+      throw new NotFoundException(
+        'Không có khoá học nào đang hoạt động. Vui lòng chọn khoá học.',
+      );
+    }
+    return {
+      courseId: defaultCourse.id,
+      defaultDurationDays: defaultCourse.defaultDurationDays,
+    };
+  }
+
+  /** Chốt ngày hết hạn nội dung từ Course.defaultDurationDays. */
+  private computeContentAccessExpiresAt(
+    defaultDurationDays: number | null,
+  ): Date | null {
+    if (defaultDurationDays == null || defaultDurationDays <= 0) {
+      return null;
+    }
+    const now = new Date();
+    const expires = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    expires.setUTCDate(expires.getUTCDate() + defaultDurationDays);
+    return expires;
+  }
+
   private async createClassOnce(
     data: CreateClassDto,
     auditActor?: ActionHistoryActor,
   ) {
-    return await this.prisma.$transaction(async (tx) => {
+    const hasSchedule = data.schedule && data.schedule.length > 0;
+    const standardBlockCount = standardBlockCountFromSlots(
+      ((data.schedule ?? []) as ScheduleSlotDto[]).map((entry) => ({
+        from: entry.from,
+        to: entry.to,
+      })),
+    );
+    const perBlockFields = dualWritePerBlockClassFields({
+      allowancePerSessionPerStudent: data.allowance_per_session_per_student,
+      maxAllowancePerSession: normalizeMaxAllowancePerSessionWrite(
+        data.max_allowance_per_session,
+      ),
+      studentTuitionPerSession: data.student_tuition_per_session,
+      studentTuitionPerBlock: data.student_tuition_per_block,
+      standardBlockCount,
+    });
+    const pricingMode = data.pricing_mode ?? ClassPricingMode.per_session;
+    if (isBlockPricingMode(pricingMode)) {
+      assertCanEnableBlockPricing(standardBlockCount);
+    }
+
+    const classDetail = await this.prisma.$transaction(async (tx) => {
+      const resolved = await this.resolveCourseWithDuration(tx, data.course_id);
+
       const createdClass = await tx.class.create({
         data: {
           id: generateClassId(),
           name: data.name,
-          type: data.type,
+          courseId: resolved.courseId,
           status: data.status,
           maxStudents: data.max_students,
           allowancePerSessionPerStudent: data.allowance_per_session_per_student,
@@ -1124,16 +1384,31 @@ export class ClassService {
             data.max_allowance_per_session,
           ),
           scaleAmount: data.scale_amount,
-          schedule: data.schedule
-            ? this.serializeStoredClassScheduleEntries(
-                this.ensureScheduleEntryIds(data.schedule as any),
-              )
-            : undefined,
           studentTuitionPerSession: data.student_tuition_per_session,
           tuitionPackageTotal: data.tuition_package_total,
           tuitionPackageSession: data.tuition_package_session,
+          contentAccessExpiresAt: this.computeContentAccessExpiresAt(
+            resolved.defaultDurationDays,
+          ),
+          pricingMode,
+          ...perBlockFields,
         },
       });
+
+      if (hasSchedule) {
+        const scheduleEntries = data.schedule as unknown as ScheduleSlotDto[];
+        await tx.classScheduleEntry.createMany({
+          data: scheduleEntries.map((entry) => ({
+            id: randomUUID(),
+            classId: createdClass.id,
+            teacherId: entry.teacherId ?? null,
+            dayOfWeek: entry.dayOfWeek,
+            from: this.normalizeTimeValue(entry.from) ?? entry.from,
+            to: this.normalizeTimeValue(entry.to) ?? entry.to,
+            effectiveFrom: this.parseEffectiveFromDate(entry.effectiveFrom),
+          })),
+        });
+      }
 
       const teacherPayload = this.getTeacherPayload(data);
       await this.assertActiveStaffIds(
@@ -1147,7 +1422,10 @@ export class ClassService {
           data: teacherPayload.map((t) => ({
             classId: createdClass.id,
             teacherId: t.teacherId,
-            customAllowance: t.customAllowance,
+            customAllowance: storeCustomAllowanceFromPerSessionInput(
+              t.customAllowance,
+              standardBlockCount,
+            ),
             operatingDeductionRatePercent: t.operatingDeductionRatePercent,
             status: 'active',
           })),
@@ -1164,11 +1442,8 @@ export class ClassService {
         });
       }
 
-      const classDetail = await this.getClassDetailSnapshot(
-        tx,
-        createdClass.id,
-      );
-      if (!classDetail) {
+      const detail = await this.getClassDetailSnapshot(tx, createdClass.id);
+      if (!detail) {
         throw new NotFoundException('Class not found');
       }
 
@@ -1178,12 +1453,25 @@ export class ClassService {
           entityType: 'class',
           entityId: createdClass.id,
           description: 'Tạo lớp học',
-          afterValue: classDetail,
+          afterValue: detail,
         });
       }
 
-      return classDetail;
+      return detail;
     });
+
+    if (hasSchedule) {
+      try {
+        await this.calendarService.syncScheduleWithCalendar(classDetail.id, []);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `[ClassService] Failed to sync schedule with Google Calendar for new class ${classDetail.id}: ${message}`,
+        );
+      }
+    }
+
+    return classDetail;
   }
 
   private async withEntityIdRetry<T>(operation: () => Promise<T>): Promise<T> {
@@ -1210,7 +1498,7 @@ export class ClassService {
   async updateClass(data: UpdateClassDto, auditActor?: ActionHistoryActor) {
     const existingClass = await this.prisma.class.findUnique({
       where: { id: data.id },
-      select: { id: true, schedule: true },
+      select: { id: true },
     });
 
     if (!existingClass) {
@@ -1231,7 +1519,6 @@ export class ClassService {
         data.teachers !== undefined || data.teacher_ids !== undefined
           ? this.getTeacherPayload(data)
           : null;
-      let prunedSchedule: Prisma.InputJsonValue | undefined;
       let removedScheduleEntries = 0;
       let oldSchedule: StoredClassScheduleEntry[] = [];
       let removedTeacherIds: string[] = [];
@@ -1257,29 +1544,32 @@ export class ClassService {
             .map((teacher) => teacher.teacherId)
             .filter((teacherId) => !nextTeacherIds.has(teacherId)),
         );
-        const scheduleRemoval = this.removeScheduleEntriesForTeachers(
-          existingClass.schedule,
+        const scheduleRemoval = await this.closeScheduleEntriesForTeachers(
+          tx,
+          data.id,
           removedTeacherIdSet,
         );
-        oldSchedule = scheduleRemoval.oldSchedule;
+        oldSchedule = scheduleRemoval.closedEntries;
         removedScheduleEntries = scheduleRemoval.removedScheduleEntries;
         removedTeacherIds = Array.from(removedTeacherIdSet);
-        if (removedScheduleEntries > 0) {
-          prunedSchedule = this.serializeStoredClassScheduleEntries(
-            scheduleRemoval.nextSchedule,
-          );
-        }
 
         await tx.classTeacher.deleteMany({
           where: { classId: data.id },
         });
 
+        const standardBlockCount = await this.loadStandardBlockCount(
+          tx,
+          data.id,
+        );
         if (teacherPayload.length > 0) {
           await tx.classTeacher.createMany({
             data: teacherPayload.map((t) => ({
               classId: data.id,
               teacherId: t.teacherId,
-              customAllowance: t.customAllowance,
+              customAllowance: storeCustomAllowanceFromPerSessionInput(
+                t.customAllowance,
+                standardBlockCount,
+              ),
               operatingDeductionRatePercent: t.operatingDeductionRatePercent,
               status: 'active',
             })),
@@ -1335,6 +1625,7 @@ export class ClassService {
                   data: {
                     status: StudentClassStatus.active,
                     customStudentTuitionPerSession: null,
+                    customTuitionPerBlock: null,
                     customTuitionPackageTotal: null,
                     customTuitionPackageSession: null,
                   },
@@ -1355,11 +1646,12 @@ export class ClassService {
         }
       }
 
+      const standardBlockCount = await this.loadStandardBlockCount(tx, data.id);
       const updatedClass = await tx.class.update({
         where: { id: data.id },
         data: {
           name: data.name,
-          type: data.type,
+          courseId: data.course_id,
           status: data.status,
           maxStudents: data.max_students,
           allowancePerSessionPerStudent: data.allowance_per_session_per_student,
@@ -1367,10 +1659,20 @@ export class ClassService {
             data.max_allowance_per_session,
           ),
           scaleAmount: data.scale_amount,
-          schedule: prunedSchedule,
           studentTuitionPerSession: data.student_tuition_per_session,
           tuitionPackageTotal: data.tuition_package_total,
           tuitionPackageSession: data.tuition_package_session,
+          ...dualWritePerBlockClassFields({
+            allowancePerSessionPerStudent:
+              data.allowance_per_session_per_student,
+            maxAllowancePerSession: normalizeMaxAllowancePerSessionWrite(
+              data.max_allowance_per_session,
+            ),
+            studentTuitionPerSession: data.student_tuition_per_session,
+            studentTuitionPerBlock: data.student_tuition_per_block,
+            standardBlockCount,
+            clearWhenUnknown: true,
+          }),
         },
       });
 
@@ -1446,15 +1748,24 @@ export class ClassService {
   ) {
     const existing = await this.prisma.class.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!existing) {
       throw new NotFoundException('Class not found');
     }
 
-    const data: Prisma.ClassUpdateInput = {};
+    if (
+      dto.status === ClassStatus.ended &&
+      existing.status === ClassStatus.running
+    ) {
+      throw new BadRequestException(
+        'Dùng POST /class/:id/end để kết thúc lớp (đóng roster, gia sư, lịch cố định và lịch bù).',
+      );
+    }
+
+    const data: Prisma.ClassUncheckedUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
-    if (dto.type !== undefined) data.type = dto.type;
+    if (dto.course_id !== undefined) data.courseId = dto.course_id;
     if (dto.status !== undefined) data.status = dto.status;
     if (dto.max_students !== undefined) data.maxStudents = dto.max_students;
     if (dto.allowance_per_session_per_student !== undefined) {
@@ -1476,11 +1787,54 @@ export class ClassService {
     if (dto.tuition_package_session !== undefined) {
       data.tuitionPackageSession = dto.tuition_package_session;
     }
+    if (dto.no_attendance !== undefined) {
+      data.noAttendance = dto.no_attendance;
+    }
+    if (dto.content_access_expires_at !== undefined) {
+      data.contentAccessExpiresAt = dto.content_access_expires_at
+        ? new Date(`${dto.content_access_expires_at}T00:00:00.000Z`)
+        : null;
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, id)
         : null;
+      const standardBlockCount = await this.loadStandardBlockCount(tx, id);
+      if (dto.allowance_per_session_per_student !== undefined) {
+        Object.assign(
+          data,
+          dualWritePerBlockClassFields({
+            allowancePerSessionPerStudent:
+              dto.allowance_per_session_per_student,
+            standardBlockCount,
+          }),
+        );
+      }
+      if (dto.max_allowance_per_session !== undefined) {
+        Object.assign(
+          data,
+          dualWritePerBlockClassFields({
+            maxAllowancePerSession: normalizeMaxAllowancePerSessionWrite(
+              dto.max_allowance_per_session,
+            ),
+            standardBlockCount,
+          }),
+        );
+      }
+      if (
+        dto.student_tuition_per_session !== undefined ||
+        dto.student_tuition_per_block !== undefined
+      ) {
+        Object.assign(
+          data,
+          dualWritePerBlockClassFields({
+            studentTuitionPerSession: dto.student_tuition_per_session,
+            studentTuitionPerBlock: dto.student_tuition_per_block,
+            standardBlockCount,
+          }),
+        );
+      }
       await tx.class.update({
         where: { id },
         data,
@@ -1506,6 +1860,260 @@ export class ClassService {
     });
   }
 
+  async updateClassPricingMode(
+    id: string,
+    dto: UpdateClassPricingModeDto,
+    auditActor?: ActionHistoryActor,
+  ) {
+    const existing = await this.prisma.class.findUnique({
+      where: { id },
+      select: { id: true, pricingMode: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('Class not found');
+    }
+
+    const nextMode = dto.pricing_mode;
+    if (isBlockPricingMode(nextMode)) {
+      const standardBlockCount = await this.loadStandardBlockCount(
+        this.prisma,
+        id,
+      );
+      assertCanEnableBlockPricing(standardBlockCount);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const beforeValue = auditActor
+        ? await this.getClassAuditSnapshot(tx, id)
+        : null;
+
+      if (existing.pricingMode !== nextMode) {
+        await tx.class.update({
+          where: { id },
+          data: { pricingMode: nextMode },
+        });
+        await this.recalculateUnpaidSessionsForPricingMode(tx, id, nextMode);
+      }
+
+      const afterValue = await this.getClassAuditSnapshot(tx, id);
+      if (!afterValue) {
+        throw new NotFoundException('Class not found');
+      }
+
+      if (auditActor) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'class',
+          entityId: id,
+          description: 'Đổi chế độ tính tiền lớp học',
+          beforeValue,
+          afterValue,
+        });
+      }
+
+      return afterValue;
+    });
+  }
+
+  private async recalculateUnpaidSessionsForPricingMode(
+    tx: Prisma.TransactionClient,
+    classId: string,
+    pricingMode: ClassPricingMode,
+  ) {
+    const classRow = await tx.class.findUnique({
+      where: { id: classId },
+      select: {
+        studentTuitionPerSession: true,
+        studentTuitionPerBlock: true,
+        tuitionPackageTotal: true,
+        tuitionPackageSession: true,
+        allowancePerSessionPerStudent: true,
+        allowancePerBlockPerStudent: true,
+        scaleAmount: true,
+        trainingManagerStaffId: true,
+        trainingManagerRatePercent: true,
+      },
+    });
+    if (!classRow) {
+      throw new NotFoundException('Class not found');
+    }
+
+    const standardBlockCount = await this.loadStandardBlockCount(tx, classId);
+    const classTeachers = await tx.classTeacher.findMany({
+      where: { classId },
+      select: { teacherId: true, customAllowance: true },
+    });
+    const customAllowanceByTeacherId = new Map(
+      classTeachers.map((row) => [row.teacherId, row.customAllowance]),
+    );
+
+    const sessions = await tx.session.findMany({
+      where: { classId },
+      include: {
+        attendance: {
+          select: {
+            id: true,
+            studentId: true,
+            status: true,
+            tuitionFee: true,
+            transactionId: true,
+          },
+        },
+      },
+    });
+
+    const studentIds = [
+      ...new Set(
+        sessions.flatMap((session) =>
+          session.attendance.map((row) => row.studentId),
+        ),
+      ),
+    ];
+    const studentClasses =
+      studentIds.length === 0
+        ? []
+        : await tx.studentClass.findMany({
+            where: { classId, studentId: { in: studentIds } },
+            select: {
+              studentId: true,
+              customStudentTuitionPerSession: true,
+              customTuitionPerBlock: true,
+              customTuitionPackageTotal: true,
+              customTuitionPackageSession: true,
+            },
+          });
+    const studentClassByStudentId = new Map(
+      studentClasses.map((row) => [row.studentId, row]),
+    );
+
+    for (const session of sessions) {
+      if (isFrozenSessionPaymentStatus(session.teacherPaymentStatus)) {
+        continue;
+      }
+
+      const startHms = clockHmsFromUnknown(session.startTime);
+      const endHms = clockHmsFromUnknown(session.endTime);
+      const snapshotBlockCount = resolveSnapshotBlockCountForPricingMode({
+        pricingMode,
+        startTime: startHms,
+        endTime: endHms,
+        standardBlockCount,
+      });
+      const reconstructionBlocks = resolveAllowanceReconstructionBlockCount({
+        snapshotBlockCount,
+        startTime: startHms,
+        endTime: endHms,
+        standardBlockCount,
+      });
+      const storedAsPerBlock = classRow.allowancePerBlockPerStudent != null;
+      const chargeableCount = session.attendance.filter(
+        (row) =>
+          row.status === AttendanceStatus.present ||
+          row.status === AttendanceStatus.excused,
+      ).length;
+      const liveAllowance = resolveLiveSessionAllowanceSnapshots({
+        pricingMode,
+        customAllowanceStored: customAllowanceByTeacherId.get(
+          session.teacherId,
+        ),
+        classDefaultPerStudent: classRow.allowancePerSessionPerStudent,
+        classDefaultPerBlock: classRow.allowancePerBlockPerStudent,
+        scaleAmount: classRow.scaleAmount,
+        reconstructionBlocks,
+        storedAsPerBlock,
+        snapshotBlockCount,
+        chargeableStudentCount: chargeableCount,
+        presentCustomAsPerSession: presentCustomAllowanceAsPerSession(
+          customAllowanceByTeacherId.get(session.teacherId),
+          reconstructionBlocks,
+          storedAsPerBlock,
+        ),
+      });
+      const snapshotPerStudentAllowance =
+        liveAllowance.snapshotPerStudentAllowance;
+      const snapshotScaleAmount = liveAllowance.snapshotScaleAmount;
+      const allowanceAmount = liveAllowance.allowanceAmount;
+
+      let tuitionTotal = 0;
+      const attendanceIds: string[] = [];
+
+      for (const attendance of session.attendance) {
+        const membership = studentClassByStudentId.get(attendance.studentId);
+        const packageFields = resolveEffectivePackageFields({
+          customTuitionPackageTotal: membership?.customTuitionPackageTotal,
+          customTuitionPackageSession: membership?.customTuitionPackageSession,
+          classTuitionPackageTotal: classRow.tuitionPackageTotal,
+          classTuitionPackageSession: classRow.tuitionPackageSession,
+        });
+        const isChargeable =
+          attendance.status === AttendanceStatus.present ||
+          attendance.status === AttendanceStatus.excused;
+        const nextFee = isChargeable
+          ? resolveSessionChargeTuitionFee({
+              pricingMode,
+              customTuitionPerSession:
+                membership?.customStudentTuitionPerSession,
+              customTuitionPerBlock: membership?.customTuitionPerBlock,
+              classTuitionPerSession: classRow.studentTuitionPerSession,
+              classTuitionPerBlock: classRow.studentTuitionPerBlock,
+              effectivePackageTotal: packageFields.effectivePackageTotal,
+              effectivePackageSession: packageFields.effectivePackageSession,
+              hasCustomPackageOverride: packageFields.hasCustomPackageOverride,
+              blockCount: snapshotBlockCount,
+            })
+          : null;
+        const oldFee = attendance.tuitionFee ?? 0;
+        const newFee = nextFee ?? 0;
+        const delta = oldFee - newFee;
+        if (delta !== 0) {
+          await tx.studentInfo.update({
+            where: { id: attendance.studentId },
+            data: { accountBalance: { increment: delta } },
+          });
+        }
+        if (attendance.transactionId != null && newFee !== oldFee) {
+          await tx.walletTransactionsHistory.update({
+            where: { id: attendance.transactionId },
+            data: { amount: newFee },
+          });
+        }
+        await tx.attendance.update({
+          where: { id: attendance.id },
+          data: { tuitionFee: nextFee },
+        });
+        tuitionTotal += newFee;
+        attendanceIds.push(attendance.id);
+      }
+
+      const trainingManagerSnapshot = computeTrainingManagerSessionSnapshot({
+        sessionTuitionTotal: tuitionTotal,
+        trainingManagerStaffId: classRow.trainingManagerStaffId,
+        trainingManagerRatePercent: classRow.trainingManagerRatePercent,
+      });
+
+      await tx.session.update({
+        where: { id: session.id },
+        data: {
+          snapshotBlockCount,
+          snapshotPerStudentAllowance,
+          snapshotScaleAmount,
+          allowanceAmount,
+          tuitionFee: tuitionTotal,
+          trainingManagerStaffId:
+            trainingManagerSnapshot.trainingManagerStaffId,
+          trainingManagerRatePercent:
+            trainingManagerSnapshot.trainingManagerRatePercent,
+          trainingManagerAllowanceAmount:
+            trainingManagerSnapshot.trainingManagerAllowanceAmount,
+          trainingManagerPaymentStatus:
+            trainingManagerSnapshot.trainingManagerPaymentStatus,
+        },
+      });
+
+      await syncLessonPlanHeadCommissions(tx, attendanceIds);
+    }
+  }
+
   async updateClassTeachers(
     id: string,
     dto: UpdateClassTeachersDto,
@@ -1513,7 +2121,7 @@ export class ClassService {
   ) {
     const existing = await this.prisma.class.findUnique({
       where: { id },
-      select: { id: true, allowancePerSessionPerStudent: true, schedule: true },
+      select: { id: true, allowancePerSessionPerStudent: true },
     });
     if (!existing) {
       throw new NotFoundException('Class not found');
@@ -1523,6 +2131,7 @@ export class ClassService {
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, id)
         : null;
+      const standardBlockCount = await this.loadStandardBlockCount(tx, id);
       await this.assertActiveStaffIds(
         tx,
         dto.teachers.map((teacher) => teacher.teacher_id),
@@ -1552,6 +2161,7 @@ export class ClassService {
           isExistingAssignment: existingCustomAllowanceByTeacherId.has(
             teacher.teacher_id,
           ),
+          standardBlockCount,
         }),
         operatingDeductionRatePercent: normalizeRatePercent(
           teacher.operating_deduction_rate_percent ?? teacher.tax_rate_percent,
@@ -1581,20 +2191,8 @@ export class ClassService {
         });
       }
 
-      const { oldSchedule, nextSchedule, removedScheduleEntries } =
-        this.removeScheduleEntriesForTeachers(
-          existing.schedule,
-          removedTeacherIds,
-        );
-
-      if (removedScheduleEntries > 0) {
-        await tx.class.update({
-          where: { id },
-          data: {
-            schedule: this.serializeStoredClassScheduleEntries(nextSchedule),
-          },
-        });
-      }
+      const { closedEntries: oldSchedule, removedScheduleEntries } =
+        await this.closeScheduleEntriesForTeachers(tx, id, removedTeacherIds);
 
       const afterValue = await this.getClassAuditSnapshot(tx, id);
       if (!afterValue) {
@@ -1677,6 +2275,7 @@ export class ClassService {
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, id)
         : null;
+      const standardBlockCount = await this.loadStandardBlockCount(tx, id);
 
       for (const teacher of dto.teachers) {
         const currentOperatingDeductionRatePercent =
@@ -1697,8 +2296,9 @@ export class ClassService {
           operatingDeductionRatePercent: nextOperatingDeductionRatePercent,
         };
         if (teacher.custom_allowance !== undefined) {
-          data.customAllowance = normalizeNullableMoney(
-            teacher.custom_allowance,
+          data.customAllowance = storeCustomAllowanceFromPerSessionInput(
+            normalizeNullableMoney(teacher.custom_allowance),
+            standardBlockCount,
           );
         }
 
@@ -1768,14 +2368,20 @@ export class ClassService {
       const perSession = normalizeStudentClassCustomTuitionMoney(
         dto.custom_tuition_per_session,
       );
+      const derivedPerSession =
+        resolveDerivedTuitionPerSession(pkgTotal, pkgSession) ?? perSession;
+      const standardBlockCount = await this.loadStandardBlockCount(tx, id);
 
       await tx.studentClass.update({
         where: { id: studentClass.id },
         data: {
           customTuitionPackageTotal: pkgTotal,
           customTuitionPackageSession: pkgSession,
-          customStudentTuitionPerSession:
-            resolveDerivedTuitionPerSession(pkgTotal, pkgSession) ?? perSession,
+          customStudentTuitionPerSession: derivedPerSession,
+          customTuitionPerBlock: perSessionToPerBlock(
+            derivedPerSession,
+            standardBlockCount,
+          ),
         },
       });
 
@@ -1804,29 +2410,70 @@ export class ClassService {
     dto: UpdateClassScheduleDto,
     auditActor?: ActionHistoryActor,
   ) {
+    if (this.activeScheduleUpdates.has(id)) {
+      throw new ConflictException(
+        'Lịch học của lớp này đang được cập nhật bởi một request khác. Vui lòng thử lại sau giây lát.',
+      );
+    }
+    this.activeScheduleUpdates.add(id);
+    try {
+      return await this.updateClassScheduleLocked(id, dto, auditActor);
+    } finally {
+      this.activeScheduleUpdates.delete(id);
+    }
+  }
+
+  private async updateClassScheduleLocked(
+    id: string,
+    dto: UpdateClassScheduleDto,
+    auditActor?: ActionHistoryActor,
+  ) {
     const existing = await this.prisma.class.findUnique({
       where: { id },
-      select: { id: true, name: true, schedule: true, createdAt: true },
+      select: {
+        id: true,
+        name: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
     if (!existing) {
       throw new NotFoundException('Class not found');
     }
 
-    const normalizedScheduleEntries = this.mergeScheduleEntriesWithExisting(
-      this.ensureScheduleEntryIds(dto.schedule),
-      existing.schedule,
-      existing.createdAt,
+    if (dto.expectedUpdatedAt) {
+      const expected = new Date(dto.expectedUpdatedAt).getTime();
+      if (
+        !Number.isNaN(expected) &&
+        expected !== existing.updatedAt.getTime()
+      ) {
+        throw new ConflictException(
+          'Lịch học của lớp vừa được người khác cập nhật. Vui lòng tải lại và thử lại.',
+        );
+      }
+    }
+
+    const existingActiveEntries = await this.prisma.classScheduleEntry.findMany(
+      {
+        where: { classId: id, effectiveTo: null },
+      },
+    );
+    const oldScheduleEntries = existingActiveEntries.map((row) =>
+      this.toStoredScheduleEntry(row),
+    );
+    const existingActiveById = new Map(
+      existingActiveEntries.map((entry) => [entry.id, entry]),
     );
 
     const teacherIds = Array.from(
       new Set(
-        normalizedScheduleEntries
+        dto.schedule
           .map((entry) => entry.teacherId)
           .filter((teacherId): teacherId is string => !!teacherId),
       ),
     );
 
-    if (normalizedScheduleEntries.some((entry) => !entry.teacherId)) {
+    if (dto.schedule.some((entry) => !entry.teacherId)) {
       throw new BadRequestException(
         'Mỗi khung giờ học phải chọn đúng 1 gia sư chịu trách nhiệm.',
       );
@@ -1860,28 +2507,21 @@ export class ClassService {
       );
     }
 
-    const schedule = this.serializeStoredClassScheduleEntries(
-      normalizedScheduleEntries,
-    );
-
     // Find modified/deleted entry IDs to check for affected future makeup events
-    const oldSchedule = this.getStoredClassScheduleEntries(existing.schedule);
-    const oldScheduleById = new Map(
-      oldSchedule
-        .filter(
-          (entry): entry is StoredClassScheduleEntry & { id: string } =>
-            !!entry.id,
-        )
-        .map((entry) => [entry.id, entry]),
-    );
-
-    const changedOrDeletedEntryIds = new Set<string>();
-    for (const entry of normalizedScheduleEntries) {
-      if (entry.id && entry.deletedAt) {
-        const oldEntry = oldScheduleById.get(entry.id);
-        if (oldEntry && !oldEntry.deletedAt) {
-          changedOrDeletedEntryIds.add(entry.id);
-        }
+    const changedOrDeletedEntryIds = new Set<string>(dto.removedEntryIds ?? []);
+    for (const entry of dto.schedule) {
+      if (!entry.id) continue;
+      const oldEntry = existingActiveById.get(entry.id);
+      if (!oldEntry) continue;
+      const fromNormalized = this.normalizeTimeValue(entry.from) ?? entry.from;
+      const toNormalized = this.normalizeTimeValue(entry.to) ?? entry.to;
+      const changed =
+        oldEntry.dayOfWeek !== entry.dayOfWeek ||
+        oldEntry.from !== fromNormalized ||
+        oldEntry.to !== toNormalized ||
+        oldEntry.teacherId !== (entry.teacherId ?? null);
+      if (changed) {
+        changedOrDeletedEntryIds.add(entry.id);
       }
     }
 
@@ -1929,10 +2569,50 @@ export class ClassService {
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, id)
         : null;
-      await tx.class.update({
-        where: { id },
-        data: { schedule },
+
+      // Optimistic lock: chỉ ghi nếu chưa ai khác cập nhật lớp kể từ lúc ta
+      // đọc `existing` ở đầu hàm. Nếu count=0 nghĩa là đã có request khác
+      // xen giữa (đã đổi updatedAt) → coi như xung đột, KHÔNG được ghi đè.
+      // Class.schedule JSON không còn được ghi — chỉ bump updatedAt để giữ
+      // nguyên semantics optimistic lock, dữ liệu lịch thật nằm ở
+      // class_schedule_entries (ghi bởi applyScheduleUpdateTx bên dưới).
+      const writeResult = await tx.class.updateMany({
+        where: { id, updatedAt: existing.updatedAt },
+        data: { updatedAt: new Date() },
       });
+      if (writeResult.count === 0) {
+        throw new ConflictException(
+          'Lịch học của lớp vừa được người khác cập nhật. Vui lòng tải lại và thử lại.',
+        );
+      }
+
+      await this.applyScheduleUpdateTx(
+        tx,
+        id,
+        dto.schedule,
+        dto.removedEntryIds,
+      );
+
+      const classRates = await tx.class.findUnique({
+        where: { id },
+        select: {
+          allowancePerSessionPerStudent: true,
+          maxAllowancePerSession: true,
+        },
+      });
+      const standardBlockCount = await this.loadStandardBlockCount(tx, id);
+      if (classRates) {
+        await tx.class.update({
+          where: { id },
+          data: dualWritePerBlockClassFields({
+            allowancePerSessionPerStudent:
+              classRates.allowancePerSessionPerStudent,
+            maxAllowancePerSession: classRates.maxAllowancePerSession,
+            standardBlockCount,
+            clearWhenUnknown: true,
+          }),
+        });
+      }
 
       const afterValue = await this.getClassAuditSnapshot(tx, id);
       if (!afterValue) {
@@ -1956,9 +2636,6 @@ export class ClassService {
     // Sync with Google Calendar after schedule change
     // Pass old schedule so sync can delete old events before creating new ones
     try {
-      const oldScheduleEntries = this.getStoredClassScheduleEntries(
-        existing.schedule,
-      );
       this.logger.log(
         `[ClassService] Calling syncScheduleWithCalendar for class ${id} after schedule update, oldSchedule entries: ${oldScheduleEntries.length}`,
       );
@@ -2007,6 +2684,7 @@ export class ClassService {
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, id)
         : null;
+      const standardBlockCount = await this.loadStandardBlockCount(tx, id);
       await this.assertActiveStudentIds(tx, normalizedStudentIds);
 
       const existingStudentClasses = await tx.studentClass.findMany({
@@ -2046,11 +2724,17 @@ export class ClassService {
               student.custom_tuition_per_session,
             );
 
+            const derivedPerSession =
+              resolveDerivedTuitionPerSession(pkgTotal, pkgSession) ??
+              perSession;
+
             const data = {
               status: StudentClassStatus.active,
-              customStudentTuitionPerSession:
-                resolveDerivedTuitionPerSession(pkgTotal, pkgSession) ??
-                perSession,
+              customStudentTuitionPerSession: derivedPerSession,
+              customTuitionPerBlock: perSessionToPerBlock(
+                derivedPerSession,
+                standardBlockCount,
+              ),
               customTuitionPackageTotal: pkgTotal,
               customTuitionPackageSession: pkgSession,
             };
@@ -2118,15 +2802,12 @@ export class ClassService {
         throw new BadRequestException('Lớp đã kết thúc.');
       }
 
-      const oldSchedule = this.getStoredClassScheduleEntries(
-        beforeValue.schedule as Prisma.JsonValue | null | undefined,
-      );
+      const oldSchedule = await this.closeAllScheduleEntriesForClass(tx, id);
 
       await tx.class.update({
         where: { id },
         data: {
           status: ClassStatus.ended,
-          schedule: [],
         },
       });
       await tx.studentClass.updateMany({
@@ -2189,26 +2870,16 @@ export class ClassService {
         throw new BadRequestException('Gia sư đã nghỉ dạy lớp này.');
       }
 
-      const scheduleRemoval = this.removeScheduleEntriesForTeachers(
-        beforeValue.schedule as Prisma.JsonValue | null | undefined,
-        new Set([teacherId]),
-      );
-
       await tx.classTeacher.update({
         where: { classId_teacherId: { classId, teacherId } },
         data: { status: 'inactive' },
       });
 
-      if (scheduleRemoval.removedScheduleEntries > 0) {
-        await tx.class.update({
-          where: { id: classId },
-          data: {
-            schedule: this.serializeStoredClassScheduleEntries(
-              scheduleRemoval.nextSchedule,
-            ),
-          },
-        });
-      }
+      const scheduleRemoval = await this.closeScheduleEntriesForTeachers(
+        tx,
+        classId,
+        new Set([teacherId]),
+      );
 
       const afterValue = await this.getClassAuditSnapshot(tx, classId);
       if (!afterValue) {
@@ -2235,7 +2906,7 @@ export class ClassService {
     if (result.scheduleRemoval.removedScheduleEntries > 0) {
       await this.calendarService.syncScheduleWithCalendar(
         classId,
-        result.scheduleRemoval.oldSchedule,
+        result.scheduleRemoval.closedEntries,
       );
     }
     await this.deleteFutureMakeupEvents(classId, auditActor, teacherId);

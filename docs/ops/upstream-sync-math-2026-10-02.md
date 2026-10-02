@@ -1,0 +1,44 @@
+# Đồng bộ repo Tin vào web Toán — 02/10/2026
+
+## Phạm vi
+
+Tích hợp upstream/main tại 451f60d1537fad395a349ca0d126babf245f5665 vào bản Toán fa56472. Chỉ cập nhật mã nguồn trong máy; không push, triển khai, chạy seed hoặc migration vào database.
+
+## Các phần riêng của Toán
+
+- Giữ biên lai Học Toán Cùng Chuyên Toán và logo_math_sm.png. Watermark ảnh public mới dùng cùng logo Toán.
+- Giữ ngoại lệ kiểm tra lịch khi admin tạo buổi; tài khoản khác vẫn bị kiểm tra. Các quy tắc thời lượng/học phí theo block mới vẫn áp dụng.
+- Giữ cấu hình deploy duy nhất math.uniedu.vn và github.token cho GHCR.
+- Ghép lại thống kê buổi học theo tháng trên admin/staff class detail với timeline mới; nguồn dữ liệu dùng API tương ứng theo quyền.
+- Nguồn khách hiển thị Fanpage Học Toán Cùng Chuyên Toán / Fanpage Luyện Toán THPT. Giữ mã enum fanpage_hoc_tin / fanpage_luyen_tin để tương thích migration gốc.
+- Nhận xét điểm danh giới hạn 500 ký tự văn bản thuần, không tính thẻ HTML; giới hạn raw HTML tại DTO là 20.000 ký tự.
+- Các thay đổi chưa commit trước đồng bộ được lưu dự phòng và khôi phục; không thay đổi thư mục .scratch/antigravity-cli-install.
+
+## Database trước lần triển khai sau
+
+Có 53 migration mới so với mốc đồng bộ dd5c6c3. Giữ nguyên lịch sử migration upstream; chưa chạy ở môi trường Toán. Trước deploy cần backup database và kiểm tra read-only dữ liệu bị tác động.
+
+Đặc biệt hai migration dữ liệu của Tin:
+
+- 20260818120000_backfill_achievement_import_student_dates: đổi ngày tạo, ngày nghỉ và status thành inactive cho danh sách ID cụ thể.
+- 20260818140000_remove_hallucinated_achievement_students: xoá danh sách 75 ID cụ thể khi còn cô lập.
+
+Đối chiếu các ID trong hai file SQL với database Toán. Nếu có ID trùng, dừng rollout để xác minh; không cho migration này tự sửa học sinh Toán. Không sửa migration đã triển khai ở môi trường khác.
+
+Các migration backfill tài khoản/hồ sơ, lịch hiệu lực, timeline, chuyển nội dung ba cấp và nguồn khách cũng thay đổi dữ liệu có sẵn. Kiểm tra trên bản sao database trước rollout. Chế độ block là opt-in; kiểm tra bảng giá giáo án theo độ khó trước sử dụng cho Toán.
+
+## Khôi phục
+
+Nhánh dự phòng: codex/backup-math-before-sync-20261002 (fa56472). Snapshot thay đổi local: stash có nhãn math-local-edits-before-upstream-sync-20261002. Bản sao file và manifest SHA256 nằm trong thư mục TEMP/unicorns-math-before-sync-20261002.
+
+Không reset checkout đang có công việc chưa commit. Nếu cần quay lại, mở nhánh dự phòng trong một checkout riêng và khôi phục các file local từ snapshot.
+
+## Kiểm tra đã hoàn tất
+
+- pnpm install --frozen-lockfile; Prisma generate bằng script của workspace.
+- Typecheck web/API pass; build Next.js 16.2.6 và NestJS pass.
+- Backend: 91 suites / 1.008 tests pass; kiểm tra tập trung tạo buổi, nhận xét và UNIOJ: 52 tests pass.
+- Frontend: 21 suites / 191 tests pass (gồm các test thống kê local có sẵn); lint các file xử lý xung đột và tuỳ biến Math pass.
+- Không còn conflict marker. Tất cả file migration trong index có blob hash trùng upstream; cấu hình deploy Math có blob hash trùng nhánh dự phòng.
+- Các chỉnh sửa thống kê/vitest và footer AGENTS có sẵn trước sync vẫn ở working tree, không gộp vào merge commit.
+- Chưa kiểm tra UI với database đã migrate, chưa chạy migration, chưa push/deploy.

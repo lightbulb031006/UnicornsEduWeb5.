@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, m, useReducedMotion } from "framer-motion";
 import { useCallback, useMemo } from "react";
 import type { NotificationFeedItem } from "@/dtos/notification.dto";
 import {
@@ -60,7 +60,7 @@ export function SidebarNotificationPanel({
     <AnimatePresence>
       {open ? (
         <>
-          <motion.button
+          <m.button
             type="button"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -71,7 +71,7 @@ export function SidebarNotificationPanel({
             onClick={onClose}
           />
 
-          <motion.aside
+          <m.aside
             role="dialog"
             aria-modal="true"
             aria-labelledby="sidebar-notif-title"
@@ -203,7 +203,7 @@ export function SidebarNotificationPanel({
                 </ul>
               )}
             </div>
-          </motion.aside>
+          </m.aside>
         </>
       ) : null}
     </AnimatePresence>

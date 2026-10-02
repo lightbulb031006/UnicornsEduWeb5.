@@ -107,6 +107,15 @@ export class AdminCreateUserDto {
   @IsOptional()
   @IsEnum(StaffRole, { each: true })
   staffRoles?: StaffRole[];
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Xác thực email ngay khi tạo user từ admin/trợ lí',
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  emailVerified?: boolean;
 }
 
 export class AdminCreateStudentUserDto extends CreateUserDto {
@@ -155,6 +164,15 @@ export class AdminCreateStudentUserDto extends CreateUserDto {
   @IsArray()
   @IsClassId({ each: true })
   class_ids: string[];
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Xác thực email ngay khi tạo học sinh từ admin/trợ lí',
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  emailVerified?: boolean;
 }
 
 export class UserInfoDto {
