@@ -9,6 +9,7 @@ export const STUDENT_CUSTOMER_SOURCES = [
   "fanpage_luyen_tin",
   "referral",
   "personal",
+  "returning_customer",
   "other",
 ] as const;
 
@@ -20,8 +21,11 @@ export const STUDENT_CUSTOMER_SOURCE_LABELS: Record<StudentCustomerSource, strin
   fanpage_luyen_tin: "Fanpage Luyện Toán THPT",
   referral: "Giới thiệu từ người quen của khách",
   personal: "Nguồn riêng của bản thân",
+  returning_customer: "Khách cũ",
   other: "Khác",
 };
+
+export const STUDENT_DROP_OUT_REASON_MAX_LENGTH = 500;
 
 export const STUDENT_CUSTOMER_SOURCE_OPTIONS = STUDENT_CUSTOMER_SOURCES.map((value) => ({
   value,
@@ -91,6 +95,8 @@ export interface StudentDetail extends StudentListItem {
   parentPhone?: string | null;
   goal?: string | null;
   dropOutDate?: string | null;
+  /** Lý do nghỉ học; giữ lại khi học sinh học lại. */
+  dropOutReason?: string | null;
   customerSource?: StudentCustomerSource | null;
   customerSourceNote?: string | null;
   customerCare?: {
@@ -246,6 +252,7 @@ export interface UpdateStudentPayload {
   gender?: StudentGender;
   goal?: string;
   drop_out_date?: string;
+  drop_out_reason?: string;
   customer_care_staff_id?: string | null;
   customer_care_profit_percent?: number | null;
   customer_source?: StudentCustomerSource;

@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-07
 - **Ticket:** #99
+- **Amended by:** `docs/adr/2026-10-02-class-content-by-module.md` — guard 409 ở quyết định 3 chỉ còn tính item của tiết thực hành; item tiết lý thuyết bị xoá theo tiết.
 
 ## Context
 

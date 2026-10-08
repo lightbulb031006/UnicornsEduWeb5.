@@ -78,6 +78,30 @@ export class ClassContentController {
     });
   }
 
+  @Get('groups')
+  @Roles(UserRole.admin)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @ApiOperation({
+    summary:
+      'Nội dung lớp gom theo chuyên đề: mỗi nhóm có tiết lý thuyết (theo thứ tự trong chuyên đề) và tiết thực hành đã giao',
+  })
+  @ApiParam({ name: 'classId', description: 'ID lớp học' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Danh sách nhóm theo sortOrder chuyên đề; nhóm moduleId=null (ngoài chuyên đề) ở cuối.',
+  })
+  async listGroups(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+  ) {
+    return this.topicService.listClassContentGroups(classId, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
   @Get('course-lessons')
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
@@ -227,5 +251,35 @@ export class ClassContentController {
       throw new NotFoundException('Student profile not found');
     }
     return this.topicService.listClassContentForStudent(classId, studentId);
+  }
+
+  @Get('student/groups')
+  @Roles(UserRole.student)
+  @ApiOperation({
+    summary:
+      'Nội dung lớp cho học sinh gom theo chuyên đề (tab Chuyên đề trang lớp)',
+  })
+  @ApiParam({ name: 'classId', description: 'ID lớp học' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Nhóm theo sortOrder chuyên đề: chuyên đề lớp đã thêm (kể cả rỗng) + chuyên đề đã gỡ còn lần giao; nhóm moduleId=null ở cuối. Không gồm item ẩn / tiết lưu trữ.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Không học lớp này hoặc lớp hết hạn xem nội dung.',
+  })
+  async listGroupsForStudent(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+  ) {
+    const studentId = await this.topicService.findStudentIdByUserId(user.id);
+    if (!studentId) {
+      throw new NotFoundException('Student profile not found');
+    }
+    return this.topicService.listClassContentGroupsForStudent(
+      classId,
+      studentId,
+    );
   }
 }

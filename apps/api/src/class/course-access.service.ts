@@ -18,6 +18,11 @@ export interface CourseActor {
 const COURSE_MANAGER_STAFF_ROLES = [
   StaffRole.admin,
   StaffRole.assistant,
+] as const;
+
+/** Role thuộc đội giáo án: chỉ thấy khoá được gán qua `CourseLessonPlanMember`. */
+const LESSON_PLAN_TEAM_STAFF_ROLES = [
+  StaffRole.lesson_plan,
   StaffRole.lesson_plan_head,
 ] as const;
 
@@ -26,10 +31,11 @@ const COURSE_MANAGER_STAFF_ROLES = [
  * (cây Chuyên đề/Tiết học, Ngân hàng câu hỏi, tiết thực hành cấp khoá...).
  *
  * Quy tắc:
- * - Admin đầy đủ, Trợ lí (`assistant`), Trưởng giáo án (`lesson_plan_head`) quản lý
- *   được nội dung của MỌI khoá (manager).
- * - Thành viên `lesson_plan` chỉ thấy/sửa nội dung khoá mình được gán
- *   (qua `CourseLessonPlanMember`).
+ * - Admin đầy đủ, Trợ lí (`assistant`) quản lý được nội dung của MỌI khoá (manager).
+ * - `lesson_plan` và Trưởng giáo án (`lesson_plan_head`) chỉ thấy/sửa khoá mình được
+ *   gán vào đội giáo án (qua `CourseLessonPlanMember`). Trưởng giáo án không có quyền
+ *   mặc định vào mọi khoá; quyền riêng của trưởng (tạo khoá, gán đội) cũng chỉ trên
+ *   khoá được gán. Hoa hồng chia doanh thu không phụ thuộc việc gán khoá.
  * - Gia sư đang dạy lớp thuộc khoá X KHÔNG vì thế mà sửa được nội dung cấp khoá của X
  *   — muốn sửa phải là manager hoặc thành viên đội giáo án của khoá đó.
  */
@@ -58,8 +64,11 @@ export class CourseAccessService {
     );
   }
 
+  /** Có role đội giáo án (`lesson_plan` hoặc `lesson_plan_head`). */
   isLessonPlanMember(actor: CourseActor): boolean {
-    return actor.roles.includes(StaffRole.lesson_plan);
+    return LESSON_PLAN_TEAM_STAFF_ROLES.some((role) =>
+      actor.roles.includes(role),
+    );
   }
 
   /**
@@ -67,13 +76,13 @@ export class CourseAccessService {
    *
    * Khác `resolveViewableCourseIds`: hàm kia trả lời "ai được quản lý nội dung"
    * và trả mảng rỗng cho teacher / training / kế toán / CSKH. Hàm này trả `null`
-   * (mọi khoá) cho mọi role, **trừ** `lesson_plan` thuần — có role `lesson_plan`
-   * mà không kèm role quản lý (`admin` / `assistant` / `lesson_plan_head`).
+   * (mọi khoá) cho mọi role, **trừ** đội giáo án thuần — có role `lesson_plan` /
+   * `lesson_plan_head` mà không kèm role quản lý (`admin` / `assistant`).
    * Tên khoá không nhạy cảm; chặn sửa nội dung là việc của gate route + guard.
    *
    * Trả `null` = mọi khoá. Trả mảng (kể cả rỗng) = chỉ các id đó.
-   * Actor không có staff profile không crash: không phải `lesson_plan` thuần thì
-   * vẫn nhận mọi khoá; `lesson_plan` thuần mà thiếu `staffId` thì nhận mảng rỗng.
+   * Actor không có staff profile không crash: không thuộc đội giáo án thì vẫn nhận
+   * mọi khoá; đội giáo án mà thiếu `staffId` thì nhận mảng rỗng.
    */
   async resolveListableCourseIds(actor: CourseActor): Promise<string[] | null> {
     if (this.isManager(actor) || !this.isLessonPlanMember(actor)) {
@@ -92,7 +101,7 @@ export class CourseAccessService {
   /**
    * Phạm vi khoá mà actor được xem nội dung.
    * Trả `null` = mọi khoá (manager). Trả mảng rỗng = không khoá nào.
-   * Thành viên `lesson_plan` thuần (không phải manager) chỉ được các khoá được gán.
+   * Đội giáo án (không phải manager) chỉ được các khoá được gán.
    */
   async resolveViewableCourseIds(actor: CourseActor): Promise<string[] | null> {
     if (this.isManager(actor)) {
@@ -143,7 +152,7 @@ export class CourseAccessService {
     }
     const label = courseName ? `của khoá "${courseName}"` : 'của khoá này';
     throw new ForbiddenException(
-      `Bạn không có quyền sửa nội dung ${label}. Chỉ admin, trợ lí, trưởng giáo án, hoặc thành viên đội giáo án của khoá mới được sửa.`,
+      `Bạn không có quyền sửa nội dung ${label}. Chỉ admin, trợ lí, hoặc thành viên đội giáo án của khoá (kể cả trưởng giáo án) mới được sửa.`,
     );
   }
 

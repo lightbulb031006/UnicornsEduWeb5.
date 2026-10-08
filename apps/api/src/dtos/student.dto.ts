@@ -39,6 +39,7 @@ export const STUDENT_CUSTOMER_SOURCE_VALUES = [
   StudentCustomerSource.fanpage_luyen_tin,
   StudentCustomerSource.referral,
   StudentCustomerSource.personal,
+  StudentCustomerSource.returning_customer,
   StudentCustomerSource.other,
 ] as const;
 
@@ -51,8 +52,11 @@ export const STUDENT_CUSTOMER_SOURCE_LABELS: Record<
   fanpage_luyen_tin: 'Fanpage Luyện Toán THPT',
   referral: 'Giới thiệu từ người quen của khách',
   personal: 'Nguồn riêng của bản thân',
+  returning_customer: 'Khách cũ',
   other: 'Khác',
 };
+
+export const STUDENT_DROP_OUT_REASON_MAX_LENGTH = 500;
 
 export const UNASSIGNED_CUSTOMER_SOURCE_KEY = 'unassigned';
 export const UNASSIGNED_CUSTOMER_SOURCE_LABEL = 'Chưa gán';
@@ -187,6 +191,15 @@ export class UpdateStudentBodyDto {
   @IsOptional()
   @IsDateString()
   drop_out_date?: string;
+
+  @ApiPropertyOptional({
+    example: 'Chuyển sang học trung tâm khác.',
+    description: `Lý do nghỉ học. Bắt buộc khi status chuyển sang inactive; chỉ nhận khi học sinh đang/sẽ nghỉ học. Tối đa ${STUDENT_DROP_OUT_REASON_MAX_LENGTH} ký tự.`,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(STUDENT_DROP_OUT_REASON_MAX_LENGTH)
+  drop_out_reason?: string;
 
   @ApiPropertyOptional({
     example: 'UNISTAFF-c3d4e5f6a7',
@@ -341,11 +354,12 @@ export class UpdateStudentStatusDto {
   status: StudentStatus;
 
   @ApiPropertyOptional({
-    description: 'Optional audit reason for the student status transition.',
+    description: `Lý do đổi trạng thái. Bắt buộc khi chuyển sang inactive và được lưu làm lý do nghỉ học; khi chuyển về active chỉ ghi vào lịch sử thao tác. Tối đa ${STUDENT_DROP_OUT_REASON_MAX_LENGTH} ký tự.`,
     example: 'Phụ huynh báo học sinh nghỉ học.',
   })
   @IsOptional()
   @IsString()
+  @MaxLength(STUDENT_DROP_OUT_REASON_MAX_LENGTH)
   reason?: string;
 }
 
@@ -712,4 +726,60 @@ export class UpdateStudentExamSchedulesDto {
   @ValidateNested({ each: true })
   @Type(() => StudentExamScheduleUpsertItemDto)
   items: StudentExamScheduleUpsertItemDto[];
+}
+
+/** Đầu trang lớp học sinh — chỉ field hiển thị, không row user/staff. */
+export class StudentClassDetailDto {
+  @ApiProperty({ description: 'Class id', example: 'cls_01' })
+  classId: string;
+
+  @ApiProperty({ description: 'Tên lớp', example: 'Lớp Thuật toán 1' })
+  className: string;
+
+  @ApiProperty({ description: 'Trạng thái lớp', example: 'running' })
+  classStatus: string;
+
+  @ApiProperty({
+    description: 'Tên khoá học của lớp',
+    example: 'Thuật toán cơ bản',
+  })
+  courseName: string;
+
+  @ApiProperty({
+    description:
+      'Họ tên các Gia sư đứng lớp đang hoạt động, sắp theo tên. Rỗng = FE ẩn khối.',
+    type: [String],
+    example: ['Nguyễn Văn A'],
+  })
+  teacherNames: string[];
+}
+
+/** Thẻ lớp đang học trên trang chủ học sinh — chỉ dữ liệu hiển thị, không học phí/gói. */
+export class StudentClassCardDto {
+  @ApiProperty({ description: 'Class id', example: 'cls_01' })
+  classId: string;
+
+  @ApiProperty({ description: 'Tên lớp', example: 'Lớp Thuật toán 1' })
+  className: string;
+
+  @ApiProperty({
+    description: 'Tên khoá học của lớp',
+    example: 'Thuật toán cơ bản',
+  })
+  courseName: string;
+
+  @ApiProperty({
+    description: 'Họ tên các Gia sư đứng lớp đang hoạt động, sắp theo tên',
+    type: [String],
+    example: ['Nguyễn Văn A'],
+  })
+  teacherNames: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Signed URL ảnh bìa lớp (1 giờ). Null = FE hiện mascot theo ID lớp.',
+    type: String,
+    nullable: true,
+  })
+  coverImageUrl: string | null;
 }

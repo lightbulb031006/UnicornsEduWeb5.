@@ -67,6 +67,8 @@ type SessionTeacherAllowanceEstimateCardProps = {
   onClearManualOverride?: () => void;
   loading?: boolean;
   errorMessage?: string | null;
+  /** Ghi chú phụ dưới breakdown (vd. "trước khấu trừ" cho gia sư xem trước). */
+  footnote?: string | null;
   className?: string;
 };
 
@@ -146,6 +148,7 @@ export function SessionTeacherAllowanceEstimateCard({
   onClearManualOverride,
   loading = false,
   errorMessage = null,
+  footnote = null,
   className = "",
 }: SessionTeacherAllowanceEstimateCardProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -257,6 +260,7 @@ export function SessionTeacherAllowanceEstimateCard({
                 : "Lấy trực tiếp từ allowance của buổi học (theo cấu hình gia sư/lớp)."}
             </p>
           )}
+          {footnote ? <p>{footnote}</p> : null}
           {isManualOverride && onClearManualOverride ? (
             <button
               type="button"

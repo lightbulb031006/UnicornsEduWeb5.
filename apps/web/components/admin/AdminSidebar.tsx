@@ -17,6 +17,7 @@ import {
 import { clearLogoutScopedQueries } from "@/lib/query-invalidation";
 import UserAvatar from "@/components/ui/UserAvatar";
 import { BrandLogoLockup } from "@/components/BrandLogoLockup";
+import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
 
 const MENU_ITEMS: {
   href: string;
@@ -46,7 +47,7 @@ const MENU_ITEMS: {
   },
   { href: "/admin/students", label: "Học sinh", icon: <IconStudents /> },
   { href: "/admin/costs", label: "Chi phí", icon: <IconCosts /> },
-  { href: "/admin/lesson-plans", label: "Giáo Án", icon: <IconLessonPlans /> },
+  { href: "/admin/lesson-plans", label: LESSON_PLAN_LABEL, icon: <IconLessonPlans /> },
   { href: "/admin/calendar", label: "Lịch", icon: <IconCalendar /> },
   {
     href: "/admin/system-settings",

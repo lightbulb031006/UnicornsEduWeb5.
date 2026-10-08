@@ -5,7 +5,10 @@
  * operator expectations when clearing fields; only positive amounts are real overrides.
  */
 
-import { isBlockPricingMode } from './class-pricing-mode.util';
+import {
+  isBlockPricingMode,
+  isOneTimePricingMode,
+} from './class-pricing-mode.util';
 
 export function normalizeNullableMoney(
   value: number | null | undefined,
@@ -138,6 +141,9 @@ function normalizePositiveBlockCount(
  *   `custom_tuition_per_block` → `student_tuition_per_block` → gói riêng →
  *   gói lớp. Số charge = đơn giá block × snapshot block count. Thiếu
  *   per-block hoặc thiếu số block thì fallback chuỗi per-session.
+ * - `one_time`: học phí cả khoá (`effectivePackageTotal`) một lần. Học sinh
+ *   đã có buổi có mặt/nghỉ phép trước đó thì charge 0. Thiếu tổng gói thì
+ *   fallback chuỗi theo buổi, để không thu 0đ vì gói trống.
  */
 export function resolveSessionChargeTuitionFee(options: {
   pricingMode?: string | null;
@@ -149,7 +155,18 @@ export function resolveSessionChargeTuitionFee(options: {
   effectivePackageSession?: number | null;
   hasCustomPackageOverride?: boolean;
   blockCount?: number | null;
+  oneTimeAlreadyCharged?: boolean;
 }): number | null {
+  if (isOneTimePricingMode(options.pricingMode)) {
+    if (options.oneTimeAlreadyCharged) {
+      return 0;
+    }
+    const packageTotal = normalizeNullableMoney(options.effectivePackageTotal);
+    if (packageTotal != null && packageTotal > 0) {
+      return packageTotal;
+    }
+  }
+
   if (!isBlockPricingMode(options.pricingMode)) {
     return resolveEffectiveTuitionPerSession({
       customTuitionPerSession: options.customTuitionPerSession,

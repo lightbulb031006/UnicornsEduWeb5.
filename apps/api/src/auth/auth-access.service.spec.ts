@@ -29,13 +29,11 @@ describe('AuthAccessService', () => {
     birthDate: new Date('2000-01-01T00:00:00.000Z'),
     university: 'UE University',
     highSchool: 'UE High',
-    specialization: 'Math',
     bankAccount: '123456789',
     bankQrLink: 'qr-link',
     ethnicity: 'Kinh',
     gender: 'male',
     currentAddress: 'Ha Noi',
-    personalAchievementLink: 'https://drive.google.com/file/d/example',
   };
 
   const prisma = {
@@ -104,7 +102,6 @@ describe('AuthAccessService', () => {
       staffInfo: {
         ...completeStaffInfo,
         id: 'staff-2',
-        specialization: 'Accounting',
       },
       studentInfo: null,
     });
@@ -271,41 +268,6 @@ describe('AuthAccessService', () => {
       staffProfileComplete: false,
       access: {
         staff: { canAccess: true, profileComplete: false },
-      },
-    });
-  });
-
-  it('does not require personal achievement link for a complete staff profile', async () => {
-    prisma.user.findUnique.mockResolvedValue({
-      ...currentConsent,
-      staffInfo: {
-        ...completeStaffInfo,
-        id: 'staff-5',
-        personalAchievementLink: null,
-        specialization: null,
-      },
-      studentInfo: null,
-    });
-    authIdentityCacheService.getStaffRoles.mockResolvedValue([
-      StaffRole.teacher,
-    ]);
-
-    await expect(
-      service.resolveForIdentity({
-        id: 'user-5',
-        email: 'teacher-no-achievement@example.com',
-        accountHandle: 'teacher-no-achievement',
-        roleType: UserRole.staff,
-        status: 'active',
-        emailVerified: true,
-        avatarPath: 'users/user-5/avatar',
-        requiresPasswordSetup: false,
-      }),
-    ).resolves.toMatchObject({
-      hasStaffProfile: true,
-      staffProfileComplete: true,
-      access: {
-        staff: { canAccess: true, profileComplete: true },
       },
     });
   });

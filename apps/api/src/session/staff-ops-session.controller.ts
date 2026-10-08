@@ -179,6 +179,11 @@ export class StaffOpsSessionController {
   @ApiParam({ name: 'classId', description: 'Class id' })
   @ApiBody({ type: CreateStaffOpsSessionDto })
   @ApiResponse({ status: 201, description: 'Session created.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Teacher blocked: the running class has not submitted a survey that is inside its deadline block window (from the day before endDate, Vietnam time).',
+  })
   async createSession(
     @CurrentUser() user: JwtPayload,
     @Param('classId', new ParseClassIdPipe()) classId: string,

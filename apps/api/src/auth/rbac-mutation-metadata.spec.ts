@@ -65,7 +65,7 @@ function getAllowAssistantOnAdminRoute(
 }
 
 describe('RBAC route metadata', () => {
-  it.each(['createUser', 'createStudentUser', 'updateUser', 'deleteUser'])(
+  it.each(['createUser', 'updateUser', 'deleteUser'])(
     'allows assistant on UserController.%s',
     (methodName) => {
       expect(getAllowedStaffRoles(UserController, methodName)).toEqual([
@@ -73,6 +73,13 @@ describe('RBAC route metadata', () => {
       ]);
     },
   );
+
+  it('allows assistant and customer care on UserController.createStudentUser', () => {
+    expect(getAllowedStaffRoles(UserController, 'createStudentUser')).toEqual([
+      StaffRole.assistant,
+      StaffRole.customer_care,
+    ]);
+  });
 
   it('allows assistant for staff profile role/link updates', () => {
     expect(getAllowedStaffRoles(StaffController, 'updateStaff')).toEqual([

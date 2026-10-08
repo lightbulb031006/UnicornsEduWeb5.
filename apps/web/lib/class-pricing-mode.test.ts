@@ -8,7 +8,9 @@ import {
   explainMissingStandardBlocks,
   formatSessionEquivalentLine,
   formatStandardBlockSummary,
+  oneTimePackageError,
   perSessionToPerBlock,
+  pricingModeForCourse,
   requestClassPricingModeChange,
   standardBlockCountFromSlots,
   toPerBlockTuitionForApi,
@@ -202,5 +204,39 @@ describe("class pricing mode UI (#137)", () => {
         displayedAmount: 50000,
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("khoá bán một lần", () => {
+  it("chế độ lớp đi theo khoá", () => {
+    expect(pricingModeForCourse("per_block", true)).toBe("one_time");
+    expect(pricingModeForCourse("one_time", false)).toBe("per_session");
+    expect(pricingModeForCourse("per_block", false)).toBe("per_block");
+  });
+
+  it("đơn giá giữ nguyên khi chuyển giữa theo buổi và bán một lần", () => {
+    for (const [from, to] of [
+      ["per_session", "one_time"],
+      ["one_time", "per_session"],
+    ] as const) {
+      expect(
+        convertDisplayedRateInput({ input: "180.000", from, to, standardBlockCount: 3 }),
+      ).toBe("180.000");
+    }
+    expect(
+      convertDisplayedRateInput({
+        input: "180.000",
+        from: "one_time",
+        to: "per_block",
+        standardBlockCount: 3,
+      }),
+    ).toBe("60.000");
+  });
+
+  it("bắt buộc Tổng gói > 0đ cho lớp bán một lần", () => {
+    expect(oneTimePackageError("one_time", undefined)).toMatch(/Tổng gói/);
+    expect(oneTimePackageError("one_time", 0)).toMatch(/Tổng gói/);
+    expect(oneTimePackageError("one_time", 1_600_000)).toBeNull();
+    expect(oneTimePackageError("per_session", undefined)).toBeNull();
   });
 });

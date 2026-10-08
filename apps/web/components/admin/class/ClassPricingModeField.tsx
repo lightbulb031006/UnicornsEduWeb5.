@@ -31,6 +31,17 @@ export default function ClassPricingModeField({
 }: Props) {
   const checked = value === "per_block";
 
+  if (value === "one_time") {
+    return (
+      <div className="flex flex-col gap-1 rounded-lg border border-border-default bg-bg-surface p-3">
+        <p className="text-sm font-medium text-text-primary">Chế độ tính tiền</p>
+        <p className="text-xs text-text-muted">
+          Lớp bán một lần. Học phí cả khoá trừ ở buổi có mặt hoặc nghỉ phép đầu tiên của từng học sinh. Các buổi sau không trừ thêm.
+        </p>
+      </div>
+    );
+  }
+
   const handleCheckedChange = (nextChecked: boolean) => {
     const next: ClassPricingMode = nextChecked ? "per_block" : "per_session";
     const result = requestClassPricingModeChange({

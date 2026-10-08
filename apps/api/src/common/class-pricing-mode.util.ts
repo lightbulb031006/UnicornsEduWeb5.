@@ -8,6 +8,7 @@ import {
 export const CLASS_PRICING_MODE = {
   per_session: 'per_session',
   per_block: 'per_block',
+  one_time: 'one_time',
 } as const;
 
 export type ClassPricingModeValue =
@@ -17,6 +18,72 @@ export function isBlockPricingMode(
   mode?: string | null,
 ): mode is typeof CLASS_PRICING_MODE.per_block {
   return mode === CLASS_PRICING_MODE.per_block;
+}
+
+export function isOneTimePricingMode(
+  mode?: string | null,
+): mode is typeof CLASS_PRICING_MODE.one_time {
+  return mode === CLASS_PRICING_MODE.one_time;
+}
+
+/**
+ * Chế độ tính tiền của lớp theo khoá: khoá bán một lần ép `one_time`; khoá
+ * thường nhận `per_session`/`per_block` và từ chối `one_time` (bán một lần là
+ * cài đặt của khoá, không chọn trên từng lớp).
+ */
+export function resolveClassPricingModeForCourse(params: {
+  courseIsOneTime: boolean;
+  requestedMode?: ClassPricingModeValue | null;
+}): ClassPricingModeValue {
+  if (params.courseIsOneTime) {
+    return CLASS_PRICING_MODE.one_time;
+  }
+  if (isOneTimePricingMode(params.requestedMode)) {
+    throw new BadRequestException(
+      'Bán một lần là cài đặt của khoá. Hãy bật "Bán một lần" trên khoá học.',
+    );
+  }
+  return params.requestedMode ?? CLASS_PRICING_MODE.per_session;
+}
+
+/** Lớp chỉ đổi sang khoá cùng chế độ bán (bán một lần ↔ bán một lần). */
+export function assertCourseChangeKeepsSaleMode(params: {
+  fromCourseIsOneTime: boolean;
+  toCourseIsOneTime: boolean;
+}): void {
+  if (params.fromCourseIsOneTime !== params.toCourseIsOneTime) {
+    throw new BadRequestException(
+      'Chỉ đổi được sang khoá cùng chế độ: lớp bán một lần sang khoá bán một lần, lớp thường sang khoá thường.',
+    );
+  }
+}
+
+/** Lớp bán một lần phải có tổng gói > 0đ, vì gói là khoản thu ở buổi đầu. */
+export function assertOneTimePackageTotal(params: {
+  isOneTime: boolean;
+  tuitionPackageTotal?: number | null;
+}): void {
+  if (!params.isOneTime) {
+    return;
+  }
+  const total = params.tuitionPackageTotal;
+  if (total == null || !Number.isFinite(total) || total <= 0) {
+    throw new BadRequestException(
+      'Lớp thuộc khoá bán một lần phải có Tổng gói lớn hơn 0đ.',
+    );
+  }
+}
+
+/**
+ * Chỉ bật bán một lần cho khoá khi chưa lớp nào của khoá thu học phí: học sinh
+ * đã bị trừ theo buổi sẽ bị coi là "đã thu" và không bao giờ bị trừ gói.
+ */
+export function assertCanEnableOneTimeCourse(chargedAttendanceCount: number) {
+  if (chargedAttendanceCount > 0) {
+    throw new BadRequestException(
+      'Khoá đã có lớp thu học phí theo buổi, không bật bán một lần được. Cần backfill riêng.',
+    );
+  }
 }
 
 export function isFrozenSessionPaymentStatus(status?: string | null): boolean {

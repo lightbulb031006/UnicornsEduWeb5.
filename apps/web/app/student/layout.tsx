@@ -27,9 +27,12 @@ export default function StudentLayout({
           style={STUDENT_LAYOUT_BACKGROUND_STYLE}
         />
         <StudentHeader />
+        {/* Navbar fixed nằm đè lên <main>: pt = chiều cao navbar + 1rem khoảng cách nội dung,
+            scroll-pt = chiều cao navbar để scrollIntoView không đưa mục xuống dưới navbar.
+            Sticky dừng ở padding-top + top, nên phần tử muốn bám sát dưới navbar dùng `-top-4`. */}
         <main
           id="student-main-content"
-          className="relative min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-8"
+          className="relative min-h-0 min-w-0 flex-1 scroll-pt-[4.25rem] overflow-y-auto px-4 pb-6 pt-[5.25rem] sm:scroll-pt-20 sm:px-6 sm:pb-8 sm:pt-24 lg:px-8"
         >
           <div className="mx-auto w-full max-w-6xl">{children}</div>
         </main>

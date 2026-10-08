@@ -10,6 +10,7 @@ import {
   ClassContentCreateDto,
   ClassContentScheduleUpdateDto,
   ClassContentItemResponseDto,
+  ClassContentModuleGroupDto,
   ClassTheoryProgressDto,
   PRACTICE_DURATION_MIN_MINUTES,
   PRACTICE_DURATION_MAX_MINUTES,
@@ -17,6 +18,7 @@ import {
   TheoryLessonViewResponseDto,
 } from 'src/dtos/course-content.dto';
 import {
+  ClassContentHiddenReason,
   LessonKind,
   ClassTimelineItemKind,
   StudentClassStatus,
@@ -27,10 +29,51 @@ import {
 } from 'src/class-timeline/append-timeline-item';
 import {
   ActionHistoryActor,
+  CLASS_OWNED_LESSON_DISABLED_MESSAGE,
+  PRACTICE_MODULE_NOT_ADDED_MESSAGE,
   CourseContentSupportService,
 } from './course-content-support.service';
+import { NOT_ARCHIVED_CONTENT_ITEM } from './archived-lesson-filter';
+import { groupClassContentByModule } from './class-content-groups';
 
 const CLASS_CONTENT_CREATE_TRANSACTION_TIMEOUT_MS = 15_000;
+
+type OrderableClassContentItem = {
+  id: string;
+  sortOrder: number;
+  lesson?: {
+    kind: string;
+    order: number;
+    module?: { id: string; sortOrder: number } | null;
+  } | null;
+};
+
+/**
+ * Thứ tự nội dung lớp: theo chuyên đề (`modules.sort_order`); trong một chuyên đề, tiết lý
+ * thuyết theo thứ tự tiết của khoá rồi tới lần giao thực hành theo `sort_order` của lớp.
+ * Item không thuộc chuyên đề (tiết riêng lớp đã lưu trữ) xếp cuối.
+ */
+export function compareClassContentItems(
+  a: OrderableClassContentItem,
+  b: OrderableClassContentItem,
+): number {
+  const aModule = a.lesson?.module ?? null;
+  const bModule = b.lesson?.module ?? null;
+  if (!aModule || !bModule) {
+    if (aModule !== bModule) return aModule ? -1 : 1;
+    return a.sortOrder - b.sortOrder || a.id.localeCompare(b.id);
+  }
+  const byModule =
+    aModule.sortOrder - bModule.sortOrder ||
+    aModule.id.localeCompare(bModule.id);
+  if (byModule !== 0) return byModule;
+
+  const aTheory = a.lesson?.kind === LessonKind.theory;
+  const bTheory = b.lesson?.kind === LessonKind.theory;
+  if (aTheory !== bTheory) return aTheory ? -1 : 1;
+  const byLessonOrder = aTheory ? a.lesson!.order - b.lesson!.order : 0;
+  return byLessonOrder || a.sortOrder - b.sortOrder || a.id.localeCompare(b.id);
+}
 
 @Injectable()
 export class ClassContentService extends CourseContentSupportService {
@@ -74,7 +117,7 @@ export class ClassContentService extends CourseContentSupportService {
       where: { classId_lessonId: { classId, lessonId } },
       include: { lesson: true },
     });
-    if (!item?.lesson) {
+    if (!item?.lesson || item.lesson.archivedAt) {
       throw new NotFoundException('Tiết học không tồn tại');
     }
     this.assertClassContentVisibleToStudent(item.hiddenAt);
@@ -94,14 +137,12 @@ export class ClassContentService extends CourseContentSupportService {
       where: { classId_lessonId: { classId, lessonId } },
       include: { lesson: true },
     });
-    if (!item?.lesson) {
+    if (!item?.lesson || item.lesson.archivedAt) {
       throw new NotFoundException('Tiết học không tồn tại');
     }
     this.assertClassContentVisibleToStudent(item.hiddenAt);
     if (item.lesson.kind !== LessonKind.theory) {
-      throw new BadRequestException(
-        'Chỉ tiết lý thuyết mới ghi nhận lượt xem',
-      );
+      throw new BadRequestException('Chỉ tiết lý thuyết mới ghi nhận lượt xem');
     }
 
     const lastViewedAt = new Date();
@@ -150,7 +191,7 @@ export class ClassContentService extends CourseContentSupportService {
       where: { id: assignmentId, classId },
       include: { lesson: true },
     });
-    if (!item?.lesson) {
+    if (!item?.lesson || item.lesson.archivedAt) {
       throw new NotFoundException('Assignment not found');
     }
     this.assertClassContentVisibleToStudent(item.hiddenAt);
@@ -172,16 +213,6 @@ export class ClassContentService extends CourseContentSupportService {
     }
   }
 
-  private async resolveHiddenByStaffId(
-    actor: ActionHistoryActor,
-  ): Promise<string | null> {
-    const staff = await this.prisma.staffInfo.findFirst({
-      where: { userId: actor.userId },
-      select: { id: true },
-    });
-    return staff?.id ?? null;
-  }
-
   /**
    * Block course-level Module/Lesson deletes while any class still
    * references the lesson via ClassContentItem (including hidden items).
@@ -191,14 +222,11 @@ export class ClassContentService extends CourseContentSupportService {
   //
   // Dual source of truth:
   // `Lesson.classId` (scalar FK on `lessons`) and `class_content_items.class_id`
-  // serve different purposes. Lesson.classId marks a lesson as owned by a class
-  // (created inline for that class — XOR with courseId+moduleId). class_content_items
-  // is the ordered list of lessons shown in the class content tab — it can
-  // reference both class-owned lessons AND course lessons. When creating a new
-  // lesson for a class, we write BOTH: Lesson.classId = classId AND a
-  // class_content_items row. When adding an existing course lesson, only a
-  // class_content_items row is created — the lesson's courseId/moduleId stay
-  // untouched.
+  // serve different purposes. Lesson.classId marks a legacy class-owned lesson —
+  // no longer created and archived by the 2026-10-02 migration (`lessons.archived_at`).
+  // class_content_items is the ordered list of course lessons shown in the class:
+  // theory items are materialized from the class's added modules (`class_modules`,
+  // see class-course-module-sync.ts); practice items are assigned one lesson at a time.
 
   /**
    * Map a raw Prisma ClassContentItem (with included lesson/module) to the
@@ -218,13 +246,14 @@ export class ClassContentService extends CourseContentSupportService {
       title: string;
       kind: string;
       classId: string | null;
-      module?: { title: string } | null;
+      module?: { id: string; title: string } | null;
     } | null;
   }): ClassContentItemResponseDto {
     const lesson = item.lesson;
     const lessonKind: 'theory' | 'practice' =
       lesson?.kind === 'practice' ? 'practice' : 'theory';
-    const kindLabel = lessonKind === 'practice' ? 'Tiết thực hành' : 'Tiết lý thuyết';
+    const kindLabel =
+      lessonKind === 'practice' ? 'Tiết thực hành' : 'Tiết lý thuyết';
     const source: 'course' | 'class' =
       item.kind === 'lesson' && lesson?.classId === item.classId
         ? 'class'
@@ -240,6 +269,7 @@ export class ClassContentService extends CourseContentSupportService {
       title: lesson?.title ?? '(Tiết học đã xoá)',
       kindLabel,
       source,
+      moduleId: lesson?.module?.id,
       moduleTitle: lesson?.module?.title,
       openAt,
       durationMinutes,
@@ -325,68 +355,52 @@ export class ClassContentService extends CourseContentSupportService {
   ): Promise<ClassContentItemResponseDto> {
     await this.validateStaffClassAccess(classId, actor);
 
-    let lessonKind: string;
-
-    if (dto.lessonId) {
-      const topic = await this.prisma.lesson.findUnique({
-        where: { id: dto.lessonId },
-      });
-      if (!topic) {
-        throw new NotFoundException(`Lesson ${dto.lessonId} not found`);
-      }
-      lessonKind = topic.kind;
-    } else {
-      if (!dto.title?.trim()) {
-        throw new BadRequestException(
-          'Title is required when creating a new lesson',
-        );
-      }
-      const kind =
-        dto.kind === LessonKind.practice ? LessonKind.practice : LessonKind.theory;
-      await this.validateLessonOwnership({
-        kind,
-        classId,
-        title: dto.title.trim(),
-      });
-      await this.validateClassExists(classId);
-      lessonKind = kind;
+    // Lớp không tạo tiết riêng nữa (ADR 2026-10-02): chỉ giao tiết thực hành có sẵn của khoá.
+    if (!dto.lessonId) {
+      throw new BadRequestException(CLASS_OWNED_LESSON_DISABLED_MESSAGE);
     }
+    const topic = await this.prisma.lesson.findUnique({
+      where: { id: dto.lessonId },
+    });
+    if (!topic || topic.archivedAt) {
+      throw new NotFoundException(`Lesson ${dto.lessonId} not found`);
+    }
+    if (topic.kind === LessonKind.theory) {
+      throw new BadRequestException(
+        'Tiết lý thuyết vào lớp theo chuyên đề. Hãy thêm chuyên đề chứa tiết này.',
+      );
+    }
+    const lessonId = dto.lessonId;
+    const lessonKind: string = topic.kind;
+    const moduleId = topic.moduleId;
 
     const schedule = this.parsePracticeSchedule(lessonKind, dto, false);
 
     const item = await this.prisma.$transaction(
       async (tx) => {
-        let lessonId: string;
+        // Chỉ giao tiết thực hành thuộc chuyên đề lớp đã thêm (cũng chặn tiết khoá khác).
+        const classModule = moduleId
+          ? await tx.classModule.findUnique({
+              where: { classId_moduleId: { classId, moduleId } },
+              select: { id: true },
+            })
+          : null;
+        if (!classModule) {
+          throw new BadRequestException(PRACTICE_MODULE_NOT_ADDED_MESSAGE);
+        }
 
-        if (dto.lessonId) {
-          const existing = await tx.classContentItem.findUnique({
-            where: { classId_lessonId: { classId, lessonId: dto.lessonId } },
-          });
-          if (existing) {
-            if (existing.hiddenAt) {
-              throw new BadRequestException(
-                'Tiết học đang bị ẩn trong lớp này. Hãy khôi phục thay vì thêm lại.',
-              );
-            }
+        const existing = await tx.classContentItem.findUnique({
+          where: { classId_lessonId: { classId, lessonId } },
+        });
+        if (existing) {
+          if (existing.hiddenAt) {
             throw new BadRequestException(
-              'Lesson is already in this class content list',
+              'Tiết học đang bị ẩn trong lớp này. Hãy khôi phục thay vì thêm lại.',
             );
           }
-          lessonId = dto.lessonId;
-        } else {
-          const created = await tx.lesson.create({
-            data: {
-              kind:
-                dto.kind === LessonKind.practice
-                  ? LessonKind.practice
-                  : LessonKind.theory,
-              classId,
-              title: dto.title!.trim(),
-              createdBy: actor.userId,
-              updatedBy: actor.userId,
-            },
-          });
-          lessonId = created.id;
+          throw new BadRequestException(
+            'Lesson is already in this class content list',
+          );
         }
 
         const maxSort = await tx.classContentItem.aggregate({
@@ -433,13 +447,59 @@ export class ClassContentService extends CourseContentSupportService {
   ): Promise<ClassContentItemResponseDto[]> {
     await this.validateStaffClassAccess(classId, actor);
     const items = await this.prisma.classContentItem.findMany({
-      where: { classId },
+      where: { classId, ...NOT_ARCHIVED_CONTENT_ITEM },
       orderBy: { sortOrder: 'asc' },
       include: {
         lesson: { include: { module: true } },
       },
     });
-    return items.map((item) => this.mapClassContentItem(item));
+    return items
+      .toSorted(compareClassContentItems)
+      .map((item) => this.mapClassContentItem(item));
+  }
+
+  async listClassContentGroups(
+    classId: string,
+    actor: ActionHistoryActor,
+  ): Promise<ClassContentModuleGroupDto[]> {
+    const items = await this.listClassContentItems(classId, actor);
+    return this.groupByClassModules(classId, items);
+  }
+
+  /**
+   * Trang lớp học sinh, tab Chuyên đề: cùng cách gom và thứ tự nhóm như staff nhưng chỉ
+   * item học sinh thấy (bỏ item ẩn, tiết lưu trữ).
+   */
+  async listClassContentGroupsForStudent(
+    classId: string,
+    studentId: string,
+  ): Promise<ClassContentModuleGroupDto[]> {
+    const items = await this.listClassContentForStudent(classId, studentId);
+    return this.groupByClassModules(classId, items);
+  }
+
+  private async groupByClassModules(
+    classId: string,
+    items: ClassContentItemResponseDto[],
+  ): Promise<ClassContentModuleGroupDto[]> {
+    // Chỉ chuyên đề lớp đang có, theo thứ tự của lớp. Item chuyên đề đã gỡ đều đã ẩn
+    // (coi như chưa từng thêm) nên không có nhóm.
+    const classModules = await this.prisma.classModule.findMany({
+      where: { classId },
+      select: {
+        sortOrder: true,
+        module: { select: { id: true, title: true } },
+      },
+    });
+    return groupClassContentByModule(
+      items,
+      classModules.map((classModule) => ({
+        id: classModule.module.id,
+        title: classModule.module.title,
+        sortOrder: classModule.sortOrder,
+        added: true,
+      })),
+    );
   }
 
   async getClassTheoryProgress(
@@ -452,10 +512,12 @@ export class ClassContentService extends CourseContentSupportService {
     const item = await this.prisma.classContentItem.findFirst({
       where: { id: itemId, classId },
       include: {
-        lesson: { select: { id: true, title: true, kind: true } },
+        lesson: {
+          select: { id: true, title: true, kind: true, archivedAt: true },
+        },
       },
     });
-    if (!item?.lesson || !item.lessonId) {
+    if (!item?.lesson || !item.lessonId || item.lesson.archivedAt) {
       throw new NotFoundException('Class content item not found');
     }
     if (item.lesson.kind !== LessonKind.theory) {
@@ -577,7 +639,7 @@ export class ClassContentService extends CourseContentSupportService {
 
     // Finding #4: verify ALL IDs belong to this class before updating
     const owned = await this.prisma.classContentItem.findMany({
-      where: { id: { in: orderedIds }, classId },
+      where: { id: { in: orderedIds }, classId, ...NOT_ARCHIVED_CONTENT_ITEM },
       select: { id: true },
     });
     if (owned.length !== orderedIds.length) {
@@ -611,10 +673,11 @@ export class ClassContentService extends CourseContentSupportService {
     }
     const hiddenAt = item.hiddenAt ?? new Date();
     const hiddenByStaffId = await this.resolveHiddenByStaffId(actor);
+    const hiddenReason = item.hiddenReason ?? ClassContentHiddenReason.manual;
     await this.prisma.$transaction([
       this.prisma.classContentItem.update({
         where: { id: itemId },
-        data: { hiddenAt, hiddenByStaffId },
+        data: { hiddenAt, hiddenByStaffId, hiddenReason },
       }),
       this.prisma.classTimelineItem.updateMany({
         where: { classContentItemId: itemId },
@@ -635,14 +698,18 @@ export class ClassContentService extends CourseContentSupportService {
     await this.validateStaffClassAccess(classId, actor);
     const item = await this.prisma.classContentItem.findUnique({
       where: { id: itemId },
+      include: {
+        lesson: { select: { kind: true, moduleId: true, archivedAt: true } },
+      },
     });
     if (!item || item.classId !== classId) {
       throw new NotFoundException('Class content item not found');
     }
+    await this.assertClassContentRestorable(classId, item.lesson);
     await this.prisma.$transaction([
       this.prisma.classContentItem.update({
         where: { id: itemId },
-        data: { hiddenAt: null, hiddenByStaffId: null },
+        data: { hiddenAt: null, hiddenByStaffId: null, hiddenReason: null },
       }),
       this.prisma.classTimelineItem.updateMany({
         where: { classContentItemId: itemId },
@@ -653,6 +720,37 @@ export class ClassContentService extends CourseContentSupportService {
       `Class content item restored: ${itemId} for class ${classId} by ${actor.userEmail}`,
     );
     return this.listClassContentItems(classId, actor);
+  }
+
+  /**
+   * Tiết đã lưu trữ không khôi phục được. Item thuộc chuyên đề (lý thuyết lẫn lần giao)
+   * chỉ hiện lại khi lớp còn chuyên đề đó — muốn hiện lại cả chuyên đề thì thêm lại chuyên đề.
+   */
+  private async assertClassContentRestorable(
+    classId: string,
+    lesson: {
+      kind: string;
+      moduleId: string | null;
+      archivedAt: Date | null;
+    } | null,
+  ): Promise<void> {
+    if (lesson?.archivedAt) {
+      throw new BadRequestException(
+        'Tiết học đã được lưu trữ, không khôi phục vào lớp được.',
+      );
+    }
+    if (!lesson?.moduleId) return;
+    const classModule = await this.prisma.classModule.findUnique({
+      where: {
+        classId_moduleId: { classId, moduleId: lesson.moduleId },
+      },
+      select: { id: true },
+    });
+    if (!classModule) {
+      throw new BadRequestException(
+        'Lớp chưa thêm chuyên đề chứa tiết này. Hãy thêm chuyên đề trước.',
+      );
+    }
   }
 
   async updateClassContentSchedule(
@@ -719,13 +817,15 @@ export class ClassContentService extends CourseContentSupportService {
       throw new ForbiddenException('Content access period has expired');
     }
     const items = await this.prisma.classContentItem.findMany({
-      where: { classId, hiddenAt: null },
+      where: { classId, hiddenAt: null, ...NOT_ARCHIVED_CONTENT_ITEM },
       orderBy: { sortOrder: 'asc' },
       include: {
         lesson: { include: { module: true } },
       },
     });
-    return items.map((item) => this.mapClassContentItem(item));
+    return items
+      .toSorted(compareClassContentItems)
+      .map((item) => this.mapClassContentItem(item));
   }
 
   async listCourseLessonsForClass(
@@ -742,7 +842,14 @@ export class ClassContentService extends CourseContentSupportService {
 
     const [courseTopics, existingItemTopicIds] = await Promise.all([
       this.prisma.lesson.findMany({
-        where: { courseId: cls.courseId, classId: null },
+        // Tiết lý thuyết vào lớp theo chuyên đề; chỉ tiết thực hành của chuyên đề lớp đã thêm được giao từng tiết.
+        where: {
+          courseId: cls.courseId,
+          classId: null,
+          kind: LessonKind.practice,
+          archivedAt: null,
+          module: { classModules: { some: { classId } } },
+        },
         include: {
           module: { select: { id: true, title: true } },
           quizzes: { select: { questionId: true } },

@@ -8,6 +8,7 @@ import {
   ResponsiveActionFooter,
 } from "@/components/ui/ResponsiveDialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Switch } from "@/components/ui/switch";
 import type { Course } from "@/dtos/class.dto";
 
 export type CourseFormValues = {
@@ -15,6 +16,8 @@ export type CourseFormValues = {
   sortOrder: number;
   /** Số ngày thời hạn mặc định. null = vô hạn. */
   defaultDurationDays: number | null;
+  /** Khoá bán một lần. Chỉ gửi lên khi người dùng được đổi chế độ bán. */
+  isOneTime: boolean;
 };
 
 type Props = {
@@ -22,13 +25,22 @@ type Props = {
   course: Course | null;
   onClose: () => void;
   onSubmit: (values: CourseFormValues) => Promise<void>;
+  /** Admin/trợ lí mới được bật/tắt "Bán một lần". */
+  canChangeSaleMode?: boolean;
 };
 
-export default function CourseFormPopup({ open, course, onClose, onSubmit }: Props) {
+export default function CourseFormPopup({
+  open,
+  course,
+  onClose,
+  onSubmit,
+  canChangeSaleMode = false,
+}: Props) {
   const isEdit = Boolean(course);
   const [name, setName] = useState("");
   const [sortOrderInput, setSortOrderInput] = useState("0");
   const [durationInput, setDurationInput] = useState("");
+  const [isOneTime, setIsOneTime] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -38,6 +50,7 @@ export default function CourseFormPopup({ open, course, onClose, onSubmit }: Pro
     setDurationInput(
       course?.defaultDurationDays != null ? String(course.defaultDurationDays) : "",
     );
+    setIsOneTime(course?.isOneTime ?? false);
   }, [open, course]);
 
   if (!open) return null;
@@ -71,6 +84,7 @@ export default function CourseFormPopup({ open, course, onClose, onSubmit }: Pro
         name: trimmedName,
         sortOrder: Math.trunc(sortOrder),
         defaultDurationDays,
+        isOneTime,
       });
     } finally {
       setSubmitting(false);
@@ -132,6 +146,37 @@ export default function CourseFormPopup({ open, course, onClose, onSubmit }: Pro
               </AlertDescription>
             </Alert>
           ) : null}
+
+          <div className="space-y-2 rounded-md border border-border-default p-3">
+            <label className="flex items-start justify-between gap-3 text-sm text-text-secondary">
+              <span className="min-w-0">
+                <span className="block font-medium text-text-primary">Bán một lần</span>
+                <span className="block text-xs text-text-muted">
+                  Học sinh bị trừ cả tổng gói ở buổi học đầu, các buổi sau không trừ.
+                  Mọi lớp của khoá phải có Tổng gói lớn hơn 0đ.
+                </span>
+              </span>
+              <Switch
+                checked={isOneTime}
+                onCheckedChange={setIsOneTime}
+                disabled={!canChangeSaleMode}
+                aria-label="Bán một lần"
+              />
+            </label>
+            {!canChangeSaleMode ? (
+              <p className="text-xs text-text-muted">
+                Chỉ admin hoặc trợ lí được đổi cài đặt này.
+              </p>
+            ) : isEdit && isOneTime !== (course?.isOneTime ?? false) ? (
+              <Alert variant="warning">
+                <AlertDescription>
+                  {isOneTime
+                    ? "Mọi lớp của khoá chuyển sang bán một lần. Chỉ bật được khi chưa lớp nào thu học phí."
+                    : "Mọi lớp của khoá trở về tính theo buổi. Khoản đã trừ giữ nguyên, không tính lại."}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
 
           <label className="flex flex-col gap-1 text-sm text-text-secondary">
             <span>Thứ tự hiển thị</span>

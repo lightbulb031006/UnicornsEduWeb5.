@@ -9,6 +9,7 @@ import {
   SessionCreatePayload,
   SessionItem,
 } from "@/dtos/session.dto";
+import type { ClassPricingMode } from "@/dtos/class.dto";
 import {
   CONTENT_LIMITS,
   firstOverLimit,
@@ -27,6 +28,7 @@ import {
   computeTeacherSessionAllowanceGrossPreviewVnd,
   grossAllowanceToRawBaseVnd,
   resolveLivePreviewPerStudentAllowanceVnd,
+  resolveTeacherScaleAmountVnd,
 } from "@/lib/session-allowance.helpers";
 import {
   resolveLivePreviewStudentTuitionVnd,
@@ -107,7 +109,9 @@ export type SessionClassPricingContext = {
   maxAllowancePerBlock?: number | null;
   scaleAmount?: number | null;
   teacherCustomAllowanceByTeacherId?: Record<string, number | null | undefined>;
-  pricingMode?: "per_session" | "per_block";
+  /** Scale riêng theo gia sư (null/thiếu = theo `scaleAmount` của lớp; 0 = không có scale). */
+  teacherCustomScaleByTeacherId?: Record<string, number | null | undefined>;
+  pricingMode?: ClassPricingMode;
   /** Đơn giá học phí / 30 phút của lớp (`student_tuition_per_block`). */
   studentTuitionPerBlock?: number | null;
   /** Số block của buổi chuẩn theo lịch cố định — fallback khi giờ nhập không chia hết 30 phút. */
@@ -126,6 +130,11 @@ type Props = {
   classPricing?: SessionClassPricingContext;
   teacherMode?: SessionTeacherMode;
   allowFinancialFields?: boolean;
+  /**
+   * Hiện thẻ "Trợ cấp buổi" chỉ đọc kể cả khi không được sửa trợ cấp
+   * (gia sư tự tạo buổi xem trước trợ cấp của mình).
+   */
+  showAllowancePreview?: boolean;
   allowAllowanceField?: boolean;
   allowAttendanceTuitionEdits?: boolean;
   /** Lớp không cần điểm danh — ẩn phần điểm danh, BE tự sinh present. */
@@ -270,6 +279,7 @@ export default function AddSessionPopup({
   classPricing,
   teacherMode = "select",
   allowFinancialFields = true,
+  showAllowancePreview = false,
   allowAllowanceField,
   allowAttendanceTuitionEdits,
   noAttendance = false,
@@ -523,6 +533,16 @@ export default function AddSessionPopup({
     });
   }, [classPricing, selectedTeacherId, previewBlockCount]);
 
+  const resolvedTeacherScaleAmount = useMemo(() => {
+    if (!classPricing) return 0;
+    return resolveTeacherScaleAmountVnd({
+      customScaleAmount: selectedTeacherId
+        ? classPricing.teacherCustomScaleByTeacherId?.[selectedTeacherId]
+        : null,
+      classScaleAmount: classPricing.scaleAmount,
+    });
+  }, [classPricing, selectedTeacherId]);
+
   const chargeableAttendanceCount = useMemo(
     () =>
       noAttendance
@@ -537,9 +557,14 @@ export default function AddSessionPopup({
     return computeSessionAllowanceRawBaseVnd({
       allowancePerStudent: resolvedTeacherAllowanceBase,
       chargeableStudentCount: chargeableAttendanceCount,
-      scaleAmount: classPricing.scaleAmount,
+      scaleAmount: resolvedTeacherScaleAmount,
     });
-  }, [classPricing, resolvedTeacherAllowanceBase, chargeableAttendanceCount]);
+  }, [
+    classPricing,
+    resolvedTeacherAllowanceBase,
+    resolvedTeacherScaleAmount,
+    chargeableAttendanceCount,
+  ]);
 
   const coefficientForPreview = isTrialLesson ? 0 : 1;
 
@@ -936,19 +961,24 @@ export default function AddSessionPopup({
                       }}
                     />
 
-                    {canEditAllowance && classPricing ? (
+                    {(canEditAllowance || showAllowancePreview) && classPricing ? (
                       <SessionTeacherAllowanceEstimateCard
                         amount={finalAllowancePreview}
                         estimatedAmount={expectedAllowanceGrossPreview}
                         breakdownText={
                           allowanceRawBasePreview == null
                             ? null
-                            : `${resolvedTeacherAllowanceBase.toLocaleString("vi-VN")}đ/hs × ${chargeableAttendanceCount} hs + ${(classPricing?.scaleAmount ?? 0).toLocaleString("vi-VN")}đ = ${allowanceRawBasePreview.toLocaleString("vi-VN")}đ`
+                            : `${resolvedTeacherAllowanceBase.toLocaleString("vi-VN")}đ/hs × ${chargeableAttendanceCount} hs + ${resolvedTeacherScaleAmount.toLocaleString("vi-VN")}đ = ${allowanceRawBasePreview.toLocaleString("vi-VN")}đ`
                         }
                         showBreakdown={Boolean(classPricing)}
                         usesSnapshot={false}
                         isManualOverride={manualAllowanceGrossOverride !== null}
-                        canEdit
+                        canEdit={canEditAllowance}
+                        footnote={
+                          canEditAllowance
+                            ? null
+                            : "Ước tính trước khấu trừ vận hành/thuế. Số chính thức chốt khi lưu buổi theo điểm danh."
+                        }
                         editLocked={isTrialLesson}
                         editLockedReason={
                           isTrialLesson

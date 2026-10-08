@@ -20,7 +20,6 @@ export interface StaffListItem {
     fullName: string;
     status: StaffStatus;
     roles?: string[];
-    personalAchievementLink?: string | null;
     user?: {
         province?: string | null;
         fullName?: string | null;
@@ -33,6 +32,8 @@ export interface StaffListItem {
         class: { id: string; name: string };
     }>;
     monthlyStats?: Array<{ totalUnpaidAll?: number | null }>;
+    /** Số thành tích của nhân sự (`GET /staff`). */
+    achievementCount?: number;
     unpaidAmountTotal?: number | null;
 }
 
@@ -41,6 +42,8 @@ export interface CustomerCareStaffOption {
     fullName: string;
     status: StaffStatus;
     roles: string[];
+    /** % mặc định của CSKH (phân số 0–0.99), áp khi gán vào học sinh. */
+    defaultProfitPercent?: number;
 }
 
 export interface StaffOption {
@@ -77,12 +80,12 @@ export interface StaffDetail {
     birthDate?: string | null;
     university?: string | null;
     highSchool?: string | null;
-    specialization?: string | null;
     bankAccount?: string | null;
     bankQrLink?: string | null;
-    personalAchievementLink?: string | null;
     googleMeetLink?: string | null;
     revenueSharePercent?: number | null;
+    /** % mặc định của CSKH (phân số 0–0.99). */
+    customerCareDefaultProfitPercent?: number;
     roles: string[];
     status: StaffStatus;
     createdAt?: string;
@@ -90,6 +93,8 @@ export interface StaffDetail {
     user?: {
         id: string;
         email: string;
+        phone?: string | null;
+        accountHandle?: string | null;
         province?: string | null;
         fullName?: string | null;
         first_name?: string | null;
@@ -118,11 +123,11 @@ export interface UpdateStaffPayload {
     birth_date?: string;
     university?: string;
     high_school?: string;
-    specialization?: string;
     bank_account?: string;
     bank_qr_link?: string;
-    personal_achievement_link?: string | null;
     revenue_share_percent?: number | null;
+    /** % mặc định của CSKH (phân số 0–0.99). */
+    customer_care_default_profit_percent?: number;
     roles?: string[];
     status?: StaffStatus;
     customer_care_managed_by_staff_id?: string | null;
@@ -382,6 +387,15 @@ export interface StaffOverdueSurveyWarningItem {
     classNames: string[];
 }
 
+/** Bài khảo sát đang trong khung chặn khảo sát sắp hạn mà gia sư còn lớp chưa nộp. */
+export interface StaffSurveyDeadlineBlockWarningItem {
+    surveyId: string;
+    surveyName: string;
+    /** YYYY-MM-DD */
+    endDate: string;
+    classNames: string[];
+}
+
 /** Response body khi backend trả 400 với code SURVEY_OVERDUE_WARNING (chưa xác nhận thanh toán). */
 export interface StaffOverdueSurveyWarningErrorResponse {
     statusCode: number;
@@ -410,10 +424,8 @@ export interface CreateStaffPayload {
     birth_date?: string;
     university?: string;
     high_school?: string;
-    specialization?: string;
     bank_account?: string;
     bank_qr_link?: string;
-    personal_achievement_link?: string | null;
     revenue_share_percent?: number | null;
     roles: string[];
     user_id: string;
@@ -426,7 +438,6 @@ export interface StaffInfoDto {
     birthdate: Date;
     university: string;
     high_school: string;
-    specialization: string;
     bank_account: string;
     bank_qr_link: string;
     status: StaffStatus;

@@ -2,8 +2,20 @@ jest.mock('../prisma/prisma.service', () => ({
   PrismaService: class PrismaServiceMock {},
 }));
 
-import { AttendanceStatus, StaffRole } from '../../generated/enums';
-import { DashboardService } from './dashboard.service';
+import {
+  AttendanceStatus,
+  StaffRole,
+  StaffStatus,
+} from '../../generated/enums';
+import { Prisma } from '../../generated/client';
+import { FIRST_WALLET_TOP_UP_SQL } from './first-wallet-top-up.sql';
+import {
+  DashboardService,
+  buildPersonnelCostBreakdown,
+  buildStaffPendingPayrollSources,
+  formatCostStaffName,
+  monthKeysIntersectingDateRange,
+} from './dashboard.service';
 
 describe('DashboardService staff training dashboard', () => {
   const prisma = {
@@ -187,6 +199,44 @@ describe('DashboardService staff training dashboard', () => {
         subject: 'An · Lớp A',
       }),
     ]);
+  });
+
+  it('keeps an inactive staff with unpaid amounts in payroll alerts', async () => {
+    prisma.$queryRaw.mockResolvedValueOnce([
+      {
+        staffId: 'staff-left',
+        staffName: 'Bình',
+        staffStatus: 'inactive',
+        sessionAmount: 400000,
+        bonusAmount: 0,
+        customerCareAmount: 0,
+        lessonAmount: 0,
+        extraAllowanceAmount: 0,
+        fixedSalaryAmount: 0,
+        assistantAmount: 0,
+        trainingManagerAmount: 0,
+        totalUnpaid: 400000,
+        totalCount: 1,
+        totalAmount: 400000,
+      },
+    ]);
+
+    const result = await service.getAdminActionAlerts({
+      group: 'payroll',
+      month: '05',
+      year: '2026',
+      page: 1,
+      limit: 20,
+    });
+
+    const [query] = prisma.$queryRaw.mock.calls[0] as [{ strings: string[] }];
+    expect(query.strings.join('')).not.toContain(
+      "staff_info.status = 'active'",
+    );
+    expect(result.data).toEqual([
+      expect.objectContaining({ targetId: 'staff-left', amount: 400000 }),
+    ]);
+    expect(result.data[0]?.subject).toMatch(/^Bình \(Đã nghỉ\) · /);
   });
 
   it('returns paginated missing-survey class action alerts with meta total', async () => {
@@ -464,6 +514,160 @@ describe('DashboardService CSKH dashboard clarity', () => {
   });
 });
 
+describe('DashboardService new students by first wallet top-up', () => {
+  const prisma = {
+    $queryRaw: jest.fn(),
+    class: { findMany: jest.fn(), count: jest.fn() },
+    makeupScheduleEvent: { findMany: jest.fn() },
+    studentExamSchedule: { findMany: jest.fn() },
+    staffInfo: { findMany: jest.fn(), count: jest.fn() },
+    customerCareService: { findMany: jest.fn() },
+    attendance: { groupBy: jest.fn() },
+    walletTransactionsHistory: { groupBy: jest.fn() },
+  };
+  const dashboardCacheService = {
+    wrapJson: jest.fn(
+      async <T>(options: { loader: () => Promise<T> }): Promise<T> =>
+        options.loader(),
+    ),
+  };
+  const surveyRoundService = {
+    getCurrentRound: jest.fn(() => Promise.resolve(6)),
+  };
+  // Học sinh nạp QR lần đầu 10/09, nạp tiếp 05/10 và 02/11: chỉ là mới ở tháng 9.
+  const firstTopUpAt = new Date('2026-09-10T03:00:00.000Z');
+
+  let service: DashboardService;
+
+  const isFirstTopUpCountQuery = (sql: Prisma.Sql) =>
+    sql.sql.includes('"newStudentsCount"') &&
+    sql.sql.includes('first_wallet_top_up');
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-15T05:30:00.000Z'));
+    jest.clearAllMocks();
+    prisma.$queryRaw.mockImplementation((sql: Prisma.Sql) => {
+      if (!isFirstTopUpCountQuery(sql)) return Promise.resolve([]);
+      const [monthStart, monthEnd] = sql.values.filter(
+        (value): value is Date => value instanceof Date,
+      );
+      const inPeriod = firstTopUpAt >= monthStart && firstTopUpAt < monthEnd;
+      return Promise.resolve([{ newStudentsCount: inPeriod ? 1 : 0 }]);
+    });
+    prisma.staffInfo.findMany.mockResolvedValue([]);
+    prisma.staffInfo.count.mockResolvedValue(0);
+    prisma.customerCareService.findMany.mockResolvedValue([
+      {
+        student: {
+          id: 'student-1',
+          status: 'active',
+          dropOutDate: null,
+        },
+      },
+    ]);
+    prisma.attendance.groupBy.mockResolvedValue([]);
+    prisma.walletTransactionsHistory.groupBy.mockResolvedValue([]);
+    service = new DashboardService(
+      prisma as never,
+      dashboardCacheService as never,
+      surveyRoundService as never,
+    );
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('counts only qualifying top-ups and keeps the earliest one', () => {
+    expect(FIRST_WALLET_TOP_UP_SQL.sql).toContain(
+      'MIN(wallet_transactions_history.created_at) AS first_top_up_at',
+    );
+    expect(FIRST_WALLET_TOP_UP_SQL.sql).toContain(
+      "student_wallet_sepay_orders.status::text = 'completed'",
+    );
+    expect(FIRST_WALLET_TOP_UP_SQL.sql).toContain(
+      "student_wallet_direct_topup_requests.status::text = 'approved'",
+    );
+    expect(FIRST_WALLET_TOP_UP_SQL.sql).toContain(
+      'GROUP BY wallet_transactions_history.student_id',
+    );
+  });
+
+  it.each([
+    ['08', 0],
+    ['09', 1],
+    ['10', 0],
+    ['11', 0],
+  ])(
+    'counts a student topping up across periods only in the first top-up month (%s)',
+    async (month, expected) => {
+      const dashboard = await service.getStaffDashboard({
+        staffId: 'cskh-1',
+        staffRoles: [StaffRole.customer_care],
+        query: { month, year: '2026' },
+      });
+
+      expect(dashboard.customerCare?.newStudentsThisMonth).toBe(expected);
+    },
+  );
+
+  it('uses the first top-up for system-wide churn counts instead of profile creation', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      { newStudentsThisMonth: 3, droppedStudentsThisMonth: 1 },
+    ]);
+
+    await expect(
+      service['getStudentChurnCounts']({
+        monthStart: new Date('2026-09-01T00:00:00.000Z'),
+        monthEnd: new Date('2026-10-01T00:00:00.000Z'),
+      }),
+    ).resolves.toEqual({
+      newStudentsThisMonth: 3,
+      droppedStudentsThisMonth: 1,
+    });
+    const [sql] = prisma.$queryRaw.mock.calls[0] as [Prisma.Sql];
+    expect(sql.sql).toContain(FIRST_WALLET_TOP_UP_SQL.sql);
+    expect(sql.sql).not.toContain('student_info.created_at');
+  });
+});
+
+describe('DashboardService customer source stats', () => {
+  const prisma = { $queryRaw: jest.fn() };
+
+  it('lists Khách cũ right before Khác, then Chưa gán', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      { customerSource: 'returning_customer', studentCount: 2, revenue: 300 },
+      { customerSource: 'other', studentCount: 1, revenue: 100 },
+      { customerSource: null, studentCount: 1, revenue: 100 },
+    ]);
+    const service = new DashboardService(
+      prisma as never,
+      {} as never,
+      {} as never,
+    );
+
+    const rows = (await service['getCustomerSourceStats']({
+      monthStart: new Date('2026-09-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-10-01T00:00:00.000Z'),
+    })) as Array<{ key: string; label: string; studentCount: number }>;
+
+    expect(rows.map((row) => row.key)).toEqual([
+      'tiktok',
+      'fanpage_hoc_tin',
+      'fanpage_luyen_tin',
+      'referral',
+      'personal',
+      'returning_customer',
+      'other',
+      'unassigned',
+    ]);
+    expect(rows.find((row) => row.key === 'returning_customer')).toMatchObject({
+      label: 'Khách cũ',
+      studentCount: 2,
+    });
+  });
+});
+
 describe('DashboardService financial export', () => {
   const prisma = {
     $queryRaw: jest.fn(),
@@ -566,7 +770,7 @@ describe('DashboardService financial export', () => {
           return revenueRows;
         }
 
-        if (sql.includes('active_staff AS')) {
+        if (sql.includes('staff_base AS')) {
           return staffRows;
         }
 
@@ -693,11 +897,12 @@ describe('DashboardService financial export', () => {
             },
           ];
         }
-        if (sql.includes('active_staff AS')) {
+        if (sql.includes('staff_base AS')) {
           return [
             {
               staffId: 'staff-1',
               staffName: 'Gia su B',
+              staffStatus: 'inactive',
               sessionAmount: 400_000,
               bonusAmount: 0,
               customerCareAmount: 0,
@@ -739,6 +944,8 @@ describe('DashboardService financial export', () => {
     expect(result.summary.personnelCost).toBe(550_000);
     expect(result.summary.profit).toBe(550_000);
     expect(result.personnelItems[0]?.note).toContain('Lương cứng');
+    // Nhân sự đã nghỉ vẫn tính chi phí, tên gắn nhãn.
+    expect(result.personnelItems[0]?.staffName).toBe('Gia su B (Đã nghỉ)');
   });
 
   it('returns per-student revenue items for date-range mode', async () => {
@@ -813,5 +1020,141 @@ describe('DashboardService financial export', () => {
     expect(result.revenueItems).toHaveLength(1);
     expect(result.meta.revenueItemCount).toBe(1);
     expect(result.meta.revenueTruncated).toBe(true);
+  });
+});
+
+describe('monthKeysIntersectingDateRange', () => {
+  it('takes whole bonus months touched by a partial date range', () => {
+    expect(monthKeysIntersectingDateRange('2026-09-15', '2026-10-03')).toEqual({
+      fromMonthKey: '2026-09',
+      toMonthKeyExclusive: '2026-11',
+    });
+  });
+
+  it('keeps a range inside one month to that month', () => {
+    expect(monthKeysIntersectingDateRange('2026-10-01', '2026-10-31')).toEqual({
+      fromMonthKey: '2026-10',
+      toMonthKeyExclusive: '2026-11',
+    });
+  });
+
+  it('rolls the exclusive bound over a year end', () => {
+    expect(monthKeysIntersectingDateRange('2026-12-20', '2026-12-20')).toEqual({
+      fromMonthKey: '2026-12',
+      toMonthKeyExclusive: '2027-01',
+    });
+  });
+});
+
+describe('buildPersonnelCostBreakdown', () => {
+  const emptyRow = {
+    sessionAmount: 0,
+    bonusRewardAmount: 0,
+    bonusPenaltyAmount: 0,
+    customerCareAmount: 0,
+    lessonAmount: 0,
+    extraAllowanceAmount: 0,
+    fixedSalaryAmount: 0,
+    assistantAmount: 0,
+    trainingManagerAmount: 0,
+  };
+
+  it('splits reward and penalty of the same month into separate sources', () => {
+    const breakdown = buildPersonnelCostBreakdown({
+      ...emptyRow,
+      sessionAmount: 1_000_000,
+      bonusRewardAmount: '500000',
+      bonusPenaltyAmount: '-200000',
+    });
+
+    expect(breakdown.sourceAmounts).toEqual({
+      'teacher-cost': 1_000_000,
+      'bonus-reward-cost': 500_000,
+      'bonus-penalty-cost': -200_000,
+    });
+    expect(breakdown.note).toBe(
+      [
+        `Dạy ${(1_000_000).toLocaleString('vi-VN')}đ`,
+        `Thưởng ${(500_000).toLocaleString('vi-VN')}đ`,
+        `Phạt ${(-200_000).toLocaleString('vi-VN')}đ`,
+      ].join(' • '),
+    );
+  });
+
+  it('keeps the penalty negative for a penalty-only staff', () => {
+    expect(
+      buildPersonnelCostBreakdown({ ...emptyRow, bonusPenaltyAmount: -50_000 }),
+    ).toEqual({
+      note: `Phạt ${(-50_000).toLocaleString('vi-VN')}đ`,
+      sourceAmounts: { 'bonus-penalty-cost': -50_000 },
+    });
+  });
+
+  it('falls back to a placeholder note when nothing is recorded', () => {
+    expect(buildPersonnelCostBreakdown(emptyRow)).toEqual({
+      note: 'Không có chi phí chi tiết.',
+      sourceAmounts: {},
+    });
+  });
+});
+
+describe('buildStaffPendingPayrollSources', () => {
+  const emptyRow = {
+    sessionAmount: 0,
+    customerCareAmount: 0,
+    lessonAmount: 0,
+    bonusAmount: 0,
+    extraAllowanceAmount: 0,
+    fixedSalaryAmount: 0,
+    assistantAmount: 0,
+    trainingManagerAmount: 0,
+  };
+
+  it('keys every pending source, fixed salary included', () => {
+    const breakdown = buildStaffPendingPayrollSources({
+      ...emptyRow,
+      sessionAmount: 300_000,
+      fixedSalaryAmount: '5000000',
+      assistantAmount: 100_000,
+      trainingManagerAmount: 50_000,
+    });
+
+    expect(breakdown.sourceAmounts).toEqual({
+      'pending-session': 300_000,
+      'pending-fixed-salary': 5_000_000,
+      'pending-assistant': 100_000,
+      'pending-training-manager': 50_000,
+    });
+    expect(breakdown.note).toBe(
+      [
+        `Buổi dạy ${(300_000).toLocaleString('vi-VN')}đ`,
+        `Lương cứng ${(5_000_000).toLocaleString('vi-VN')}đ`,
+        `Trợ lí ${(100_000).toLocaleString('vi-VN')}đ`,
+        `QL lớp ${(50_000).toLocaleString('vi-VN')}đ`,
+      ].join(' • '),
+    );
+  });
+
+  it('skips zero and negative amounts', () => {
+    expect(
+      buildStaffPendingPayrollSources({ ...emptyRow, bonusAmount: -20_000 }),
+    ).toEqual({
+      note: 'Không có khoản pending chi tiết.',
+      sourceAmounts: {},
+    });
+  });
+});
+
+describe('formatCostStaffName', () => {
+  it('labels only inactive staff', () => {
+    expect(
+      formatCostStaffName({ staffName: 'An', staffStatus: StaffStatus.active }),
+    ).toBe('An');
+    expect(
+      formatCostStaffName({
+        staffName: 'An',
+        staffStatus: StaffStatus.inactive,
+      }),
+    ).toBe('An (Đã nghỉ)');
   });
 });

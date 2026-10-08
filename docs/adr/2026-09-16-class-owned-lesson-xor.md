@@ -1,6 +1,6 @@
 # ADR: Tiết riêng lớp không thuộc chuyên đề nào (XOR chủ sở hữu)
 
-- **Status:** Accepted
+- **Status:** Superseded by `docs/adr/2026-10-02-class-content-by-module.md` (2026-10-02)
 - **Date:** 2026-09-16
 - **Related:** `docs/adr/2026-09-15-three-level-content-model.md`
 

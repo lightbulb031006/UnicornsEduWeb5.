@@ -1,4 +1,5 @@
 import type { CourseWorkspaceRouteBase } from "@/dtos/course-workspace.dto";
+import type { StudentClassTab } from "@/lib/student-class-tabs";
 
 /**
  * Next.js page hrefs for the course content tree (admin / staff / student).
@@ -55,10 +56,25 @@ export function lessonHref(
   return `${routeBase}/courses/${courseId}/modules/${moduleId}/lessons/${lessonId}`;
 }
 
+export function studentClassTabHref(
+  classId: string,
+  tab: StudentClassTab,
+): string {
+  return `/student/classes/${classId}?tab=${tab}`;
+}
+
+/** Link quay lại từ trang tiết học / bài thực hành → tab Chuyên đề. */
 export function studentClassLessonsHref(classId: string): string {
-  return `/student/classes/${classId}?tab=lessons`;
+  return studentClassTabHref(classId, "chuyen-de");
 }
 
 export function studentLessonHref(classId: string, lessonId: string): string {
   return `/student/classes/${classId}/lessons/${lessonId}`;
+}
+
+export function studentAssignmentHref(
+  classId: string,
+  classContentItemId: string,
+): string {
+  return `/student/classes/${classId}/assignments/${classContentItemId}`;
 }

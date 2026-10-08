@@ -134,5 +134,5 @@ Không có bảng draft: toàn bộ bước soát diễn ra ở client, chỉ m�
 
 ## Quyền
 
-- Đội giáo án được gán vào khoá (`course_editors`) và `lesson_plan_head`: nhập vào mọi khoá mình có quyền.
+- Đội giáo án được gán vào khoá (`course_lesson_plan_members`, kể cả `lesson_plan_head`): chỉ nhập vào khoá mình được gán.
 - Gia sư: nhập vào ngân hàng của khoá mà lớp mình đang dạy thuộc về. Backend chặn `create`/`bulkCreate`/`update` nếu không phải manager/đội giáo án của khoá và không có `class_teachers` active trên lớp thuộc khoá đó.

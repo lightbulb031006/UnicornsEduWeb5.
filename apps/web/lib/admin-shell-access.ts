@@ -17,7 +17,7 @@ export type StudentAdminCapabilities = {
   isCustomerCareReadOnlyView: boolean;
   canManageStudent: boolean;
   canEditStudentProfile: boolean;
-  canEditCustomerCareProfitPercent: boolean;
+  canManageCustomerCareAssignment: boolean;
   canCreateWalletQr: boolean;
   canDirectlyAdjustWallet: boolean;
   canDirectlyWithdrawWallet: boolean;
@@ -220,7 +220,7 @@ export function resolveStudentAdminCapabilities(
       isStaffRoute && !access.isAssistant && access.isCustomerCare,
     canManageStudent,
     canEditStudentProfile,
-    canEditCustomerCareProfitPercent: access.isAdmin || access.isAssistant,
+    canManageCustomerCareAssignment: access.isAdmin || access.isAssistant,
     canCreateWalletQr:
       access.isAdmin || access.isAssistant || isCustomerCareStaff,
     canDirectlyAdjustWallet: access.isAdmin,

@@ -112,6 +112,9 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
       name: string;
       customAllowance?: number;
       allowanceTouched?: boolean;
+      /** Scale riêng (0 = không có scale; undefined = theo scale lớp). */
+      customScaleAmount?: number;
+      scaleTouched?: boolean;
       operatingDeductionRatePercent?: number;
     }>
   >(() =>
@@ -122,6 +125,8 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
         name: t.fullName?.trim() ?? "—",
         customAllowance: t.customAllowance ?? undefined,
         allowanceTouched: false,
+        customScaleAmount: t.customScaleAmount ?? undefined,
+        scaleTouched: false,
         operatingDeductionRatePercent:
           t.operatingDeductionRatePercent ?? undefined,
       })),
@@ -197,6 +202,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
       const payload: {
         teacher_id: string;
         custom_allowance?: number | null;
+        custom_scale_amount?: number | null;
         operating_deduction_rate_percent: number;
       } = {
         teacher_id: t.id,
@@ -208,6 +214,11 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
       if (t.allowanceTouched) {
         payload.custom_allowance =
           t.customAllowance != null ? t.customAllowance : null;
+      }
+
+      // Chưa chạm = bỏ qua field để API giữ nguyên scale riêng hiện có.
+      if (t.scaleTouched) {
+        payload.custom_scale_amount = t.customScaleAmount ?? null;
       }
 
       return payload;
@@ -293,6 +304,8 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
             {" "}
             {defaultAllowanceLabel ? `trợ cấp mặc định của lớp (${defaultAllowanceLabel})` : "trợ cấp mặc định hiện có của lớp"}.
             {" "}
+            Scale riêng để trống = theo scale lớp, nhập 0 = gia sư không có scale; chỉ áp dụng cho buổi tạo sau khi lưu.
+            {" "}
             Tỷ lệ vận hành (%) được áp dụng theo từng quan hệ gia sư-lớp.
           </p>
           <div className="space-y-3">
@@ -301,7 +314,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                 key={t.id}
                 className="rounded-2xl border border-border-default bg-bg-surface p-3 shadow-sm"
               >
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(8.5rem,10rem)_minmax(6.5rem,7.5rem)_auto] sm:items-start">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start lg:grid-cols-[minmax(0,1fr)_minmax(8.5rem,10rem)_minmax(8.5rem,10rem)_minmax(6.5rem,7.5rem)_auto]">
                   <div className="min-w-0">
                     <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
                       Gia sư phụ trách
@@ -353,6 +366,51 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                                   classDetail.allowancePerSessionPerStudent,
                                 )
                           }
+                          className="min-w-0 flex-1 bg-transparent text-right text-sm font-semibold tabular-nums text-text-primary outline-none placeholder:text-text-muted"
+                        />
+                        <span className="shrink-0 text-xs font-medium text-text-muted">VNĐ</span>
+                      </div>
+                    </div>
+                  </label>
+                  <label className="min-w-0">
+                    <span className="sr-only">Scale riêng cho {t.name}</span>
+                    <p className="mb-1.5 ml-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
+                      Scale / buổi
+                    </p>
+                    <div className="min-h-11 rounded-xl border border-border-default bg-bg-primary px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <MoneyInput
+                          value={
+                            t.customScaleAmount == null
+                              ? ""
+                              : moneyInputInitialFromNumber(t.customScaleAmount)
+                          }
+                          onValueChange={(nextValue) => {
+                            const v = nextValue.trim();
+                            if (v === "") {
+                              setSelectedTeachers((prev) =>
+                                prev.map((x) =>
+                                  x.id === t.id
+                                    ? { ...x, customScaleAmount: undefined, scaleTouched: true }
+                                    : x,
+                                ),
+                              );
+                              return;
+                            }
+                            const num = parseMoneyInput(v);
+                            if (num == null || num < 0) {
+                              toast.error("Scale riêng phải là số không âm.");
+                              return;
+                            }
+                            setSelectedTeachers((prev) =>
+                              prev.map((x) =>
+                                x.id === t.id
+                                  ? { ...x, customScaleAmount: num, scaleTouched: true }
+                                  : x,
+                              ),
+                            );
+                          }}
+                          placeholder={moneyInputInitialFromNumber(classDetail.scaleAmount ?? 0)}
                           className="min-w-0 flex-1 bg-transparent text-right text-sm font-semibold tabular-nums text-text-primary outline-none placeholder:text-text-muted"
                         />
                         <span className="shrink-0 text-xs font-medium text-text-muted">VNĐ</span>
@@ -538,6 +596,8 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                               name: s.fullName?.trim() ?? s.id,
                               customAllowance: undefined,
                               allowanceTouched: false,
+                              customScaleAmount: undefined,
+                              scaleTouched: false,
                               operatingDeductionRatePercent: undefined,
                             },
                           ]);

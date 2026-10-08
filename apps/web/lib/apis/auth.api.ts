@@ -48,6 +48,7 @@ import type {
   StudentWalletTransaction,
   UpdateStudentExamSchedulesPayload,
 } from "@/dtos/student.dto";
+import { clearLoginScopedDismissals } from "@/lib/login-scoped-dismissals";
 import { api } from "../client";
 import { normalizeStaffIncomeSummary } from "./staff-income-summary.api";
 
@@ -114,6 +115,7 @@ export async function setupPassword(data: SetupPasswordDto) {
 
 export async function logout() {
   const response = await api.post("/auth/logout");
+  clearLoginScopedDismissals();
   return response.data;
 }
 

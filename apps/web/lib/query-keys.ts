@@ -67,12 +67,30 @@ export const actionHistoryKeys = {
     [...actionHistoryKeys.all, "list", createStableFilterKey(filters)] as const,
 };
 
+/** Dữ liệu học sinh đang đăng nhập (`/users/me/...`). */
+export const studentSelfKeys = {
+  all: ["student", "self"] as const,
+  classes: () => [...studentSelfKeys.all, "classes"] as const,
+};
+
 export const classKeys = {
   all: ["class"] as const,
   lists: () => [...classKeys.all, "list"] as const,
   list: (filters?: Record<string, unknown>) =>
     [...classKeys.lists(), createStableFilterKey(filters)] as const,
   detail: (id: string) => [...classKeys.all, "detail", id] as const,
+  coverImage: (id: string) => [...classKeys.all, "cover-image", id] as const,
+  modules: (id: string) => [...classKeys.all, "modules", id] as const,
+  /** Cảnh báo trước khi gỡ chuyên đề (`GET /class/:id/modules/:moduleId/removal-impact`). */
+  moduleRemovalImpact: (id: string, moduleId: string) =>
+    [...classKeys.all, "modules", id, "removal-impact", moduleId] as const,
+  /** Tiết thực hành giao được cho lớp (`GET /class/:id/content/course-lessons`). */
+  courseLessons: (id: string) => ["course-lessons-for-class", id] as const,
+  /** Nằm dưới prefix `["class-content", id]` nên invalidate nội dung lớp kéo theo. */
+  contentGroups: (id: string) => ["class-content", id, "groups"] as const,
+  /** Tab Chuyên đề trang lớp học sinh (`GET /class/:id/content/student/groups`). */
+  studentContentGroups: (id: string) =>
+    ["class-content", id, "student-groups"] as const,
 };
 
 export const courseKeys = {

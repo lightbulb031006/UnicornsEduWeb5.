@@ -4,6 +4,8 @@ import { ActionHistoryModule } from 'src/action-history/action-history.module';
 import { ClassModule } from 'src/class/class.module';
 import { ClassContentController } from './class-content.controller';
 import { ClassContentService } from './class-content.service';
+import { ClassCourseModuleController } from './class-course-module.controller';
+import { ClassCourseModuleService } from './class-course-module.service';
 import { ClassLessonController } from './class-lesson.controller';
 import { CourseModuleController } from './course-module.controller';
 import { CourseModuleService } from './course-module.service';
@@ -26,6 +28,7 @@ import { CourseContentService } from './course-content.service';
     ClassLessonController,
     LessonQuizController,
     ClassContentController,
+    ClassCourseModuleController,
     PracticeLessonQuestionController,
     CourseExamLibraryController,
   ],
@@ -35,6 +38,7 @@ import { CourseContentService } from './course-content.service';
     CourseLessonService,
     LessonQuizService,
     ClassContentService,
+    ClassCourseModuleService,
     PracticeQuestionLinkService,
     ExamLibraryService,
     CourseContentService,

@@ -32,6 +32,7 @@ import {
 } from '../../generated/enums';
 import { createSignedStorageUrl } from 'src/storage/supabase-storage';
 import { StaffService } from './staff.service';
+import { LESSON_PLAN_LABEL } from '../common/lesson-plan-label';
 
 const mockCreateSignedStorageUrl =
   createSignedStorageUrl as jest.MockedFunction<typeof createSignedStorageUrl>;
@@ -291,7 +292,6 @@ describe('StaffService', () => {
         birth_date: '2000-01-01',
         university: 'HCMUS',
         high_school: 'LHP',
-        specialization: 'Math',
         bank_account: '123',
         bank_qr_link: 'qr',
         roles: [StaffRole.teacher],
@@ -331,6 +331,30 @@ describe('StaffService', () => {
         }),
       }),
     );
+  });
+
+  it('exposes the customer care default percent on customer-care staff options', async () => {
+    mockPrisma.staffInfo.findMany.mockResolvedValue([
+      {
+        id: 'cc-1',
+        status: StaffStatus.active,
+        roles: [StaffRole.customer_care],
+        customerCareDefaultProfitPercent: '0.15',
+        user: {
+          first_name: 'A',
+          last_name: 'B',
+          accountHandle: null,
+          email: 'a@x.vn',
+        },
+      },
+    ]);
+
+    const rows = await service.searchCustomerCareStaff({ limit: 10 });
+
+    expect(rows[0]).toEqual(
+      expect.objectContaining({ id: 'cc-1', defaultProfitPercent: 0.15 }),
+    );
+    expect(rows[0]).not.toHaveProperty('customerCareDefaultProfitPercent');
   });
 
   it('returns only active general staff options', async () => {
@@ -593,8 +617,7 @@ describe('StaffService', () => {
         nextRoles: [StaffRole.teacher, StaffRole.assistant],
       }),
     );
-    const updateOrder =
-      mockPrisma.staffInfo.update.mock.invocationCallOrder[0];
+    const updateOrder = mockPrisma.staffInfo.update.mock.invocationCallOrder[0];
     const syncOrder =
       fixedSalarySettingsService.syncStaffRoleOverridesInTx.mock
         .invocationCallOrder[0];
@@ -867,7 +890,7 @@ describe('StaffService', () => {
       },
       {
         role: StaffRole.lesson_plan,
-        label: 'Giáo án',
+        label: LESSON_PLAN_LABEL,
         total: 100000,
         paid: 80000,
         unpaid: 20000,
@@ -2726,11 +2749,17 @@ describe('StaffService', () => {
       {
         id: 'survey-1',
         name: 'Bài khảo sát 7',
+        createdAt: new Date('2026-02-20T03:00:00.000Z'),
         excludedClasses: [],
       },
     ]);
     mockPrisma.class.findMany.mockResolvedValue([
-      { id: 'class-1', name: 'Lớp Toán A' },
+      {
+        id: 'class-1',
+        name: 'Lớp Toán A',
+        sessions: [{ date: new Date('2026-02-01T00:00:00.000Z') }],
+        teachers: [{ createdAt: new Date('2026-02-01T03:00:00.000Z') }],
+      },
     ]);
     mockPrisma.classSurvey.findMany.mockResolvedValue([]);
 
@@ -2769,11 +2798,17 @@ describe('StaffService', () => {
       {
         id: 'survey-1',
         name: 'Bài khảo sát 7',
+        createdAt: new Date('2026-02-20T03:00:00.000Z'),
         excludedClasses: [],
       },
     ]);
     mockPrisma.class.findMany.mockResolvedValue([
-      { id: 'class-1', name: 'Lớp Toán A' },
+      {
+        id: 'class-1',
+        name: 'Lớp Toán A',
+        sessions: [{ date: new Date('2026-02-01T00:00:00.000Z') }],
+        teachers: [{ createdAt: new Date('2026-02-01T03:00:00.000Z') }],
+      },
     ]);
     mockPrisma.classSurvey.findMany.mockResolvedValue([]);
     mockPrisma.session.findMany.mockResolvedValue([
@@ -2800,11 +2835,17 @@ describe('StaffService', () => {
       {
         id: 'survey-1',
         name: 'Bài khảo sát 7',
+        createdAt: new Date('2026-02-20T03:00:00.000Z'),
         excludedClasses: [],
       },
     ]);
     mockPrisma.class.findMany.mockResolvedValue([
-      { id: 'class-1', name: 'Lớp Toán A' },
+      {
+        id: 'class-1',
+        name: 'Lớp Toán A',
+        sessions: [{ date: new Date('2026-02-01T00:00:00.000Z') }],
+        teachers: [{ createdAt: new Date('2026-02-01T03:00:00.000Z') }],
+      },
     ]);
     mockPrisma.classSurvey.findMany.mockResolvedValue([
       { classId: 'class-1', surveyId: 'survey-1' },
@@ -2841,6 +2882,7 @@ describe('StaffService', () => {
           avatarPath: 'users/user-1/avatar',
         },
         classTeachers: [],
+        _count: { achievements: 2 },
       },
     ]);
     mockPrisma.$queryRaw.mockResolvedValue([
@@ -2874,6 +2916,7 @@ describe('StaffService', () => {
               class: { select: { id: true, name: true } },
             },
           },
+          _count: { select: { achievements: true } },
         },
       }),
     );
@@ -2883,10 +2926,12 @@ describe('StaffService', () => {
         user: expect.objectContaining({
           avatarUrl: 'signed:users/user-1/avatar',
         }),
+        achievementCount: 2,
         unpaidAmountTotal: 345000,
       }),
     ]);
     expect(result.data[0].user).not.toHaveProperty('avatarPath');
+    expect(result.data[0]).not.toHaveProperty('_count');
   });
 
   it('hides inactive class_teachers without remaining allowance on staff list', async () => {
@@ -2919,6 +2964,7 @@ describe('StaffService', () => {
             class: { id: 'class-retired-unpaid', name: 'ADVANCED 10' },
           },
         ],
+        _count: { achievements: 0 },
       },
     ]);
     jest
@@ -2953,6 +2999,7 @@ describe('StaffService', () => {
         last_name: 'Teacher',
         accountHandle: 'teacher-a',
         email: 'teacher@example.com',
+        phone: '0901234567',
         province: 'Hanoi',
         avatarPath: 'users/user-1/avatar',
       },
@@ -2970,6 +3017,7 @@ describe('StaffService', () => {
           user: expect.objectContaining({
             select: expect.objectContaining({
               avatarPath: true,
+              phone: true,
             }),
           }),
         }),
@@ -2979,6 +3027,7 @@ describe('StaffService', () => {
       expect.objectContaining({
         fullName: 'Teacher A',
         avatarUrl: 'signed:users/user-1/avatar',
+        phone: '0901234567',
       }),
     );
     expect(result.user).not.toHaveProperty('avatarPath');
@@ -3184,7 +3233,9 @@ describe('StaffService', () => {
           },
         ],
       });
-    jest.spyOn(service as any, 'guardOverdueSurveyReports').mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'guardOverdueSurveyReports')
+      .mockResolvedValue(undefined);
 
     await service.payAllPayments(
       'staff-1',

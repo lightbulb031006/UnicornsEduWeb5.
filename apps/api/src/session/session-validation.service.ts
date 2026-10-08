@@ -240,6 +240,7 @@ export class SessionValidationService {
     classTuitionPackageTotal?: number | null;
     classTuitionPackageSession?: number | null;
     blockCount?: number | null;
+    oneTimeAlreadyCharged?: boolean;
   }): number | null {
     const {
       effectivePackageTotal,
@@ -262,6 +263,7 @@ export class SessionValidationService {
       effectivePackageSession,
       hasCustomPackageOverride,
       blockCount: options.blockCount,
+      oneTimeAlreadyCharged: options.oneTimeAlreadyCharged,
     });
   }
 
@@ -294,6 +296,13 @@ export class SessionValidationService {
     }
 
     return this.resolveAttendanceTuitionFee(overrideValue, defaultValue);
+  }
+
+  /** Lớp `one_time` đã thu gói ở buổi khác: buổi tính phí 0đ, vắng không có học phí. */
+  resolveOneTimeAlreadyChargedTuitionFee(
+    status: AttendanceStatus,
+  ): number | null {
+    return this.isTuitionChargeableStatus(status) ? 0 : null;
   }
 
   normalizeCoefficient(value: number | null | undefined) {

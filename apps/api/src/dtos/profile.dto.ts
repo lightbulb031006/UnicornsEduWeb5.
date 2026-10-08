@@ -121,11 +121,6 @@ export class UpdateMyStaffProfileDto {
   @IsString()
   high_school?: string;
 
-  @ApiPropertyOptional({ example: 'Math' })
-  @IsOptional()
-  @IsString()
-  specialization?: string;
-
   @ApiPropertyOptional({ example: '1234567890' })
   @IsOptional()
   @IsString()
@@ -135,13 +130,6 @@ export class UpdateMyStaffProfileDto {
   @IsOptional()
   @IsString()
   bank_qr_link?: string;
-
-  @ApiPropertyOptional({
-    example: 'https://drive.google.com/drive/folders/abc123',
-  })
-  @IsOptional()
-  @IsString()
-  personal_achievement_link?: string | null;
 }
 
 /** Update current user's student record (self). No id. */

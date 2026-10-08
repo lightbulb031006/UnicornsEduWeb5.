@@ -6,6 +6,7 @@ jest.mock('../../generated/client', () => ({}));
 
 import { ClassTimelineService } from './class-timeline.service';
 import { UserRole } from 'generated/enums';
+import { NOT_ARCHIVED_TIMELINE_ITEM } from 'src/course-content/archived-lesson-filter';
 
 describe('ClassTimelineService — soft hide', () => {
   let service: ClassTimelineService;
@@ -65,9 +66,41 @@ describe('ClassTimelineService — soft hide', () => {
     expect(rows[0].hiddenAt).toBe('2026-09-07T00:00:00.000Z');
     expect(mockPrisma.classTimelineItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { classId: 'cls-1' },
+        where: { classId: 'cls-1', ...NOT_ARCHIVED_TIMELINE_ITEM },
       }),
     );
+  });
+
+  it('staff list shows session teacher as họ đệm + tên', async () => {
+    mockPrisma.classTimelineItem.findMany.mockResolvedValue([
+      {
+        id: 'tl-s1',
+        kind: 'session',
+        sortOrder: 0,
+        hiddenAt: null,
+        classContentItem: null,
+        classSurvey: null,
+        session: {
+          id: 'ses-1',
+          date: new Date('2026-10-01T00:00:00.000Z'),
+          notes: null,
+          teacherPaymentStatus: 'unpaid',
+          coefficient: null,
+          trainingManagerAllowanceAmount: null,
+          class: { name: 'Lớp A' },
+          makeupScheduleEvent: null,
+          teacher: { user: { first_name: 'Phương', last_name: 'Vũ Minh' } },
+          attendance: [],
+        },
+      },
+    ]);
+
+    const rows = await service.listForStaff('cls-1', adminActor);
+
+    expect(rows[0].session).toMatchObject({
+      teacherName: 'Vũ Minh Phương',
+      teacher: { fullName: 'Vũ Minh Phương' },
+    });
   });
 
   it('student list omits hidden timeline items', async () => {
@@ -87,124 +120,5 @@ describe('ClassTimelineService — soft hide', () => {
         }),
       }),
     );
-  });
-});
-
-describe('ClassTimelineService — reorder', () => {
-  let service: ClassTimelineService;
-  let mockPrisma: Record<string, any>;
-  let staffAccess: {
-    resolveClassViewerActor: jest.Mock;
-    resolveClassViewAccessMode: jest.Mock;
-  };
-
-  const adminActor = {
-    userId: 'user-admin-1',
-    userEmail: 'admin@test.com',
-    roleType: UserRole.admin,
-  };
-
-  const ownedIds = ['A', 'B', 'C'];
-
-  function contentRow(id: string, sortOrder: number, title: string) {
-    return {
-      id,
-      kind: 'content_item',
-      sortOrder,
-      hiddenAt: null,
-      classContentItem: {
-        id: `cci-${id}`,
-        hiddenAt: null,
-        openAt: null,
-        durationMinutes: null,
-        lesson: { id: `t-${id}`, title, kind: 'theory' },
-      },
-      session: null,
-      classSurvey: null,
-    };
-  }
-
-  beforeEach(() => {
-    mockPrisma = {
-      classTimelineItem: {
-        findMany: jest.fn(),
-        findFirst: jest.fn(),
-        update: jest.fn().mockResolvedValue({}),
-      },
-      studentClass: { findFirst: jest.fn() },
-      studentInfo: { findUnique: jest.fn() },
-      class: { update: jest.fn().mockResolvedValue({}) },
-      $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
-    };
-    staffAccess = {
-      resolveClassViewerActor: jest.fn().mockResolvedValue({}),
-      resolveClassViewAccessMode: jest.fn().mockResolvedValue('admin'),
-    };
-    service = new ClassTimelineService(mockPrisma as any, staffAccess as any);
-  });
-
-  it('rejects duplicate payload [A,A,B] for class {A,B,C}', async () => {
-    mockPrisma.classTimelineItem.findMany.mockResolvedValue(
-      ownedIds.map((id) => ({ id })),
-    );
-
-    await expect(
-      service.reorder('cls-1', ['A', 'A', 'B'], adminActor),
-    ).rejects.toThrow('Reorder payload contains duplicate IDs');
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('rejects unknown id in an otherwise complete-length payload', async () => {
-    mockPrisma.classTimelineItem.findMany.mockResolvedValue(
-      ownedIds.map((id) => ({ id })),
-    );
-
-    await expect(
-      service.reorder('cls-1', ['A', 'B', 'D'], adminActor),
-    ).rejects.toThrow('Some IDs do not belong to this class timeline');
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('rejects payload that omits an owned item', async () => {
-    mockPrisma.classTimelineItem.findMany.mockResolvedValue(
-      ownedIds.map((id) => ({ id })),
-    );
-
-    await expect(
-      service.reorder('cls-1', ['A', 'B'], adminActor),
-    ).rejects.toThrow('Reorder must include every timeline item exactly once');
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
-  });
-
-  it('persists unique complete order and returns items in that order', async () => {
-    mockPrisma.classTimelineItem.findMany
-      .mockResolvedValueOnce(ownedIds.map((id) => ({ id })))
-      .mockResolvedValueOnce([
-        contentRow('C', 0, 'C'),
-        contentRow('A', 1, 'A'),
-        contentRow('B', 2, 'B'),
-      ]);
-
-    const rows = await service.reorder('cls-1', ['C', 'A', 'B'], adminActor);
-
-    expect(mockPrisma.$transaction).toHaveBeenCalled();
-    expect(mockPrisma.class.update).toHaveBeenCalledWith({
-      where: { id: 'cls-1' },
-      data: { timelineCustomOrder: true },
-    });
-    expect(mockPrisma.classTimelineItem.update).toHaveBeenCalledWith({
-      where: { id: 'C' },
-      data: { sortOrder: 0 },
-    });
-    expect(mockPrisma.classTimelineItem.update).toHaveBeenCalledWith({
-      where: { id: 'A' },
-      data: { sortOrder: 1 },
-    });
-    expect(mockPrisma.classTimelineItem.update).toHaveBeenCalledWith({
-      where: { id: 'B' },
-      data: { sortOrder: 2 },
-    });
-    expect(rows.map((row) => row.id)).toEqual(['C', 'A', 'B']);
-    expect(rows.map((row) => row.sortOrder)).toEqual([0, 1, 2]);
   });
 });

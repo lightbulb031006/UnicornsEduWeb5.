@@ -59,6 +59,7 @@ import {
   UpdateStaffWithFixedSalaryOverridesDto,
   UpdateStaffStatusDto,
   PatchStaffClassTeacherOperatingDeductionDto,
+  type StaffSurveyDeadlineBlockWarningItemDto,
 } from 'src/dtos/staff.dto';
 import {
   StaffLandingProfileQueryDto,
@@ -191,7 +192,8 @@ export class StaffController {
   @Get()
   @ApiOperation({
     summary: 'List staff',
-    description: 'Get all staff records.',
+    description:
+      'Get all staff records. Each row carries `achievementCount` (number of staff achievements) for the «Xem thành tích (n)» button.',
   })
   @ApiQuery({
     name: 'page',
@@ -488,6 +490,24 @@ export class StaffController {
     return this.staffService.getPaymentPreview(id, query);
   }
 
+  @Get(':id/survey-deadline-block-warnings')
+  @ApiOperation({
+    summary: 'Get survey deadline block warnings for paying a teacher',
+    description:
+      'Surveys inside the deadline block window (from the day before endDate, Vietnam time, including after the deadline) that this teacher still has running classes not reported for. Informational only: payment endpoints are not blocked by it.',
+  })
+  @ApiParam({ name: 'id', description: 'Staff id' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'List of { surveyId, surveyName, endDate (YYYY-MM-DD), classNames }. Empty when nothing is pending.',
+  })
+  async getStaffSurveyDeadlineBlockWarnings(
+    @Param('id', new ParseStaffIdPipe()) id: string,
+  ): Promise<StaffSurveyDeadlineBlockWarningItemDto[]> {
+    return this.staffService.getSurveyDeadlineBlockWarnings(id);
+  }
+
   @Get(':id/deposit-payment-preview')
   @ApiOperation({
     summary: 'Get staff deposit payment preview',
@@ -708,16 +728,11 @@ export class StaffController {
       data.bank_qr_link,
       'Link QR ngân hàng',
     );
-    const normalizedAchievementLink = normalizeHttpHttpsUrl(
-      data.personal_achievement_link,
-      'Link thành tích cá nhân',
-    );
 
     return this.staffService.createStaff(
       {
         ...data,
         bank_qr_link: normalizedBankQrLink ?? undefined,
-        personal_achievement_link: normalizedAchievementLink ?? undefined,
       },
       {
         userId: user.id,
@@ -748,16 +763,11 @@ export class StaffController {
       data.bank_qr_link,
       'Link QR ngân hàng',
     );
-    const normalizedAchievementLink = normalizeHttpHttpsUrl(
-      data.personal_achievement_link,
-      'Link thành tích cá nhân',
-    );
 
     return this.staffService.updateStaff(
       {
         ...data,
         bank_qr_link: normalizedBankQrLink ?? undefined,
-        personal_achievement_link: normalizedAchievementLink ?? undefined,
       },
       {
         userId: user.id,
@@ -799,17 +809,12 @@ export class StaffController {
       data.bank_qr_link,
       'Link QR ngân hàng',
     );
-    const normalizedAchievementLink = normalizeHttpHttpsUrl(
-      data.personal_achievement_link,
-      'Link thành tích cá nhân',
-    );
 
     return this.staffService.updateStaffWithFixedSalaryOverrides(
       id,
       {
         ...data,
         bank_qr_link: normalizedBankQrLink ?? undefined,
-        personal_achievement_link: normalizedAchievementLink ?? undefined,
       },
       {
         userId: user.id,

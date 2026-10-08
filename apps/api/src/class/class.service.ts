@@ -56,12 +56,17 @@ import {
 } from 'src/common/student-class-tuition.util';
 import {
   assertCanEnableBlockPricing,
+  assertCourseChangeKeepsSaleMode,
+  assertOneTimePackageTotal,
   clockHmsFromUnknown,
   isBlockPricingMode,
   isFrozenSessionPaymentStatus,
+  isOneTimePricingMode,
+  resolveClassPricingModeForCourse,
   resolveAllowanceReconstructionBlockCount,
   resolveSnapshotBlockCountForPricingMode,
 } from 'src/common/class-pricing-mode.util';
+import { findOneTimeChargedStudentIds } from 'src/common/one-time-charge.util';
 import {
   dualWritePerBlockClassFields,
   perSessionToPerBlock,
@@ -69,13 +74,17 @@ import {
   standardBlockCountFromSlots,
   storeCustomAllowanceFromPerSessionInput,
 } from 'src/common/block-pricing.util';
-import { resolveClassTeacherCustomAllowanceOnWrite } from './class-teacher-allowance.util';
+import {
+  resolveClassTeacherCustomAllowanceOnWrite,
+  resolveClassTeacherCustomScaleAmountOnWrite,
+} from './class-teacher-allowance.util';
 import {
   redactClassForAccountantView,
   redactClassForTrainingManagerView,
   redactClassListForAccountantView,
   redactClassListForTrainingManagerView,
   redactClassStudentWalletBalances,
+  redactOtherTeachersIncome,
   resolveAccountantFinanceView,
 } from 'src/common/accountant-finance-redaction.util';
 import {
@@ -86,7 +95,10 @@ import {
   buildClassEndEligibility,
   getClassTeacherSessionSettlement,
 } from 'src/common/class-teacher-session-settlement.util';
-import { resolveLiveSessionAllowanceSnapshots } from 'src/session/session-allowance.util';
+import {
+  resolveLiveSessionAllowanceSnapshots,
+  resolveTeacherScaleAmountVnd,
+} from 'src/session/session-allowance.util';
 import { computeTrainingManagerSessionSnapshot } from 'src/training-manager/training-manager.utils';
 import { syncLessonPlanHeadCommissions } from 'src/payroll/lesson-plan-head-commission.util';
 
@@ -158,6 +170,8 @@ type StoredClassScheduleEntry = {
 type TeacherAssignmentPayload = {
   teacherId: string;
   customAllowance: number | null;
+  /** `undefined` = omitted in payload (preserve on update, inherit on create). */
+  customScaleAmount: number | null | undefined;
   operatingDeductionRatePercent: number;
 };
 
@@ -166,6 +180,7 @@ type TeacherAssignmentRecord = {
   teacherId?: string;
   status: string | null;
   customAllowance: number | null;
+  customScaleAmount: number | null;
   operatingDeductionRatePercent: Prisma.Decimal | number | string | null;
   teacher: {
     id: string;
@@ -237,6 +252,7 @@ export class ClassService {
         options?.standardBlockCount,
         options?.storedAsPerBlock === true,
       ),
+      customScaleAmount: record.customScaleAmount,
       operatingDeductionRatePercent,
     };
   }
@@ -560,6 +576,7 @@ export class ClassService {
       | 'classTeacher'
       | 'studentClass'
       | 'classScheduleEntry'
+      | 'attendance'
       | '$queryRaw'
     >,
     id: string,
@@ -597,6 +614,7 @@ export class ClassService {
         teacherId: true,
         status: true,
         customAllowance: true,
+        customScaleAmount: true,
         operatingDeductionRatePercent: true,
         teacher: {
           select: {
@@ -640,6 +658,10 @@ export class ClassService {
       orderBy: [{ createdAt: 'asc' }, { studentId: 'asc' }],
     });
 
+    const oneTimeChargedStudentIds = isOneTimePricingMode(classInfo.pricingMode)
+      ? await findOneTimeChargedStudentIds(db, { classId: id })
+      : new Set<string>();
+
     const students = classStudents.map((student) => {
       const customTuitionPerSession = normalizeStudentClassCustomTuitionMoney(
         student.customStudentTuitionPerSession,
@@ -657,16 +679,31 @@ export class ClassService {
       const effectiveTuitionPackageSession =
         customTuitionPackageSession ??
         normalizeNullableMoney(classInfo.tuitionPackageSession);
-      const effectiveTuitionPerSession = resolveEffectiveTuitionPerSession({
-        customTuitionPerSession,
-        classTuitionPerSession: classInfo.studentTuitionPerSession,
-        effectivePackageTotal: effectiveTuitionPackageTotal,
-        effectivePackageSession: effectiveTuitionPackageSession,
-        hasCustomPackageOverride: hasCustomPackageOverride({
-          customTuitionPackageTotal,
-          customTuitionPackageSession,
-        }),
+      const packageOverride = hasCustomPackageOverride({
+        customTuitionPackageTotal,
+        customTuitionPackageSession,
       });
+      const effectiveTuitionPerSession = isOneTimePricingMode(
+        classInfo.pricingMode,
+      )
+        ? resolveSessionChargeTuitionFee({
+            pricingMode: classInfo.pricingMode,
+            customTuitionPerSession,
+            classTuitionPerSession: classInfo.studentTuitionPerSession,
+            effectivePackageTotal: effectiveTuitionPackageTotal,
+            effectivePackageSession: effectiveTuitionPackageSession,
+            hasCustomPackageOverride: packageOverride,
+            oneTimeAlreadyCharged: oneTimeChargedStudentIds.has(
+              student.studentId,
+            ),
+          })
+        : resolveEffectiveTuitionPerSession({
+            customTuitionPerSession,
+            classTuitionPerSession: classInfo.studentTuitionPerSession,
+            effectivePackageTotal: effectiveTuitionPackageTotal,
+            effectivePackageSession: effectiveTuitionPackageSession,
+            hasCustomPackageOverride: packageOverride,
+          });
       const { customerCareServices, ...studentInfo } = student.student;
       const customerCareStaff = customerCareServices?.staff
         ? {
@@ -767,6 +804,7 @@ export class ClassService {
       | 'classTeacher'
       | 'studentClass'
       | 'classScheduleEntry'
+      | 'attendance'
       | '$queryRaw'
     >,
     id: string,
@@ -870,6 +908,7 @@ export class ClassService {
               teacherId: true,
               status: true,
               customAllowance: true,
+              customScaleAmount: true,
               operatingDeductionRatePercent: true,
               teacher: {
                 select: {
@@ -1006,6 +1045,7 @@ export class ClassService {
     teachers?: {
       teacher_id: string;
       custom_allowance?: number | null;
+      custom_scale_amount?: number | null;
       operating_deduction_rate_percent?: number;
       tax_rate_percent?: number;
     }[];
@@ -1015,6 +1055,7 @@ export class ClassService {
       return data.teachers.map((t) => ({
         teacherId: t.teacher_id,
         customAllowance: t.custom_allowance ?? null,
+        customScaleAmount: t.custom_scale_amount,
         operatingDeductionRatePercent: normalizeRatePercent(
           t.operating_deduction_rate_percent ?? t.tax_rate_percent,
         ),
@@ -1024,6 +1065,7 @@ export class ClassService {
       return data.teacher_ids.map((teacherId) => ({
         teacherId,
         customAllowance: null,
+        customScaleAmount: undefined,
         operatingDeductionRatePercent: 0,
       }));
     }
@@ -1153,7 +1195,14 @@ export class ClassService {
       return redactClassStudentWalletBalances(result, { mode: 'full' });
     }
 
-    if (accessMode === 'teacher' || accessMode === 'training_manager') {
+    if (accessMode === 'teacher') {
+      return redactClassStudentWalletBalances(
+        redactOtherTeachersIncome(result, actor.id),
+        { mode: 'none' },
+      );
+    }
+
+    if (accessMode === 'training_manager') {
       return redactClassStudentWalletBalances(result, { mode: 'none' });
     }
 
@@ -1299,24 +1348,41 @@ export class ClassService {
   private async resolveCourseWithDuration(
     db: Prisma.TransactionClient | PrismaService,
     courseId?: string,
-  ): Promise<{ courseId: string; defaultDurationDays: number | null }> {
+  ): Promise<{
+    courseId: string;
+    courseName: string;
+    courseIsOneTime: boolean;
+    defaultDurationDays: number | null;
+  }> {
     if (courseId) {
       const course = await db.course.findUnique({
         where: { id: courseId },
-        select: { id: true, defaultDurationDays: true },
+        select: {
+          id: true,
+          name: true,
+          isOneTime: true,
+          defaultDurationDays: true,
+        },
       });
       if (!course) {
         throw new NotFoundException('Khoá học không tồn tại.');
       }
       return {
         courseId: course.id,
+        courseName: course.name,
+        courseIsOneTime: course.isOneTime,
         defaultDurationDays: course.defaultDurationDays,
       };
     }
     const defaultCourse = await db.course.findFirst({
       where: { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      select: { id: true, defaultDurationDays: true },
+      select: {
+        id: true,
+        name: true,
+        isOneTime: true,
+        defaultDurationDays: true,
+      },
     });
     if (!defaultCourse) {
       throw new NotFoundException(
@@ -1325,8 +1391,49 @@ export class ClassService {
     }
     return {
       courseId: defaultCourse.id,
+      courseName: defaultCourse.name,
+      courseIsOneTime: defaultCourse.isOneTime,
       defaultDurationDays: defaultCourse.defaultDurationDays,
     };
+  }
+
+  /**
+   * Luật khoá bán một lần khi sửa lớp: chỉ đổi sang khoá cùng chế độ, và lớp
+   * bán một lần luôn giữ Tổng gói > 0đ.
+   */
+  private async assertClassSaleModeRules(
+    db: Prisma.TransactionClient | PrismaService,
+    classId: string,
+    next: { courseId?: string; tuitionPackageTotal?: number | null },
+  ) {
+    const current = await db.class.findUnique({
+      where: { id: classId },
+      select: {
+        courseId: true,
+        tuitionPackageTotal: true,
+        course: { select: { isOneTime: true } },
+      },
+    });
+    if (!current) {
+      throw new NotFoundException('Class not found');
+    }
+    const fromCourseIsOneTime = current.course?.isOneTime ?? false;
+    let toCourseIsOneTime = fromCourseIsOneTime;
+    if (next.courseId !== undefined && next.courseId !== current.courseId) {
+      const target = await this.resolveCourseWithDuration(db, next.courseId);
+      toCourseIsOneTime = target.courseIsOneTime;
+      assertCourseChangeKeepsSaleMode({
+        fromCourseIsOneTime,
+        toCourseIsOneTime,
+      });
+    }
+    assertOneTimePackageTotal({
+      isOneTime: toCourseIsOneTime,
+      tuitionPackageTotal:
+        next.tuitionPackageTotal !== undefined
+          ? next.tuitionPackageTotal
+          : current.tuitionPackageTotal,
+    });
   }
 
   /** Chốt ngày hết hạn nội dung từ Course.defaultDurationDays. */
@@ -1364,13 +1471,19 @@ export class ClassService {
       studentTuitionPerBlock: data.student_tuition_per_block,
       standardBlockCount,
     });
-    const pricingMode = data.pricing_mode ?? ClassPricingMode.per_session;
-    if (isBlockPricingMode(pricingMode)) {
-      assertCanEnableBlockPricing(standardBlockCount);
-    }
-
     const classDetail = await this.prisma.$transaction(async (tx) => {
       const resolved = await this.resolveCourseWithDuration(tx, data.course_id);
+      const pricingMode = resolveClassPricingModeForCourse({
+        courseIsOneTime: resolved.courseIsOneTime,
+        requestedMode: data.pricing_mode,
+      }) as ClassPricingMode;
+      if (isBlockPricingMode(pricingMode)) {
+        assertCanEnableBlockPricing(standardBlockCount);
+      }
+      assertOneTimePackageTotal({
+        isOneTime: resolved.courseIsOneTime,
+        tuitionPackageTotal: data.tuition_package_total,
+      });
 
       const createdClass = await tx.class.create({
         data: {
@@ -1426,6 +1539,11 @@ export class ClassService {
               t.customAllowance,
               standardBlockCount,
             ),
+            customScaleAmount: resolveClassTeacherCustomScaleAmountOnWrite({
+              incoming: t.customScaleAmount,
+              existingCustomScaleAmount: null,
+              isExistingAssignment: false,
+            }),
             operatingDeductionRatePercent: t.operatingDeductionRatePercent,
             status: 'active',
           })),
@@ -1512,6 +1630,10 @@ export class ClassService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.assertClassSaleModeRules(tx, data.id, {
+        courseId: data.course_id,
+        tuitionPackageTotal: data.tuition_package_total,
+      });
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, data.id)
         : null;
@@ -1533,9 +1655,16 @@ export class ClassService {
           where: { classId: data.id },
           select: {
             teacherId: true,
+            customScaleAmount: true,
             operatingDeductionRatePercent: true,
           },
         });
+        const existingCustomScaleByTeacherId = new Map(
+          existingTeachers.map((teacher) => [
+            teacher.teacherId,
+            teacher.customScaleAmount,
+          ]),
+        );
         const nextTeacherIds = new Set(
           teacherPayload.map((teacher) => teacher.teacherId),
         );
@@ -1570,6 +1699,15 @@ export class ClassService {
                 t.customAllowance,
                 standardBlockCount,
               ),
+              customScaleAmount: resolveClassTeacherCustomScaleAmountOnWrite({
+                incoming: t.customScaleAmount,
+                existingCustomScaleAmount: existingCustomScaleByTeacherId.get(
+                  t.teacherId,
+                ),
+                isExistingAssignment: existingCustomScaleByTeacherId.has(
+                  t.teacherId,
+                ),
+              }),
               operatingDeductionRatePercent: t.operatingDeductionRatePercent,
               status: 'active',
             })),
@@ -1687,6 +1825,7 @@ export class ClassService {
           teacherId: true,
           status: true,
           customAllowance: true,
+          customScaleAmount: true,
           operatingDeductionRatePercent: true,
           teacher: {
             select: {
@@ -1797,6 +1936,10 @@ export class ClassService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      await this.assertClassSaleModeRules(tx, id, {
+        courseId: dto.course_id,
+        tuitionPackageTotal: dto.tuition_package_total,
+      });
       const beforeValue = auditActor
         ? await this.getClassAuditSnapshot(tx, id)
         : null;
@@ -1874,6 +2017,15 @@ export class ClassService {
     }
 
     const nextMode = dto.pricing_mode;
+    // Bán một lần đi theo khoá: không bật/tắt trên từng lớp.
+    if (
+      isOneTimePricingMode(nextMode) ||
+      isOneTimePricingMode(existing.pricingMode)
+    ) {
+      throw new BadRequestException(
+        'Bán một lần là cài đặt của khoá. Hãy đổi trên khoá học.',
+      );
+    }
     if (isBlockPricingMode(nextMode)) {
       const standardBlockCount = await this.loadStandardBlockCount(
         this.prisma,
@@ -1941,10 +2093,17 @@ export class ClassService {
     const standardBlockCount = await this.loadStandardBlockCount(tx, classId);
     const classTeachers = await tx.classTeacher.findMany({
       where: { classId },
-      select: { teacherId: true, customAllowance: true },
+      select: {
+        teacherId: true,
+        customAllowance: true,
+        customScaleAmount: true,
+      },
     });
     const customAllowanceByTeacherId = new Map(
       classTeachers.map((row) => [row.teacherId, row.customAllowance]),
+    );
+    const customScaleByTeacherId = new Map(
+      classTeachers.map((row) => [row.teacherId, row.customScaleAmount]),
     );
 
     const sessions = await tx.session.findMany({
@@ -2018,7 +2177,10 @@ export class ClassService {
         ),
         classDefaultPerStudent: classRow.allowancePerSessionPerStudent,
         classDefaultPerBlock: classRow.allowancePerBlockPerStudent,
-        scaleAmount: classRow.scaleAmount,
+        scaleAmount: resolveTeacherScaleAmountVnd({
+          customScaleAmount: customScaleByTeacherId.get(session.teacherId),
+          classScaleAmount: classRow.scaleAmount,
+        }),
         reconstructionBlocks,
         storedAsPerBlock,
         snapshotBlockCount,
@@ -2142,6 +2304,7 @@ export class ClassService {
         select: {
           teacherId: true,
           customAllowance: true,
+          customScaleAmount: true,
           operatingDeductionRatePercent: true,
         },
       });
@@ -2149,6 +2312,12 @@ export class ClassService {
         existingTeachers.map((teacher) => [
           teacher.teacherId,
           teacher.customAllowance,
+        ]),
+      );
+      const existingCustomScaleByTeacherId = new Map(
+        existingTeachers.map((teacher) => [
+          teacher.teacherId,
+          teacher.customScaleAmount,
         ]),
       );
       const teacherPayload = dto.teachers.map((teacher) => ({
@@ -2162,6 +2331,15 @@ export class ClassService {
             teacher.teacher_id,
           ),
           standardBlockCount,
+        }),
+        customScaleAmount: resolveClassTeacherCustomScaleAmountOnWrite({
+          incoming: teacher.custom_scale_amount,
+          existingCustomScaleAmount: existingCustomScaleByTeacherId.get(
+            teacher.teacher_id,
+          ),
+          isExistingAssignment: existingCustomScaleByTeacherId.has(
+            teacher.teacher_id,
+          ),
         }),
         operatingDeductionRatePercent: normalizeRatePercent(
           teacher.operating_deduction_rate_percent ?? teacher.tax_rate_percent,
@@ -2185,6 +2363,7 @@ export class ClassService {
             classId: id,
             teacherId: t.teacherId,
             customAllowance: t.customAllowance,
+            customScaleAmount: t.customScaleAmount,
             operatingDeductionRatePercent: t.operatingDeductionRatePercent,
             status: 'active',
           })),
@@ -2291,6 +2470,7 @@ export class ClassService {
 
         const data: {
           customAllowance?: number | null;
+          customScaleAmount?: number | null;
           operatingDeductionRatePercent: number;
         } = {
           operatingDeductionRatePercent: nextOperatingDeductionRatePercent,
@@ -2299,6 +2479,11 @@ export class ClassService {
           data.customAllowance = storeCustomAllowanceFromPerSessionInput(
             normalizeNullableMoney(teacher.custom_allowance),
             standardBlockCount,
+          );
+        }
+        if (teacher.custom_scale_amount !== undefined) {
+          data.customScaleAmount = normalizeNullableMoney(
+            teacher.custom_scale_amount,
           );
         }
 
@@ -2323,7 +2508,8 @@ export class ClassService {
           actor: auditActor,
           entityType: 'class',
           entityId: id,
-          description: 'Cập nhật trợ cấp và % vận hành gia sư của lớp học',
+          description:
+            'Cập nhật trợ cấp, scale và % vận hành gia sư của lớp học',
           beforeValue,
           afterValue,
         });

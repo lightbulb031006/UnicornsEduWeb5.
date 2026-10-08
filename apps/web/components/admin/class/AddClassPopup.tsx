@@ -9,7 +9,7 @@ import { TimeInput } from "@/components/ui/TimeInput";
 import { DateInput } from "@/components/ui/DateInput";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
-import CourseSelect from "@/components/shared/class/CourseSelect";
+import CourseSelect, { useCourseList } from "@/components/shared/class/CourseSelect";
 import * as classApi from "@/lib/apis/class.api";
 import * as staffApi from "@/lib/apis/staff.api";
 import * as studentApi from "@/lib/apis/student.api";
@@ -35,6 +35,8 @@ import {
   toPerBlockTuitionForApi,
   toPerSessionAmountForApi,
   toPerSessionMaxAllowanceForApi,
+  oneTimePackageError,
+  pricingModeForCourse,
 } from "@/lib/class-pricing-mode";
 import {
   moneyInputInitialFromNumber,
@@ -274,6 +276,14 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
       toast.error(tuitionPkg.message);
       return;
     }
+    const oneTimePkgError = oneTimePackageError(
+      pricingMode,
+      tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total,
+    );
+    if (oneTimePkgError) {
+      toast.error(oneTimePkgError);
+      return;
+    }
     const studentTuitionPerSession =
       tuitionPkg.mode === "empty"
         ? undefined
@@ -382,6 +392,15 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
     standardBlockCount,
   ]);
 
+  const { data: courseList = [] } = useCourseList();
+  // Bán một lần là cài đặt của khoá: chọn khoá nào thì chế độ lớp đi theo khoá đó.
+  const handleCourseChange = (nextCourseId: string) => {
+    setCourseId(nextCourseId);
+    const course = courseList.find((item) => item.id === nextCourseId);
+    const nextMode = pricingModeForCourse(pricingMode, Boolean(course?.isOneTime));
+    if (nextMode !== pricingMode) handlePricingModeChange(nextMode);
+  };
+
   const handlePricingModeChange = (next: ClassPricingMode) => {
     setAllowancePerSessionInput((prev) =>
       convertDisplayedRateInput({
@@ -454,7 +473,7 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
                 <CourseSelect
                   name="add-class-type"
                   value={courseId}
-                  onValueChange={setCourseId}
+                  onValueChange={handleCourseChange}
                   buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>

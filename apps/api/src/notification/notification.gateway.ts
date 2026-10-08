@@ -217,7 +217,11 @@ export class NotificationGateway implements OnGatewayInit, OnGatewayConnection {
       return [NOTIFICATION_ALL_ROOM];
     }
 
-    const rooms = new Set<string>();
+    // Admin thấy mọi thông báo đã đẩy, kể cả thông báo không nhắm tới admin.
+    const rooms = new Set<string>([
+      roleRoom(UserRole.admin),
+      staffRoleRoom(StaffRole.admin),
+    ]);
 
     targeting.targetRoleTypes.forEach((roleType) => {
       rooms.add(roleRoom(roleType));

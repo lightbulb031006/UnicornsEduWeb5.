@@ -3,6 +3,7 @@ import {
     CustomerCareStaffOption,
     CreateStaffPayload,
     StaffDepositPaymentPreview,
+    StaffSurveyDeadlineBlockWarningItem,
     StaffAssignableUser,
     StaffDetail,
     StaffPayDepositSessionsPayload,
@@ -272,6 +273,17 @@ export async function getStaffPaymentPreview(
         },
     });
 
+    return response.data;
+}
+
+/** Bài khảo sát đang chặn mà gia sư còn lớp chưa nộp (cảnh báo khi trả trợ cấp, không chặn thao tác trả). */
+export async function getStaffSurveyDeadlineBlockWarnings(
+    id: string,
+): Promise<StaffSurveyDeadlineBlockWarningItem[]> {
+    const safeId = encodeURIComponent(id);
+    const response = await api.get<StaffSurveyDeadlineBlockWarningItem[]>(
+        `/staff/${safeId}/survey-deadline-block-warnings`,
+    );
     return response.data;
 }
 

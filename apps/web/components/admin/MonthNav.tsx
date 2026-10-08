@@ -85,17 +85,23 @@ export default function MonthNav({
     <div
       className={
         hasLeft || hasRight
-          ? "grid w-full grid-cols-[auto_1fr_auto] items-center gap-2.5 sm:grid-cols-[1fr_auto_1fr]"
+          ? // Mobile: tháng / nhãn / nút xếp dọc; sm: tháng full hàng trên, nhãn + nút hàng dưới; lg: một hàng.
+            "grid w-full grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto] lg:grid-cols-[1fr_auto_1fr] lg:gap-2.5"
           : "flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-center"
       }
     >
       {hasLeft ? (
-        <div className="text-sm text-text-muted sm:justify-self-start">{countLabel}</div>
+        <div className="text-center text-sm text-text-muted sm:justify-self-start sm:text-left">
+          {countLabel}
+        </div>
       ) : (
-        <div className="hidden sm:block" aria-hidden />
+        <div className="hidden lg:block" aria-hidden />
       )}
 
-      <div data-month-nav className="relative flex w-full items-center justify-center sm:w-auto">
+      <div
+        data-month-nav
+        className="relative order-first flex w-full items-center justify-center sm:col-span-2 lg:order-none lg:col-span-1 lg:w-auto"
+      >
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -208,9 +214,11 @@ export default function MonthNav({
       </div>
 
       {hasRight ? (
-        <div className="shrink-0 justify-self-end sm:justify-self-end">{actionButton}</div>
+        <div className="flex w-full justify-center sm:w-auto sm:justify-self-end sm:justify-end">
+          {actionButton}
+        </div>
       ) : (
-        <div className="hidden sm:block" aria-hidden />
+        <div className="hidden lg:block" aria-hidden />
       )}
     </div>
   );

@@ -2,8 +2,14 @@
 
 import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import * as surveysApi from "@/lib/apis/surveys.api";
+import {
+  getSurveyBlockedClassIds,
+  isOnSurveyBlockedClassPage,
+} from "@/lib/survey-deadline-block";
+import { staffClassDetailHref } from "@/lib/class-detail-tabs";
 
 const SESSION_DISMISS_KEY = "survey-reminder-dismissed-session";
 
@@ -30,6 +36,27 @@ function getTodayIsoDate(): string {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 }
 
+/** Mức nghiêm trọng của popup, quyết định cách dismiss và copy. */
+type GateSeverity = "blocking" | "overdue" | "pending";
+
+const GATE_COPY: Record<GateSeverity, { title: string; body: string; headerClass: string }> = {
+  blocking: {
+    title: "⛔ Nộp khảo sát trước khi tạo buổi học",
+    body: "Khảo sát sắp hết hạn — bạn không tạo được buổi học cho lớp bị chặn cho tới khi lớp nộp khảo sát.",
+    headerClass: "bg-danger/10",
+  },
+  overdue: {
+    title: "🔴 Có báo cáo khảo sát đã quá hạn",
+    body: "Có bài đã quá hạn — cảnh báo này sẽ hiển thị lại mỗi khi bạn truy cập cho đến khi báo cáo xong.",
+    headerClass: "bg-danger/10",
+  },
+  pending: {
+    title: "⚠️ Còn lớp chưa báo cáo khảo sát",
+    body: "Vui lòng báo cáo sớm.",
+    headerClass: "bg-warning/10",
+  },
+};
+
 /**
  * Modal cảnh báo cho gia sư: hiện mỗi khi truy cập web nếu có lớp đang running
  * còn thiếu báo cáo bài khảo sát đã mở. Một card/lớp, mỗi card liệt kê tất cả
@@ -40,6 +67,10 @@ function getTodayIsoDate(): string {
  * sẽ hiển thị lại ngay từ lần truy cập kế tiếp (tải lại trang / mở tab mới) cho
  * đến khi báo cáo xong. Nếu không có bài quá hạn, "Để sau" ẩn cho hết phiên
  * (sessionStorage) như trước.
+ *
+ * Trong khung **chặn khảo sát sắp hạn** (API trả `blocking`), popup không có
+ * "Để sau" và không đóng được cho tới khi lớp nộp, kể cả sau hạn; chỉ nhường chỗ
+ * khi gia sư đang ở trang chi tiết của lớp bị chặn để nộp khảo sát.
  */
 /** Giá trị chỉ đọc một lần lúc mount nên không cần subscribe thật. */
 const subscribeNoop = () => () => {};
@@ -54,6 +85,7 @@ export default function SurveyReminderGate() {
     () => false,
   );
   const [dismissedLocally, setDismissedLocally] = useState(false);
+  const pathname = usePathname();
 
   const warningsQuery = useQuery({
     queryKey: ["surveys", "my-warnings"],
@@ -66,9 +98,14 @@ export default function SurveyReminderGate() {
   const hasOverdue = warnings.some((item) =>
     item.pendingSurveys.some((survey) => isOverdue(survey.endDate)),
   );
-  const isDismissed = hasOverdue
-    ? dismissedLocally
-    : dismissedThisSession || dismissedLocally;
+  const blockedClassIds = getSurveyBlockedClassIds(warnings);
+  const severity: GateSeverity =
+    blockedClassIds.size > 0 ? "blocking" : hasOverdue ? "overdue" : "pending";
+  const isDismissed = {
+    blocking: () => isOnSurveyBlockedClassPage(pathname, blockedClassIds),
+    overdue: () => dismissedLocally,
+    pending: () => dismissedThisSession || dismissedLocally,
+  }[severity]();
   const shouldShow = warnings.length > 0 && !isDismissed;
 
   if (!shouldShow) {
@@ -76,7 +113,8 @@ export default function SurveyReminderGate() {
   }
 
   const handleDismiss = () => {
-    if (!hasOverdue) {
+    if (severity === "blocking") return;
+    if (severity === "pending") {
       window.sessionStorage.setItem(SESSION_DISMISS_KEY, "1");
     }
     setDismissedLocally(true);
@@ -92,24 +130,18 @@ export default function SurveyReminderGate() {
         className="fixed left-1/2 top-1/2 z-[71] flex max-h-[85vh] w-[calc(100vw-1.5rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-warning/40 bg-bg-surface shadow-2xl sm:w-full"
       >
         <div
-          className={`border-b border-border-default px-5 py-4 ${
-            hasOverdue ? "bg-danger/10" : "bg-warning/10"
-          }`}
+          className={`border-b border-border-default px-5 py-4 ${GATE_COPY[severity].headerClass}`}
         >
           <h2
             id="survey-reminder-gate-title"
             className="text-base font-semibold text-text-primary"
           >
-            {hasOverdue
-              ? "🔴 Có báo cáo khảo sát đã quá hạn"
-              : "⚠️ Còn lớp chưa báo cáo khảo sát"}
+            {GATE_COPY[severity].title}
           </h2>
           <p className="mt-1 text-sm text-text-secondary">
             Bạn đang phụ trách {warnings.length} lớp còn thiếu báo cáo khảo
             sát.{" "}
-            {hasOverdue
-              ? "Có bài đã quá hạn — cảnh báo này sẽ hiển thị lại mỗi khi bạn truy cập cho đến khi báo cáo xong."
-              : "Vui lòng báo cáo sớm."}
+            {GATE_COPY[severity].body}
           </p>
         </div>
 
@@ -134,12 +166,17 @@ export default function SurveyReminderGate() {
                           Quá hạn
                         </span>
                       ) : null}
+                      {survey.blocking ? (
+                        <span className="ml-1.5 rounded-full bg-danger/15 px-1.5 py-0.5 text-[10px] font-semibold text-danger">
+                          Chặn tạo buổi
+                        </span>
+                      ) : null}
                     </li>
                   );
                 })}
               </ul>
               <Link
-                href={`/staff/classes/${item.classId}?tab=surveys`}
+                href={staffClassDetailHref(item.classId)}
                 prefetch={false}
                 onClick={handleDismiss}
                 className="mt-3 inline-flex rounded-md bg-primary px-3 py-2 text-xs font-semibold text-text-inverse transition hover:opacity-90"
@@ -150,15 +187,17 @@ export default function SurveyReminderGate() {
           ))}
         </div>
 
-        <div className="flex justify-end border-t border-border-default px-5 py-3">
-          <button
-            type="button"
-            onClick={handleDismiss}
-            className="rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary hover:bg-bg-secondary"
-          >
-            Để sau
-          </button>
-        </div>
+        {severity === "blocking" ? null : (
+          <div className="flex justify-end border-t border-border-default px-5 py-3">
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary hover:bg-bg-secondary"
+            >
+              Để sau
+            </button>
+          </div>
+        )}
       </div>
     </>
   );

@@ -92,7 +92,11 @@ export class CourseModuleController {
   })
   @ApiParam({ name: 'courseId', description: 'ID khoá học' })
   @ApiParam({ name: 'moduleId', description: 'ID chuyên đề' })
-  @ApiResponse({ status: 200, description: 'Chi tiết chuyên đề.', type: Object })
+  @ApiResponse({
+    status: 200,
+    description: 'Chi tiết chuyên đề.',
+    type: Object,
+  })
   @ApiResponse({ status: 404, description: 'Chuyên đề không tồn tại.' })
   async getModule(
     @Param('courseId') courseId: string,

@@ -33,10 +33,8 @@ type FullProfileGuardPayload = {
     birthDate?: string | null;
     university?: string | null;
     highSchool?: string | null;
-    specialization?: string | null;
     bankAccount?: string | null;
     bankQrLink?: string | null;
-    personalAchievementLink?: string | null;
   } | null;
 };
 
@@ -72,10 +70,8 @@ function isStaffProfileComplete(profile: FullProfileGuardPayload): boolean {
     hasText(staffInfo.birthDate) &&
     hasText(staffInfo.university) &&
     hasText(staffInfo.highSchool) &&
-    hasText(staffInfo.specialization) &&
     hasText(staffInfo.bankAccount) &&
-    hasText(staffInfo.bankQrLink) &&
-    hasText(staffInfo.personalAchievementLink)
+    hasText(staffInfo.bankQrLink)
   );
 }
 

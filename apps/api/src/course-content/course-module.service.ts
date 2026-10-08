@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { LessonKind } from 'generated/enums';
 import {
   ModuleCreateDto,
   ModuleUpdateDto,
@@ -72,14 +73,22 @@ export class CourseModuleService extends CourseContentSupportService {
 
     const moduleLessons = await this.prisma.lesson.findMany({
       where: { moduleId },
-      select: { id: true },
+      select: { id: true, kind: true },
     });
+    // Chặn khi còn lần giao tiết thực hành; tiết lý thuyết trên lớp mất theo chuyên đề.
     await this.assertLessonsNotUsedByClasses(
-      moduleLessons.map((lesson) => lesson.id),
+      moduleLessons
+        .filter((lesson) => lesson.kind === LessonKind.practice)
+        .map((lesson) => lesson.id),
       'Chuyên đề',
     );
 
-    await this.prisma.module.delete({ where: { id: moduleId } });
+    await this.prisma.$transaction([
+      this.prisma.classContentItem.deleteMany({
+        where: { lessonId: { in: moduleLessons.map((lesson) => lesson.id) } },
+      }),
+      this.prisma.module.delete({ where: { id: moduleId } }),
+    ]);
     this.logger.log(`Module deleted: ${moduleId} by ${actor.userEmail}`);
   }
 

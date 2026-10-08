@@ -6,7 +6,15 @@ import {
   UNASSIGNED_CUSTOMER_SOURCE_KEY,
   UNASSIGNED_CUSTOMER_SOURCE_LABEL,
 } from '../dtos/student.dto';
-import { ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL } from 'src/payroll/assistant-share.util';
+import {
+  ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL,
+  ATTENDANCE_COMMISSION_TUITION_BASIS_SQL,
+} from 'src/payroll/assistant-share.util';
+import {
+  FIRST_WALLET_TOP_UP_JOIN_SQL,
+  FIRST_WALLET_TOP_UP_SQL,
+  firstTopUpInRangeSql,
+} from './first-wallet-top-up.sql';
 import {
   AttendanceStatus,
   ClassStatus,
@@ -77,6 +85,11 @@ import {
   SQL_TEACHER_SESSION_CAP_GROUP_BY,
 } from '../common/teacher-session-allowance-sql.util';
 import { SurveyRoundService } from '../class/survey-round.service';
+import {
+  FIRST_SESSION_SELECT,
+  isSurveyRequiredFor,
+} from '../class/survey-requirement';
+import { LESSON_PLAN_LABEL } from '../common/lesson-plan-label';
 
 type SummaryCountRow = {
   activeClasses: number | string | null;
@@ -172,6 +185,7 @@ type StudentChangeSqlRow = {
 type StaffUnpaidAlertSqlRow = {
   staffId: string;
   staffName: string;
+  staffStatus: StaffStatus;
   sessionAmount: number | string | null;
   bonusAmount: number | string | null;
   customerCareAmount: number | string | null;
@@ -196,8 +210,11 @@ type StaffUnpaidAlertSqlRow = {
 type PersonnelStaffCostSqlRow = {
   staffId: string;
   staffName: string;
+  staffStatus: StaffStatus;
   sessionAmount: number | string | null;
   bonusAmount: number | string | null;
+  bonusRewardAmount: number | string | null;
+  bonusPenaltyAmount: number | string | null;
   customerCareAmount: number | string | null;
   lessonAmount: number | string | null;
   extraAllowanceAmount: number | string | null;
@@ -455,9 +472,7 @@ function buildDashboardRange(month?: string, year?: string) {
 
   // For month-key-based fields (bonuses, extra_allowances): single-month range
   const fromMonthKey = `${parsedYear}-${normalizedMonth}`;
-  const nextParsedMonth = parsedMonth === 12 ? 1 : parsedMonth + 1;
-  const nextParsedYear = parsedMonth === 12 ? parsedYear + 1 : parsedYear;
-  const toMonthKeyExclusive = `${nextParsedYear}-${String(nextParsedMonth).padStart(2, '0')}`;
+  const toMonthKeyExclusive = nextMonthKey(fromMonthKey);
 
   return {
     isDateRange: false as const,
@@ -474,6 +489,29 @@ function buildDashboardRange(month?: string, year?: string) {
 }
 
 /**
+ * Khoản theo tháng (`bonuses.month`, `extra_allowances.month`) không có ngày,
+ * nên khoảng ngày lấy trọn mọi tháng giao với khoảng: tháng của `dateFrom`
+ * tới hết tháng của `dateTo` (inclusive), trả về cận trên exclusive.
+ */
+export function monthKeysIntersectingDateRange(
+  dateFrom: string,
+  dateTo: string,
+): { fromMonthKey: string; toMonthKeyExclusive: string } {
+  return {
+    fromMonthKey: dateFrom.slice(0, 7),
+    toMonthKeyExclusive: nextMonthKey(dateTo.slice(0, 7)),
+  };
+}
+
+/** `YYYY-MM` của tháng liền sau, qua năm khi là tháng 12. */
+function nextMonthKey(monthKey: string): string {
+  const [year, month] = monthKey.split('-').map(Number);
+  return month === 12
+    ? `${year + 1}-01`
+    : `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+
+/**
  * Build an arbitrary date-range period for financial calculations.
  * dateFrom and dateTo are YYYY-MM-DD strings (dateTo is inclusive).
  */
@@ -483,14 +521,10 @@ function buildDateRangePeriod(dateFrom: string, dateTo: string) {
   // exclusive end = dateTo + 1 day
   periodEnd.setUTCDate(periodEnd.getUTCDate() + 1);
 
-  // For YYYY-MM key based fields (bonuses, extra_allowances)
-  const fromMonthKey = dateFrom.slice(0, 7); // 'YYYY-MM'
-  const [toYStr, toMStr] = dateTo.slice(0, 7).split('-');
-  const toY = Number(toYStr);
-  const toM = Number(toMStr);
-  const nextM = toM === 12 ? 1 : toM + 1;
-  const nextY = toM === 12 ? toY + 1 : toY;
-  const toMonthKeyExclusive = `${nextY}-${String(nextM).padStart(2, '0')}`;
+  const { fromMonthKey, toMonthKeyExclusive } = monthKeysIntersectingDateRange(
+    dateFrom,
+    dateTo,
+  );
 
   return {
     isDateRange: true as const,
@@ -557,15 +591,9 @@ function buildCalendarPeriodStrings(anchorMonthKey: string) {
 
 /** Inclusive calendar start and exclusive end as YYYY-MM-DD for an arbitrary multi-month span. */
 function buildMonthRangeStrings(fromMonthKey: string, toMonthKey: string) {
-  const [fromYearStr, fromMonthStr] = fromMonthKey.split('-');
-  const [toYearStr, toMonthStr] = toMonthKey.split('-');
-  const periodStartStr = `${fromYearStr}-${fromMonthStr}-01`;
-  const toYear = Number(toYearStr);
-  const toMonth = Number(toMonthStr);
-  const nextYear = toMonth === 12 ? toYear + 1 : toYear;
-  const nextMonth = toMonth === 12 ? 1 : toMonth + 1;
-  const periodEndExclusiveStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
-  const toMonthKeyExclusive = `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+  const periodStartStr = `${fromMonthKey}-01`;
+  const toMonthKeyExclusive = nextMonthKey(toMonthKey);
+  const periodEndExclusiveStr = `${toMonthKeyExclusive}-01`;
   return {
     periodStartStr,
     periodEndExclusiveStr,
@@ -597,8 +625,101 @@ function formatMonthLabel(month: string, year: string) {
   return `Tháng ${month} / ${year}`;
 }
 
+/** Tách bonus thành thưởng (dương) và phạt (âm); ròng = reward + penalty. */
+const BONUS_REWARD_PENALTY_SUMS_SQL = Prisma.sql`
+  COALESCE(SUM(GREATEST(COALESCE(bonuses.amount, 0), 0)), 0) AS reward,
+  COALESCE(SUM(LEAST(COALESCE(bonuses.amount, 0), 0)), 0) AS penalty
+`;
+
+type BonusMonthRange = { fromMonthKey: string; toMonthKeyExclusive: string };
+
 function formatCurrencyLabel(value: number) {
   return `${value.toLocaleString('vi-VN')}đ`;
+}
+
+/**
+ * Bóc tách chi phí của một nhân sự theo từng nguồn (khoá trùng `sources[].key`
+ * của chi tiết Chi phí nhân sự). Bonus tách «Thưởng» (dương) và «Phạt» (âm,
+ * giữ dấu trừ). `note` nối các đoạn bằng ` • ` để đọc; FE lọc theo
+ * `sourceAmounts`, không parse ghi chú.
+ */
+export function buildPersonnelCostBreakdown(
+  row: Omit<
+    PersonnelStaffCostSqlRow,
+    'staffId' | 'staffName' | 'staffStatus' | 'totalCost' | 'bonusAmount'
+  >,
+): { note: string; sourceAmounts: Record<string, number> } {
+  const sources: Array<{
+    key: string;
+    label: string;
+    value: number | string | null;
+    sign: 1 | -1;
+  }> = [
+    { key: 'teacher-cost', label: 'Dạy', value: row.sessionAmount, sign: 1 },
+    {
+      key: 'customer-care-cost',
+      label: 'CSKH',
+      value: row.customerCareAmount,
+      sign: 1,
+    },
+    {
+      key: 'lesson-cost',
+      label: LESSON_PLAN_LABEL,
+      value: row.lessonAmount,
+      sign: 1,
+    },
+    {
+      key: 'bonus-reward-cost',
+      label: 'Thưởng',
+      value: row.bonusRewardAmount,
+      sign: 1,
+    },
+    {
+      key: 'bonus-penalty-cost',
+      label: 'Phạt',
+      value: row.bonusPenaltyAmount,
+      sign: -1,
+    },
+    {
+      key: 'extra-allowance-cost',
+      label: 'Trợ cấp khác',
+      value: row.extraAllowanceAmount,
+      sign: 1,
+    },
+    {
+      key: 'fixed-salary-cost',
+      label: 'Lương cứng',
+      value: row.fixedSalaryAmount,
+      sign: 1,
+    },
+    {
+      key: 'assistant-cost',
+      label: 'Trợ lí',
+      value: row.assistantAmount,
+      sign: 1,
+    },
+    {
+      key: 'training-manager-cost',
+      label: 'QL lớp',
+      value: row.trainingManagerAmount,
+      sign: 1,
+    },
+  ];
+
+  const segments: string[] = [];
+  const sourceAmounts: Record<string, number> = {};
+  for (const source of sources) {
+    const amount = normalizeMoneyAmount(source.value);
+    if (amount * source.sign <= 0) continue;
+    sourceAmounts[source.key] = amount;
+    segments.push(`${source.label} ${formatCurrencyLabel(amount)}`);
+  }
+
+  return {
+    note:
+      segments.length > 0 ? segments.join(' • ') : 'Không có chi phí chi tiết.',
+    sourceAmounts,
+  };
 }
 
 function formatDateTimeLabel(value: Date | string) {
@@ -636,6 +757,77 @@ function formatDebtDue(row: StudentAlertSqlRow) {
   return `Thiếu khoảng ${Math.max(1, Math.ceil(debtAmount / referenceTuition))} buổi`;
 }
 
+/**
+ * Bóc tách khoản chờ thanh toán của một nhân sự theo từng nguồn (khoá trùng
+ * `sources[].key` của chi tiết Trợ cấp chờ thanh toán). FE lọc theo
+ * `sourceAmounts`, không parse ghi chú — thêm nguồn mới chỉ cần thêm ở đây.
+ */
+export function buildStaffPendingPayrollSources(
+  row: Pick<
+    StaffUnpaidAlertSqlRow,
+    | 'sessionAmount'
+    | 'customerCareAmount'
+    | 'lessonAmount'
+    | 'bonusAmount'
+    | 'extraAllowanceAmount'
+    | 'fixedSalaryAmount'
+    | 'assistantAmount'
+    | 'trainingManagerAmount'
+  >,
+): { note: string; sourceAmounts: Record<string, number> } {
+  const sources: Array<{
+    key: string;
+    label: string;
+    value: number | string | null;
+  }> = [
+    { key: 'pending-session', label: 'Buổi dạy', value: row.sessionAmount },
+    {
+      key: 'pending-customer-care',
+      label: 'CSKH',
+      value: row.customerCareAmount,
+    },
+    {
+      key: 'pending-lesson',
+      label: LESSON_PLAN_LABEL,
+      value: row.lessonAmount,
+    },
+    { key: 'pending-bonus', label: 'Bonus', value: row.bonusAmount },
+    {
+      key: 'pending-extra',
+      label: 'Trợ cấp',
+      value: row.extraAllowanceAmount,
+    },
+    {
+      key: 'pending-fixed-salary',
+      label: 'Lương cứng',
+      value: row.fixedSalaryAmount,
+    },
+    { key: 'pending-assistant', label: 'Trợ lí', value: row.assistantAmount },
+    {
+      key: 'pending-training-manager',
+      label: 'QL lớp',
+      value: row.trainingManagerAmount,
+    },
+  ];
+
+  const segments: string[] = [];
+  const sourceAmounts: Record<string, number> = {};
+  for (const source of sources) {
+    const amount = normalizeMoneyAmount(source.value);
+    if (amount <= 0) continue;
+    sourceAmounts[source.key] = amount;
+    segments.push(`${source.label} ${formatCurrencyLabel(amount)}`);
+  }
+
+  return {
+    note:
+      segments.length > 0
+        ? segments.join(' • ')
+        : 'Không có khoản pending chi tiết.',
+    sourceAmounts,
+  };
+}
+
 function buildStaffUnpaidSourceLabel(row: StaffUnpaidAlertSqlRow) {
   const sources = [
     normalizeMoneyAmount(row.sessionAmount) > 0 ? 'buổi dạy' : null,
@@ -660,14 +852,9 @@ function buildStaffUnpaidSourceLabel(row: StaffUnpaidAlertSqlRow) {
 }
 
 function formatStaffUnpaidAlertDue(row: StaffUnpaidAlertSqlRow) {
-  const pendingSourceCount = [
-    normalizeMoneyAmount(row.sessionAmount) > 0 ? 'buổi dạy' : null,
-    normalizeMoneyAmount(row.bonusAmount) > 0 ? 'bonus' : null,
-    normalizeMoneyAmount(row.customerCareAmount) > 0 ? 'CSKH' : null,
-    normalizeMoneyAmount(row.lessonAmount) > 0 ? 'giáo án' : null,
-    normalizeMoneyAmount(row.extraAllowanceAmount) > 0 ? 'trợ cấp' : null,
-    normalizeMoneyAmount(row.fixedSalaryAmount) > 0 ? 'lương cứng' : null,
-  ].filter(Boolean).length;
+  const pendingSourceCount = Object.keys(
+    buildStaffPendingPayrollSources(row).sourceAmounts,
+  ).length;
 
   return `${pendingSourceCount} nguồn pending`;
 }
@@ -702,12 +889,25 @@ function mapDebtStudentToActionAlert(
   };
 }
 
+/**
+ * Tên nhân sự hiển thị trên các bảng chi phí: chi phí tính cả người đã nghỉ,
+ * nên gắn nhãn để kế toán phân biệt.
+ */
+export function formatCostStaffName(row: {
+  staffName: string;
+  staffStatus: StaffStatus;
+}): string {
+  return row.staffStatus === StaffStatus.inactive
+    ? `${row.staffName} (Đã nghỉ)`
+    : row.staffName;
+}
+
 function mapUnpaidStaffToActionAlert(
   row: StaffUnpaidAlertSqlRow,
 ): AdminDashboardActionAlertDto {
   return {
     type: 'Nhân sự chưa thanh toán',
-    subject: `${row.staffName} · ${buildStaffUnpaidSourceLabel(row)}`,
+    subject: `${formatCostStaffName(row)} · ${buildStaffUnpaidSourceLabel(row)}`,
     owner: 'Kế toán',
     due: formatStaffUnpaidAlertDue(row),
     amount: normalizeMoneyAmount(row.totalUnpaid),
@@ -828,7 +1028,10 @@ export class DashboardService {
     );
   }
 
-  /** System-wide (all StudentInfo, not scoped by CSKH staff) new/dropped counts for the selected period. */
+  /**
+   * System-wide (all StudentInfo, not scoped by CSKH staff) new/dropped counts for the selected period.
+   * Học sinh mới = lần nạp ví thành công đầu tiên rơi trong kỳ.
+   */
   private async getStudentChurnCounts(period: {
     monthStart: Date;
     monthEnd: Date;
@@ -841,9 +1044,8 @@ export class DashboardService {
         SELECT
           (
             SELECT COUNT(*)
-            FROM student_info
-            WHERE student_info.created_at >= ${period.monthStart}
-              AND student_info.created_at < ${period.monthEnd}
+            FROM (${FIRST_WALLET_TOP_UP_SQL}) AS first_wallet_top_up
+            WHERE ${firstTopUpInRangeSql(period)}
           ) AS "newStudentsThisMonth",
           (
             SELECT COUNT(*)
@@ -1086,7 +1288,7 @@ export class DashboardService {
             SUM(
               ROUND(
                 (
-                  COALESCE(attendance.tuition_fee, 0) *
+                  ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} *
                   COALESCE(attendance.customer_care_coef, 0)
                 )::numeric,
                 0
@@ -1111,11 +1313,11 @@ export class DashboardService {
       ),
       monthly_bonus_cost AS (
         SELECT
-          date_trunc('month', bonuses.date)::date AS month_start,
+          TO_DATE(CONCAT(bonuses.month, '-01'), 'YYYY-MM-DD') AS month_start,
           COALESCE(SUM(COALESCE(bonuses.amount, 0)), 0) AS amount
         FROM bonuses
-        WHERE bonuses.date >= ${periodStartDate}
-          AND bonuses.date < ${periodEndExclusiveDate}
+        WHERE bonuses.month::text >= ${yearStartKey}
+          AND bonuses.month::text < ${yearEndKeyExclusive}
         GROUP BY 1
       ),
       monthly_extra_allowance_cost AS (
@@ -1142,7 +1344,7 @@ export class DashboardService {
           COALESCE(
             SUM(
               ROUND(
-                (COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric,
+                (${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric,
                 0
               )
             ),
@@ -1322,7 +1524,7 @@ export class DashboardService {
               SUM(
                 ROUND(
                   (
-                    COALESCE(attendance.tuition_fee, 0) *
+                    ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} *
                     COALESCE(attendance.customer_care_coef, 0)
                   )::numeric,
                   0
@@ -1368,7 +1570,7 @@ export class DashboardService {
             COALESCE(
               SUM(
                 ROUND(
-                  (COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric,
+                  (${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric,
                   0
                 )
               ),
@@ -1592,7 +1794,7 @@ export class DashboardService {
     offset = 0,
   ) {
     return this.prisma.$queryRaw<StaffUnpaidAlertSqlRow[]>(Prisma.sql`
-      WITH active_staff AS (
+      WITH staff_base AS (
         SELECT
           staff_info.id,
           NULLIF(
@@ -1604,10 +1806,10 @@ export class DashboardService {
               )
             ),
             ''
-          ) AS full_name
+          ) AS full_name,
+          staff_info.status::text AS status
         FROM staff_info
         INNER JOIN users staff_user ON staff_user.id = staff_info.user_id
-        WHERE staff_info.status = 'active'
       ),
       session_allowances AS (
         SELECT
@@ -1617,7 +1819,7 @@ export class DashboardService {
         FROM attendance
         INNER JOIN sessions ON sessions.id = attendance.session_id
         INNER JOIN classes ON classes.id = sessions.class_id
-        INNER JOIN active_staff ON active_staff.id = sessions.teacher_id
+        INNER JOIN staff_base ON staff_base.id = sessions.teacher_id
         WHERE LOWER(COALESCE(sessions.teacher_payment_status, '')) = 'unpaid'
           ${
             period
@@ -1644,7 +1846,7 @@ export class DashboardService {
           bonuses.staff_id AS staff_id,
           COALESCE(SUM(COALESCE(bonuses.amount, 0)), 0) AS amount
         FROM bonuses
-        INNER JOIN active_staff ON active_staff.id = bonuses.staff_id
+        INNER JOIN staff_base ON staff_base.id = bonuses.staff_id
         WHERE bonuses.status::text = 'pending'
           ${
             period
@@ -1661,7 +1863,7 @@ export class DashboardService {
             SUM(
               ROUND(
                 (
-                  COALESCE(attendance.tuition_fee, 0) *
+                  ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} *
                   COALESCE(attendance.customer_care_coef, 0)
                 )::numeric,
                 0
@@ -1671,7 +1873,7 @@ export class DashboardService {
           ) AS amount
         FROM attendance
         INNER JOIN sessions ON sessions.id = attendance.session_id
-        INNER JOIN active_staff ON active_staff.id = attendance.customer_care_staff_id
+        INNER JOIN staff_base ON staff_base.id = attendance.customer_care_staff_id
         WHERE COALESCE(attendance.customer_care_payment_status::text, 'pending') = 'pending'
           ${
             period
@@ -1686,7 +1888,7 @@ export class DashboardService {
           lesson_outputs.staff_id AS staff_id,
           COALESCE(SUM(COALESCE(lesson_outputs.cost, 0)), 0) AS amount
         FROM lesson_outputs
-        INNER JOIN active_staff ON active_staff.id = lesson_outputs.staff_id
+        INNER JOIN staff_base ON staff_base.id = lesson_outputs.staff_id
         WHERE lesson_outputs.payment_status::text = 'pending'
           ${
             period
@@ -1701,7 +1903,7 @@ export class DashboardService {
           extra_allowances.staff_id AS staff_id,
           COALESCE(SUM(COALESCE(extra_allowances.amount, 0)), 0) AS amount
         FROM extra_allowances
-        INNER JOIN active_staff ON active_staff.id = extra_allowances.staff_id
+        INNER JOIN staff_base ON staff_base.id = extra_allowances.staff_id
         WHERE extra_allowances.status::text = 'pending'
           ${
             period
@@ -1716,7 +1918,7 @@ export class DashboardService {
           staff_fixed_salary_payables.staff_id AS staff_id,
           COALESCE(SUM(COALESCE(staff_fixed_salary_payables.gross_amount, 0)), 0) AS amount
         FROM staff_fixed_salary_payables
-        INNER JOIN active_staff ON active_staff.id = staff_fixed_salary_payables.staff_id
+        INNER JOIN staff_base ON staff_base.id = staff_fixed_salary_payables.staff_id
         WHERE staff_fixed_salary_payables.status::text = 'pending'
           ${
             period
@@ -1732,7 +1934,7 @@ export class DashboardService {
           COALESCE(
             SUM(
               ROUND(
-                (COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric,
+                (${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric,
                 0
               )
             ),
@@ -1740,7 +1942,7 @@ export class DashboardService {
           ) AS amount
         FROM attendance
         INNER JOIN sessions ON sessions.id = attendance.session_id
-        INNER JOIN active_staff ON active_staff.id = attendance.assistant_manager_staff_id
+        INNER JOIN staff_base ON staff_base.id = attendance.assistant_manager_staff_id
         WHERE attendance.status IN ('present', 'excused')
           AND COALESCE(attendance.assistant_payment_status::text, 'pending') = 'pending'
           ${ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL}
@@ -1760,7 +1962,7 @@ export class DashboardService {
             0
           ) AS amount
         FROM sessions
-        INNER JOIN active_staff ON active_staff.id = sessions.training_manager_staff_id
+        INNER JOIN staff_base ON staff_base.id = sessions.training_manager_staff_id
         WHERE COALESCE(sessions.training_manager_payment_status::text, 'pending') = 'pending'
           AND COALESCE(sessions.training_manager_allowance_amount, 0) > 0
           ${
@@ -1773,8 +1975,9 @@ export class DashboardService {
       ),
       combined AS (
         SELECT
-          active_staff.id AS "staffId",
-          active_staff.full_name AS "staffName",
+          staff_base.id AS "staffId",
+          staff_base.full_name AS "staffName",
+          staff_base.status AS "staffStatus",
           COALESCE(session_unpaid.amount, 0) AS "sessionAmount",
           COALESCE(bonus_unpaid.amount, 0) AS "bonusAmount",
           COALESCE(customer_care_unpaid.amount, 0) AS "customerCareAmount",
@@ -1793,15 +1996,15 @@ export class DashboardService {
             COALESCE(assistant_unpaid.amount, 0) +
             COALESCE(training_manager_unpaid.amount, 0)
           ) AS "totalUnpaid"
-        FROM active_staff
-        LEFT JOIN session_unpaid ON session_unpaid.staff_id = active_staff.id
-        LEFT JOIN bonus_unpaid ON bonus_unpaid.staff_id = active_staff.id
-        LEFT JOIN customer_care_unpaid ON customer_care_unpaid.staff_id = active_staff.id
-        LEFT JOIN lesson_output_unpaid ON lesson_output_unpaid.staff_id = active_staff.id
-        LEFT JOIN extra_allowance_unpaid ON extra_allowance_unpaid.staff_id = active_staff.id
-        LEFT JOIN fixed_salary_unpaid ON fixed_salary_unpaid.staff_id = active_staff.id
-        LEFT JOIN assistant_unpaid ON assistant_unpaid.staff_id = active_staff.id
-        LEFT JOIN training_manager_unpaid ON training_manager_unpaid.staff_id = active_staff.id
+        FROM staff_base
+        LEFT JOIN session_unpaid ON session_unpaid.staff_id = staff_base.id
+        LEFT JOIN bonus_unpaid ON bonus_unpaid.staff_id = staff_base.id
+        LEFT JOIN customer_care_unpaid ON customer_care_unpaid.staff_id = staff_base.id
+        LEFT JOIN lesson_output_unpaid ON lesson_output_unpaid.staff_id = staff_base.id
+        LEFT JOIN extra_allowance_unpaid ON extra_allowance_unpaid.staff_id = staff_base.id
+        LEFT JOIN fixed_salary_unpaid ON fixed_salary_unpaid.staff_id = staff_base.id
+        LEFT JOIN assistant_unpaid ON assistant_unpaid.staff_id = staff_base.id
+        LEFT JOIN training_manager_unpaid ON training_manager_unpaid.staff_id = staff_base.id
       ),
       filtered AS (
         SELECT *
@@ -1838,6 +2041,7 @@ export class DashboardService {
       SELECT
         "staffId",
         "staffName",
+        "staffStatus",
         "sessionAmount",
         "bonusAmount",
         "customerCareAmount",
@@ -1864,6 +2068,25 @@ export class DashboardService {
     `);
   }
 
+  /** Tổng thưởng (dương) và phạt (âm) theo tháng thưởng trong kỳ; ròng = cộng hai số. */
+  private async getBonusRewardPenaltyTotals(
+    period: BonusMonthRange,
+  ): Promise<{ reward: number; penalty: number }> {
+    const [row] = await this.prisma.$queryRaw<
+      Array<{ reward: number | string | null; penalty: number | string | null }>
+    >(Prisma.sql`
+      SELECT
+        ${BONUS_REWARD_PENALTY_SUMS_SQL}
+      FROM bonuses
+      WHERE bonuses.month >= ${period.fromMonthKey}
+        AND bonuses.month < ${period.toMonthKeyExclusive}
+    `);
+    return {
+      reward: normalizeMoneyAmount(row?.reward),
+      penalty: normalizeMoneyAmount(row?.penalty),
+    };
+  }
+
   private async getPersonnelStaffCosts(
     limit: number,
     period?: {
@@ -1875,7 +2098,7 @@ export class DashboardService {
     offset = 0,
   ) {
     return this.prisma.$queryRaw<PersonnelStaffCostSqlRow[]>(Prisma.sql`
-      WITH active_staff AS (
+      WITH staff_base AS (
         SELECT
           staff_info.id,
           NULLIF(
@@ -1887,7 +2110,8 @@ export class DashboardService {
               )
             ),
             ''
-          ) AS full_name
+          ) AS full_name,
+          staff_info.status::text AS status
         FROM staff_info
         INNER JOIN users staff_user ON staff_user.id = staff_info.user_id
       ),
@@ -1899,7 +2123,7 @@ export class DashboardService {
         FROM attendance
         INNER JOIN sessions ON sessions.id = attendance.session_id
         INNER JOIN classes ON classes.id = sessions.class_id
-        INNER JOIN active_staff ON active_staff.id = sessions.teacher_id
+        INNER JOIN staff_base ON staff_base.id = sessions.teacher_id
         WHERE 1=1
           ${
             period
@@ -1924,14 +2148,15 @@ export class DashboardService {
       bonus_total AS (
         SELECT
           bonuses.staff_id AS staff_id,
-          COALESCE(SUM(COALESCE(bonuses.amount, 0)), 0) AS amount
+          COALESCE(SUM(COALESCE(bonuses.amount, 0)), 0) AS amount,
+          ${BONUS_REWARD_PENALTY_SUMS_SQL}
         FROM bonuses
-        INNER JOIN active_staff ON active_staff.id = bonuses.staff_id
+        INNER JOIN staff_base ON staff_base.id = bonuses.staff_id
         WHERE 1=1
           ${
             period
-              ? Prisma.sql`AND bonuses.date >= ${period.monthStart}
-          AND bonuses.date < ${period.monthEnd}`
+              ? Prisma.sql`AND bonuses.month >= ${period.fromMonthKey}
+          AND bonuses.month < ${period.toMonthKeyExclusive}`
               : Prisma.empty
           }
         GROUP BY bonuses.staff_id
@@ -1943,7 +2168,7 @@ export class DashboardService {
             SUM(
               ROUND(
                 (
-                  COALESCE(attendance.tuition_fee, 0) *
+                  ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} *
                   COALESCE(attendance.customer_care_coef, 0)
                 )::numeric,
                 0
@@ -1953,7 +2178,7 @@ export class DashboardService {
           ) AS amount
         FROM attendance
         INNER JOIN sessions ON sessions.id = attendance.session_id
-        INNER JOIN active_staff ON active_staff.id = attendance.customer_care_staff_id
+        INNER JOIN staff_base ON staff_base.id = attendance.customer_care_staff_id
         WHERE 1=1
           ${
             period
@@ -1968,7 +2193,7 @@ export class DashboardService {
           lesson_outputs.staff_id AS staff_id,
           COALESCE(SUM(COALESCE(lesson_outputs.cost, 0)), 0) AS amount
         FROM lesson_outputs
-        INNER JOIN active_staff ON active_staff.id = lesson_outputs.staff_id
+        INNER JOIN staff_base ON staff_base.id = lesson_outputs.staff_id
         WHERE 1=1
           ${
             period
@@ -1983,7 +2208,7 @@ export class DashboardService {
           extra_allowances.staff_id AS staff_id,
           COALESCE(SUM(COALESCE(extra_allowances.amount, 0)), 0) AS amount
         FROM extra_allowances
-        INNER JOIN active_staff ON active_staff.id = extra_allowances.staff_id
+        INNER JOIN staff_base ON staff_base.id = extra_allowances.staff_id
         WHERE 1=1
           ${
             period
@@ -1998,7 +2223,7 @@ export class DashboardService {
           staff_fixed_salary_payables.staff_id AS staff_id,
           COALESCE(SUM(COALESCE(staff_fixed_salary_payables.gross_amount, 0)), 0) AS amount
         FROM staff_fixed_salary_payables
-        INNER JOIN active_staff ON active_staff.id = staff_fixed_salary_payables.staff_id
+        INNER JOIN staff_base ON staff_base.id = staff_fixed_salary_payables.staff_id
         WHERE 1=1
           ${
             period
@@ -2014,7 +2239,7 @@ export class DashboardService {
           COALESCE(
             SUM(
               ROUND(
-                (COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric,
+                (${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric,
                 0
               )
             ),
@@ -2022,7 +2247,7 @@ export class DashboardService {
           ) AS amount
         FROM attendance
         INNER JOIN sessions ON sessions.id = attendance.session_id
-        INNER JOIN active_staff ON active_staff.id = attendance.assistant_manager_staff_id
+        INNER JOIN staff_base ON staff_base.id = attendance.assistant_manager_staff_id
         WHERE attendance.status IN ('present', 'excused')
           AND attendance.assistant_manager_staff_id IS NOT NULL
           ${ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL}
@@ -2042,7 +2267,7 @@ export class DashboardService {
             0
           ) AS amount
         FROM sessions
-        INNER JOIN active_staff ON active_staff.id = sessions.training_manager_staff_id
+        INNER JOIN staff_base ON staff_base.id = sessions.training_manager_staff_id
         WHERE sessions.training_manager_staff_id IS NOT NULL
           ${
             period
@@ -2054,10 +2279,13 @@ export class DashboardService {
       ),
       combined AS (
         SELECT
-          active_staff.id AS "staffId",
-          active_staff.full_name AS "staffName",
+          staff_base.id AS "staffId",
+          staff_base.full_name AS "staffName",
+          staff_base.status AS "staffStatus",
           COALESCE(session_total.amount, 0) AS "sessionAmount",
           COALESCE(bonus_total.amount, 0) AS "bonusAmount",
+          COALESCE(bonus_total.reward, 0) AS "bonusRewardAmount",
+          COALESCE(bonus_total.penalty, 0) AS "bonusPenaltyAmount",
           COALESCE(customer_care_total.amount, 0) AS "customerCareAmount",
           COALESCE(lesson_output_total.amount, 0) AS "lessonAmount",
           COALESCE(extra_allowance_total.amount, 0) AS "extraAllowanceAmount",
@@ -2074,26 +2302,29 @@ export class DashboardService {
             COALESCE(assistant_total.amount, 0) +
             COALESCE(training_manager_total.amount, 0)
           ) AS "totalCost"
-        FROM active_staff
-        LEFT JOIN session_total ON session_total.staff_id = active_staff.id
-        LEFT JOIN bonus_total ON bonus_total.staff_id = active_staff.id
-        LEFT JOIN customer_care_total ON customer_care_total.staff_id = active_staff.id
-        LEFT JOIN lesson_output_total ON lesson_output_total.staff_id = active_staff.id
-        LEFT JOIN extra_allowance_total ON extra_allowance_total.staff_id = active_staff.id
-        LEFT JOIN fixed_salary_total ON fixed_salary_total.staff_id = active_staff.id
-        LEFT JOIN assistant_total ON assistant_total.staff_id = active_staff.id
-        LEFT JOIN training_manager_total ON training_manager_total.staff_id = active_staff.id
+        FROM staff_base
+        LEFT JOIN session_total ON session_total.staff_id = staff_base.id
+        LEFT JOIN bonus_total ON bonus_total.staff_id = staff_base.id
+        LEFT JOIN customer_care_total ON customer_care_total.staff_id = staff_base.id
+        LEFT JOIN lesson_output_total ON lesson_output_total.staff_id = staff_base.id
+        LEFT JOIN extra_allowance_total ON extra_allowance_total.staff_id = staff_base.id
+        LEFT JOIN fixed_salary_total ON fixed_salary_total.staff_id = staff_base.id
+        LEFT JOIN assistant_total ON assistant_total.staff_id = staff_base.id
+        LEFT JOIN training_manager_total ON training_manager_total.staff_id = staff_base.id
       ),
       filtered AS (
         SELECT *
         FROM combined
-        WHERE "totalCost" > 0
+        WHERE "totalCost" > 0 OR "bonusPenaltyAmount" < 0
       )
       SELECT
         "staffId",
         "staffName",
+        "staffStatus",
         "sessionAmount",
         "bonusAmount",
+        "bonusRewardAmount",
+        "bonusPenaltyAmount",
         "customerCareAmount",
         "lessonAmount",
         "extraAllowanceAmount",
@@ -2102,7 +2333,7 @@ export class DashboardService {
         "trainingManagerAmount",
         "totalCost"
       FROM filtered
-      ORDER BY "totalCost" DESC
+      ORDER BY ABS("totalCost") DESC
       LIMIT ${limit} OFFSET ${offset}
     `);
   }
@@ -2192,6 +2423,7 @@ export class DashboardService {
   /**
    * Running classes that have NOT reported active/open survey(s)
    * (survey has name != null, startDate <= CURRENT_DATE, class is not excluded, and no class_surveys row with this surveyId).
+   * Lớp có buổi đầu tiên muộn hơn ngày tạo bài (giờ VN) được miễn — cùng quy tắc `isSurveyRequiredFor`.
    */
   private async getMissingSurveyClassAlertRows(params: {
     limit: number;
@@ -2233,6 +2465,12 @@ export class DashboardService {
             SELECT 1
             FROM class_surveys cs
             WHERE cs.class_id = c.id AND cs.survey_id = s.id
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM sessions se
+            WHERE se.class_id = c.id
+              AND se.date <= (s.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
           )
       ),
       counted AS (
@@ -2364,6 +2602,11 @@ export class DashboardService {
           select: {
             id: true,
             name: true,
+            sessions: FIRST_SESSION_SELECT,
+            teachers: {
+              where: { teacherId: staffId },
+              select: { createdAt: true },
+            },
             _count: {
               select: {
                 surveys: true,
@@ -2409,11 +2652,21 @@ export class DashboardService {
           select: {
             id: true,
             name: true,
+            createdAt: true,
             excludedClasses: { select: { classId: true } },
           },
         }),
       ]);
 
+    const surveySubjectByClassId = new Map(
+      assignedClasses.map((item) => [
+        item.id,
+        {
+          sessions: item.sessions,
+          teacherJoinedAt: item.teachers[0]?.createdAt,
+        },
+      ]),
+    );
     const assignedClassesIds = assignedClasses.map((item) => item.id);
     const [latestSurveyRows, reportedSurveyRows] =
       assignedClassesIds.length > 0
@@ -2478,10 +2731,13 @@ export class DashboardService {
           const latestClassSurveyTestNumber =
             latestSurveyByClassId.get(item.id) ?? null;
           const missingSchedule = item.scheduleCount === 0;
+          const surveySubject = surveySubjectByClassId.get(item.id);
           const missingSurveys = openSurveys.filter(
             (s) =>
               !s.excludedClasses.some((e) => e.classId === item.id) &&
-              !reportedSurveyKeySet.has(`${item.id}::${s.id}`),
+              !reportedSurveyKeySet.has(`${item.id}::${s.id}`) &&
+              surveySubject != null &&
+              isSurveyRequiredFor(s.createdAt, surveySubject),
           );
           const missingSurvey = missingSurveys.length > 0;
 
@@ -3098,7 +3354,6 @@ export class DashboardService {
           select: {
             id: true,
             status: true,
-            createdAt: true,
             dropOutDate: true,
           },
         },
@@ -3114,9 +3369,13 @@ export class DashboardService {
         range,
       );
 
-    const [lowBalanceRows, debtRows] = await Promise.all([
+    const [lowBalanceRows, debtRows, newStudentsThisMonth] = await Promise.all([
       this.getExpiringStudentsByCustomerCareStaff(staffId, 6),
       this.getDebtStudentsByCustomerCareStaff(staffId, 6),
+      this.countNewStudentsByFirstTopUp(
+        assignedStudents.map((student) => student.id),
+        range,
+      ),
     ]);
 
     const learnedTuitionTotal = assignedStudents.reduce(
@@ -3129,11 +3388,7 @@ export class DashboardService {
     );
 
     return {
-      newStudentsThisMonth: assignedStudents.filter(
-        (student) =>
-          student.createdAt >= range.monthStart &&
-          student.createdAt < range.monthEnd,
-      ).length,
+      newStudentsThisMonth,
       droppedStudentsThisMonth: assignedStudents.filter((student) =>
         isDropOutDateInDashboardMonth(
           student.dropOutDate,
@@ -3150,6 +3405,29 @@ export class DashboardService {
       ),
       debtStudents: debtRows.map((row) => this.mapStudentAlertItem(row)),
     };
+  }
+
+  /** Đếm Học sinh mới trong nhóm học sinh: lần nạp ví thành công đầu tiên rơi trong kỳ. */
+  private async countNewStudentsByFirstTopUp(
+    studentIds: string[],
+    range: { monthStart: Date; monthEnd: Date },
+  ): Promise<number> {
+    if (studentIds.length === 0) {
+      return 0;
+    }
+
+    const [row] = await this.prisma.$queryRaw<
+      { newStudentsCount: number | string | null }[]
+    >(
+      Prisma.sql`
+        SELECT COUNT(*)::int AS "newStudentsCount"
+        FROM (${FIRST_WALLET_TOP_UP_SQL}) AS first_wallet_top_up
+        WHERE first_wallet_top_up.student_id IN (${Prisma.join(studentIds)})
+          AND ${firstTopUpInRangeSql(range)}
+      `,
+    );
+
+    return normalizeInteger(row?.newStudentsCount);
   }
 
   private async getMyCustomerCarePortfolio(
@@ -3245,14 +3523,14 @@ export class DashboardService {
 
     const typeFilter =
       params.query.type === 'new'
-        ? Prisma.sql`student_info.created_at >= ${monthStart} AND student_info.created_at < ${monthEnd}`
+        ? firstTopUpInRangeSql({ monthStart, monthEnd })
         : params.query.type === 'dropped'
           ? Prisma.sql`student_info.drop_out_date IS NOT NULL AND student_info.drop_out_date >= ${periodStartStr}::date AND student_info.drop_out_date < ${periodEndExclusiveStr}::date`
           : Prisma.sql`student_info.status = 'active'`;
 
     const dateColumn =
       params.query.type === 'new'
-        ? Prisma.sql`student_info.created_at`
+        ? Prisma.sql`first_wallet_top_up.first_top_up_at`
         : params.query.type === 'dropped'
           ? Prisma.sql`student_info.drop_out_date`
           : Prisma.sql`NULL`;
@@ -3266,6 +3544,7 @@ export class DashboardService {
           ${dateColumn} AS "eventDate"
         FROM customer_care_service
         INNER JOIN student_info ON student_info.id = customer_care_service.student_id
+        ${FIRST_WALLET_TOP_UP_JOIN_SQL}
         LEFT JOIN student_classes ON student_classes.student_id = student_info.id
         LEFT JOIN classes ON classes.id = student_classes.class_id
         WHERE customer_care_service.staff_id IN (${Prisma.join(staffIds)})
@@ -3360,7 +3639,7 @@ export class DashboardService {
             THEN student_info.id
           END)::int AS "activeStudentsCount",
           COUNT(DISTINCT CASE
-            WHEN student_info.created_at >= ${range.monthStart} AND student_info.created_at < ${range.monthEnd}
+            WHEN ${firstTopUpInRangeSql(range)}
             THEN student_info.id
           END)::int AS "newStudentsCount",
           COUNT(DISTINCT CASE
@@ -3371,6 +3650,7 @@ export class DashboardService {
           END)::int AS "droppedStudentsCount"
         FROM customer_care_service
         INNER JOIN student_info ON student_info.id = customer_care_service.student_id
+        ${FIRST_WALLET_TOP_UP_JOIN_SQL}
         WHERE customer_care_service.staff_id IN (${Prisma.join(staffIds)})
         GROUP BY customer_care_service.staff_id
       `,
@@ -3451,17 +3731,18 @@ export class DashboardService {
           SELECT DISTINCT
             student_info.id AS "studentId",
             student_info.status AS status,
-            student_info.created_at AS "createdAt",
+            first_wallet_top_up.first_top_up_at AS "firstTopUpAt",
             student_info.drop_out_date AS "dropOutDate"
           FROM customer_care_service
           INNER JOIN student_info ON student_info.id = customer_care_service.student_id
+          ${FIRST_WALLET_TOP_UP_JOIN_SQL}
           WHERE customer_care_service.staff_id IN (${Prisma.join(staffIds)})
         )
         SELECT
           COUNT(*) FILTER (WHERE status = 'active')::int AS "activeStudentsCount",
           COUNT(*) FILTER (
-            WHERE "createdAt" >= ${range.monthStart}
-              AND "createdAt" < ${range.monthEnd}
+            WHERE "firstTopUpAt" >= ${range.monthStart}
+              AND "firstTopUpAt" < ${range.monthEnd}
           )::int AS "newStudentsThisMonth",
           COUNT(*) FILTER (
             WHERE "dropOutDate" IS NOT NULL
@@ -3697,7 +3978,7 @@ export class DashboardService {
     const unpaidStaff: StaffDashboardUnpaidStaffItemDto[] = unpaidRows.map(
       (row) => ({
         staffId: row.staffId,
-        staffName: row.staffName,
+        staffName: formatCostStaffName(row),
         sessionAmount: normalizeMoneyAmount(row.sessionAmount),
         bonusAmount: normalizeMoneyAmount(row.bonusAmount),
         customerCareAmount: normalizeMoneyAmount(row.customerCareAmount),
@@ -3750,7 +4031,7 @@ export class DashboardService {
           'customerCareCost' AS key,
           ROUND(
             (
-              COALESCE(attendance.tuition_fee, 0) *
+              ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} *
               COALESCE(attendance.customer_care_coef, 0)
             )::numeric,
             0
@@ -3772,7 +4053,7 @@ export class DashboardService {
 
         SELECT
           'assistantCost' AS key,
-          ROUND((COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric, 0) AS amount,
+          ROUND((${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric, 0) AS amount,
           CASE
             WHEN COALESCE(attendance.assistant_payment_status::text, 'pending') = 'paid'
               THEN 'paid'
@@ -3815,8 +4096,8 @@ export class DashboardService {
             ELSE 'other'
           END AS status
         FROM bonuses
-        WHERE bonuses.date >= ${period.monthStart}
-          AND bonuses.date < ${period.monthEnd}
+        WHERE bonuses.month >= ${period.fromMonthKey}
+          AND bonuses.month < ${period.toMonthKeyExclusive}
 
         UNION ALL
 
@@ -3939,7 +4220,7 @@ export class DashboardService {
 
     const pendingStaff = pendingStaffRows.map((row) => ({
       staffId: row.staffId,
-      staffName: row.staffName,
+      staffName: formatCostStaffName(row),
       sessionAmount: normalizeMoneyAmount(row.sessionAmount),
       bonusAmount: normalizeMoneyAmount(row.bonusAmount),
       customerCareAmount: normalizeMoneyAmount(row.customerCareAmount),
@@ -3984,7 +4265,7 @@ export class DashboardService {
         },
         {
           key: 'lessonCost',
-          label: 'Giáo án',
+          label: LESSON_PLAN_LABEL,
           amount: normalizeMoneyAmount(summaryRow?.lessonCost),
         },
         {
@@ -4847,41 +5128,11 @@ export class DashboardService {
 
         const personnelItems: AdminDashboardFinancialExportPersonnelItemDto[] =
           staffCostsRaw.slice(0, limit).map((row) => {
-            const segments = [
-              normalizeMoneyAmount(row.sessionAmount) > 0
-                ? `Dạy ${formatCurrencyLabel(normalizeMoneyAmount(row.sessionAmount))}`
-                : null,
-              normalizeMoneyAmount(row.customerCareAmount) > 0
-                ? `CSKH ${formatCurrencyLabel(normalizeMoneyAmount(row.customerCareAmount))}`
-                : null,
-              normalizeMoneyAmount(row.lessonAmount) > 0
-                ? `Giáo án ${formatCurrencyLabel(normalizeMoneyAmount(row.lessonAmount))}`
-                : null,
-              normalizeMoneyAmount(row.bonusAmount) > 0
-                ? `Bonus ${formatCurrencyLabel(normalizeMoneyAmount(row.bonusAmount))}`
-                : null,
-              normalizeMoneyAmount(row.extraAllowanceAmount) > 0
-                ? `Trợ cấp khác ${formatCurrencyLabel(normalizeMoneyAmount(row.extraAllowanceAmount))}`
-                : null,
-              normalizeMoneyAmount(row.fixedSalaryAmount) > 0
-                ? `Lương cứng ${formatCurrencyLabel(normalizeMoneyAmount(row.fixedSalaryAmount))}`
-                : null,
-              normalizeMoneyAmount(row.assistantAmount) > 0
-                ? `Trợ lí ${formatCurrencyLabel(normalizeMoneyAmount(row.assistantAmount))}`
-                : null,
-              normalizeMoneyAmount(row.trainingManagerAmount) > 0
-                ? `QL lớp ${formatCurrencyLabel(normalizeMoneyAmount(row.trainingManagerAmount))}`
-                : null,
-            ].filter((value): value is string => value != null);
-
             return {
               staffId: row.staffId,
-              staffName: row.staffName,
+              staffName: formatCostStaffName(row),
               amount: normalizeMoneyAmount(row.totalCost),
-              note:
-                segments.length > 0
-                  ? segments.join(' • ')
-                  : 'Không có chi phí chi tiết.',
+              note: buildPersonnelCostBreakdown(row).note,
             };
           });
 
@@ -5237,7 +5488,7 @@ export class DashboardService {
                 },
                 {
                   key: 'pending-lesson',
-                  label: 'Giáo án chưa thanh toán',
+                  label: `${LESSON_PLAN_LABEL} chưa thanh toán`,
                   amount: totalLessonAmount,
                   note: 'Trợ cấp viết giáo án/soạn tài liệu ở trạng thái chưa chi trả.',
                   tone: 'negative',
@@ -5279,42 +5530,16 @@ export class DashboardService {
                 },
               ],
               items: rows.map<AdminDashboardFinancialDetailItemDto>((row) => {
-                const segments = [
-                  normalizeMoneyAmount(row.sessionAmount) > 0
-                    ? `Buổi dạy ${formatCurrencyLabel(normalizeMoneyAmount(row.sessionAmount))}`
-                    : null,
-                  normalizeMoneyAmount(row.customerCareAmount) > 0
-                    ? `CSKH ${formatCurrencyLabel(normalizeMoneyAmount(row.customerCareAmount))}`
-                    : null,
-                  normalizeMoneyAmount(row.lessonAmount) > 0
-                    ? `Giáo án ${formatCurrencyLabel(normalizeMoneyAmount(row.lessonAmount))}`
-                    : null,
-                  normalizeMoneyAmount(row.bonusAmount) > 0
-                    ? `Bonus ${formatCurrencyLabel(normalizeMoneyAmount(row.bonusAmount))}`
-                    : null,
-                  normalizeMoneyAmount(row.extraAllowanceAmount) > 0
-                    ? `Trợ cấp ${formatCurrencyLabel(normalizeMoneyAmount(row.extraAllowanceAmount))}`
-                    : null,
-                  normalizeMoneyAmount(row.fixedSalaryAmount) > 0
-                    ? `Lương cứng ${formatCurrencyLabel(normalizeMoneyAmount(row.fixedSalaryAmount))}`
-                    : null,
-                  normalizeMoneyAmount(row.assistantAmount) > 0
-                    ? `Trợ lí ${formatCurrencyLabel(normalizeMoneyAmount(row.assistantAmount))}`
-                    : null,
-                  normalizeMoneyAmount(row.trainingManagerAmount) > 0
-                    ? `QL lớp ${formatCurrencyLabel(normalizeMoneyAmount(row.trainingManagerAmount))}`
-                    : null,
-                ].filter((value): value is string => value != null);
+                const { note, sourceAmounts } =
+                  buildStaffPendingPayrollSources(row);
 
                 return {
                   id: row.staffId,
-                  label: row.staffName,
+                  label: formatCostStaffName(row),
                   secondaryLabel: buildStaffUnpaidSourceLabel(row),
                   amount: normalizeMoneyAmount(row.totalUnpaid),
-                  note:
-                    segments.length > 0
-                      ? segments.join(' • ')
-                      : 'Không có khoản pending chi tiết.',
+                  note,
+                  sourceAmounts,
                 };
               }),
               emptyState: 'Không có khoản thanh toán pending cho nhân sự.',
@@ -5342,48 +5567,22 @@ export class DashboardService {
             const otherCost = selectedMonthTrend.otherCost;
 
             if (query.rowKey === 'personnel-cost') {
-              const staffCosts = await this.getPersonnelStaffCosts(
-                limit,
-                dashboardPeriod,
-              );
+              const [staffCosts, bonusSplit] = await Promise.all([
+                this.getPersonnelStaffCosts(limit, dashboardPeriod),
+                this.getBonusRewardPenaltyTotals(dashboardPeriod),
+              ]);
               const items =
                 staffCosts.map<AdminDashboardFinancialDetailItemDto>((row) => {
-                  const segments = [
-                    normalizeMoneyAmount(row.sessionAmount) > 0
-                      ? `Dạy ${formatCurrencyLabel(normalizeMoneyAmount(row.sessionAmount))}`
-                      : null,
-                    normalizeMoneyAmount(row.customerCareAmount) > 0
-                      ? `CSKH ${formatCurrencyLabel(normalizeMoneyAmount(row.customerCareAmount))}`
-                      : null,
-                    normalizeMoneyAmount(row.lessonAmount) > 0
-                      ? `Giáo án ${formatCurrencyLabel(normalizeMoneyAmount(row.lessonAmount))}`
-                      : null,
-                    normalizeMoneyAmount(row.bonusAmount) > 0
-                      ? `Bonus ${formatCurrencyLabel(normalizeMoneyAmount(row.bonusAmount))}`
-                      : null,
-                    normalizeMoneyAmount(row.extraAllowanceAmount) > 0
-                      ? `Trợ cấp khác ${formatCurrencyLabel(normalizeMoneyAmount(row.extraAllowanceAmount))}`
-                      : null,
-                    normalizeMoneyAmount(row.fixedSalaryAmount) > 0
-                      ? `Lương cứng ${formatCurrencyLabel(normalizeMoneyAmount(row.fixedSalaryAmount))}`
-                      : null,
-                    normalizeMoneyAmount(row.assistantAmount) > 0
-                      ? `Trợ lí ${formatCurrencyLabel(normalizeMoneyAmount(row.assistantAmount))}`
-                      : null,
-                    normalizeMoneyAmount(row.trainingManagerAmount) > 0
-                      ? `QL lớp ${formatCurrencyLabel(normalizeMoneyAmount(row.trainingManagerAmount))}`
-                      : null,
-                  ].filter((value): value is string => value != null);
+                  const { note, sourceAmounts } =
+                    buildPersonnelCostBreakdown(row);
 
                   return {
                     id: row.staffId,
-                    label: row.staffName,
+                    label: formatCostStaffName(row),
                     secondaryLabel: 'Chi phí nhân sự',
                     amount: normalizeMoneyAmount(row.totalCost),
-                    note:
-                      segments.length > 0
-                        ? segments.join(' • ')
-                        : 'Không có chi phí chi tiết.',
+                    note,
+                    sourceAmounts,
                   };
                 });
 
@@ -5415,11 +5614,18 @@ export class DashboardService {
                     tone: 'negative',
                   },
                   {
-                    key: 'bonus-cost',
-                    label: 'Bonus',
-                    amount: selectedMonthTrend.bonusCost,
-                    note: 'Tổng các khoản thưởng nhân viên phát sinh trong kỳ.',
+                    key: 'bonus-reward-cost',
+                    label: 'Thưởng',
+                    amount: bonusSplit.reward,
+                    note: 'Các khoản bonus dương theo tháng thưởng trong kỳ.',
                     tone: 'negative',
+                  },
+                  {
+                    key: 'bonus-penalty-cost',
+                    label: 'Phạt',
+                    amount: Math.abs(bonusSplit.penalty),
+                    note: `Các khoản bonus âm, trừ vào chi phí (bảng chi tiết hiện số âm). Bonus ròng: ${formatCurrencyLabel(selectedMonthTrend.bonusCost)}.`,
+                    tone: 'positive',
                   },
                   {
                     key: 'extra-allowance-cost',
@@ -5551,7 +5757,7 @@ export class DashboardService {
                 })),
                 ...staffRows.map((row) => ({
                   id: `staff-${row.staffId}`,
-                  label: `Chi phí - Nhân sự ${row.staffName}`,
+                  label: `Chi phí - Nhân sự ${formatCostStaffName(row)}`,
                   secondaryLabel: 'Chi phí nhân sự',
                   amount: -normalizeMoneyAmount(row.totalCost),
                   note: `Tổng trợ cấp nhân sự (Chi phí -)`,
@@ -5646,7 +5852,7 @@ export class DashboardService {
               })),
               ...staffRows.map((row) => ({
                 id: `staff-${row.staffId}`,
-                label: `Chi phí - Nhân sự ${row.staffName}`,
+                label: `Chi phí - Nhân sự ${formatCostStaffName(row)}`,
                 secondaryLabel: 'Chi phí nhân sự',
                 amount: -normalizeMoneyAmount(row.totalCost),
                 note: `Tổng trợ cấp nhân sự trong kỳ (Chi -)`,
@@ -5882,8 +6088,12 @@ export class DashboardService {
     const period = resolveFinancialPeriod(query);
     const dateColumn =
       query.type === 'new'
-        ? 'student_info.created_at'
+        ? 'first_wallet_top_up.first_top_up_at'
         : 'student_info.drop_out_date';
+    // Học sinh mới: ngày vào học = lần nạp ví thành công đầu tiên; điều kiện
+    // kỳ trên `dateColumn` loại học sinh chưa nạp nên LEFT JOIN đủ.
+    const firstTopUpJoin =
+      query.type === 'new' ? FIRST_WALLET_TOP_UP_JOIN_SQL : Prisma.empty;
 
     const cacheKey = period.isDateRange
       ? buildCacheKey('student-churn-details', {
@@ -5913,6 +6123,7 @@ export class DashboardService {
               ) AS "className",
               ${Prisma.raw(dateColumn)} AS "eventDate"
             FROM student_info
+            ${firstTopUpJoin}
             LEFT JOIN student_classes ON student_classes.student_id = student_info.id
             LEFT JOIN classes ON classes.id = student_classes.class_id
             WHERE ${Prisma.raw(dateColumn)} >= ${period.monthStart}
@@ -6112,7 +6323,7 @@ export class DashboardService {
                   SUM(
                     ROUND(
                       (
-                        COALESCE(attendance.tuition_fee, 0) *
+                        ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} *
                         COALESCE(attendance.customer_care_coef, 0)
                       )::numeric,
                       0
@@ -6137,11 +6348,11 @@ export class DashboardService {
             ),
             monthly_bonus_cost AS (
               SELECT
-                date_trunc('month', bonuses.date)::date AS month_start,
+                TO_DATE(CONCAT(bonuses.month, '-01'), 'YYYY-MM-DD') AS month_start,
                 COALESCE(SUM(COALESCE(bonuses.amount, 0)), 0) AS amount
               FROM bonuses
-              WHERE bonuses.date >= ${periodStartDate}
-                AND bonuses.date < ${periodEndExclusiveDate}
+              WHERE bonuses.month::text >= ${fromKeyLiteral}
+                AND bonuses.month::text < ${toKeyExclusiveLiteral}
               GROUP BY 1
             ),
             monthly_extra_allowance_cost AS (
@@ -6168,7 +6379,7 @@ export class DashboardService {
                 COALESCE(
                   SUM(
                     ROUND(
-                      (COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric,
+                      (${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric,
                       0
                     )
                   ),

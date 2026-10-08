@@ -66,6 +66,8 @@ export interface TeacherSurveyPendingItem {
   name: string;
   startDate: string | null;
   endDate: string | null;
+  /** Đang trong khung chặn khảo sát sắp hạn: gia sư không tạo được buổi học cho lớp. */
+  blocking: boolean;
 }
 
 export interface TeacherSurveyWarning {

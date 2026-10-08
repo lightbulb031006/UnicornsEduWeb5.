@@ -172,7 +172,7 @@ export default function StudentTopicDetailPage() {
           href={studentClassLessonsHref(classId)}
           className="inline-flex items-center gap-1 font-medium text-text-muted transition-colors hover:text-primary max-w-[200px] sm:max-w-xs truncate"
         >
-          {classDetail?.class?.name || "Chi tiết lớp"}
+          {classDetail?.className || "Chi tiết lớp"}
         </Link>
         <span>/</span>
         <span className="font-semibold text-text-primary max-w-[220px] sm:max-w-sm truncate">
@@ -438,10 +438,10 @@ function QuizQuestionInput({
 
   return (
     <div className="rounded-xl border border-border-default p-4">
-      <p className="text-sm font-medium text-text-primary mb-3">
+      <div className="text-sm font-medium text-text-primary mb-3">
         <span className="text-primary mr-1">Câu {index + 1}.</span>
-        <MathContent content={quiz.question.content} className="inline" />
-      </p>
+        <MathContent content={quiz.question.content} className="inline [&>p:first-child]:inline" />
+      </div>
 
       {isSingleChoice ? (
         <div className="space-y-2">
@@ -518,10 +518,10 @@ function QuizReview({ answers }: { answers: LessonQuizAnswer[] }) {
                   : "border-error/30 bg-error/5",
             )}
           >
-            <p className="text-sm font-medium text-text-primary mb-2">
+            <div className="text-sm font-medium text-text-primary mb-2">
               <span className="text-primary mr-1">Câu {idx + 1}.</span>
-              <MathContent content={ans.question.content} className="inline" />
-            </p>
+              <MathContent content={ans.question.content} className="inline [&>p:first-child]:inline" />
+            </div>
 
             {/* Student answer */}
             <div className="mb-2">

@@ -24,6 +24,8 @@ model StaffInfo {
   personalAchievementLink      String?                     @map("personal_achievement_link")
   customerCareManagedByStaffId String?                     @map("customer_care_managed_by_staff_id")
   revenueSharePercent          Decimal?                    @map("revenue_share_percent") @db.Decimal(5, 2)
+  /// % mặc định của CSKH (phân số 0.00–0.99, cùng đơn vị `customer_care_service.profit_percent`); áp khi CSKH được gán vào học sinh.
+  customerCareDefaultProfitPercent Decimal                 @default(0) @map("customer_care_default_profit_percent") @db.Decimal(2, 2)
   assistantStudentSession      Attendance[]                @relation("AttendanceAssistant")
   customerCareStudentSession   Attendance[]                @relation("AttendanceCustomerCare")
   bonuses                      Bonus[]
@@ -76,6 +78,8 @@ model StudentInfo {
   customerSource            StudentCustomerSource?            @map("customer_source")
   customerSourceNote        String?                           @map("customer_source_note") @db.VarChar(200)
   dropOutDate               DateTime?                         @map("drop_out_date") @db.Date
+  /// Lý do nghỉ học, bắt buộc khi chuyển sang nghỉ; giữ lại khi học sinh học lại.
+  dropOutReason             String?                           @map("drop_out_reason") @db.VarChar(500)
   createdAt                 DateTime                          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime                          @updatedAt @map("updated_at") @db.Timestamptz(6)
   userId                    String?                           @unique @map("user_id")

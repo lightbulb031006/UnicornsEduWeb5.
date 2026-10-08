@@ -457,6 +457,18 @@ export class NotificationService {
   private buildFeedWhereInput(
     audience: NotificationAudienceContext,
   ): Prisma.NotificationWhereInput {
+    const publishedWhere: Prisma.NotificationWhereInput = {
+      status: NotificationStatus.published,
+      lastPushedAt: { not: null },
+    };
+    // Feed thông báo của admin (CONTEXT.md): thấy mọi thông báo đã đẩy.
+    if (
+      audience.roleType === UserRole.admin ||
+      audience.staffRoles.includes(StaffRole.admin)
+    ) {
+      return publishedWhere;
+    }
+
     const orFilters: Prisma.NotificationWhereInput[] = [
       { targetAll: true },
       { targetUserIds: { has: audience.userId } },
@@ -472,11 +484,7 @@ export class NotificationService {
       });
     }
 
-    return {
-      status: NotificationStatus.published,
-      lastPushedAt: { not: null },
-      OR: orFilters,
-    };
+    return { ...publishedWhere, OR: orFilters };
   }
 
   private async buildUpdateData(

@@ -33,8 +33,9 @@ import {
 import { resolveCanonicalUserName } from "@/dtos/user-name.dto";
 import { formatCurrency, normalizeTimeOnly } from "@/lib/class.helpers";
 import { formatMonthPartsLabel } from "@/lib/month-format";
-import { ROLE_LABELS } from "@/lib/staff.constants";
+import { LESSON_PLAN_LABEL, ROLE_LABELS } from "@/lib/staff.constants";
 import { formatVnDate } from "@/lib/formatters";
+import NewStudentDefinitionHint from "@/components/shared/NewStudentDefinitionHint";
 
 const TASK_STATUS_LABELS: Record<string, string> = {
   pending: "Chờ xử lý",
@@ -298,6 +299,7 @@ function StudentChangeMiniStat({
               Đóng
             </button>
           </div>
+          {type === "new" ? <NewStudentDefinitionHint /> : null}
           <ResponsiveDialogBody className="space-y-2 p-5 max-h-[70vh] overflow-y-auto">
             {query.isLoading ? (
               <p className="text-sm text-text-muted">Đang tải…</p>
@@ -383,6 +385,7 @@ function StaffStudentChangeDialog({
           Đóng
         </button>
       </div>
+      {type === "new" ? <NewStudentDefinitionHint /> : null}
       <ResponsiveDialogBody className="space-y-2 p-5 max-h-[70vh] overflow-y-auto">
         {query.isLoading ? (
           <p className="text-sm text-text-muted">Đang tải…</p>
@@ -861,7 +864,7 @@ function LessonPlanSection({
       <SectionTitle
         staffRole="lesson_plan"
         href="/staff/lesson-plans"
-        linkLabel="Giáo án"
+        linkLabel={LESSON_PLAN_LABEL}
       />
       <div className="grid gap-3 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
         <SurfaceCard eyebrow="Tiến độ" title="Task được giao">
@@ -911,7 +914,7 @@ function LessonPlanHeadSection({
       <SectionTitle
         staffRole="lesson_plan_head"
         href="/staff/lesson-plans"
-        linkLabel="Giáo án"
+        linkLabel={LESSON_PLAN_LABEL}
       />
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)]">
         <SurfaceCard eyebrow="Tiến độ" title="Task chưa hoàn thành">
@@ -1607,7 +1610,7 @@ function UnpaidStaffList({
         ? `CSKH ${formatCurrency(item.customerCareAmount)}`
         : null,
       item.lessonAmount > 0
-        ? `Giáo án ${formatCurrency(item.lessonAmount)}`
+        ? `${LESSON_PLAN_LABEL} ${formatCurrency(item.lessonAmount)}`
         : null,
       item.bonusAmount > 0
         ? `Bonus ${formatCurrency(item.bonusAmount)}`

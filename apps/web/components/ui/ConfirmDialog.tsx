@@ -25,6 +25,8 @@ export type ConfirmDialogProps = {
   variant?: ConfirmDialogVariant;
   onConfirm: () => void;
   confirmPending?: boolean;
+  /** Nội dung phụ (vd. ô lý do) render giữa header và footer. */
+  children?: ReactNode;
 };
 
 export function ConfirmDialog({
@@ -37,6 +39,7 @@ export function ConfirmDialog({
   variant = "default",
   onConfirm,
   confirmPending = false,
+  children,
 }: ConfirmDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -47,6 +50,7 @@ export function ConfirmDialog({
             <AlertDialogDescription>{description}</AlertDialogDescription>
           ) : null}
         </AlertDialogHeader>
+        {children}
         <AlertDialogFooter>
           <AlertDialogCancel type="button" disabled={confirmPending}>
             {cancelLabel}

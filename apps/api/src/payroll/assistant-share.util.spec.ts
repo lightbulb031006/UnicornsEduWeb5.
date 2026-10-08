@@ -1,4 +1,5 @@
 import {
+  commissionTuitionBasisVnd,
   isSelfManagedAssistantShareAttendance,
   isSelfManagedCustomerCareStaff,
   resolveAssistantManagerStaffIdForAttendance,
@@ -60,5 +61,27 @@ describe('assistant-share.util', () => {
         customerCareManagedByStaffId: 'b',
       }),
     ).toBeNull();
+  });
+
+  it('reads the frozen basis whenever one exists, regardless of payment status', () => {
+    expect(
+      commissionTuitionBasisVnd({
+        tuitionFee: 0,
+        payrollBasisTuitionFee: 300_000,
+      }),
+    ).toBe(300_000);
+    expect(
+      commissionTuitionBasisVnd({ tuitionFee: 0, payrollBasisTuitionFee: 0 }),
+    ).toBe(0);
+  });
+
+  it('falls back to tuition when no basis is frozen', () => {
+    expect(
+      commissionTuitionBasisVnd({
+        tuitionFee: 4_500_000,
+        payrollBasisTuitionFee: null,
+      }),
+    ).toBe(4_500_000);
+    expect(commissionTuitionBasisVnd({})).toBe(0);
   });
 });

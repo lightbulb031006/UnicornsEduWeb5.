@@ -42,8 +42,12 @@ const staffLessonWorkspace = compileModule("lib/staff-lesson-workspace.ts", {
 const adminShellAccess = compileModule("lib/admin-shell-access.ts", {
   "@/dtos/Auth.dto": authDto,
 });
+const notificationPublisherAccess = compileModule(
+  "lib/notification-publisher-access.ts",
+);
 const staffShellAccess = compileModule("lib/staff-shell-access.ts", {
   "@/dtos/Auth.dto": authDto,
+  "@/lib/notification-publisher-access": notificationPublisherAccess,
   "@/lib/staff-lesson-workspace": staffLessonWorkspace,
 });
 const authRedirect = compileModule("lib/auth-redirect.ts", {
@@ -283,6 +287,47 @@ test("linked staff roles unlock staff shell even when primary role is student", 
     ).isAllowed,
     true,
   );
+});
+
+test("notification composer opens for publisher staff roles, not teacher or customer care", () => {
+  const sessionWithRoles = (staffRoles) => ({
+    id: "staff-user",
+    accountHandle: "staff",
+    roleType: "staff",
+    requiresPasswordSetup: false,
+    canAccessRestrictedRoutes: true,
+    staffRoles,
+    hasStaffProfile: true,
+    hasStudentProfile: false,
+    staffProfileComplete: true,
+    access: {
+      admin: { canAccess: false, tier: null },
+      staff: { canAccess: true, profileComplete: true },
+      student: { canAccess: false },
+    },
+  });
+  const canOpen = (staffRoles, pathname) =>
+    staffShellAccess.resolveStaffShellRouteAccess(
+      sessionWithRoles(staffRoles),
+      pathname,
+    ).isAllowed;
+
+  for (const role of [
+    "assistant",
+    "lesson_plan",
+    "lesson_plan_head",
+    "accountant_income",
+    "accountant_expense",
+    "communication",
+    "technical",
+    "training",
+  ]) {
+    assert.equal(canOpen([role], "/staff/notification/manage"), true, role);
+  }
+  for (const role of ["teacher", "customer_care"]) {
+    assert.equal(canOpen([role], "/staff/notification/manage"), false, role);
+    assert.equal(canOpen([role], "/staff/notification"), true, role);
+  }
 });
 
 test("staff data consent route is no longer a staff workspace route", () => {

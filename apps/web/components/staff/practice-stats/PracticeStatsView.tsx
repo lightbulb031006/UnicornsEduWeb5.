@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { staffClassDetailHref } from "@/lib/class-detail-tabs";
 
 const LOW_CORRECT_RATE = 0.5;
 
@@ -118,7 +119,7 @@ export default function PracticeStatsView() {
   const params = useParams();
   const classId = params.id as string;
   const assignmentId = params.cid as string;
-  const backHref = `/staff/classes/${classId}?tab=content`;
+  const backHref = staffClassDetailHref(classId, "chuyen-de");
   const [sortKey, setSortKey] = useState<StudentSortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 

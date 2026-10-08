@@ -21,17 +21,27 @@ import type {
   CustomerCareCommissionListDto,
   CustomerCareCommissionListQueryDto,
   CustomerCareCommissionScope,
+  CustomerCareMissingDropOutReasonListDto,
   CustomerCareSessionCommissionDto,
   CustomerCareStudentListDto,
   CustomerCareStudentSummaryDto,
   CustomerCareTopUpHistoryListDto,
 } from 'src/dtos/customer-care.dto';
+import {
+  ATTENDANCE_COMMISSION_TUITION_BASIS_SQL,
+  commissionTuitionBasisVnd,
+} from 'src/payroll/assistant-share.util';
 import { resolveTaxDeductionRate } from 'src/payroll/deduction-rates';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 const DEFAULT_DAYS = 30;
 const RECENT_TOP_UP_DAYS = 21;
 const RECENT_TOP_UP_THRESHOLD = 300_000;
+/**
+ * Lý do nghỉ bắt buộc từ 10/2026; tháng trước đó CSKH điền bù qua popup nhắc.
+ * Điền bù xong thì bỏ endpoint `me/missing-drop-out-reasons` và hằng này.
+ */
+const DROP_OUT_REASON_BACKFILL_MONTH_KEY = '2026-09';
 
 function toNumber(value: unknown): number {
   if (value == null) return 0;
@@ -380,6 +390,48 @@ export class CustomerCareService {
     };
   }
 
+  /**
+   * Học sinh CSKH đang đăng nhập phụ trách, nghỉ trong tháng điền bù mà chưa có
+   * lý do nghỉ. Người không phải CSKH nhận danh sách rỗng.
+   */
+  async getMyMissingDropOutReasons(
+    userId: string,
+  ): Promise<CustomerCareMissingDropOutReasonListDto> {
+    const monthKey = DROP_OUT_REASON_BACKFILL_MONTH_KEY;
+    const staff = await this.resolveStaffProfile(userId);
+    if (!staff?.roles.includes(StaffRole.customer_care)) {
+      return { monthKey, items: [] };
+    }
+
+    const { start, endExclusive } = parseMonthRange(monthKey);
+    const assignments = await this.prisma.customerCareService.findMany({
+      where: {
+        staffId: staff.id,
+        student: {
+          status: StudentStatus.inactive,
+          dropOutReason: null,
+          dropOutDate: { gte: start, lt: endExclusive },
+        },
+      },
+      select: {
+        student: { select: { id: true, fullName: true, dropOutDate: true } },
+      },
+      orderBy: [
+        { student: { dropOutDate: 'asc' } },
+        { student: { fullName: 'asc' } },
+      ],
+    });
+
+    return {
+      monthKey,
+      items: assignments.map(({ student }) => ({
+        studentId: student.id,
+        fullName: student.fullName,
+        dropOutDate: student.dropOutDate?.toISOString().slice(0, 10) ?? '',
+      })),
+    };
+  }
+
   private async getRecentTopUpTotalsByStudentId(
     studentIds: string[],
   ): Promise<Map<string, number>> {
@@ -568,7 +620,7 @@ export class CustomerCareService {
             COALESCE(
               SUM(
                 ROUND(
-                  COALESCE(attendance.tuition_fee, 0)::numeric
+                  ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL}::numeric
                   * COALESCE(attendance.customer_care_coef, 0)
                 )
               ),
@@ -579,7 +631,7 @@ export class CustomerCareService {
                 CASE
                   WHEN COALESCE(attendance.customer_care_payment_status::text, ${PaymentStatus.pending}) = ${PaymentStatus.pending}
                   THEN ROUND(
-                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL}::numeric
                     * COALESCE(attendance.customer_care_coef, 0)
                   )
                   ELSE 0
@@ -592,7 +644,7 @@ export class CustomerCareService {
                 CASE
                   WHEN attendance.customer_care_payment_status::text = ${PaymentStatus.paid}
                   THEN ROUND(
-                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL}::numeric
                     * COALESCE(attendance.customer_care_coef, 0)
                   )
                   ELSE 0
@@ -650,7 +702,7 @@ export class CustomerCareService {
                   WHEN sessions.date >= ${start}
                     AND sessions.date < ${endExclusive}
                   THEN ROUND(
-                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL}::numeric
                     * COALESCE(attendance.customer_care_coef, 0)
                   )
                   ELSE 0
@@ -663,7 +715,7 @@ export class CustomerCareService {
                 CASE
                   WHEN COALESCE(attendance.customer_care_payment_status::text, ${PaymentStatus.pending}) = ${PaymentStatus.pending}
                   THEN ROUND(
-                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL}::numeric
                     * COALESCE(attendance.customer_care_coef, 0)
                   )
                   ELSE 0
@@ -678,7 +730,7 @@ export class CustomerCareService {
                     AND sessions.date >= ${start}
                     AND sessions.date < ${endExclusive}
                   THEN ROUND(
-                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL}::numeric
                     * COALESCE(attendance.customer_care_coef, 0)
                   )
                   ELSE 0
@@ -701,7 +753,7 @@ export class CustomerCareService {
                   WHEN sessions.date >= ${start}
                     AND sessions.date < ${endExclusive}
                   THEN ROUND(
-                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL}::numeric
                     * COALESCE(attendance.customer_care_coef, 0)
                   )
                   ELSE 0
@@ -714,7 +766,7 @@ export class CustomerCareService {
                 CASE
                   WHEN COALESCE(attendance.customer_care_payment_status::text, ${PaymentStatus.pending}) = ${PaymentStatus.pending}
                   THEN ROUND(
-                    COALESCE(attendance.tuition_fee, 0)::numeric
+                    ${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL}::numeric
                     * COALESCE(attendance.customer_care_coef, 0)
                   )
                   ELSE 0
@@ -794,6 +846,7 @@ export class CustomerCareService {
         select: {
           id: true,
           tuitionFee: true,
+          payrollBasisTuitionFee: true,
           customerCareCoef: true,
           customerCarePaymentStatus: true,
           session: {
@@ -807,7 +860,7 @@ export class CustomerCareService {
       });
 
       return attendances.map((attendance) => {
-        const tuition = attendance.tuitionFee ?? 0;
+        const tuition = commissionTuitionBasisVnd(attendance);
         const coef = toNumber(attendance.customerCareCoef);
         const commission = Math.round(tuition * coef);
 
@@ -871,6 +924,7 @@ export class CustomerCareService {
       select: {
         id: true,
         tuitionFee: true,
+        payrollBasisTuitionFee: true,
         customerCareCoef: true,
         customerCarePaymentStatus: true,
         session: {
@@ -885,7 +939,7 @@ export class CustomerCareService {
     });
 
     return attendances.map((attendance) => {
-      const tuition = toNumber(attendance.tuitionFee);
+      const tuition = toNumber(commissionTuitionBasisVnd(attendance));
       const coef = toNumber(attendance.customerCareCoef);
       const commission = Math.round(tuition * coef);
       return {

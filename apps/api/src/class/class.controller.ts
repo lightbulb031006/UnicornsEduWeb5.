@@ -210,7 +210,7 @@ export class ClassController {
   @ApiOperation({
     summary: 'Đổi chế độ tính tiền của lớp',
     description:
-      'Theo buổi (mặc định) hoặc theo block 30 phút. Buổi unpaid được tính lại học phí/trợ cấp/snapshot; buổi paid, deposit hoặc cọc không đổi. Từ chối bật theo block nếu không suy được số block chuẩn từ lịch cố định.',
+      'Theo buổi (mặc định), theo block 30 phút, hoặc một lần (one_time: học phí cả khoá ở buổi tính phí đầu tiên). Giữa per_session và per_block, buổi unpaid được tính lại học phí/trợ cấp/snapshot; buổi paid, deposit hoặc cọc không đổi. Đổi có dính one_time không tính lại buổi nào, để không đụng ví. Từ chối bật theo block nếu không suy được số block chuẩn từ lịch cố định.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassPricingModeDto })

@@ -17,8 +17,34 @@ function InlineFact({
   return (
     <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1.5">
       <span className="shrink-0 text-sm text-text-secondary">{label}</span>
-      <span className="min-w-0 text-sm text-text-primary">{display}</span>
+      <span className="min-w-0 break-words text-sm text-text-primary">
+        {display}
+      </span>
     </span>
+  );
+}
+
+function FactRow({
+  items,
+}: {
+  items: Array<{ label: string; value: ReactNode }>;
+}) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5 sm:gap-x-2.5">
+      {items.map((item, index) => (
+        <span
+          key={item.label}
+          className="inline-flex max-w-full items-baseline gap-x-2 sm:gap-x-2.5"
+        >
+          {index > 0 ? (
+            <span className="select-none text-text-muted/30" aria-hidden>
+              ·
+            </span>
+          ) : null}
+          <InlineFact label={item.label} value={item.value} />
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -30,12 +56,20 @@ export type StaffIdentityOverviewProps = {
   staffId: string;
   /** Admin detail uses admin APIs; staff self profile uses /users/me/achievements. */
   achievementMode?: "admin" | "self";
+  email?: string | null;
+  phone?: string | null;
+  accountHandle?: string | null;
   birthDateLabel: string;
   province: React.ReactNode;
   ethnicity?: string | null;
   gender?: string | null;
+  cccdNumber?: string | null;
+  cccdIssuedDateLabel?: string | null;
+  cccdIssuedPlace?: string | null;
   currentAddress?: string | null;
   university?: string | null;
+  highSchool?: string | null;
+  bankAccount?: string | null;
   googleMeetLink?: string | null;
   qrLink: string | null;
   onQrEdit: () => void;
@@ -54,12 +88,20 @@ function getGenderLabel(gender?: string | null): string {
 export default function StaffIdentityOverview({
   staffId,
   achievementMode = "admin",
+  email,
+  phone,
+  accountHandle,
   birthDateLabel,
   province,
   ethnicity,
   gender,
+  cccdNumber,
+  cccdIssuedDateLabel,
+  cccdIssuedPlace,
   currentAddress,
   university,
+  highSchool,
+  bankAccount,
   googleMeetLink,
   qrLink,
   onQrEdit,
@@ -90,28 +132,42 @@ export default function StaffIdentityOverview({
         />
       </div>
 
-      <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1.5 sm:gap-x-2.5">
-        <InlineFact label="Ngày sinh" value={birthDateLabel} />
-        <span className="select-none text-text-muted/30" aria-hidden>
-          ·
-        </span>
-        <InlineFact label="Tỉnh / TP" value={province} />
-        <span className="select-none text-text-muted/30" aria-hidden>
-          ·
-        </span>
-        <InlineFact label="Dân tộc" value={ethnicity?.trim()} />
-        <span className="select-none text-text-muted/30" aria-hidden>
-          ·
-        </span>
-        <InlineFact label="Giới tính" value={getGenderLabel(gender)} />
-        <span className="select-none text-text-muted/30" aria-hidden>
-          ·
-        </span>
-        <InlineFact label="Trường ĐH" value={university?.trim()} />
-      </div>
-
-      <div className="mt-2">
+      <div className="mt-3 space-y-2">
+        <FactRow
+          items={[
+            { label: "Email", value: email?.trim() },
+            { label: "SĐT", value: phone?.trim() },
+            {
+              label: "Handle",
+              value: accountHandle?.trim()
+                ? `@${accountHandle.trim()}`
+                : null,
+            },
+          ]}
+        />
+        <FactRow
+          items={[
+            { label: "Ngày sinh", value: birthDateLabel },
+            { label: "Tỉnh / TP", value: province },
+            { label: "Dân tộc", value: ethnicity?.trim() },
+            { label: "Giới tính", value: getGenderLabel(gender) },
+          ]}
+        />
+        <FactRow
+          items={[
+            { label: "Số CCCD", value: cccdNumber?.trim() },
+            { label: "Ngày cấp", value: cccdIssuedDateLabel },
+            { label: "Nơi cấp", value: cccdIssuedPlace?.trim() },
+          ]}
+        />
+        <FactRow
+          items={[
+            { label: "Trường ĐH", value: university?.trim() },
+            { label: "Trường THPT", value: highSchool?.trim() },
+          ]}
+        />
         <InlineFact label="Địa chỉ hiện tại" value={currentAddress?.trim()} />
+        <InlineFact label="Số tài khoản" value={bankAccount?.trim()} />
       </div>
 
       <div className="mt-4 flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">

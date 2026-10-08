@@ -42,13 +42,16 @@ export default function StaffAccessGate({
     isLessonPlanSelfRoute,
     isNotesSubjectRoute,
     isStaffNotificationRoute,
+    isStaffNotificationManageRoute,
     isStaffSurveysRoute,
     isStaffCoursesRoute,
+    isStaffTutorsRoute,
   } = flags;
   const redirectHref = routeAccess.redirectHref;
 
-  const lockedLabel =
-    isRootStaffProfileRoute || isNotesSubjectRoute || isStaffNotificationRoute
+  const lockedLabel = isStaffNotificationManageRoute
+    ? "Notification Composer Locked"
+    : isRootStaffProfileRoute || isNotesSubjectRoute || isStaffNotificationRoute
       ? "Staff Profile Locked"
       : isStaffClassesRoute
         ? "Class Workspace Locked"
@@ -60,6 +63,8 @@ export default function StaffAccessGate({
         ? "Survey Workspace Locked"
         : isStaffCoursesRoute
           ? "Course Workspace Locked"
+        : isStaffTutorsRoute
+          ? "Tutor Directory Locked"
         : isStaffCostsRoute
               ? "Cost Workspace Locked"
               : isAssistantStaffsRoute
@@ -81,8 +86,9 @@ export default function StaffAccessGate({
                         : isLessonPlanSelfRoute
                           ? "Lesson Plan Locked"
                           : "Staff Ops Locked";
-  const lockedTitle =
-    isRootStaffProfileRoute || isNotesSubjectRoute
+  const lockedTitle = isStaffNotificationManageRoute
+    ? "Tài khoản này không được soạn thông báo đẩy."
+    : isRootStaffProfileRoute || isNotesSubjectRoute
       ? "Tài khoản này chưa mở được hồ sơ staff tự phục vụ."
       : isStaffNotificationRoute
         ? "Tài khoản này không dùng được feed thông báo staff."
@@ -90,6 +96,8 @@ export default function StaffAccessGate({
           ? "Tài khoản này không dùng được màn Bài khảo sát trong staff shell."
           : isStaffCoursesRoute
             ? "Tài khoản này không dùng được màn Nội dung khoá trong staff shell."
+          : isStaffTutorsRoute
+            ? "Tài khoản này không dùng được màn hồ sơ gia sư."
           : isStaffClassesRoute
           ? "Tài khoản này không dùng được màn lớp học trong staff shell."
           : isStaffDeductionsRoute
@@ -122,15 +130,18 @@ export default function StaffAccessGate({
                                     : isLessonPlanSelfRoute
                                       ? "Tài khoản này không dùng được màn lesson output cá nhân."
                                       : "Tài khoản này không dùng được màn vận hành lớp học.";
-  const lockedDescription =
-    isRootStaffProfileRoute || isNotesSubjectRoute
+  const lockedDescription = isStaffNotificationManageRoute
+    ? "Route `/staff/notification/manage` mở cho admin, trợ lí, giáo án, trưởng giáo án, kế toán thu, kế toán chi, truyền thông, kỹ thuật và đào tạo. Gia sư và CSKH chỉ nhận thông báo qua `/staff/notification`."
+    : isRootStaffProfileRoute || isNotesSubjectRoute
       ? "Route `/staff` hiện là hồ sơ của chính nhân sự đang đăng nhập. Nó chỉ mở khi tài khoản có liên kết staff record hợp lệ."
       : isStaffNotificationRoute
-        ? "Route `/staff/notification` chỉ mở khi tài khoản có linked staff profile hợp lệ. Đây là feed chỉ đọc dành cho nhân sự xem các thông báo admin đã push."
+        ? "Route `/staff/notification` chỉ mở khi tài khoản có linked staff profile hợp lệ. Đây là feed chỉ đọc dành cho nhân sự xem các thông báo đã push."
         : isStaffSurveysRoute
           ? "Route `/staff/surveys` mở cho `admin`, `staff.assistant`, `staff.lesson_plan`, và `staff.lesson_plan_head` — dùng để tạo/sửa/xóa Bài khảo sát, soạn thông báo kèm (Title/Thời gian/Nội dung/Hướng dẫn/Lưu ý/Gia sư) và sao chép để dán vào Zalo."
+          : isStaffTutorsRoute
+            ? "Route `/staff/tutors` chỉ mở cho Ban Đào Tạo (`staff.training` đang active). Màn này chỉ đọc hồ sơ gia sư: không có CCCD, thông tin cá nhân, ngân hàng hay tiền."
           : isStaffCoursesRoute
-            ? "Route `/staff/courses` mở cho `staff.lesson_plan` và `staff.lesson_plan_head`. Đây là workspace khoá học dùng chung với `/admin/courses` (wrapper mỏng, `routeBase=/staff`). `lesson_plan` chỉ thấy khoá được phân công, không thêm/sửa/xoá/switch khoá, nhưng soạn được tab Nội dung / Câu hỏi / Cài đặt (3 tab). `lesson_plan_head` thấy mọi khoá và đủ thao tác workspace. `teacher`, `accountant_*`, `customer_care`, `training` bị chặn. Admin/assistant dùng `/admin/courses`."
+            ? "Route `/staff/courses` mở cho `staff.lesson_plan` và `staff.lesson_plan_head`. Đây là workspace khoá học dùng chung với `/admin/courses` (wrapper mỏng, `routeBase=/staff`). `lesson_plan` chỉ thấy khoá được phân công, không thêm/sửa/xoá/switch khoá, nhưng soạn được tab Nội dung / Câu hỏi / Cài đặt (3 tab). `lesson_plan_head` chỉ thấy khoá mình được gán vào đội giáo án (khoá tự tạo được tự gán) và đủ thao tác workspace trên các khoá đó. `teacher`, `accountant_*`, `customer_care`, `training` bị chặn. Admin/assistant dùng `/admin/courses`."
           : isStaffClassesRoute
           ? "Route `/staff/classes` mở danh sách cho `staff.assistant`, `staff.accountant_income`, `staff.accountant_expense`, và `staff.training` (UI giống admin nhưng backend chỉ trả các lớp được gán quản lý); riêng `staff.teacher`, `admin`, và `staff.customer_care` chỉ mở trực tiếp trang chi tiết `/staff/classes/[id]`. Với customer care, backend tiếp tục khóa theo các lớp có ít nhất một học sinh đang do chính staff đó phụ trách."
           : isStaffDeductionsRoute
@@ -159,7 +170,7 @@ export default function StaffAccessGate({
                                   ? "Route `/staff/lesson-plans/tasks/[taskId]` mở cho `lesson_plan`, `lesson_plan_head`, `admin`, `staff.assistant`, và `staff.accountant_expense`; kế toán chi chỉ xem output và chỉnh trạng thái thanh toán."
                                   : isLessonPlanManageDetailsRoute ||
                                       isStaffLessonPlansHomeRoute
-                                    ? "Workspace `/staff/lesson-plans` là entrypoint chung cho lesson module trong staff shell. `lesson_plan_head` thấy 3 tab `Tổng quan / Công việc / Giáo Án`; `lesson_plan` chỉ thấy `Tổng quan / Công việc` và dữ liệu cá nhân; `accountant_expense` chỉ thấy tab `Công việc` với toàn bộ lesson output."
+                                    ? "Workspace `/staff/lesson-plans` là entrypoint chung cho lesson module trong staff shell. `lesson_plan_head` thấy 3 tab `Tổng quan / Công việc / Giáo án học sinh giỏi`; `lesson_plan` chỉ thấy `Tổng quan / Công việc` và dữ liệu cá nhân; `accountant_expense` chỉ thấy tab `Công việc` với toàn bộ lesson output."
                                     : isLessonPlanSelfRoute
                                       ? "Màn này chỉ mở khi hồ sơ nhân sự hiện tại có role `lesson_plan` hoặc `lesson_plan_head`. Nó chỉ hiển thị lesson output của chính bạn và không cho phép chỉnh sửa."
                                       : "Màn này hiện mở cho `admin` hoặc `staff.teacher`. Teacher dùng nó để xem lớp phụ trách và thao tác buổi học; admin có thể truy cập để theo dõi hoặc hỗ trợ vận hành.";

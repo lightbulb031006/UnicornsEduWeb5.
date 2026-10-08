@@ -51,6 +51,7 @@ If you change project workflow/conventions for agents (commands, required checks
 - Use `codex/` branches for new feature work unless the user specifies another branch.
 - A user-requested sync from the Tin repository may merge `upstream/main` into local `main`, after backing up the current Math tip and uncommitted work, resolving conflicts and running the relevant checks.
 - Keep Math branding, session permissions and deployment configuration. Do not run upstream data-repair migrations on the Math database without a read-only impact check and explicit deployment authorization. See `docs/ops/upstream-sync-math-2026-10-02.md`.
+- October 2026 one-time tuition backfills also target course names `THPTQG`/`PREVOI` and Tin class/student IDs. Math preflight stops when any target exists while these migrations are pending; investigate impact before deployment. See `docs/ops/upstream-sync-math-2026-10-08.md`.
 - Pulling/merging source locally does not authorize pushing a release or deploying. GitHub Actions on this fork can deploy on push, so only push when the user requests publication/deployment.
 - The original Tin repo's `dev` slice/review workflow remains applicable to work targeting that upstream repository, not this Math source-sync operation.
 

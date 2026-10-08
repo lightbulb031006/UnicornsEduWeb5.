@@ -22,6 +22,7 @@ import {
   StaffIdentityOverview,
   QrLinkPopup,
   SessionHistoryTableSkeleton,
+  SurveyDeadlineBlockPaymentWarning,
 } from "@/components/admin/staff";
 import { UserLinkedProfileLinks } from "@/components/admin/user";
 import {
@@ -1793,6 +1794,14 @@ export default function AdminStaffDetailPage({
                 <span className="text-sm text-text-muted">Chưa có role</span>
               )}
             </div>
+            {staff.roles?.includes("customer_care") ? (
+              <p className="mt-2 text-sm text-text-secondary">
+                % mặc định CSKH:{" "}
+                <span className="font-medium text-text-primary">
+                  {Math.round((staff.customerCareDefaultProfitPercent ?? 0) * 100)}%
+                </span>
+              </p>
+            ) : null}
             {canManageUsers && staff.user?.id ? (
               <div className="mt-3">
                 <UserLinkedProfileLinks
@@ -1830,12 +1839,20 @@ export default function AdminStaffDetailPage({
       <div className="flex flex-col gap-4">
         <StaffIdentityOverview
           staffId={staff.id}
+          email={staff.user?.email}
+          phone={staff.user?.phone}
+          accountHandle={staff.user?.accountHandle}
           birthDateLabel={formatDate(staff.birthDate)}
           province={province}
           ethnicity={staff.ethnicity}
           gender={staff.gender}
+          cccdNumber={staff.cccdNumber}
+          cccdIssuedDateLabel={formatDate(staff.cccdIssuedDate)}
+          cccdIssuedPlace={staff.cccdIssuedPlace}
           currentAddress={staff.currentAddress}
           university={staff.university}
+          highSchool={staff.highSchool}
+          bankAccount={staff.bankAccount}
           googleMeetLink={staff.googleMeetLink}
           qrLink={qrLink ?? resolvedQrLink}
           onQrEdit={() => setQrPopupOpen(true)}
@@ -2764,6 +2781,7 @@ export default function AdminStaffDetailPage({
                     sách chi tiết. Thuế theo mức hiện hành tại{" "}
                     {paymentPreviewTaxAsOfDate}.
                   </p>
+                  <SurveyDeadlineBlockPaymentWarning staffId={id} className="mt-3" />
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {paymentPreviewSummary?.itemCount ? (
@@ -3622,6 +3640,9 @@ export default function AdminStaffDetailPage({
                         ? `Chọn các buổi cọc cần thanh toán. Buổi cọc không áp chi phí vận hành và không áp thuế; preview được chốt theo quy tắc hiện hành tại ${depositPaymentTaxAsOfDate}.`
                         : `Tổng cọc năm ${selectedYear}: ${formatCurrency(depositYearTotal)}`}
                     </p>
+                    {canPayAll ? (
+                      <SurveyDeadlineBlockPaymentWarning staffId={id} className="mt-3" />
+                    ) : null}
                   </div>
                   <button
                     type="button"

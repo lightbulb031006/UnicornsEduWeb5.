@@ -99,6 +99,20 @@ export interface CustomerCareBulkPaymentStatusUpdateResultDto {
   updatedCount: number;
 }
 
+/** Học sinh nghỉ trong tháng điền bù mà chưa có lý do nghỉ. */
+export interface CustomerCareMissingDropOutReasonDto {
+  studentId: string;
+  fullName: string;
+  /** Ngày nghỉ học, dạng `YYYY-MM-DD`. */
+  dropOutDate: string;
+}
+
+export interface CustomerCareMissingDropOutReasonListDto {
+  /** Tháng cần điền bù lý do nghỉ, dạng `YYYY-MM`. */
+  monthKey: string;
+  items: CustomerCareMissingDropOutReasonDto[];
+}
+
 export interface CustomerCareBulkProfitPercentUpdateDto {
   studentIds: string[];
   /** Phân số 0.00-0.99 (FE convert từ input số nguyên 0-99). */

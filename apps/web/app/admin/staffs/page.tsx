@@ -10,9 +10,12 @@ import * as staffApi from "@/lib/apis/staff.api";
 import { ROLE_LABELS } from "@/lib/staff.constants";
 import { StaffListTableSkeleton } from "@/components/admin/staff";
 import StaffListAvatar from "@/components/admin/staff/StaffListAvatar";
+import StaffAchievementsDialog, {
+  StaffAchievementsButton,
+} from "@/components/shared/achievement/StaffAchievementsDialog";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
-import { StaffListResponse, StaffStatus } from "@/dtos/staff.dto";
+import { StaffListItem, StaffListResponse, StaffStatus } from "@/dtos/staff.dto";
 import {
   buildAdminLikePath,
   resolveAdminLikeRouteBase,
@@ -65,6 +68,9 @@ function AdminStaffPageContent() {
   const roleMenuRef = useRef<HTMLDivElement | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [staffToDelete, setStaffToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [achievementsTarget, setAchievementsTarget] = useState<{ id: string; name: string } | null>(null);
+  const openAchievements = (row: StaffListItem) =>
+    setAchievementsTarget({ id: row.id, name: row.fullName?.trim() || "" });
   const [filterDraft, setFilterDraft] = useState({
     province: "",
     university: "",
@@ -696,21 +702,11 @@ function AdminStaffPageContent() {
 
                       <div className="mt-2 flex flex-col gap-1 text-sm text-text-secondary">
                         <span className="truncate">Tỉnh: {province}</span>
-                        {row.personalAchievementLink?.trim() ? (
-                          <span className="flex items-center gap-1">
-                            <span>Thành tích:</span>
-                            <a
-                              href={row.personalAchievementLink.trim()}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="truncate font-medium text-primary underline-offset-4 hover:underline focus:outline-none"
-                              title={row.personalAchievementLink.trim()}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              Xem link
-                            </a>
-                          </span>
-                        ) : null}
+                        <StaffAchievementsButton
+                          count={row.achievementCount}
+                          className="self-start"
+                          onOpen={() => openAchievements(row)}
+                        />
                         {classItems.length > 0 ? (
                           <div className="flex flex-col gap-1">
                             <span className="text-sm text-text-secondary">Lớp:</span>
@@ -744,11 +740,10 @@ function AdminStaffPageContent() {
                       <th scope="col" className="w-[8%] min-w-14 px-2 py-3 overflow-x-hidden">
                         <span className="sr-only">Ảnh đại diện</span>
                       </th>
-                      <th scope="col" className="w-[13%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Tên</th>
+                      <th scope="col" className="w-[20%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Tên</th>
                       <th scope="col" className="w-[20%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Role</th>
                       <th scope="col" className="w-[10%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Tỉnh</th>
-                      <th scope="col" className="w-[14%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Thành tích</th>
-                      <th scope="col" className="w-[16%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Lớp</th>
+                      <th scope="col" className="w-[23%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Lớp</th>
                       <th scope="col" className="w-[14%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Chưa thanh toán</th>
                       {canDeleteStaff ? (
                         <th scope="col" className="w-[5%] min-w-16 px-4 py-3">
@@ -794,10 +789,14 @@ function AdminStaffPageContent() {
                               routeBase={routeBase}
                             />
                           </td>
-                          <td className="w-[14%] min-w-0 px-4 py-3 text-text-primary">
+                          <td className="w-[20%] min-w-0 px-4 py-3 text-text-primary">
                             <span className="block truncate">{row.fullName?.trim() || "—"}</span>
+                            <StaffAchievementsButton
+                              count={row.achievementCount}
+                              onOpen={() => openAchievements(row)}
+                            />
                           </td>
-                          <td className="w-[17%] min-w-0 px-4 py-3 align-middle overflow-x-hidden">
+                          <td className="w-[20%] min-w-0 px-4 py-3 align-middle overflow-x-hidden">
                             <div className="flex flex-wrap gap-1">
                               {roleTags && roleTags.length > 0 ? (
                                 roleTags.map((role) => (
@@ -816,23 +815,7 @@ function AdminStaffPageContent() {
                           <td className="w-[10%] min-w-0 px-4 py-3 text-text-secondary">
                             <span className="block truncate">{province}</span>
                           </td>
-                          <td className="w-[14%] min-w-0 px-4 py-3 align-middle">
-                            {row.personalAchievementLink?.trim() ? (
-                              <a
-                                href={row.personalAchievementLink.trim()}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block max-w-[10rem] truncate text-sm font-medium text-primary underline-offset-4 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                                title={row.personalAchievementLink.trim()}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                Xem thành tích
-                              </a>
-                            ) : (
-                              <span className="text-text-muted">-</span>
-                            )}
-                          </td>
-                          <td className="w-[16%] min-w-0 px-4 py-3 text-text-secondary align-middle">
+                          <td className="w-[23%] min-w-0 px-4 py-3 text-text-secondary align-middle">
                             <div className="flex min-w-0 flex-col gap-1">
                               {classItems.length > 0 ? (
                                 classItems.map((c) => (
@@ -848,11 +831,11 @@ function AdminStaffPageContent() {
                               )}
                             </div>
                           </td>
-                          <td className={`w-[15%] min-w-0 px-4 py-3 tabular-nums ${hasUnpaid ? "font-semibold text-error" : "text-text-primary"}`}>
+                          <td className={`w-[14%] min-w-0 px-4 py-3 tabular-nums ${hasUnpaid ? "font-semibold text-error" : "text-text-primary"}`}>
                             {formatCurrency(unpaid)}
                           </td>
                           {canDeleteStaff ? (
-                            <td className="w-[17%] min-w-16 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            <td className="w-[5%] min-w-16 px-4 py-3" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
                                 <button
                                   type="button"
@@ -920,6 +903,14 @@ function AdminStaffPageContent() {
           )}
         </div>
       </div>
+
+      {achievementsTarget ? (
+        <StaffAchievementsDialog
+          staffId={achievementsTarget.id}
+          staffName={achievementsTarget.name}
+          onClose={() => setAchievementsTarget(null)}
+        />
+      ) : null}
 
       {canDeleteStaff && deleteConfirmOpen && staffToDelete ? (
         <>

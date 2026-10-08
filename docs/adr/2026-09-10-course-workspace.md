@@ -24,6 +24,8 @@ Trước workspace này, một khoá học bị xé thành bốn bề mặt admi
 
    **Rủi ro đã chấp nhận:** `CourseService.create` và `CourseService.remove` **không nhận actor** và **không** gọi `CourseAccessService`. Guard controller (`@Roles` + `@AllowStaffRolesOnAdminRoutes`) là tầng bảo vệ duy nhất cho tạo/xoá. `PATCH` khoá cùng kiểu — service không kiểm actor. Caller nội bộ hoặc decorator bị nới sau này sẽ tạo/xoá được khoá mà không đi qua `assertCanManageCourse`. Chấp nhận vì tạo/xoá không có “khoá được gán” để so: đó là thao tác toàn cục, trùng tập manager, và `remove` vẫn chặn khi còn lớp. Không backfill actor vào service trong đợt này.
 
+   **Sửa đổi 2026-10-03 (ticket 20, #163) — thay thế đoạn trên:** trưởng giáo án chỉ thấy và thao tác với khoá mình được gán vào đội giáo án. `lesson_plan_head` bị bỏ khỏi `COURSE_MANAGER_STAFF_ROLES` (chỉ còn admin/`assistant`); đội giáo án thuần (`lesson_plan` và/hoặc `lesson_plan_head`, không kèm admin/assistant) đi qua `course_lesson_plan_members` cho list, xem và sửa. Rủi ro “service không nhận actor” đã đóng: controller truyền actor xuống `CourseService.create/update/remove`; `update`/`remove` gọi `assertCanManageCourse`. Quyền tạo khoá giữ nguyên; người không phải manager tạo khoá được tự gán vào đội giáo án của khoá đó. Hoa hồng trưởng giáo án không phụ thuộc gán khoá.
+
 5. **Xoá thẳng bốn route cũ, không redirect.** `/admin/question-bank`, `/admin/exam-library`, `/admin/classes/courses`, `/admin/classes/courses/[id]` bị xoá. Không `redirect()` trong App Router. Bookmark cũ 404 có chủ đích: giữ redirect vĩnh viễn sẽ hai URL cho cùng workspace, sidebar/docs dễ lệch, và query cũ (dropdown khoá, không có `?tab=`) không map 1-1 sang tab.
 
 ## Considered options
@@ -39,4 +41,4 @@ Trước workspace này, một khoá học bị xé thành bốn bề mặt admi
 - Nguồn sự thật UI: `apps/web/components/course-workspace/` + `apps/web/lib/course-workspace-access.ts`. Spec: `docs/pages/admin.md`, `docs/pages/staff.md`. API: `docs/api/courses.md`.
 - Tab Đề thi và tab Nội dung cùng hàng `Topic.kind = practice` (hai query key; invalidate dùng `invalidateCoursePracticeTopicQueries`).
 - `Question.chapterId` NOT NULL: `lesson_plan` không tạo Chương nên khoá chưa có chương thì không tạo câu hỏi — empty state, không mở form trống.
-- Người sau đọc `DELETE /courses/:id` cho `lesson_plan_head` thì câu trả lời là quyết định 4 ở trên, không phải quên sót guard service.
+- Người sau đọc `DELETE /courses/:id` cho `lesson_plan_head` thì câu trả lời là quyết định 4 ở trên kèm sửa đổi 2026-10-03: trưởng giáo án chỉ sửa/xoá khoá được gán, service kiểm actor.

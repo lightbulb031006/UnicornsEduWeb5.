@@ -12,6 +12,15 @@ import {
 import { getUserFullNameFromParts } from 'src/common/user-name.util';
 import { NotificationService } from 'src/notification/notification.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import {
+  getVietnamToday,
+  isSurveyDeadlineBlockActive,
+} from './survey-deadline-block';
+import {
+  classRequiredForSurveyWhere,
+  FIRST_SESSION_SELECT,
+  isSurveyRequiredFor,
+} from './survey-requirement';
 import type {
   AccountantSurveyWarningDto,
   CreateSurveyDto,
@@ -143,10 +152,15 @@ export class SurveyService {
 
     const excludedClassIds = survey.excludedClasses.map((row) => row.classId);
     const [totalRunningClasses, reportedCount] = await Promise.all([
+      // Lớp miễn báo cáo (`isSurveyRequiredFor`) chỉ tính khi đã lỡ nộp.
       this.prisma.class.count({
         where: {
           status: ClassStatus.running,
           id: { notIn: excludedClassIds },
+          OR: [
+            classRequiredForSurveyWhere(survey.createdAt),
+            { surveys: { some: { surveyId } } },
+          ],
         },
       }),
       this.prisma.class.count({
@@ -338,7 +352,10 @@ export class SurveyService {
     }
   }
 
-  /** Danh sách userId của gia sư đang phụ trách ít nhất 1 lớp running chưa bị loại trừ. */
+  /**
+   * Danh sách userId của gia sư đang phụ trách ít nhất 1 lớp running chưa bị loại
+   * trừ và đã có buổi học (bài vừa tạo nên mọi gia sư hiện tại đều vào lớp trước đó).
+   */
   private async getRelevantTeacherUserIds(
     excludedClassIds: string[],
   ): Promise<string[]> {
@@ -346,6 +363,7 @@ export class SurveyService {
       where: {
         status: ClassStatus.running,
         id: { notIn: excludedClassIds },
+        ...classRequiredForSurveyWhere(new Date()),
       },
       select: {
         teachers: {
@@ -484,11 +502,17 @@ export class SurveyService {
     surveyId: string,
     params: { page?: number; limit?: number },
   ): Promise<SurveyMissingClassListDto> {
-    const excluded = await this.prisma.surveyExcludedClass.findMany({
-      where: { surveyId },
-      select: { classId: true },
+    const survey = await this.prisma.survey.findUnique({
+      where: { id: surveyId },
+      select: {
+        createdAt: true,
+        excludedClasses: { select: { classId: true } },
+      },
     });
-    const excludedIds = excluded.map((row) => row.classId);
+    if (!survey) {
+      throw new NotFoundException('Bài khảo sát không tồn tại.');
+    }
+    const excludedIds = survey.excludedClasses.map((row) => row.classId);
     const page = Math.max(params.page ?? 1, 1);
     const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
 
@@ -496,7 +520,8 @@ export class SurveyService {
       status: ClassStatus.running,
       id: { notIn: excludedIds },
       surveys: { none: { surveyId } },
-    } as const;
+      ...classRequiredForSurveyWhere(survey.createdAt),
+    };
 
     const [total, classes] = await Promise.all([
       this.prisma.class.count({ where }),
@@ -610,7 +635,10 @@ export class SurveyService {
     };
   }
 
-  /** Cảnh báo cho gia sư: các lớp đang running mình phụ trách còn thiếu báo cáo bài khảo sát đã mở (kể cả quá hạn). */
+  /**
+   * Cảnh báo cho gia sư: các lớp đang running mình phụ trách còn thiếu báo cáo bài
+   * khảo sát đã mở (kể cả quá hạn), bỏ bài mà lớp/gia sư được miễn (`isSurveyRequiredFor`).
+   */
   async getTeacherWarnings(
     staffId: string,
   ): Promise<TeacherSurveyWarningDto[]> {
@@ -622,7 +650,15 @@ export class SurveyService {
           status: ClassStatus.running,
           teachers: { some: { teacherId: staffId } },
         },
-        select: { id: true, name: true },
+        select: {
+          id: true,
+          name: true,
+          sessions: FIRST_SESSION_SELECT,
+          teachers: {
+            where: { teacherId: staffId },
+            select: { createdAt: true },
+          },
+        },
       }),
       this.prisma.survey.findMany({
         where: { name: { not: null }, startDate: { lte: today } },
@@ -631,6 +667,7 @@ export class SurveyService {
           name: true,
           startDate: true,
           endDate: true,
+          createdAt: true,
           excludedClasses: { select: { classId: true } },
         },
       }),
@@ -652,19 +689,26 @@ export class SurveyService {
       reportedRows.map((row) => `${row.classId}::${row.surveyId}`),
     );
 
+    const vietnamToday = getVietnamToday();
     const warnings: TeacherSurveyWarningDto[] = [];
     for (const classItem of classes) {
+      const subject = {
+        sessions: classItem.sessions,
+        teacherJoinedAt: classItem.teachers[0]?.createdAt,
+      };
       const pendingSurveys = openSurveys
         .filter(
           (survey) =>
             !survey.excludedClasses.some((e) => e.classId === classItem.id),
         )
+        .filter((survey) => isSurveyRequiredFor(survey.createdAt, subject))
         .filter((survey) => !reportedKeys.has(`${classItem.id}::${survey.id}`))
         .map((survey) => ({
           surveyId: survey.id,
           name: survey.name ?? '',
           startDate: toIsoDate(survey.startDate),
           endDate: toIsoDate(survey.endDate),
+          blocking: isSurveyDeadlineBlockActive(survey.endDate, vietnamToday),
         }));
 
       if (pendingSurveys.length) {
@@ -679,7 +723,10 @@ export class SurveyService {
     return warnings.sort((a, b) => a.className.localeCompare(b.className));
   }
 
-  /** Cảnh báo cho kế toán chi: nhân sự (gia sư) chưa báo cáo bài khảo sát đã quá hạn (endDate < hôm nay). */
+  /**
+   * Cảnh báo cho kế toán chi: nhân sự (gia sư) chưa báo cáo bài khảo sát đã quá hạn
+   * (endDate < hôm nay), bỏ lớp/gia sư được miễn (`isSurveyRequiredFor`).
+   */
   async getAccountantWarnings(
     viewerUserId: string,
   ): Promise<AccountantSurveyWarningDto[]> {
@@ -692,6 +739,7 @@ export class SurveyService {
         id: true,
         name: true,
         endDate: true,
+        createdAt: true,
         excludedClasses: { select: { classId: true } },
       },
     });
@@ -712,8 +760,10 @@ export class SurveyService {
       select: {
         id: true,
         name: true,
+        sessions: FIRST_SESSION_SELECT,
         teachers: {
           select: {
+            createdAt: true,
             teacher: {
               select: {
                 id: true,
@@ -761,6 +811,14 @@ export class SurveyService {
           if (!teacher) continue;
           const key = `${teacher.id}::${survey.id}`;
           if (dismissedKeys.has(key)) continue;
+          if (
+            !isSurveyRequiredFor(survey.createdAt, {
+              sessions: classItem.sessions,
+              teacherJoinedAt: entry.createdAt,
+            })
+          ) {
+            continue;
+          }
 
           const bucket =
             buckets.get(key) ??

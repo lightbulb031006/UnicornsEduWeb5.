@@ -97,6 +97,19 @@ export function resolveSnapshotScaleAmountVnd(
   return Number.isFinite(scaleNum) && scaleNum >= 0 ? Math.floor(scaleNum) : 0;
 }
 
+/**
+ * Scale hiệu lực của gia sư trên lớp: `class_teachers.custom_scale_amount` nếu có
+ * (kể cả 0 = không có scale), không thì `classes.scale_amount`.
+ */
+export function resolveTeacherScaleAmountVnd(input: {
+  customScaleAmount: number | null | undefined;
+  classScaleAmount: number | null | undefined;
+}): number {
+  return resolveSnapshotScaleAmountVnd(
+    input.customScaleAmount ?? input.classScaleAmount,
+  );
+}
+
 export function hasSessionAllowanceSnapshots(input: {
   snapshotPerStudentAllowance: number | null | undefined;
   snapshotScaleAmount: number | null | undefined;

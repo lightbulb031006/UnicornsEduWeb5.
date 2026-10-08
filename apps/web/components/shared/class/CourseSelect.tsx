@@ -15,7 +15,20 @@ type Props = {
   includeInactive?: boolean;
   buttonClassName?: string;
   labelId?: string;
+  /**
+   * Chỉ hiện khoá cùng chế độ bán (true = bán một lần, false = thường). Dùng khi đổi
+   * khoá của lớp đã có: lớp không được đổi sang khoá khác chế độ.
+   */
+  isOneTime?: boolean;
 };
+
+/** Danh sách khoá học (GET /courses), dùng chung cache với CourseSelect. */
+export function useCourseList(includeInactive = false) {
+  return useQuery({
+    queryKey: courseKeys.list(includeInactive),
+    queryFn: () => classApi.getCourses(includeInactive),
+  });
+}
 
 /** Dropdown chọn khoá học, lấy danh sách động từ GET /courses. */
 export default function CourseSelect({
@@ -27,11 +40,13 @@ export default function CourseSelect({
   includeInactive = false,
   buttonClassName,
   labelId,
+  isOneTime,
 }: Props) {
-  const { data: courses = [] } = useQuery({
-    queryKey: courseKeys.list(includeInactive),
-    queryFn: () => classApi.getCourses(includeInactive),
-  });
+  const { data: allCourses = [] } = useCourseList(includeInactive);
+  const courses =
+    isOneTime === undefined
+      ? allCourses
+      : allCourses.filter((course) => Boolean(course.isOneTime) === isOneTime);
 
   return (
     <UpgradedSelect

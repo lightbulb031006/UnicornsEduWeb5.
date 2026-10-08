@@ -2,6 +2,12 @@ enum ClassContentItemKind {
   lesson
 }
 
+/// Lý do ẩn mềm một item nội dung lớp. Thêm lại chuyên đề chỉ khôi phục `module_removed`.
+enum ClassContentHiddenReason {
+  manual
+  module_removed
+}
+
 enum ClassTimelineItemKind {
   session
   class_survey
@@ -46,6 +52,8 @@ model ClassContentItem {
   /// Null = hiện với học sinh. Có giá trị = ẩn mềm; không xoá Attempt.
   hiddenAt         DateTime?            @map("hidden_at") @db.Timestamptz(6)
   hiddenByStaffId  String?              @map("hidden_by_staff_id")
+  /// Null khi đang hiện. `manual` = gia sư tự ẩn; `module_removed` = ẩn do gỡ chuyên đề.
+  hiddenReason     ClassContentHiddenReason? @map("hidden_reason")
   createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -81,6 +89,26 @@ model ClassTheoryLessonView {
   @@map("class_theory_lesson_views")
 }
 
+/// Chuyên đề mà lớp đã thêm. Thêm chuyên đề đưa mọi tiết lý thuyết của chuyên đề vào nội dung
+/// lớp (một `ClassContentItem` mỗi tiết); tiết lý thuyết thêm/gỡ khỏi chuyên đề về sau tự đồng bộ
+/// sang mọi lớp có dòng ở đây. Tiết thực hành không đi theo (giao từng tiết).
+/// `sortOrder` = thứ tự nhóm chuyên đề của riêng lớp (nhỏ lên trước); không đụng `modules.sort_order`.
+model ClassModule {
+  id        String   @id @default(uuid())
+  classId   String   @map("class_id")
+  moduleId  String   @map("module_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  class  Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, moduleId])
+  @@index([moduleId])
+  @@index([classId, sortOrder])
+  @@map("class_modules")
+}
+
 model Class {
   id                            String                      @id
   name                          String
@@ -108,8 +136,9 @@ model Class {
   /// Null = vô hạn. Được chốt lúc tạo lớp từ Course.defaultDurationDays,
   /// sau đó admin có thể sửa tay. Sửa Course.defaultDurationDays KHÔNG hồi tố.
   contentAccessExpiresAt        DateTime?                   @map("content_access_expires_at") @db.Date
-  /// false = timeline theo thời gian (tự sắp khi tạo/sửa ngày). true = đã DnD, giữ sort_order.
-  timelineCustomOrder           Boolean                     @default(false) @map("timeline_custom_order")
+  /// Path ảnh bìa (tuỳ chọn) trong bucket private `class-covers`, dạng `{classId}/cover.{ext}`.
+  /// Null = thẻ lớp hiện mascot theo ID lớp.
+  coverImagePath                String?                     @map("cover_image_path")
   trainingManagerStaffId        String?                     @map("training_manager_staff_id")
   trainingManagerRatePercent    Decimal?                    @map("training_manager_rate_percent") @db.Decimal(5, 2)
   createdAt                     DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -123,6 +152,7 @@ model Class {
   sessions                      Session[]
   students                      StudentClass[]
   contentItems ClassContentItem[]
+  modules                       ClassModule[]
   lessons                       Lesson[]
   timelineItems                 ClassTimelineItem[]
   trainingManager               StaffInfo?                  @relation("ClassTrainingManager", fields: [trainingManagerStaffId], references: [id])
@@ -141,6 +171,8 @@ model Course {
   defaultDurationDays Int?                  @map("default_duration_days")
   sortOrder           Int                   @default(0) @map("sort_order")
   isActive            Boolean               @default(true) @map("is_active")
+  /// Khoá bán một lần: mọi lớp của khoá có `pricing_mode = one_time`.
+  isOneTime           Boolean               @default(false) @map("is_one_time")
   createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
   classes             Class[]
@@ -199,6 +231,7 @@ model Module {
   course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
   lessons   Lesson[]
   questions Question[] // back‑relation for question bank
+  classModules ClassModule[]
 
   @@index([courseId])
   @@map("modules")
@@ -209,6 +242,8 @@ model ClassTeacher {
   classId                       String    @map("class_id")
   teacherId                     String    @map("teacher_id")
   customAllowance               Int?      @map("custom_allowance")
+  /// Scale riêng của gia sư trên lớp (VNĐ phẳng mỗi buổi). Null = theo `classes.scale_amount`; 0 = không có scale.
+  customScaleAmount             Int?      @map("custom_scale_amount")
   operatingDeductionRatePercent Decimal   @default(0) @map("tax_rate_percent") @db.Decimal(5, 2)
   status                        String?
   createdAt                     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -394,6 +429,8 @@ model Attendance {
   customerCarePaymentStatus           PaymentStatus?             @map("customer_care_payment_status")
   customerCareTaxDeductionRatePercent Decimal                    @default(0) @map("customer_care_tax_deduction_rate_percent") @db.Decimal(5, 2)
   tuitionFee                          Int?                       @map("tuition_fee")
+  /// Học phí dùng để tính hoa hồng đã chốt (paid/pending) khi `tuition_fee` bị dồn sang buổi khác.
+  payrollBasisTuitionFee              Int?                       @map("payroll_basis_tuition_fee")
   transactionId                       String?                    @unique @map("transaction_id")
   assistantManagerStaffId             String?                    @map("assistant_manager_staff_id")
   assistantPaymentStatus              PaymentStatus?             @map("assistant_payment_status")
@@ -450,6 +487,7 @@ model CfProblemTutorial {
 /// Tiết học — đơn vị học sinh nhìn thấy. Lý thuyết mang video + nội dung + bài tập ôn nhẹ;
 /// thực hành chỉ là tập câu hỏi (CHECK SQL cấm video/content). XOR: thuộc chuyên đề cấp khoá
 /// (`course_id` + `module_id`) hoặc thuộc riêng một lớp (`class_id`) — không bao giờ cả hai.
+/// Tiết riêng của lớp đã ngừng tạo mới qua chuyên đề lớp; dữ liệu cũ được lưu trữ (`archived_at`).
 model Lesson {
   id        String     @id @default(uuid())
   kind      LessonKind
@@ -460,6 +498,8 @@ model Lesson {
   videoUrl  String?    @map("video_url")
   content   String?
   order     Int        @default(0)
+  /// Lưu trữ mềm (không xoá). Tiết riêng của lớp cũ bị lưu trữ khi chuyển sang nội dung theo chuyên đề.
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
   createdBy String?    @map("created_by")
   updatedBy String?    @map("updated_by")
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)

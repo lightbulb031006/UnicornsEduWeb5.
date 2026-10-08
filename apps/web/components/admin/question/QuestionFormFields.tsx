@@ -1,7 +1,9 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
+import ClassTabList from "@/components/class-timeline/ClassTabList";
+import QuestionPreview from "@/components/admin/question/QuestionPreview";
 import MathRichTextEditor from "@/components/ui/MathRichTextEditor";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { QuestionTypeDto } from "@/dtos/question.dto";
@@ -34,6 +36,13 @@ export const emptyQuestionFormValue: QuestionFormValue = {
   answerGuide: "",
 };
 
+const FORM_VIEWS = ["edit", "preview"] as const;
+type FormView = (typeof FORM_VIEWS)[number];
+const FORM_VIEW_LABELS: Record<FormView, string> = {
+  edit: "Soạn thảo",
+  preview: "Xem trước",
+};
+
 const TYPE_OPTIONS = [
   { value: QuestionTypeDto.single_choice, label: "Trắc nghiệm" },
   { value: QuestionTypeDto.essay, label: "Tự luận" },
@@ -55,6 +64,9 @@ export default function QuestionFormFields({
   onChange: (patch: Partial<QuestionFormValue>) => void;
   courseSlot?: ReactNode;
 }) {
+  const viewIdPrefix = useId();
+  const viewPanelId = `${viewIdPrefix}-panel`;
+  const [view, setView] = useState<FormView>("edit");
   const { data: modules = [] } = useCourseModules(courseId || undefined);
   const { data: difficultyLevels = [] } = useCourseDifficultyLevels(
     courseId || undefined,
@@ -101,143 +113,164 @@ export default function QuestionFormFields({
 
   return (
     <div className="space-y-4">
+      <ClassTabList
+        tabs={FORM_VIEWS}
+        labels={FORM_VIEW_LABELS}
+        activeTab={view}
+        onSelect={setView}
+        idPrefix={viewIdPrefix}
+        panelId={viewPanelId}
+        ariaLabel="Chế độ soạn câu hỏi"
+      />
       <div
-        className={`grid grid-cols-1 gap-3 ${courseSlot ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+        id={viewPanelId}
+        role="tabpanel"
+        aria-labelledby={`${viewIdPrefix}-${view}`}
       >
-        {courseSlot}
-        <div>
-          <span className="mb-1 block text-xs font-medium text-text-muted">
-            Chuyên đề
-          </span>
-          <UpgradedSelect
-            searchable
-            value={value.moduleId}
-            onValueChange={(v) => onChange({ moduleId: v })}
-            options={chapterOptions}
-            placeholder="Gõ để tìm hoặc tạo chuyên đề"
-            disabled={!courseId}
-            ariaLabel="Chuyên đề"
-            {...chapterCreate}
-          />
-        </div>
-        <div>
-          <span className="mb-1 block text-xs font-medium text-text-muted">
-            Độ khó
-          </span>
-          <UpgradedSelect
-            searchable
-            value={value.difficultyLevelId}
-            onValueChange={(v) => onChange({ difficultyLevelId: v })}
-            options={difficultyOptions}
-            placeholder="Gõ để tìm hoặc tạo độ khó"
-            disabled={!courseId}
-            ariaLabel="Độ khó"
-            {...difficultyCreate}
-          />
-        </div>
-      </div>
-
-      <div>
-        <span className="mb-1 block text-xs font-medium text-text-muted">
-          Loại câu hỏi
-        </span>
-        <UpgradedSelect
-          value={value.type}
-          onValueChange={(v) => onChange({ type: v as QuestionTypeDto })}
-          options={TYPE_OPTIONS}
-          ariaLabel="Loại câu hỏi"
-        />
-      </div>
-
-      <div>
-        <span className="mb-1 block text-xs font-medium text-text-muted">
-          Nội dung câu hỏi (hỗ trợ LaTeX: $x^2$)
-        </span>
-        <MathRichTextEditor
-          value={value.content}
-          onChange={(next) => onChange({ content: next })}
-          ariaLabel="Nội dung câu hỏi"
-          placeholder="Nhập nội dung câu hỏi..."
-          minHeight="min-h-[120px]"
-        />
-      </div>
-
-      {value.type === QuestionTypeDto.single_choice && (
-        <div className="space-y-2">
-          <span className="mb-1 block text-xs font-medium text-text-muted">
-            Phương án ({value.options.length}/6)
-          </span>
-          {value.options.map((opt, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className="w-6 text-center text-sm font-bold text-text-muted">
-                {String.fromCharCode(65 + i)}
-              </span>
-              <input
-                value={opt}
-                onChange={(e) => updateOption(i, e.target.value)}
-                className="flex-1 rounded-md border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                aria-label={`Phương án ${String.fromCharCode(65 + i)}`}
-                placeholder={`Phương án ${String.fromCharCode(65 + i)}`}
-              />
-              <input
-                type="radio"
-                name="correctIndex"
-                checked={value.correctIndex === i}
-                onChange={() => onChange({ correctIndex: i })}
-                className="accent-primary"
-                title="Đáp án đúng"
-              />
-              {value.options.length > 2 && (
-                <button
-                  type="button"
-                  onClick={() => removeOption(i)}
-                  className="text-error hover:text-error/80"
-                  aria-label={`Xoá phương án ${String.fromCharCode(65 + i)}`}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          ))}
-          {value.options.length < 6 && (
-            <button
-              type="button"
-              onClick={addOption}
-              className="text-sm text-primary hover:underline"
+        {view === "preview" ? (
+          <QuestionPreview value={value} />
+        ) : (
+          <div className="space-y-4">
+            <div
+              className={`grid grid-cols-1 gap-3 ${courseSlot ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
             >
-              + Thêm phương án
-            </button>
-          )}
-        </div>
-      )}
+              {courseSlot}
+              <div>
+                <span className="mb-1 block text-xs font-medium text-text-muted">
+                  Chuyên đề
+                </span>
+                <UpgradedSelect
+                  searchable
+                  value={value.moduleId}
+                  onValueChange={(v) => onChange({ moduleId: v })}
+                  options={chapterOptions}
+                  placeholder="Gõ để tìm hoặc tạo chuyên đề"
+                  disabled={!courseId}
+                  ariaLabel="Chuyên đề"
+                  {...chapterCreate}
+                />
+              </div>
+              <div>
+                <span className="mb-1 block text-xs font-medium text-text-muted">
+                  Độ khó
+                </span>
+                <UpgradedSelect
+                  searchable
+                  value={value.difficultyLevelId}
+                  onValueChange={(v) => onChange({ difficultyLevelId: v })}
+                  options={difficultyOptions}
+                  placeholder="Gõ để tìm hoặc tạo độ khó"
+                  disabled={!courseId}
+                  ariaLabel="Độ khó"
+                  {...difficultyCreate}
+                />
+              </div>
+            </div>
 
-      <div>
-        <span className="mb-1 block text-xs font-medium text-text-muted">
-          Giải thích (tuỳ chọn)
-        </span>
-        <MathRichTextEditor
-          value={value.explanation}
-          onChange={(next) => onChange({ explanation: next })}
-          ariaLabel="Giải thích"
-          placeholder="Giải thích đáp án..."
-          minHeight="min-h-[80px]"
-        />
+            <div>
+              <span className="mb-1 block text-xs font-medium text-text-muted">
+                Loại câu hỏi
+              </span>
+              <UpgradedSelect
+                value={value.type}
+                onValueChange={(v) => onChange({ type: v as QuestionTypeDto })}
+                options={TYPE_OPTIONS}
+                ariaLabel="Loại câu hỏi"
+              />
+            </div>
+
+            <div>
+              <span className="mb-1 block text-xs font-medium text-text-muted">
+                Nội dung câu hỏi (hỗ trợ LaTeX: $x^2$)
+              </span>
+              <MathRichTextEditor
+                value={value.content}
+                onChange={(next) => onChange({ content: next })}
+                ariaLabel="Nội dung câu hỏi"
+                placeholder="Nhập nội dung câu hỏi..."
+                minHeight="min-h-[120px]"
+              />
+            </div>
+
+            {value.type === QuestionTypeDto.single_choice && (
+              <div className="space-y-2">
+                <span className="mb-1 block text-xs font-medium text-text-muted">
+                  Phương án ({value.options.length}/6)
+                </span>
+                {value.options.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="w-6 text-center text-sm font-bold text-text-muted">
+                      {String.fromCharCode(65 + i)}
+                    </span>
+                    <input
+                      value={opt}
+                      onChange={(e) => updateOption(i, e.target.value)}
+                      className="flex-1 rounded-md border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                      aria-label={`Phương án ${String.fromCharCode(65 + i)}`}
+                      placeholder={`Phương án ${String.fromCharCode(65 + i)}`}
+                    />
+                    <input
+                      type="radio"
+                      name="correctIndex"
+                      checked={value.correctIndex === i}
+                      onChange={() => onChange({ correctIndex: i })}
+                      className="accent-primary"
+                      title="Đáp án đúng"
+                    />
+                    {value.options.length > 2 && (
+                      <button
+                        type="button"
+                        onClick={() => removeOption(i)}
+                        className="text-error hover:text-error/80"
+                        aria-label={`Xoá phương án ${String.fromCharCode(65 + i)}`}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {value.options.length < 6 && (
+                  <button
+                    type="button"
+                    onClick={addOption}
+                    className="text-sm text-primary hover:underline"
+                  >
+                    + Thêm phương án
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div>
+              <span className="mb-1 block text-xs font-medium text-text-muted">
+                Giải thích (tuỳ chọn)
+              </span>
+              <MathRichTextEditor
+                value={value.explanation}
+                onChange={(next) => onChange({ explanation: next })}
+                ariaLabel="Giải thích"
+                placeholder="Giải thích đáp án..."
+                minHeight="min-h-[80px]"
+              />
+            </div>
+
+            {value.type === QuestionTypeDto.essay && (
+              <div>
+                <span className="mb-1 block text-xs font-medium text-text-muted">
+                  Hướng dẫn trả lời (tuỳ chọn)
+                </span>
+                <MathRichTextEditor
+                  value={value.answerGuide}
+                  onChange={(next) => onChange({ answerGuide: next })}
+                  ariaLabel="Hướng dẫn trả lời"
+                  placeholder="Hướng dẫn cho câu tự luận..."
+                  minHeight="min-h-[80px]"
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
-
-      {value.type === QuestionTypeDto.essay && (
-        <div>
-          <span className="mb-1 block text-xs font-medium text-text-muted">
-            Hướng dẫn trả lời (tuỳ chọn)
-          </span>
-          <MathRichTextEditor
-            value={value.answerGuide}
-            onChange={(next) => onChange({ answerGuide: next })}
-            ariaLabel="Hướng dẫn trả lời"
-            placeholder="Hướng dẫn cho câu tự luận..."
-            minHeight="min-h-[80px]"
-          />
-        </div>
-      )}
     </div>
   );
 }

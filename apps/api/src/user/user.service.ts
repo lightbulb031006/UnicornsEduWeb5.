@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -31,6 +32,16 @@ import {
   UpdateUserDto,
 } from 'src/dtos/user.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
+import type {
+  StudentClassCardDto,
+  StudentClassDetailDto,
+} from 'src/dtos/student.dto';
+import { ACTIVE_STANDING_TEACHER } from 'src/class/standing-teacher-filter';
+import { createClassCoverSignedUrl } from 'src/class/class-cover.storage';
+import {
+  mapStudentClassCard,
+  standingTeacherNames,
+} from './student-class-card.util';
 import {
   createSignedStorageUrl,
   normalizeHttpHttpsUrl,
@@ -64,6 +75,15 @@ function normalizeOptionalText(value: string | null | undefined) {
 
 // Hoist ở module scope: tránh dựng lại Object.values(StaffRole) mỗi phần tử filter.
 const STAFF_ROLE_VALUES = new Set<StaffRole>(Object.values(StaffRole));
+
+const STANDING_TEACHER_NAME_SELECT = {
+  where: ACTIVE_STANDING_TEACHER,
+  select: {
+    teacher: {
+      select: { user: { select: { first_name: true, last_name: true } } },
+    },
+  },
+} satisfies Prisma.Class$teachersArgs;
 
 @Injectable()
 export class UserService {
@@ -463,12 +483,47 @@ export class UserService {
     return response;
   }
 
+  /**
+   * CSKH thuần (không kèm admin/trợ lí) tạo học sinh thì trả hồ sơ để gán làm
+   * Người chăm sóc; admin/trợ lí tự chọn Người chăm sóc nên trả null.
+   */
+  private async resolveCreatorCustomerCareStaff(actor?: ActionHistoryActor) {
+    if (!actor?.userId || actor.roleType === UserRole.admin) {
+      return null;
+    }
+
+    const staff = await this.prisma.staffInfo.findUnique({
+      where: { userId: actor.userId },
+      select: {
+        id: true,
+        roles: true,
+        customerCareDefaultProfitPercent: true,
+      },
+    });
+    if (
+      !staff?.roles.includes(StaffRole.customer_care) ||
+      staff.roles.includes(StaffRole.admin) ||
+      staff.roles.includes(StaffRole.assistant)
+    ) {
+      return null;
+    }
+
+    return staff;
+  }
+
   async createStudentUser(
     data: AdminCreateStudentUserDto,
     auditActor?: ActionHistoryActor,
     emailLinkOrigin?: PublicRequestOrigin,
   ) {
     const classIds = Array.from(new Set(data.class_ids));
+    const creatorCustomerCareStaff =
+      await this.resolveCreatorCustomerCareStaff(auditActor);
+    if (creatorCustomerCareStaff && classIds.length > 0) {
+      throw new ForbiddenException(
+        'CSKH không được xếp lớp khi tạo học sinh. Nhờ admin/trợ lí xếp lớp sau.',
+      );
+    }
     if (classIds.length > 0) {
       const classes = await this.prisma.class.findMany({
         where: { id: { in: classIds } },
@@ -603,6 +658,21 @@ export class UserService {
                 studentId: student.id,
                 status: StudentClassStatus.active,
               })),
+            });
+          }
+
+          // CSKH tạo học sinh thì tự là Người chăm sóc với % mặc định trên hồ sơ.
+          // Học sinh đã có Người chăm sóc thì giữ nguyên: chuyển người chỉ admin/trợ lí làm.
+          if (creatorCustomerCareStaff) {
+            await tx.customerCareService.upsert({
+              where: { studentId: student.id },
+              create: {
+                studentId: student.id,
+                staffId: creatorCustomerCareStaff.id,
+                profitPercent:
+                  creatorCustomerCareStaff.customerCareDefaultProfitPercent,
+              },
+              update: {},
             });
           }
 
@@ -990,6 +1060,89 @@ export class UserService {
     return student.id;
   }
 
+  /**
+   * Lớp học sinh đang học (enrollment active, chưa hết hạn xem nội dung) cho thẻ trang chủ.
+   * Chỉ select tên — không trả bản ghi user của Gia sư.
+   */
+  async getMyStudentClassCards(
+    studentId: string,
+    now: Date = new Date(),
+  ): Promise<StudentClassCardDto[]> {
+    const rows = await this.prisma.studentClass.findMany({
+      where: {
+        studentId,
+        status: StudentClassStatus.active,
+        class: {
+          OR: [
+            { contentAccessExpiresAt: null },
+            { contentAccessExpiresAt: { gt: now } },
+          ],
+        },
+      },
+      select: {
+        class: {
+          select: {
+            id: true,
+            name: true,
+            coverImagePath: true,
+            course: { select: { name: true } },
+            teachers: STANDING_TEACHER_NAME_SELECT,
+          },
+        },
+      },
+    });
+
+    const cards = await Promise.all(
+      rows.map(async (row) =>
+        mapStudentClassCard(
+          row,
+          await createClassCoverSignedUrl(row.class.coverImagePath),
+        ),
+      ),
+    );
+    return cards.sort((a, b) => a.className.localeCompare(b.className, 'vi'));
+  }
+
+  /**
+   * Đầu trang lớp học sinh: tên lớp, khoá, trạng thái, họ tên Gia sư đứng lớp.
+   * Chỉ field hiển thị — không trả row user/staff (email, hash...).
+   */
+  async getMyStudentClassDetail(
+    studentId: string,
+    classId: string,
+    now: Date = new Date(),
+  ): Promise<StudentClassDetailDto> {
+    const enrollment = await this.prisma.studentClass.findFirst({
+      where: { classId, studentId, status: StudentClassStatus.active },
+      select: {
+        class: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            contentAccessExpiresAt: true,
+            course: { select: { name: true } },
+            teachers: STANDING_TEACHER_NAME_SELECT,
+          },
+        },
+      },
+    });
+    if (!enrollment) {
+      throw new ForbiddenException('You are not enrolled in this class');
+    }
+    const cls = enrollment.class;
+    if (cls.contentAccessExpiresAt && cls.contentAccessExpiresAt < now) {
+      throw new ForbiddenException('This class has expired');
+    }
+    return {
+      classId: cls.id,
+      className: cls.name,
+      classStatus: cls.status,
+      courseName: cls.course.name,
+      teacherNames: standingTeacherNames(cls.teachers),
+    };
+  }
+
   /** Update current user's basic info (self). */
   async updateMyProfile(
     userId: string,
@@ -1210,19 +1363,11 @@ export class UserService {
     }
     if (dto.university !== undefined) data.university = dto.university;
     if (dto.high_school !== undefined) data.highSchool = dto.high_school;
-    if (dto.specialization !== undefined)
-      data.specialization = dto.specialization;
     if (dto.bank_account !== undefined) data.bankAccount = dto.bank_account;
     if (dto.bank_qr_link !== undefined) {
       data.bankQrLink = normalizeHttpHttpsUrl(
         dto.bank_qr_link,
         'Link QR ngân hàng',
-      );
-    }
-    if (dto.personal_achievement_link !== undefined) {
-      data.personalAchievementLink = normalizeHttpHttpsUrl(
-        dto.personal_achievement_link,
-        'Link thành tích cá nhân',
       );
     }
     if (

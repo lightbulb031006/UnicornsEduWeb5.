@@ -362,7 +362,7 @@ export class AttemptService {
       where: { id: assignmentId, classId },
       include: { lesson: true },
     });
-    if (!item) {
+    if (!item || item.lesson?.archivedAt) {
       throw new NotFoundException('Assignment not found');
     }
 
@@ -437,7 +437,7 @@ export class AttemptService {
       where: { id: assignmentId, classId },
       include: { lesson: true, class: { select: { name: true } } },
     });
-    if (!item) {
+    if (!item || item.lesson?.archivedAt) {
       throw new NotFoundException('Assignment not found');
     }
 

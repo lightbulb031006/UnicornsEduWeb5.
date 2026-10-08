@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { Play } from "lucide-react";
+import { useRef, type ReactNode } from "react";
+import { VideoOff } from "lucide-react";
 
 import type { ClassTimelineItemDto } from "@/dtos/class-timeline.dto";
 import MathContent from "@/components/ui/MathContent";
+import YouTubeEmbed from "@/components/ui/YouTubeEmbed";
+import { useNearViewport } from "@/hooks/use-near-viewport";
 import { formatVnWeekday } from "@/lib/formatters";
-import { extractYouTubeVideoId, youtubeThumbnailUrl } from "@/lib/youtube";
 
 type TimelineSession = NonNullable<ClassTimelineItemDto["session"]>;
 type TimelineSurvey = NonNullable<ClassTimelineItemDto["survey"]>;
@@ -50,13 +51,7 @@ function formatTimeRange(
   return start || end || "—";
 }
 
-function SessionField({
-  label,
-  content,
-}: {
-  label: string;
-  content: string;
-}) {
+function SessionField({ label, content }: { label: string; content: string }) {
   return (
     <div className="min-w-0">
       <p className="text-[11px] font-medium uppercase text-text-muted">
@@ -68,129 +63,127 @@ function SessionField({
 }
 
 /**
- * Ảnh tĩnh từ `recordingUrl` (field chính thức của buổi học). Không nhúng
- * `YouTubeEmbed` — trình phát chỉ mở khi học sinh bấm vào dòng/thumbnail.
+ * Khung video 16:9 của thẻ buổi học. Trình phát `YouTubeEmbed` (poster tới khi
+ * bấm, không tự phát) chỉ mount khi khung gần viewport; buổi chưa có video giữ
+ * khung rỗng cùng tỉ lệ để các thẻ thẳng hàng.
  */
-function SessionVideoThumbnail({
+function SessionVideoFrame({
   recordingUrl,
   sessionDate,
 }: {
   recordingUrl: string;
   sessionDate: string;
 }) {
-  const videoId = extractYouTubeVideoId(recordingUrl);
-  const [imgFailed, setImgFailed] = useState(false);
-  const dateLabel = formatDateOnly(sessionDate);
-  const alt = `Video buổi học ngày ${dateLabel}`;
-  const src = videoId && !imgFailed ? youtubeThumbnailUrl(videoId) : null;
+  const frameRef = useRef<HTMLDivElement>(null);
+  const nearViewport = useNearViewport(frameRef);
+  const title = `Video buổi học ngày ${formatDateOnly(sessionDate)}`;
+
+  if (!recordingUrl) {
+    return (
+      <div className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border-default bg-bg-secondary/40 text-xs text-text-muted">
+        <VideoOff className="size-6 text-text-muted/60" aria-hidden />
+        Buổi học chưa có video.
+      </div>
+    );
+  }
 
   return (
-    <div className="order-2 w-full max-w-[13.5rem] shrink-0 overflow-hidden rounded-lg bg-bg-secondary sm:order-3 sm:w-36">
-      <div className="relative aspect-video">
-        {src ? (
-          // eslint-disable-next-line @next/next/no-img-element -- remote YouTube poster; Next Image needs a remotePatterns allowlist per host
-          <img
-            src={src}
-            alt={alt}
-            loading="lazy"
-            decoding="async"
-            className="size-full object-cover"
-            onError={() => setImgFailed(true)}
-          />
-        ) : (
-          <div
-            className="flex size-full items-center justify-center bg-bg-secondary"
-            role="img"
-            aria-label={alt}
-          />
-        )}
-        <span
-          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30"
-          aria-hidden
-        >
-          <Play className="size-7 fill-white text-white drop-shadow-sm" />
-        </span>
-      </div>
+    <div
+      ref={frameRef}
+      className="aspect-video w-full overflow-hidden rounded-xl bg-bg-secondary"
+    >
+      {nearViewport ? (
+        <YouTubeEmbed
+          url={recordingUrl}
+          protected
+          title={title}
+          className="aspect-video w-full rounded-xl"
+        />
+      ) : null}
     </div>
   );
 }
 
 /**
- * Row buổi học trên timeline học sinh: thời gian + nội dung buổi đầy đủ + nhận
- * xét dành riêng cho chính em. Có video thì hiện thumbnail tĩnh từ
- * `recordingUrl`; không suy đoán từ chữ trong mô tả. Không hiện dữ liệu vận
- * hành (hệ số, thanh toán gia sư, trợ cấp) và không hiện điểm danh/nhận xét
- * của bạn học khác.
+ * Thẻ buổi học trên tab Buổi học của học sinh: ngày giờ ở đầu; video lớn bên
+ * trái (trên ở mobile); cột chữ bắt đầu bằng điểm danh + nhận xét dành riêng
+ * cho em, rồi Nội dung bài học, BTVN, Tutorial. Không hiện dữ liệu vận hành
+ * (hệ số, thanh toán gia sư, trợ cấp) và không hiện điểm danh/nhận xét của bạn
+ * học khác.
  */
 export function StudentSessionTimelineCard({
   session,
+  leading,
 }: {
   session: TimelineSession;
+  /** Hiện trước ngày giờ trên hàng đầu thẻ (số thứ tự, badge loại). */
+  leading?: ReactNode;
 }) {
   const fields = [
-    { label: "Nội dung", content: session.lessonContent },
-    { label: "Bài tập", content: session.homework },
-    { label: "Hướng dẫn", content: session.tutorial },
-  ].filter((field) => Boolean(field.content?.trim()));
+    { label: "Nội dung bài học", content: session.lessonContent },
+    { label: "BTVN", content: session.homework },
+    { label: "Tutorial", content: session.tutorial },
+  ].filter((field): field is { label: string; content: string } =>
+    Boolean(field.content?.trim()),
+  );
   const statusLabel = attendanceStatusLabel(session.myAttendanceStatus);
   const myNotes = session.myAttendanceNotes?.trim() ?? "";
   const recordingUrl = session.recordingUrl?.trim() ?? "";
-  const hasRecording = Boolean(recordingUrl);
 
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-      <div className="order-1 flex min-w-[5.5rem] shrink-0 flex-col gap-0.5 text-left">
-        <p className="text-xs leading-tight text-text-secondary">
-          {formatWeekday(session.date)}:
-        </p>
-        <p className="text-sm font-bold leading-tight text-text-primary">
-          {formatDateOnly(session.date)}
-        </p>
-        <p className="font-mono text-[11px] leading-tight text-text-muted">
-          {formatTimeRange(session.startTime, session.endTime)}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {leading}
+        <p className="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold text-text-primary">
+          <span>
+            {formatWeekday(session.date)}, {formatDateOnly(session.date)}
+          </span>
+          <span className="font-mono text-xs font-normal text-text-muted">
+            {formatTimeRange(session.startTime, session.endTime)}
+          </span>
         </p>
       </div>
 
-      {hasRecording ? (
-        <SessionVideoThumbnail
+      <div className="grid gap-3 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] md:gap-4">
+        <SessionVideoFrame
           recordingUrl={recordingUrl}
           sessionDate={session.date}
         />
-      ) : null}
 
-      <div className="order-3 min-w-0 flex-1 space-y-2 sm:order-2">
-        {fields.length ? (
-          <div className="space-y-1.5">
-            {fields.map((field) => (
-              <SessionField
-                key={field.label}
-                label={field.label}
-                content={field.content as string}
-              />
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-text-muted">
-            Chưa có nội dung cho buổi học này.
-          </p>
-        )}
+        <div className="min-w-0 space-y-2">
+          {statusLabel || myNotes ? (
+            <div className="flex flex-col gap-1 border-b border-border-subtle pb-2">
+              {statusLabel ? (
+                <span
+                  className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[11px] font-medium ${attendanceStatusClassName(
+                    session.myAttendanceStatus,
+                  )}`}
+                >
+                  {statusLabel}
+                </span>
+              ) : null}
+              {myNotes ? (
+                <MathContent content={myNotes} className="text-xs" />
+              ) : null}
+            </div>
+          ) : null}
 
-        {statusLabel || myNotes ? (
-          <div className="flex flex-col gap-1 border-t border-border-subtle pt-2">
-            {statusLabel ? (
-              <span
-                className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[11px] font-medium ${attendanceStatusClassName(
-                  session.myAttendanceStatus,
-                )}`}
-              >
-                {statusLabel}
-              </span>
-            ) : null}
-            {myNotes ? (
-              <MathContent content={myNotes} className="text-xs" />
-            ) : null}
-          </div>
-        ) : null}
+          {fields.length ? (
+            <div className="space-y-1.5">
+              {fields.map((field) => (
+                <SessionField
+                  key={field.label}
+                  label={field.label}
+                  content={field.content}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-text-muted">
+              Chưa có nội dung cho buổi học này.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

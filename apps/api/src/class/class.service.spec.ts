@@ -1110,6 +1110,7 @@ describe('ClassService', () => {
             classId: 'class-1',
             teacherId: 'teacher-1',
             customAllowance: null,
+            customScaleAmount: null,
             operatingDeductionRatePercent: 0,
             status: 'active',
           },
@@ -1163,6 +1164,61 @@ describe('ClassService', () => {
       });
     });
 
+    it('preserves existing custom_scale_amount (including 0) when field is omitted', async () => {
+      mockTx.classTeacher.findMany.mockResolvedValue([
+        {
+          teacherId: 'teacher-1',
+          customAllowance: null,
+          customScaleAmount: 0,
+          operatingDeductionRatePercent: 0,
+        },
+      ]);
+
+      await service.updateClassTeachers('class-1', {
+        teachers: [{ teacher_id: 'teacher-1' }],
+      });
+
+      expect(mockTx.classTeacher.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            teacherId: 'teacher-1',
+            customScaleAmount: 0,
+          }),
+        ],
+      });
+    });
+
+    it('sets and clears custom_scale_amount explicitly', async () => {
+      mockTx.classTeacher.findMany.mockResolvedValue([
+        {
+          teacherId: 'teacher-1',
+          customAllowance: null,
+          customScaleAmount: 40000,
+          operatingDeductionRatePercent: 0,
+        },
+      ]);
+
+      await service.updateClassTeachers('class-1', {
+        teachers: [
+          { teacher_id: 'teacher-1', custom_scale_amount: null },
+          { teacher_id: 'teacher-2', custom_scale_amount: 25000 },
+        ],
+      });
+
+      expect(mockTx.classTeacher.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            teacherId: 'teacher-1',
+            customScaleAmount: null,
+          }),
+          expect.objectContaining({
+            teacherId: 'teacher-2',
+            customScaleAmount: 25000,
+          }),
+        ],
+      });
+    });
+
     it('persists operating deduction on the class-teacher assignment', async () => {
       await service.updateClassTeachers('class-1', {
         teachers: [
@@ -1180,6 +1236,7 @@ describe('ClassService', () => {
             classId: 'class-1',
             teacherId: 'teacher-1',
             customAllowance: 150000,
+            customScaleAmount: null,
             operatingDeductionRatePercent: 7.5,
             status: 'active',
           },
@@ -1332,6 +1389,36 @@ describe('ClassService', () => {
       });
     });
 
+    it('stores custom_scale_amount 0 as override and null as inherit', async () => {
+      mockPrisma.class.findUnique.mockResolvedValue({
+        id: 'class-1',
+        teachers: [
+          { teacherId: 'teacher-1', operatingDeductionRatePercent: 5 },
+          { teacherId: 'teacher-2', operatingDeductionRatePercent: 5 },
+        ],
+      });
+
+      await service.updateClassTeacherCompensation('class-1', {
+        teachers: [
+          { teacher_id: 'teacher-1', custom_scale_amount: 0 },
+          { teacher_id: 'teacher-2', custom_scale_amount: null },
+        ],
+      });
+
+      expect(mockTx.classTeacher.update).toHaveBeenCalledWith({
+        where: {
+          classId_teacherId: { classId: 'class-1', teacherId: 'teacher-1' },
+        },
+        data: { customScaleAmount: 0, operatingDeductionRatePercent: 5 },
+      });
+      expect(mockTx.classTeacher.update).toHaveBeenCalledWith({
+        where: {
+          classId_teacherId: { classId: 'class-1', teacherId: 'teacher-2' },
+        },
+        data: { customScaleAmount: null, operatingDeductionRatePercent: 5 },
+      });
+    });
+
     it('clears custom allowance when null is sent', async () => {
       mockPrisma.class.findUnique.mockResolvedValue({
         id: 'class-1',
@@ -1423,6 +1510,77 @@ describe('ClassService', () => {
       ).rejects.toThrow('Học sinh đang ở trạng thái nghỉ học.');
 
       expect(mockTx.studentClass.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('khoá bán một lần', () => {
+    beforeEach(() => {
+      mockPrisma.class.findUnique.mockResolvedValue({
+        id: 'class-1',
+        status: ClassStatus.running,
+        pricingMode: ClassPricingMode.per_session,
+      });
+      mockTx.class.findUnique.mockResolvedValue({
+        courseId: 'course-basic',
+        tuitionPackageTotal: 1600000,
+        course: { isOneTime: false },
+      });
+    });
+
+    it('chặn đổi lớp sang khoá khác chế độ', async () => {
+      mockTx.course.findUnique.mockResolvedValue({
+        id: 'course-thptqg',
+        name: 'THPTQG',
+        isOneTime: true,
+        defaultDurationDays: null,
+      });
+      await expect(
+        service.updateClassBasicInfo('class-1', { course_id: 'course-thptqg' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockTx.class.update).not.toHaveBeenCalled();
+    });
+
+    it('cho đổi sang khoá cùng chế độ', async () => {
+      mockTx.course.findUnique.mockResolvedValue({
+        id: 'course-advance',
+        name: 'Advance',
+        isOneTime: false,
+        defaultDurationDays: null,
+      });
+      await service.updateClassBasicInfo('class-1', {
+        course_id: 'course-advance',
+      });
+      expect(mockTx.class.update).toHaveBeenCalled();
+    });
+
+    it('chặn xoá tổng gói của lớp bán một lần', async () => {
+      mockTx.class.findUnique.mockResolvedValue({
+        courseId: 'course-thptqg',
+        tuitionPackageTotal: 1600000,
+        course: { isOneTime: true },
+      });
+      await expect(
+        service.updateClassBasicInfo('class-1', { tuition_package_total: 0 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockTx.class.update).not.toHaveBeenCalled();
+    });
+
+    it('không bật/tắt one_time trên từng lớp', async () => {
+      await expect(
+        service.updateClassPricingMode('class-1', {
+          pricing_mode: ClassPricingMode.one_time,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      mockPrisma.class.findUnique.mockResolvedValue({
+        id: 'class-1',
+        pricingMode: ClassPricingMode.one_time,
+      });
+      await expect(
+        service.updateClassPricingMode('class-1', {
+          pricing_mode: ClassPricingMode.per_session,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

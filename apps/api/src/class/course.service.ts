@@ -1,9 +1,15 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '../../generated/client';
+import {
+  AttendanceStatus,
+  ClassPricingMode,
+  Prisma,
+} from '../../generated/client';
+import { assertCanEnableOneTimeCourse } from 'src/common/class-pricing-mode.util';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { getPreferredUserFullName } from 'src/common/user-name.util';
 import {
@@ -105,40 +111,116 @@ export class CourseService {
     };
   }
 
-  async create(dto: CreateCourseDto) {
+  async create(actor: CourseActor, dto: CreateCourseDto) {
+    // Trưởng giáo án chỉ thấy khoá được gán: tự gán người tạo để khoá không "biến mất".
+    const creatorStaffId =
+      !this.courseAccess.isManager(actor) && actor.staffId
+        ? actor.staffId
+        : null;
+    if (dto.is_one_time) {
+      this.assertCanChangeSaleMode(actor);
+    }
     return this.prisma.course.create({
       data: {
         name: dto.name,
         defaultDurationDays: dto.default_duration_days ?? null,
         sortOrder: dto.sort_order ?? 0,
-      },
-    });
-  }
-
-  async update(id: string, dto: UpdateCourseDto) {
-    const existing = await this.prisma.course.findUnique({ where: { id } });
-    if (!existing) {
-      throw new NotFoundException('Không tìm thấy khoá học.');
-    }
-
-    return this.prisma.course.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.default_duration_days !== undefined
-          ? { defaultDurationDays: dto.default_duration_days }
+        isOneTime: dto.is_one_time ?? false,
+        ...(creatorStaffId
+          ? { lessonPlanMembers: { create: { staffId: creatorStaffId } } }
           : {}),
-        ...(dto.sort_order !== undefined ? { sortOrder: dto.sort_order } : {}),
-        ...(dto.is_active !== undefined ? { isActive: dto.is_active } : {}),
       },
     });
   }
 
-  async remove(id: string) {
+  async update(actor: CourseActor, id: string, dto: UpdateCourseDto) {
     const existing = await this.prisma.course.findUnique({ where: { id } });
     if (!existing) {
       throw new NotFoundException('Không tìm thấy khoá học.');
     }
+    await this.courseAccess.assertCanManageCourse(actor, id, existing.name);
+
+    const saleModeChanged =
+      dto.is_one_time !== undefined && dto.is_one_time !== existing.isOneTime;
+    if (saleModeChanged) {
+      this.assertCanChangeSaleMode(actor);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (saleModeChanged && dto.is_one_time) {
+        const chargedAttendanceCount = await tx.attendance.count({
+          where: {
+            status: {
+              in: [AttendanceStatus.present, AttendanceStatus.excused],
+            },
+            tuitionFee: { gt: 0 },
+            session: { class: { courseId: id } },
+          },
+        });
+        assertCanEnableOneTimeCourse(chargedAttendanceCount);
+        const missingPackageCount = await tx.class.count({
+          where: {
+            courseId: id,
+            OR: [
+              { tuitionPackageTotal: null },
+              { tuitionPackageTotal: { lte: 0 } },
+            ],
+          },
+        });
+        if (missingPackageCount > 0) {
+          throw new BadRequestException(
+            `Còn ${missingPackageCount} lớp của khoá chưa có Tổng gói > 0đ. Nhập gói cho các lớp đó trước khi bật bán một lần.`,
+          );
+        }
+      }
+
+      const updated = await tx.course.update({
+        where: { id },
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(dto.default_duration_days !== undefined
+            ? { defaultDurationDays: dto.default_duration_days }
+            : {}),
+          ...(dto.sort_order !== undefined
+            ? { sortOrder: dto.sort_order }
+            : {}),
+          ...(dto.is_active !== undefined ? { isActive: dto.is_active } : {}),
+          ...(saleModeChanged ? { isOneTime: dto.is_one_time } : {}),
+        },
+      });
+
+      // Chế độ lớp đi theo khoá. Tắt bán một lần đưa lớp về theo buổi, không
+      // tính lại buổi nào (khoản đã thu giữ nguyên).
+      if (saleModeChanged) {
+        await tx.class.updateMany({
+          where: { courseId: id },
+          data: {
+            pricingMode: dto.is_one_time
+              ? ClassPricingMode.one_time
+              : ClassPricingMode.per_session,
+          },
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  /** Bán một lần đụng tới học phí: chỉ admin/trợ lí, không cho trưởng giáo án. */
+  private assertCanChangeSaleMode(actor: CourseActor) {
+    if (!this.courseAccess.isManager(actor)) {
+      throw new ForbiddenException(
+        'Chỉ admin hoặc trợ lí được đổi cài đặt bán một lần của khoá.',
+      );
+    }
+  }
+
+  async remove(actor: CourseActor, id: string) {
+    const existing = await this.prisma.course.findUnique({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException('Không tìm thấy khoá học.');
+    }
+    await this.courseAccess.assertCanManageCourse(actor, id, existing.name);
 
     const classCount = await this.prisma.class.count({
       where: { courseId: id },

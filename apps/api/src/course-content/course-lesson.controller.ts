@@ -1,4 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import {
   ApiBody,
   ApiCookieAuth,
@@ -39,8 +47,7 @@ export class CourseLessonController {
   @AllowStaffRolesOnAdminRoutes(...COURSE_TREE_STAFF_ROLES)
   @ApiOperation({
     summary: 'Tạo tiết học mới trong chuyên đề (khoá học)',
-    description:
-      `${TREE_STAFF_DESC} Loại tiết: lý thuyết (video/nội dung) hoặc thực hành (chỉ câu hỏi).`,
+    description: `${TREE_STAFF_DESC} Loại tiết: lý thuyết (video/nội dung) hoặc thực hành (chỉ câu hỏi).`,
   })
   @ApiParam({ name: 'courseId', description: 'ID khoá học' })
   @ApiParam({ name: 'moduleId', description: 'ID chuyên đề' })
@@ -52,7 +59,8 @@ export class CourseLessonController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Lỗi khi tạo tiết học, hoặc tiết thực hành kèm video/nội dung.',
+    description:
+      'Lỗi khi tạo tiết học, hoặc tiết thực hành kèm video/nội dung.',
   })
   @ApiResponse({ status: 403, description: COURSE_CONTENT_FORBIDDEN })
   async createLesson(

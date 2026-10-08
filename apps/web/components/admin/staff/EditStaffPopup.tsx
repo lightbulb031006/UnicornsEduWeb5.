@@ -25,7 +25,7 @@ import {
   type DisabledRoleOverrideWarning,
 } from "@/lib/fixed-salary-settings.helpers";
 import { moneyInputInitialFromNumber } from "@/lib/money-input.helpers";
-import { ROLE_LABELS } from "@/lib/staff.constants";
+import { LESSON_PLAN_LABEL, ROLE_LABELS } from "@/lib/staff.constants";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 
 type Props = {
@@ -45,7 +45,7 @@ const ROLE_OPTIONS: { value: string; label: string }[] = [
   { value: "admin", label: "Admin" },
   { value: "teacher", label: "Giáo viên" },
   { value: "assistant", label: "Trợ lí" },
-  { value: "lesson_plan", label: "Giáo án" },
+  { value: "lesson_plan", label: LESSON_PLAN_LABEL },
   { value: "lesson_plan_head", label: "Trưởng giáo án" },
   { value: "accountant_income", label: "Kế toán thu" },
   { value: "accountant_expense", label: "Kế toán chi" },
@@ -93,6 +93,9 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
   const [bankQrLink, setBankQrLink] = useState(staff.bankQrLink ?? "");
   const [revenueSharePercent, setRevenueSharePercent] = useState(
     staff.revenueSharePercent != null ? String(staff.revenueSharePercent) : "",
+  );
+  const [customerCareDefaultPercent, setCustomerCareDefaultPercent] = useState(
+    () => String(Math.round((staff.customerCareDefaultProfitPercent ?? 0) * 100)),
   );
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(
     () => new Set(staff.roles ?? []),
@@ -231,6 +234,12 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
           revenue_share_percent: showRevenueShareField
             ? (trimmedRevenueSharePercent ? Number(trimmedRevenueSharePercent) : null)
             : null,
+          ...(hasCustomerCareRole
+            ? {
+                customer_care_default_profit_percent:
+                  Number(customerCareDefaultPercent.trim() || 0) / 100,
+              }
+            : {}),
         });
         const statusChanged = status !== staff.status;
         if (statusChanged) {
@@ -281,6 +290,14 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
       const parsed = Number(trimmedRevenueSharePercent);
       if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
         toast.error("Tỷ lệ % hoa hồng doanh thu phải là số từ 0 đến 100.");
+        return;
+      }
+    }
+
+    if (hasCustomerCareRole) {
+      const parsed = Number(customerCareDefaultPercent.trim() || 0);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 99) {
+        toast.error("% mặc định CSKH phải là số nguyên từ 0 đến 99.");
         return;
       }
     }
@@ -656,6 +673,26 @@ export default function EditStaffPopup({ open, onClose, staff, onSuccess }: Prop
                   />
                   <p className="text-xs text-text-muted">
                     Nhân sự sẽ nhận % này trên tổng doanh thu hệ thống mỗi tháng.
+                  </p>
+                </label>
+              )}
+
+              {hasCustomerCareRole && (
+                <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                  <span>% mặc định CSKH</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={99}
+                    step={1}
+                    value={customerCareDefaultPercent}
+                    onChange={(e) => setCustomerCareDefaultPercent(e.target.value)}
+                    className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                    placeholder="VD: 10"
+                  />
+                  <p className="text-xs text-text-muted">
+                    Áp vào học sinh khi gán CSKH này. Học sinh đã gán và buổi đã tính không đổi.
                   </p>
                 </label>
               )}

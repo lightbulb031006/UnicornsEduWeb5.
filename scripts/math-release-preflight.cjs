@@ -36,6 +36,29 @@ async function main() {
     if (collisions.rows[0].count !== 0 && repairs.some((name) => pending.includes(name))) {
       throw new Error('Tin repair IDs exist in the Math database; rollout stopped');
     }
+    // October's Tin backfills rewrite tuition and wallet history. A matching
+    // course name or ID on Math requires a separate impact review first.
+    const oneTimeRepairs = [
+      '20261002100000_backfill_one_time_course_tuition',
+      '20261004000000_one_time_course_setting',
+    ];
+    let tinOneTimeCollisions = 0;
+    if (oneTimeRepairs.some((name) => pending.includes(name))) {
+      const repairSql = oneTimeRepairs.map((name) =>
+        fs.readFileSync(path.join(root, name, 'migration.sql'), 'utf8'),
+      ).join('\n');
+      const classIds = [...new Set(repairSql.match(/UNICL-[a-z0-9]+/g) || [])];
+      const studentIds = [...new Set(repairSql.match(/UNIST-[a-z0-9]+/g) || [])];
+      const impact = await client.query(`SELECT
+        (SELECT count(*) FROM public.courses WHERE name IN ('THPTQG', 'PREVOI')) +
+        (SELECT count(*) FROM public.classes WHERE id = ANY($1::text[])) +
+        (SELECT count(*) FROM public.student_info WHERE id = ANY($2::text[])) AS count`,
+      [classIds, studentIds]);
+      tinOneTimeCollisions = Number(impact.rows[0].count);
+      if (tinOneTimeCollisions !== 0) {
+        throw new Error('Tin one-time tuition backfill targets exist in the Math database; impact review required');
+      }
+    }
     const counts = await client.query(`SELECT
       (SELECT count(*)::int FROM public.student_info) AS students,
       (SELECT count(*)::int FROM public.users) AS users,
@@ -75,6 +98,7 @@ async function main() {
       pending,
       tinRepairIdCount: ids.length,
       tinRepairCollisions: collisions.rows[0].count,
+      tinOneTimeCollisions,
       counts: counts.rows[0],
       expectedCounts,
     };

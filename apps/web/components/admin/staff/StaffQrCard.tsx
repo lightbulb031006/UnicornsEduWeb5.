@@ -1,16 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useId, useState } from "react";
-import {
-  ResponsiveActionFooter,
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-} from "@/components/ui/ResponsiveDialog";
-import {
-  STAFF_QR_SCANNABLE_PIXEL,
-  buildStaffQrDisplaySrc,
-} from "@/lib/staff-qr-image";
+import { useEffect, useState } from "react";
+import { buildStaffQrDisplaySrc } from "@/lib/staff-qr-image";
 
 function isHttpOrHttpsUrl(url: string): boolean {
   try {
@@ -19,11 +11,6 @@ function isHttpOrHttpsUrl(url: string): boolean {
   } catch {
     return false;
   }
-}
-
-function openOriginalLink(url: string) {
-  if (!isHttpOrHttpsUrl(url)) return;
-  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 type Props = {
@@ -49,19 +36,14 @@ export default function StaffQrCard({
   const isMinimal = size === "minimal";
   const isCompact = size === "compact";
   const pixel = isMinimal ? 64 : isCompact ? 100 : 150;
-  const previewTitleId = useId();
 
   const hasLink = Boolean(qrLink?.trim());
   const displayUrl = qrLink?.trim() || "";
   const thumbnail = hasLink
     ? buildStaffQrDisplaySrc(displayUrl, pixel)
     : null;
-  const preview = hasLink
-    ? buildStaffQrDisplaySrc(displayUrl, STAFF_QR_SCANNABLE_PIXEL)
-    : null;
   const canOpenOriginal = hasLink && isHttpOrHttpsUrl(displayUrl);
 
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
@@ -93,22 +75,10 @@ export default function StaffQrCard({
       ? "border-primary/30 bg-primary/5 hover:border-primary/45 hover:bg-primary/10"
       : "border-border-default bg-bg-secondary/50 opacity-80 hover:bg-bg-tertiary hover:opacity-95";
 
-  const mainInteractive = allowEdit || hasLink;
-
-  const handleMainClick = () => {
-    if (hasLink) {
-      setPreviewOpen(true);
-      return;
-    }
-    if (allowEdit) {
-      onEditClick();
-    }
-  };
-
   const thumbnailLabel = hasLink
     ? imageFailed
-      ? "Không sinh được mã QR, nhấn để xem chi tiết"
-      : "Xem mã QR thanh toán đủ lớn để quét"
+      ? "Không sinh được mã QR, nhấn để mở link"
+      : "Mở link QR thanh toán"
     : allowEdit
       ? "Thêm link QR thanh toán"
       : undefined;
@@ -161,8 +131,8 @@ export default function StaffQrCard({
         <span className="sr-only">
           {hasLink
             ? imageFailed
-              ? "Không sinh được mã QR thanh toán, nhấn để xem chi tiết"
-              : "Đã có QR thanh toán, nhấn để xem mã đủ lớn để quét"
+              ? "Không sinh được mã QR thanh toán, nhấn để mở link"
+              : "Đã có QR thanh toán, nhấn để mở link"
             : allowEdit
               ? "Chưa có link QR, nhấn để thêm"
               : "Chưa có link QR thanh toán"}
@@ -176,7 +146,7 @@ export default function StaffQrCard({
           {hasLink
             ? imageFailed
               ? "Không sinh được mã"
-              : "Xem mã / quét QR"
+              : "Mở link QR"
             : allowEdit
               ? "Thêm link"
               : "Chưa có link"}
@@ -216,13 +186,28 @@ export default function StaffQrCard({
           </svg>
         </button>
       ) : null}
-      {mainInteractive ? (
-        <button
-          type="button"
-          onClick={handleMainClick}
+      {canOpenOriginal ? (
+        <a
+          href={displayUrl}
+          target="_blank"
+          rel="noopener noreferrer"
           className={`relative flex touch-manipulation flex-col items-center justify-center transition-colors duration-200 ${boxClass} ${
             isMinimal
-              ? `cursor-pointer ${hasLink ? "hover:bg-bg-tertiary/80" : "opacity-75 hover:opacity-100"}`
+              ? "cursor-pointer hover:bg-bg-tertiary/80"
+              : `border-dashed ${borderTone} cursor-pointer`
+          }`}
+          title={thumbnailLabel}
+          aria-label={thumbnailLabel}
+        >
+          {mainBody}
+        </a>
+      ) : allowEdit && !hasLink ? (
+        <button
+          type="button"
+          onClick={onEditClick}
+          className={`relative flex touch-manipulation flex-col items-center justify-center transition-colors duration-200 ${boxClass} ${
+            isMinimal
+              ? "cursor-pointer opacity-75 hover:opacity-100"
               : `border-dashed ${borderTone} cursor-pointer`
           }`}
           title={thumbnailLabel}
@@ -239,93 +224,6 @@ export default function StaffQrCard({
           {mainBody}
         </div>
       )}
-
-      {previewOpen && preview ? (
-        <ResponsiveDialog
-          labelledBy={previewTitleId}
-          onBackdropClick={() => setPreviewOpen(false)}
-          size="sm"
-        >
-          <div className="flex shrink-0 items-center justify-between border-b border-border-subtle p-4 sm:p-5">
-            <h2
-              id={previewTitleId}
-              className="text-lg font-semibold text-text-primary"
-            >
-              QR thanh toán
-            </h2>
-            <button
-              type="button"
-              onClick={() => setPreviewOpen(false)}
-              className="rounded p-1 text-text-muted transition-colors duration-200 hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-              aria-label="Đóng"
-            >
-              <svg
-                className="size-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
-          <ResponsiveDialogBody className="space-y-3">
-            {imageFailed ? (
-              <p className="text-sm text-text-secondary">
-                Không sinh được mã QR. Hãy mở link gốc để kiểm tra, hoặc thử lại
-                sau.
-              </p>
-            ) : (
-              <div className="mx-auto w-full max-w-none sm:max-w-sm">
-                <Image
-                  src={preview}
-                  alt="Mã QR thanh toán đủ lớn để quét"
-                  width={STAFF_QR_SCANNABLE_PIXEL}
-                  height={STAFF_QR_SCANNABLE_PIXEL}
-                  className="h-auto w-full bg-bg-surface object-contain"
-                  unoptimized
-                  referrerPolicy="no-referrer"
-                  onError={() => setImageFailed(true)}
-                />
-              </div>
-            )}
-          </ResponsiveDialogBody>
-          <ResponsiveActionFooter
-            className={canOpenOriginal ? undefined : "min-[380px]:grid-cols-1"}
-          >
-            {canOpenOriginal ? (
-              <button
-                type="button"
-                onClick={() => openOriginalLink(displayUrl)}
-                className={`inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors duration-200 sm:min-h-10 ${
-                  imageFailed
-                    ? "bg-primary text-text-inverse hover:bg-primary-hover"
-                    : "border border-border-default bg-bg-surface text-text-primary hover:bg-bg-tertiary"
-                }`}
-              >
-                Mở link gốc
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => setPreviewOpen(false)}
-              className={`inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors duration-200 sm:min-h-10 ${
-                imageFailed
-                  ? "border border-border-default bg-bg-surface text-text-primary hover:bg-bg-tertiary"
-                  : "bg-primary text-text-inverse hover:bg-primary-hover"
-              }`}
-            >
-              Đóng
-            </button>
-          </ResponsiveActionFooter>
-        </ResponsiveDialog>
-      ) : null}
     </section>
   );
 }

@@ -9,6 +9,8 @@ import { Prisma } from '../../generated/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StaffOperationsAccessService } from 'src/staff-ops/staff-operations-access.service';
 import type { ActionHistoryActor } from 'src/course-content/course-content.service';
+import { NOT_ARCHIVED_TIMELINE_ITEM } from 'src/course-content/archived-lesson-filter';
+import { getUserFullNameFromParts } from 'src/common/user-name.util';
 import type {
   ClassTimelineItemDto,
   ClassTimelinePageDto,
@@ -81,7 +83,7 @@ export class ClassTimelineService {
     const rows = await findTimelineItems(
       this.prisma,
       {
-        where: { classId },
+        where: { classId, ...NOT_ARCHIVED_TIMELINE_ITEM },
         orderBy: { sortOrder: 'asc' },
       },
       null,
@@ -114,6 +116,7 @@ export class ClassTimelineService {
         where: {
           classId,
           hiddenAt: null,
+          ...NOT_ARCHIVED_TIMELINE_ITEM,
           OR: [
             { classContentItemId: null },
             { classContentItem: { hiddenAt: null } },
@@ -131,60 +134,6 @@ export class ClassTimelineService {
       items: page.map((row) => this.mapItem(row, studentId)),
       nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
     };
-  }
-
-  async reorder(
-    classId: string,
-    orderedIds: string[],
-    actor: ActionHistoryActor,
-  ): Promise<ClassTimelineItemDto[]> {
-    const mode = await this.validateStaffClassAccess(classId, actor);
-    if (mode === 'customer_care' || mode === 'training_manager') {
-      throw new ForbiddenException('Bạn không được sắp xếp timeline lớp.');
-    }
-    if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
-      throw new BadRequestException('orderedIds is required');
-    }
-
-    const owned = await this.prisma.classTimelineItem.findMany({
-      where: { classId },
-      select: { id: true },
-    });
-    const uniqueOrdered = new Set(orderedIds);
-    if (uniqueOrdered.size !== orderedIds.length) {
-      throw new BadRequestException(
-        'Reorder payload contains duplicate IDs',
-      );
-    }
-    if (owned.length !== orderedIds.length) {
-      throw new BadRequestException(
-        'Reorder must include every timeline item exactly once',
-      );
-    }
-    const ownedIds = new Set(owned.map((row) => row.id));
-    for (const id of orderedIds) {
-      if (!ownedIds.has(id)) {
-        throw new BadRequestException(
-          'Some IDs do not belong to this class timeline',
-        );
-      }
-    }
-
-    await this.prisma.$transaction(
-      [
-        this.prisma.class.update({
-          where: { id: classId },
-          data: { timelineCustomOrder: true },
-        }),
-        ...orderedIds.map((id, idx) =>
-          this.prisma.classTimelineItem.update({
-            where: { id },
-            data: { sortOrder: idx },
-          }),
-        ),
-      ],
-    );
-    return this.listForStaff(classId, actor);
   }
 
   async findStudentIdByUserId(userId: string): Promise<string | null> {
@@ -374,16 +323,14 @@ export class ClassTimelineService {
   }
 }
 
-/** Ghép họ tên staff từ quan hệ `teacher.user` (StaffInfo không có cột fullName). */
+/**
+ * Họ tên staff từ quan hệ `teacher.user` (StaffInfo không có cột fullName), theo thứ tự
+ * Việt Nam: họ + đệm (`last_name`) rồi tên (`first_name`).
+ */
 function staffFullName(
   staff: { user?: { first_name: string | null; last_name: string | null } | null } | null,
 ): string | null {
-  if (!staff?.user) return null;
-  const name = [staff.user.first_name, staff.user.last_name]
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-  return name || null;
+  return getUserFullNameFromParts(staff?.user);
 }
 
 function formatTime(value: Date | null): string | null {

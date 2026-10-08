@@ -45,6 +45,8 @@ import type {
 } from "@/dtos/dashboard.dto";
 import { toast } from "sonner";
 import { formatVnInteger } from "@/lib/formatters";
+import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
+import NewStudentDefinitionHint from "@/components/shared/NewStudentDefinitionHint";
 
 function formatCurrency(value: number) {
   return `${formatVnInteger(value)} đ`;
@@ -235,6 +237,7 @@ function StudentChurnDetailModal({
                 Học sinh hiện tại ({activeCount})
               </button>
             </div>
+            {activeTab === "new" ? <NewStudentDefinitionHint /> : null}
 
             <div className="max-h-[65vh] overflow-auto px-4 py-4 sm:px-5">
               {churnQuery.isLoading ? (
@@ -361,7 +364,7 @@ function formatPendingPayrollNote(
     assistantAmount: 0,
     trainingManagerAmount: 0,
   };
-  return `Gia sư: ${formatCurrency(b.sessionAmount)} - Giáo án: ${formatCurrency(b.lessonAmount)} - SALE&CSKH: ${formatCurrency(b.customerCareAmount)} - Thưởng: ${formatCurrency(b.bonusAmount)} - Trợ cấp khác: ${formatCurrency(b.extraAllowanceAmount)} - Lương cứng: ${formatCurrency(b.fixedSalaryAmount ?? 0)} - Trợ lí: ${formatCurrency(b.assistantAmount)} - QL lớp: ${formatCurrency(b.trainingManagerAmount)} · Mọi khoản pending/unpaid mọi thời điểm (không lọc theo kỳ).`;
+  return `Gia sư: ${formatCurrency(b.sessionAmount)} - ${LESSON_PLAN_LABEL}: ${formatCurrency(b.lessonAmount)} - SALE&CSKH: ${formatCurrency(b.customerCareAmount)} - Thưởng: ${formatCurrency(b.bonusAmount)} - Trợ cấp khác: ${formatCurrency(b.extraAllowanceAmount)} - Lương cứng: ${formatCurrency(b.fixedSalaryAmount ?? 0)} - Trợ lí: ${formatCurrency(b.assistantAmount)} - QL lớp: ${formatCurrency(b.trainingManagerAmount)} · Mọi khoản pending/unpaid mọi thời điểm (không lọc theo kỳ).`;
 }
 
 function getOtherCostFromBreakdown(dashboard: AdminDashboardDto) {
@@ -715,7 +718,7 @@ export default function AdminDashboardTabPage() {
       key: "personnel-cost",
       label: "Chi phí Nhân sự",
       value: personnelCostMonthly,
-      note: "Chi phí nhân sự phát sinh trong kỳ: dạy, CSKH, giáo án, bonus, trợ cấp khác, trợ lí, quản lý lớp.",
+      note: "Chi phí nhân sự phát sinh trong kỳ: dạy, CSKH, giáo án học sinh giỏi, bonus, trợ cấp khác, trợ lí, quản lý lớp.",
     },
     {
       key: "other-cost",
@@ -958,6 +961,9 @@ export default function AdminDashboardTabPage() {
                       className="rounded-md border border-border-default bg-bg-surface px-2.5 py-1.5 text-sm text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                     />
                   </div>
+                  <p className="basis-full text-xs text-text-muted">
+                    Bonus tính trọn tháng thưởng: mọi tháng giao với khoảng ngày đã chọn đều được lấy đủ.
+                  </p>
                 </div>
               )}
             </div>

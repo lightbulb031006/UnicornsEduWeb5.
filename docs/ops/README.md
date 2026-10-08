@@ -1,5 +1,7 @@
 # Ops / data migrations
 
+Đồng bộ nguồn Tin → Toán mới nhất: [08/10/2026 — phạm vi, backup và migration cần kiểm tra](upstream-sync-math-2026-10-08.md). Chưa triển khai bản đồng bộ này.
+
 ## Multi-instance VPS deploy
 
 Nhiều bản UnicornsEduWeb5 trên **cùng một VPS** — mỗi môn học / domain riêng, database riêng, cổng Nginx loopback riêng.

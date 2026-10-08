@@ -503,6 +503,20 @@ describe('AttemptService', () => {
   });
 
   describe('getGradingQueue', () => {
+    it('404 khi tiết của lần giao đã lưu trữ', async () => {
+      prisma.classContentItem.findFirst.mockResolvedValue({
+        ...assignment,
+        lesson: { ...assignment.lesson, archivedAt: new Date() },
+      });
+
+      await expect(service.getGradingQueue('cls-1', 'cci-1')).rejects.toThrow(
+        'Assignment not found',
+      );
+      await expect(service.getPracticeStats('cls-1', 'cci-1')).rejects.toThrow(
+        'Assignment not found',
+      );
+    });
+
     it('chỉ lấy câu tự luận chưa chấm; distinct theo studentId (lượt mới nhất)', async () => {
       prisma.classContentItem.findFirst.mockResolvedValue(assignment);
       prisma.attempt.groupBy.mockResolvedValue([

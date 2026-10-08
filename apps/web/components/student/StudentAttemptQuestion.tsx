@@ -14,12 +14,15 @@ export default function StudentAttemptQuestion({
   index,
   disabled,
   reveal,
+  hidePoints = false,
   onChange,
 }: {
   question: AttemptQuestionDto;
   index: number;
   disabled: boolean;
   reveal: boolean;
+  /** Xem trước khi soạn: điểm chỉ chốt lúc giao đề (100/N). */
+  hidePoints?: boolean;
   onChange: (val: {
     choiceIndex?: number | null;
     essayAnswer?: string | null;
@@ -42,13 +45,15 @@ export default function StudentAttemptQuestion({
       )}
     >
       <div className="mb-3 flex items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 text-sm font-medium text-text-primary">
+        <div className="min-w-0 flex-1 text-sm font-medium text-text-primary">
           <span className="mr-1 text-primary">Câu {index + 1}.</span>
-          <MathContent content={question.content} className="inline" />
-          <span className="ml-2 text-[11px] font-normal text-text-muted">
-            {question.pointsPossible} điểm
-          </span>
-        </p>
+          <MathContent content={question.content} className="inline [&>p:first-child]:inline" />
+          {hidePoints ? null : (
+            <span className="ml-2 text-[11px] font-normal text-text-muted">
+              {question.pointsPossible} điểm
+            </span>
+          )}
+        </div>
         {canMark ? (
           <button
             type="button"

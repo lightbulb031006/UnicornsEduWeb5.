@@ -6,11 +6,82 @@ import {
   resolveLiveSessionAllowanceSnapshots,
   resolveSnapshotPerStudentAllowanceVnd,
   resolveSnapshotScaleAmountVnd,
+  resolveTeacherScaleAmountVnd,
   resolveTeacherSessionAllowanceCapVnd,
 } from './session-allowance.util';
 import { presentCustomAllowanceAsPerSession } from '../common/block-pricing.util';
 
 describe('session-allowance.util', () => {
+  describe('resolveTeacherScaleAmountVnd', () => {
+    it('inherits class scale when teacher has no custom scale', () => {
+      expect(
+        resolveTeacherScaleAmountVnd({
+          customScaleAmount: null,
+          classScaleAmount: 50_000,
+        }),
+      ).toBe(50_000);
+      expect(
+        resolveTeacherScaleAmountVnd({
+          customScaleAmount: undefined,
+          classScaleAmount: 50_000,
+        }),
+      ).toBe(50_000);
+    });
+
+    it('treats custom 0 as "no scale", not as inherit', () => {
+      expect(
+        resolveTeacherScaleAmountVnd({
+          customScaleAmount: 0,
+          classScaleAmount: 50_000,
+        }),
+      ).toBe(0);
+    });
+
+    it('uses positive custom scale over class scale', () => {
+      expect(
+        resolveTeacherScaleAmountVnd({
+          customScaleAmount: 80_000,
+          classScaleAmount: 50_000,
+        }),
+      ).toBe(80_000);
+      expect(
+        resolveTeacherScaleAmountVnd({
+          customScaleAmount: 30_000,
+          classScaleAmount: null,
+        }),
+      ).toBe(30_000);
+    });
+
+    it('returns 0 when neither custom nor class scale is set', () => {
+      expect(
+        resolveTeacherScaleAmountVnd({
+          customScaleAmount: null,
+          classScaleAmount: null,
+        }),
+      ).toBe(0);
+    });
+
+    it('feeds the session snapshot: custom scale is flat, not multiplied by blocks', () => {
+      const live = resolveLiveSessionAllowanceSnapshots({
+        pricingMode: 'per_block',
+        customAllowanceStored: null,
+        classDefaultPerStudent: 90_000,
+        classDefaultPerBlock: 30_000,
+        scaleAmount: resolveTeacherScaleAmountVnd({
+          customScaleAmount: 20_000,
+          classScaleAmount: 50_000,
+        }),
+        reconstructionBlocks: 3,
+        storedAsPerBlock: true,
+        snapshotBlockCount: 3,
+        chargeableStudentCount: 2,
+        presentCustomAsPerSession: null,
+      });
+      expect(live.snapshotScaleAmount).toBe(20_000);
+      expect(live.allowanceAmount).toBe(30_000 * 2 * 3 + 20_000);
+    });
+  });
+
   it('resolves per-student allowance from custom then class default', () => {
     expect(
       resolveSnapshotPerStudentAllowanceVnd({

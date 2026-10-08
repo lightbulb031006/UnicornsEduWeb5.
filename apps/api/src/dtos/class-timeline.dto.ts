@@ -1,14 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { ArrayUnique, IsArray, IsString } from 'class-validator';
 import { ClassTimelineItemKind } from '../../generated/enums';
-
-export class ReorderClassTimelineDto {
-  @ApiProperty({ type: [String] })
-  @IsArray()
-  @ArrayUnique({ message: 'orderedIds must not contain duplicate ids' })
-  @IsString({ each: true })
-  orderedIds: string[];
-}
 
 /** Điểm danh rút gọn, chỉ trả cho staff để dựng nhận xét buổi học trên timeline. */
 export interface ClassTimelineAttendanceDto {

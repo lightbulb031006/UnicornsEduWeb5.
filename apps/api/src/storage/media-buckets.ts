@@ -7,3 +7,6 @@ export const STUDENT_GALLERY_STORAGE_BUCKET = 'student-gallery';
 export const AVATAR_PUBLIC_BUCKET = 'avatars-public';
 export const ACHIEVEMENT_PUBLIC_BUCKET = 'achievements-public';
 export const STUDENT_GALLERY_PUBLIC_BUCKET = 'student-gallery-public';
+
+/** Private bucket ảnh bìa lớp (đọc qua signed URL). */
+export const CLASS_COVER_STORAGE_BUCKET = 'class-covers';

@@ -17,6 +17,9 @@ type TutorItem = {
   status: string | null;
   assignmentStatus?: string | null;
   customAllowance: number | null;
+  /** Scale hiệu lực / buổi (riêng nếu có, không thì scale lớp). */
+  effectiveScaleAmount: number | null;
+  hasCustomScale: boolean;
   operatingDeductionRatePercent: number | null;
 };
 
@@ -26,8 +29,15 @@ type Props = {
   trainingManagerRatePercent?: number | null;
   /** Class default allowance per student per session (VNĐ). Used when teacher has no custom override. */
   defaultAllowancePerStudent?: number | null;
+  /** Class `scale_amount` (VNĐ / buổi). Used when teacher has no custom scale. */
+  defaultScaleAmount?: number | null;
   /** Admin, accountant, assistant only — shows per-teacher Trợ cấp + Vận hành. */
   showTeacherCompensation?: boolean;
+  /**
+   * Gia sư tự xem lớp: chỉ dòng của gia sư này hiện trợ cấp / scale / vận hành
+   * (kèm nhãn "bạn"); các dòng khác không có khối số. Bỏ trống = hiện cho mọi dòng.
+   */
+  compensationTeacherId?: string | null;
   className?: string;
   action?: React.ReactNode;
   enableTeacherNavigation?: boolean;
@@ -63,6 +73,7 @@ function resolveEffectiveAllowance(
 function normalizeTutors(
   teachers?: ClassTeacher[],
   defaultAllowancePerStudent?: number | null,
+  defaultScaleAmount?: number | null,
 ): TutorItem[] {
   if (!Array.isArray(teachers)) return [];
 
@@ -73,6 +84,8 @@ function normalizeTutors(
     const operatingDeductionRatePercent = normalizeRatePercent(
       teacher.operatingDeductionRatePercent ?? null,
     );
+    // 0 là scale riêng hợp lệ (gia sư không có scale), nên không dùng `||`.
+    const customScale = normalizeMoneyAmount(teacher.customScaleAmount);
 
     return [
       ...acc,
@@ -90,6 +103,8 @@ function normalizeTutors(
           normalizeMoneyAmount(teacher.customAllowance),
           defaultAllowancePerStudent,
         ),
+        effectiveScaleAmount: customScale ?? normalizeMoneyAmount(defaultScaleAmount),
+        hasCustomScale: customScale != null,
         operatingDeductionRatePercent,
       },
     ];
@@ -101,7 +116,9 @@ export default function TutorCard({
   trainingManager,
   trainingManagerRatePercent,
   defaultAllowancePerStudent,
+  defaultScaleAmount,
   showTeacherCompensation = false,
+  compensationTeacherId = null,
   className = "",
   action,
   enableTeacherNavigation = true,
@@ -112,6 +129,7 @@ export default function TutorCard({
   const tutorItems = normalizeTutors(
     teachers,
     showTeacherCompensation ? defaultAllowancePerStudent : undefined,
+    showTeacherCompensation ? defaultScaleAmount : undefined,
   );
   const { push } = useRouter();
 
@@ -127,106 +145,142 @@ export default function TutorCard({
           </p>
           {tutorItems.length > 0 ? (
             <div className="space-y-1.5">
-              {tutorItems.map((teacher, index) => (
-                <div
-                  key={teacher.id}
-                  role="button"
-                  tabIndex={enableTeacherNavigation ? 0 : -1}
-                  aria-disabled={!enableTeacherNavigation}
-                  onClick={
-                    enableTeacherNavigation
-                      ? () => push(`/admin/staffs/${encodeURIComponent(teacher.id)}`)
-                      : undefined
-                  }
-                  onKeyDown={
-                    enableTeacherNavigation
-                      ? (e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            push(`/admin/staffs/${encodeURIComponent(teacher.id)}`);
-                          }
-                        }
-                      : undefined
-                  }
-                  className={`rounded-lg border border-border-default bg-bg-secondary/70 transition-colors ${
-                    showTeacherCompensation
-                      ? "px-2.5 py-2 sm:px-3 sm:py-2.5"
-                      : "flex items-center gap-2 px-2.5 py-1.5 sm:gap-2.5 sm:px-3 sm:py-2"
-                  } ${
-                    enableTeacherNavigation
-                      ? "cursor-pointer hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                      : "cursor-default"
-                  }`}
-                >
+              {tutorItems.map((teacher, index) => {
+                const isSelf = compensationTeacherId != null && teacher.id === compensationTeacherId;
+                const showCompensation =
+                  showTeacherCompensation && (compensationTeacherId == null || isSelf);
+                const showStopTeaching =
+                  canStopTeaching && teacher.assignmentStatus !== "inactive";
+                const isStopTeachingPending = stopTeachingPendingTeacherId === teacher.id;
+
+                return (
                   <div
-                    className={
-                      showTeacherCompensation
-                        ? "flex items-center gap-2 sm:gap-2.5"
-                        : "contents"
+                    key={teacher.id}
+                    role="button"
+                    tabIndex={enableTeacherNavigation ? 0 : -1}
+                    aria-disabled={!enableTeacherNavigation}
+                    onClick={
+                      enableTeacherNavigation
+                        ? () => push(`/admin/staffs/${encodeURIComponent(teacher.id)}`)
+                        : undefined
                     }
+                    onKeyDown={
+                      enableTeacherNavigation
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              push(`/admin/staffs/${encodeURIComponent(teacher.id)}`);
+                            }
+                          }
+                        : undefined
+                    }
+                    className={`rounded-lg border border-border-default bg-bg-secondary/70 transition-colors ${
+                      showCompensation
+                        ? "px-2.5 py-2 sm:px-3 sm:py-2.5"
+                        : "px-2.5 py-1.5 sm:px-3 sm:py-2"
+                    } ${
+                      enableTeacherNavigation
+                        ? "cursor-pointer hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                        : "cursor-default"
+                    }`}
                   >
-                    <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border-default bg-bg-surface text-[10px] font-semibold tabular-nums text-text-secondary">
-                      {String(index + 1).padStart(2, "0")}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium leading-tight text-text-primary">
-                        {teacher.name}
-                      </p>
-                    </div>
+                    {/* Mobile: badge + nút Nghỉ dạy xuống dòng 2 (thụt theo tên); sm+: chung 1 dòng. */}
                     <div
-                      className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] sm:text-[11px] ${
-                        teacher.status === "Đang hoạt động"
-                          ? "border-success/30 bg-success/10 text-success"
-                          : teacher.status === "Ngưng hoạt động"
-                            ? "border-error/30 bg-error/10 text-error"
-                            : "border-border-default bg-bg-surface text-text-secondary"
+                      className={`flex items-center gap-2 sm:flex-nowrap sm:gap-2.5 ${
+                        showStopTeaching ? "flex-wrap" : ""
                       }`}
                     >
-                      {teacher.status ?? "Đang phân công"}
-                    </div>
-                  </div>
-                  {showTeacherCompensation ? (
-                    <div
-                      className="mt-2 grid grid-cols-2 gap-2 border-t border-border-default/70 pt-2"
-                      role="presentation"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
-                          Trợ cấp / học sinh
-                        </p>
-                        <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-primary">
-                          {formatCurrency(teacher.customAllowance)}
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border-default bg-bg-surface text-[10px] font-semibold tabular-nums text-text-secondary">
+                        {String(index + 1).padStart(2, "0")}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium leading-tight text-text-primary">
+                          {teacher.name}
+                          {isSelf ? (
+                            <span className="ml-1.5 font-normal text-text-muted">(bạn)</span>
+                          ) : null}
                         </p>
                       </div>
-                      <div className="min-w-0 text-right">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
-                          Vận hành
-                        </p>
-                        <p className="mt-0.5 text-sm font-semibold tabular-nums text-text-primary">
-                          {formatRatePercent(teacher.operatingDeductionRatePercent)}
-                        </p>
-                      </div>
-                      {canStopTeaching && teacher.assignmentStatus !== "inactive" ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onStopTeaching?.(teacher.id);
-                          }}
-                          disabled={stopTeachingPendingTeacherId === teacher.id}
-                          className="col-span-2 inline-flex min-h-9 items-center justify-center rounded-md border border-border-default bg-bg-surface px-3 text-xs font-semibold text-text-secondary transition hover:bg-bg-tertiary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                      <div
+                        className={`flex shrink-0 items-center gap-2 ${
+                          showStopTeaching
+                            ? "w-full justify-between pl-10 sm:w-auto sm:justify-end sm:pl-0"
+                            : ""
+                        }`}
+                      >
+                        <div
+                          className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] sm:text-[11px] ${
+                            teacher.status === "Đang hoạt động"
+                              ? "border-success/30 bg-success/10 text-success"
+                              : teacher.status === "Ngưng hoạt động"
+                                ? "border-error/30 bg-error/10 text-error"
+                                : "border-border-default bg-bg-surface text-text-secondary"
+                          }`}
                         >
-                          {stopTeachingPendingTeacherId === teacher.id
-                            ? "Đang lưu..."
-                            : "Nghỉ dạy"}
-                        </button>
-                      ) : null}
+                          {teacher.status ?? "Đang phân công"}
+                        </div>
+                        {showStopTeaching ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onStopTeaching?.(teacher.id);
+                            }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            disabled={isStopTeachingPending}
+                            className="inline-flex min-h-8 shrink-0 items-center justify-center rounded-md border border-error/40 bg-error/10 px-2.5 text-xs font-semibold text-error transition hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-error/50"
+                          >
+                            {isStopTeachingPending ? "Đang lưu..." : "Nghỉ dạy"}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
-                  ) : null}
-                </div>
-              ))}
+                    {showCompensation ? (
+                      <div
+                        className="mt-2 grid grid-cols-2 gap-2 border-t border-border-default/70 pt-2 sm:grid-cols-3"
+                        role="presentation"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+                            Trợ cấp / học sinh
+                          </p>
+                          <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-primary">
+                            {formatCurrency(teacher.customAllowance)}
+                          </p>
+                        </div>
+                        <div className="min-w-0 text-right sm:text-left">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+                            Scale / buổi
+                          </p>
+                          <p className="mt-0.5 flex items-center justify-end gap-1 text-sm font-semibold tabular-nums text-text-primary sm:justify-start">
+                            <span className="truncate">
+                              {formatCurrency(teacher.effectiveScaleAmount)}
+                            </span>
+                            {teacher.hasCustomScale ? (
+                              <span
+                                className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-px text-[10px] font-medium text-primary"
+                                title="Scale riêng của gia sư, khác scale mặc định của lớp"
+                              >
+                                riêng
+                              </span>
+                            ) : null}
+                          </p>
+                        </div>
+                        <div className="min-w-0 text-left sm:text-right">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+                            Vận hành
+                          </p>
+                          <p className="mt-0.5 text-sm font-semibold tabular-nums text-text-primary">
+                            {formatRatePercent(teacher.operatingDeductionRatePercent)}
+                          </p>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-border-default bg-bg-secondary/50 px-3 py-4 text-center text-xs text-text-muted">

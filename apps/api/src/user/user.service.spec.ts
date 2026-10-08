@@ -5,9 +5,10 @@ jest.mock('src/staff/staff.service', () => ({
   StaffService: class StaffServiceMock {},
 }));
 
-import { BadRequestException } from '@nestjs/common';
-import { UserRole } from '../../generated/enums';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { StaffRole, UserRole } from '../../generated/enums';
 import { UserService } from './user.service';
+import { ACTIVE_STANDING_TEACHER } from 'src/class/standing-teacher-filter';
 
 describe('UserService', () => {
   const mockPrisma = {
@@ -24,6 +25,18 @@ describe('UserService', () => {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+    },
+    studentClass: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      updateMany: jest.fn(),
+      createMany: jest.fn(),
+    },
+    class: {
+      findMany: jest.fn(),
+    },
+    customerCareService: {
+      upsert: jest.fn(),
     },
     studentInfo: {
       create: jest.fn(),
@@ -172,6 +185,98 @@ describe('UserService', () => {
     expect(
       authService.createPendingUserWithVerificationEmail,
     ).not.toHaveBeenCalled();
+  });
+
+  describe('createStudentUser customer care owner', () => {
+    const customerCareActor = {
+      userId: 'care-user-1',
+      userEmail: 'care@example.com',
+      roleType: UserRole.staff,
+    };
+    const payload = {
+      email: 'new-student@example.com',
+      phone: '0900000000',
+      password: 'secret',
+      accountHandle: 'new-student',
+      first_name: 'An',
+      last_name: 'Nguyen',
+      class_ids: [] as string[],
+    };
+
+    beforeEach(() => {
+      authService.createPendingUserWithVerificationEmail.mockResolvedValue({
+        message: 'Tạo học sinh thành công. Email xác thực đã được gửi.',
+      });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: payload.email,
+        studentInfo: null,
+      });
+      mockPrisma.studentInfo.create.mockResolvedValue({ id: 'student-1' });
+      mockPrisma.studentInfo.findUnique.mockResolvedValue({ id: 'student-1' });
+      mockPrisma.studentClass.findMany.mockResolvedValue([]);
+    });
+
+    it('assigns the creating customer care staff with their default percent', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.customer_care],
+        customerCareDefaultProfitPercent: 0.15,
+      });
+
+      await service.createStudentUser(payload, customerCareActor);
+
+      expect(mockPrisma.customerCareService.upsert).toHaveBeenCalledWith({
+        where: { studentId: 'student-1' },
+        create: {
+          studentId: 'student-1',
+          staffId: 'staff-care-1',
+          profitPercent: 0.15,
+        },
+        update: {},
+      });
+    });
+
+    it('rejects class assignment when customer care creates a student', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.customer_care],
+        customerCareDefaultProfitPercent: 0.15,
+      });
+
+      await expect(
+        service.createStudentUser(
+          { ...payload, class_ids: ['class-1'] },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(
+        authService.createPendingUserWithVerificationEmail,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-assign customer care when an assistant creates a student', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-assistant-1',
+        roles: [StaffRole.assistant, StaffRole.customer_care],
+        customerCareDefaultProfitPercent: 0.15,
+      });
+
+      await service.createStudentUser(payload, customerCareActor);
+
+      expect(mockPrisma.customerCareService.upsert).not.toHaveBeenCalled();
+    });
+
+    it('does not look up staff when an admin creates a student', async () => {
+      await service.createStudentUser(payload, {
+        userId: 'admin-1',
+        userEmail: 'admin@example.com',
+        roleType: UserRole.admin,
+      });
+
+      expect(mockPrisma.staffInfo.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.customerCareService.upsert).not.toHaveBeenCalled();
+    });
   });
 
   it('filters users by search tokens and clamps page to available range', async () => {
@@ -867,5 +972,156 @@ describe('UserService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(mockPrisma.user.delete).not.toHaveBeenCalled();
+  });
+
+  describe('getMyStudentClassCards', () => {
+    it('queries active, non-expired enrollments with names only and sorts by class name', async () => {
+      const now = new Date('2026-10-02T00:00:00.000Z');
+      mockPrisma.studentClass.findMany.mockResolvedValue([
+        {
+          class: {
+            id: 'c2',
+            name: 'Lớp B',
+            course: { name: 'Khoá Y' },
+            teachers: [],
+          },
+        },
+        {
+          class: {
+            id: 'c1',
+            name: 'Lớp A',
+            course: { name: 'Khoá X' },
+            teachers: [
+              { teacher: { user: { first_name: 'An', last_name: 'Lê' } } },
+            ],
+          },
+        },
+      ]);
+
+      const cards = await service.getMyStudentClassCards('s1', now);
+
+      expect(cards).toEqual([
+        {
+          classId: 'c1',
+          className: 'Lớp A',
+          courseName: 'Khoá X',
+          teacherNames: ['Lê An'],
+          coverImageUrl: null,
+        },
+        {
+          classId: 'c2',
+          className: 'Lớp B',
+          courseName: 'Khoá Y',
+          teacherNames: [],
+          coverImageUrl: null,
+        },
+      ]);
+
+      const [args] = mockPrisma.studentClass.findMany.mock.calls[0] as [
+        {
+          where: unknown;
+          select: { class: { select: { teachers: unknown } } };
+        },
+      ];
+      expect(args.where).toEqual({
+        studentId: 's1',
+        status: 'active',
+        class: {
+          OR: [
+            { contentAccessExpiresAt: null },
+            { contentAccessExpiresAt: { gt: now } },
+          ],
+        },
+      });
+      expect(args.select.class.select.teachers).toEqual({
+        where: ACTIVE_STANDING_TEACHER,
+        select: {
+          teacher: {
+            select: { user: { select: { first_name: true, last_name: true } } },
+          },
+        },
+      });
+    });
+  });
+
+  describe('getMyStudentClassDetail', () => {
+    const now = new Date('2026-10-02T00:00:00.000Z');
+    const enrollment = (overrides: Record<string, unknown> = {}) => ({
+      class: {
+        id: 'c1',
+        name: 'Lớp A',
+        status: 'running',
+        contentAccessExpiresAt: null,
+        course: { name: 'Khoá X' },
+        teachers: [
+          { teacher: { user: { first_name: 'Bình', last_name: 'Trần' } } },
+          { teacher: { user: { first_name: 'An', last_name: 'Lê' } } },
+        ],
+        ...overrides,
+      },
+    });
+
+    it('returns header fields with active standing teacher names only', async () => {
+      mockPrisma.studentClass.findFirst.mockResolvedValue(enrollment());
+
+      const detail = await service.getMyStudentClassDetail('s1', 'c1', now);
+
+      expect(detail).toEqual({
+        classId: 'c1',
+        className: 'Lớp A',
+        classStatus: 'running',
+        courseName: 'Khoá X',
+        teacherNames: ['Lê An', 'Trần Bình'],
+      });
+      const [args] = mockPrisma.studentClass.findFirst.mock.calls[0] as [
+        {
+          where: unknown;
+          select: { class: { select: Record<string, unknown> } };
+        },
+      ];
+      expect(args.where).toEqual({
+        classId: 'c1',
+        studentId: 's1',
+        status: 'active',
+      });
+      expect(args.select.class.select.teachers).toEqual({
+        where: ACTIVE_STANDING_TEACHER,
+        select: {
+          teacher: {
+            select: { user: { select: { first_name: true, last_name: true } } },
+          },
+        },
+      });
+    });
+
+    it('returns empty teacherNames when class has no active standing teacher', async () => {
+      mockPrisma.studentClass.findFirst.mockResolvedValue(
+        enrollment({ teachers: [] }),
+      );
+
+      const detail = await service.getMyStudentClassDetail('s1', 'c1', now);
+
+      expect(detail.teacherNames).toEqual([]);
+    });
+
+    it('rejects students not enrolled in the class', async () => {
+      mockPrisma.studentClass.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getMyStudentClassDetail('s1', 'c1', now),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects expired class content access', async () => {
+      mockPrisma.studentClass.findFirst.mockResolvedValue(
+        enrollment({
+          contentAccessExpiresAt: new Date('2026-10-01T00:00:00.000Z'),
+        }),
+      );
+
+      await expect(
+        service.getMyStudentClassDetail('s1', 'c1', now),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
   });
 });

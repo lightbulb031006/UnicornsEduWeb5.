@@ -4,7 +4,11 @@ import { useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as classApi from "@/lib/apis/class.api";
-import { CourseFormPopup, type CourseFormValues } from "@/components/admin/class";
+import {
+  CourseFormPopup,
+  CourseOneTimeBadge,
+  type CourseFormValues,
+} from "@/components/admin/class";
 import { Switch } from "@/components/ui/switch";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { courseKeys, classKeys, authKeys } from "@/lib/query-keys";
@@ -88,6 +92,10 @@ export default function CourseListWorkspace({
             name: values.name,
             sort_order: values.sortOrder,
             default_duration_days: values.defaultDurationDays,
+            ...(capabilities.canChangeCourseSaleMode &&
+            values.isOneTime !== editingCourse.isOneTime
+              ? { is_one_time: values.isOneTime }
+              : {}),
           }),
         onSuccess: invalidateCourseData,
       });
@@ -103,6 +111,9 @@ export default function CourseListWorkspace({
           name: values.name,
           sort_order: values.sortOrder,
           default_duration_days: values.defaultDurationDays,
+          ...(capabilities.canChangeCourseSaleMode && values.isOneTime
+            ? { is_one_time: true }
+            : {}),
         }),
       onSuccess: invalidateCourseData,
     });
@@ -178,7 +189,11 @@ export default function CourseListWorkspace({
               </button>
             </div>
           ) : courses.length === 0 ? (
-            <p className="p-4 text-sm text-text-secondary">Chưa có khoá học nào.</p>
+            <p className="p-4 text-sm text-text-secondary">
+              {capabilities.canViewAllCourses
+                ? "Chưa có khoá học nào."
+                : "Bạn chưa được gán vào đội giáo án của khoá nào."}
+            </p>
           ) : (
             <ul className="space-y-2">
               {courses.map((course) => (
@@ -199,6 +214,7 @@ export default function CourseListWorkspace({
                           Đã ẩn
                         </span>
                       ) : null}
+                      <CourseOneTimeBadge isOneTime={course.isOneTime} />
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
                       <span>Thứ tự: {course.sortOrder}</span>
@@ -254,6 +270,7 @@ export default function CourseListWorkspace({
           course={editingCourse}
           onClose={() => setFormOpen(false)}
           onSubmit={handleSubmit}
+          canChangeSaleMode={capabilities.canChangeCourseSaleMode}
         />
       ) : null}
       {dialog}

@@ -52,6 +52,20 @@ export class ClassTeacherItemDto {
 
   @ApiPropertyOptional({
     description:
+      'Custom scale for this teacher in this class (VNĐ, flat per session). Omit to preserve an existing value or inherit the class scale_amount for new assignments. Send null to inherit the class scale_amount. 0 means no scale for this teacher.',
+    example: 50000,
+    minimum: 0,
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_obj, value) => value !== null && value !== undefined)
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  custom_scale_amount?: number | null;
+
+  @ApiPropertyOptional({
+    description:
       'Operating deduction rate for this teacher-class relation in percent. If omitted, backend persists 0.',
     example: 10,
     minimum: 0,
@@ -170,7 +184,7 @@ export class CreateClassDto {
     enum: ClassPricingMode,
     default: ClassPricingMode.per_session,
     description:
-      'Chế độ tính tiền của lớp. Mặc định theo buổi. Theo block 30 phút chỉ khi lịch chuẩn suy được số block.',
+      'Chế độ tính tiền của lớp. Mặc định theo buổi. Theo block 30 phút chỉ khi lịch chuẩn suy được số block. Lớp thuộc khoá bán một lần luôn là one_time (bỏ qua giá trị gửi lên); gửi one_time cho khoá thường bị 400. Lớp khoá bán một lần bắt buộc tuition_package_total > 0.',
   })
   @IsOptional()
   @IsEnum(ClassPricingMode)
@@ -275,7 +289,7 @@ export class UpdateClassPricingModeDto {
   @ApiProperty({
     enum: ClassPricingMode,
     description:
-      'Đổi chế độ tính tiền. Buổi unpaid được tính lại; buổi paid/deposit/cọc giữ nguyên.',
+      'Đổi chế độ tính tiền giữa per_session và per_block: buổi unpaid được tính lại, buổi paid/deposit/cọc giữ nguyên. one_time đi theo khoá (PATCH /courses/:id is_one_time): gửi one_time hoặc đổi lớp one_time ở đây bị 400.',
     example: ClassPricingMode.per_session,
   })
   @IsEnum(ClassPricingMode)
@@ -333,6 +347,20 @@ export class ClassTeacherCompensationItemDto {
   @IsInt()
   @Min(0)
   custom_allowance?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Custom scale for this teacher in this class (VNĐ, flat per session). Omit to leave unchanged. Send null to inherit the class scale_amount. 0 means no scale for this teacher.',
+    example: 50000,
+    minimum: 0,
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_obj, value) => value !== null && value !== undefined)
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  custom_scale_amount?: number | null;
 
   @ApiPropertyOptional({
     description:
@@ -610,4 +638,20 @@ export class UpdateClassDto extends PartialType(CreateClassDto) {
   @IsArray()
   @IsStudentId({ each: true })
   student_ids?: string[];
+}
+
+export class ClassCoverImageDto {
+  @ApiPropertyOptional({
+    description:
+      'Signed URL ảnh bìa (hết hạn sau 1 giờ). Null = chưa có ảnh bìa, FE hiện mascot.',
+    type: String,
+    nullable: true,
+  })
+  coverImageUrl: string | null;
+
+  @ApiProperty({
+    description:
+      'Người gọi có được upload/thay/gỡ ảnh bìa lớp này không (admin, trợ lí, Gia sư đứng lớp, Quản lý lớp).',
+  })
+  canManage: boolean;
 }

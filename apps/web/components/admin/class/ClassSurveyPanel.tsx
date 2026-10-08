@@ -2,11 +2,20 @@
 
 import {
   ClipboardDocumentIcon,
-  PencilSquareIcon,
   TrashIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { useEffect, useMemo, useState, type ReactNode, type SyntheticEvent } from "react";
+import {
+  useMemo,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type SyntheticEvent,
+} from "react";
+import {
+  ClassDetailDateLines,
+  type SessionHistoryExtraRow,
+} from "@/components/admin/session/SessionHistoryTable";
 import { toast } from "sonner";
 import { DateInput } from "@/components/ui/DateInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
@@ -65,8 +74,6 @@ type Props = {
   availableSurveys: ClassSurveyPickerOption[];
   teachers: ClassSurveyTeacherOption[];
   students: ClassSurveyStudentOption[];
-  loading?: boolean;
-  fetching?: boolean;
   error?: boolean;
   canManage?: boolean;
   canViewDetails?: boolean;
@@ -79,9 +86,8 @@ type Props = {
     payload: UpdateClassSurveyPayload,
   ) => Promise<unknown>;
   onDelete: (surveyId: string) => Promise<unknown>;
-  hideList?: boolean;
-  autoOpenSurveyId?: string | null;
-  autoOpenToken?: number;
+  /** Vẽ danh sách chung (bảng buổi học) với các dòng khảo sát đã dựng sẵn. */
+  renderList: (surveyRows: SessionHistoryExtraRow[]) => ReactNode;
 };
 
 function getTodayInputValue() {
@@ -180,84 +186,163 @@ function formatSurveyDate(value: string) {
   return surveyDateFormatter.format(date);
 }
 
-function SurveyTableSkeleton() {
-  return (
-    <div aria-hidden>
-      <div className="space-y-2 md:hidden">
-        {Array.from({ length: 3 }).map((_, index) => (
-          <article
-            key={index}
-            className="rounded-lg border border-border-default bg-bg-surface p-3 shadow-sm"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="space-y-2">
-                <span className="block h-4 w-28 animate-pulse rounded bg-bg-tertiary" />
-                <span className="block h-3 w-20 animate-pulse rounded bg-bg-tertiary" />
-              </div>
-              <span className="block h-5 w-16 animate-pulse rounded-full bg-bg-tertiary" />
-            </div>
-            <div className="mt-3 space-y-1 border-t border-border-subtle pt-3">
-              <span className="block h-3 w-full animate-pulse rounded bg-bg-tertiary" />
-              <span className="block h-3 w-2/3 animate-pulse rounded bg-bg-tertiary" />
-            </div>
-          </article>
-        ))}
-      </div>
-      <div className="hidden overflow-x-auto md:block">
-        <table className="w-full min-w-[680px] border-collapse text-left text-sm">
-          <thead>
-            <tr className="border-b border-border-default bg-bg-secondary">
-              {["Bài khảo sát", "Ngày báo cáo", "Người phụ trách", "Đánh giá", ""].map(
-                (label) => (
-                  <th
-                    key={label || "actions"}
-                    className="px-4 py-3 font-medium text-text-primary"
-                  >
-                    {label}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: 3 }).map((_, index) => (
-              <tr
-                key={index}
-                className="border-b border-border-default bg-bg-surface"
-              >
-                {Array.from({ length: 5 }).map((__, cellIndex) => (
-                  <td key={cellIndex} className="px-4 py-3">
-                    <span className="block h-5 w-24 animate-pulse rounded bg-bg-tertiary" />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+const surveyRowActionClassName =
+  "inline-flex items-center justify-center rounded p-1.5 text-text-muted transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus";
 
-function IconButton({
+function SurveyRowAction({
   label,
+  tone = "default",
   onClick,
   children,
 }: {
   label: string;
-  onClick: (event: SyntheticEvent<HTMLButtonElement>) => void;
+  tone?: "default" | "danger";
+  onClick: () => void;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(event: SyntheticEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
       title={label}
       aria-label={label}
-      className="flex size-9 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+      className={`${surveyRowActionClassName} ${
+        tone === "danger"
+          ? "hover:bg-error/10 hover:text-error"
+          : "hover:bg-bg-tertiary hover:text-text-primary"
+      }`}
     >
       {children}
     </button>
+  );
+}
+
+type SurveyRowProps = {
+  survey: ClassSurveyRecord;
+  /** Bấm cả dòng: sửa (quản lý) hoặc xem (chỉ đọc). Không có thì dòng không bấm được. */
+  onOpen?: () => void;
+  onCopy: () => void;
+  onDelete?: () => void;
+};
+
+function surveyRowInteraction(onOpen?: () => void) {
+  if (!onOpen) return {};
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    onClick: onOpen,
+    onKeyDown: (event: KeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onOpen();
+      }
+    },
+  };
+}
+
+function SurveyDateCell({ survey }: { survey: ClassSurveyRecord }) {
+  return (
+    <ClassDetailDateLines date={survey.reportDate}>
+      <span className="mt-0.5 inline-flex w-fit items-center rounded-full bg-info/10 px-1.5 py-px text-[10px] font-semibold text-info">
+        Khảo sát
+      </span>
+    </ClassDetailDateLines>
+  );
+}
+
+function SurveySummary({ survey }: { survey: ClassSurveyRecord }) {
+  return (
+    <div className="min-w-0 space-y-0.5">
+      <p className="truncate text-sm font-semibold text-text-primary">
+        {renderSurveyName(survey)}
+      </p>
+      <p className="text-xs text-text-muted">
+        {renderSurveyAssessmentSummary(survey)}
+      </p>
+    </div>
+  );
+}
+
+function SurveyTeacher({ survey }: { survey: ClassSurveyRecord }) {
+  return (
+    <p className="truncate text-xs font-medium text-primary">
+      {renderSurveyTeacher(survey)}
+    </p>
+  );
+}
+
+function SurveyRowActions({ onCopy, onDelete }: SurveyRowProps) {
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-0.5">
+      <SurveyRowAction label="Sao chép để dán Zalo" onClick={onCopy}>
+        <ClipboardDocumentIcon className="size-4" aria-hidden />
+      </SurveyRowAction>
+      {onDelete ? (
+        <SurveyRowAction label="Xóa báo cáo" tone="danger" onClick={onDelete}>
+          <TrashIcon className="size-4" aria-hidden />
+        </SurveyRowAction>
+      ) : null}
+    </div>
+  );
+}
+
+/** Thẻ khảo sát trong danh sách buổi học (mobile), cùng khung với thẻ buổi học. */
+function SurveyTimelineCard(props: SurveyRowProps) {
+  const { survey, onOpen } = props;
+  return (
+    <article
+      {...surveyRowInteraction(onOpen)}
+      aria-label={`Báo cáo khảo sát ${renderSurveyName(survey)}`}
+      className={`rounded-lg border border-info/25 bg-bg-surface p-3 shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${
+        onOpen ? "cursor-pointer hover:bg-bg-secondary" : ""
+      }`}
+    >
+      <div className="flex items-start gap-2">
+        <SurveyDateCell survey={survey} />
+        <div className="min-w-0 flex-1 space-y-1">
+          <SurveySummary survey={survey} />
+          <SurveyTeacher survey={survey} />
+        </div>
+        <SurveyRowActions {...props} />
+      </div>
+    </article>
+  );
+}
+
+/** Dòng khảo sát trong bảng buổi học (desktop), khớp cột Thời gian / Nhận xét / Thông tin / thao tác. */
+function SurveyTimelineRow({
+  withBulkColumn,
+  ...props
+}: SurveyRowProps & { withBulkColumn: boolean }) {
+  const { survey, onOpen } = props;
+  return (
+    <tr
+      {...surveyRowInteraction(onOpen)}
+      aria-label={`Báo cáo khảo sát ${renderSurveyName(survey)}`}
+      className={`border-b border-border-default bg-bg-surface transition-colors hover:bg-bg-secondary ${
+        onOpen
+          ? "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+          : ""
+      }`}
+    >
+      {withBulkColumn ? <td className="px-2 py-1.5" aria-hidden /> : null}
+      <td className="px-2.5 py-1.5 align-middle">
+        <SurveyDateCell survey={survey} />
+      </td>
+      <td className="px-2.5 py-1.5 align-middle">
+        <SurveySummary survey={survey} />
+      </td>
+      <td className="px-2.5 py-1.5 text-center align-middle">
+        <SurveyTeacher survey={survey} />
+      </td>
+      <td className="px-1.5 py-1.5 align-top">
+        <SurveyRowActions {...props} />
+      </td>
+    </tr>
   );
 }
 
@@ -715,14 +800,17 @@ function SurveyViewDialog({
   );
 }
 
+/**
+ * Báo cáo khảo sát của lớp trên tab Buổi học: không có danh sách riêng mà sinh các
+ * dòng `SessionHistoryExtraRow` để `renderList` chen vào bảng buổi học theo ngày.
+ * Panel giữ cảnh báo, các dialog tạo / sửa / xem / xóa và lỗi tải.
+ */
 export default function ClassSurveyPanel({
   className,
   surveys,
   availableSurveys,
   teachers,
   students,
-  loading = false,
-  fetching = false,
   error = false,
   canManage = false,
   canViewDetails = false,
@@ -732,27 +820,37 @@ export default function ClassSurveyPanel({
   onCreate,
   onUpdate,
   onDelete,
-  hideList = false,
-  autoOpenSurveyId = null,
-  autoOpenToken = 0,
+  renderList,
 }: Props) {
   const [viewingSurvey, setViewingSurvey] = useState<ClassSurveyRecord | null>(null);
   const [editingSurvey, setEditingSurvey] = useState<ClassSurveyRecord | null>(null);
   const [deletingSurvey, setDeletingSurvey] = useState<ClassSurveyRecord | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const sortedSurveys = useMemo(
-    () => [...surveys].sort((a, b) => b.reportDate.localeCompare(a.reportDate)),
-    [surveys],
-  );
 
-  useEffect(() => {
-    if (!autoOpenSurveyId) return;
-    const survey = surveys.find((item) => item.id === autoOpenSurveyId);
-    if (!survey) return;
-    if (canManage) setEditingSurvey(survey);
-    else setViewingSurvey(survey);
-  }, [autoOpenSurveyId, autoOpenToken, surveys, canManage]);
+  const surveyRows = useMemo<SessionHistoryExtraRow[]>(() => {
+    const openSurvey = canManage
+      ? setEditingSurvey
+      : canViewDetails
+        ? setViewingSurvey
+        : null;
+    return surveys.map((survey) => {
+      const rowProps: SurveyRowProps = {
+        survey,
+        onOpen: openSurvey ? () => openSurvey(survey) : undefined,
+        onCopy: () => void copySurveyReport(survey, className),
+        onDelete: canManage ? () => setDeletingSurvey(survey) : undefined,
+      };
+      return {
+        id: survey.id,
+        date: survey.reportDate,
+        mobileCard: <SurveyTimelineCard {...rowProps} />,
+        renderDesktopRow: ({ withBulkColumn }) => (
+          <SurveyTimelineRow {...rowProps} withBulkColumn={withBulkColumn} />
+        ),
+      };
+    });
+  }, [surveys, className, canManage, canViewDetails]);
 
   const runSave = async (
     action: () => Promise<unknown>,
@@ -792,221 +890,25 @@ export default function ClassSurveyPanel({
     }
   };
 
-  if (loading && !hideList) {
-    return <SurveyTableSkeleton />;
-  }
-
   return (
-    <div className={fetching ? "transition-opacity opacity-70" : "transition-opacity"}>
-      {!hideList ? (
-      <>
+    <>
       {teachers.length === 0 && canManage ? (
-        <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           Lớp chưa có gia sư phụ trách nên chưa thể tạo báo cáo khảo sát.
         </div>
       ) : null}
       {availableSurveys.length === 0 && canManage ? (
-        <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           Chưa có bài khảo sát nào được tạo. Vui lòng liên hệ admin/đội giáo án.
         </div>
       ) : null}
-
-      <div className="md:hidden">
-        {sortedSurveys.length === 0 ? (
-          <p className="py-6 text-center text-sm text-text-muted">
-            Không có báo cáo khảo sát trong tháng này.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {sortedSurveys.map((survey) => (
-              <article
-                key={survey.id}
-                role={canViewDetails ? "button" : undefined}
-                tabIndex={canViewDetails ? 0 : undefined}
-                onClick={canViewDetails ? () => setViewingSurvey(survey) : undefined}
-                onKeyDown={
-                  canViewDetails
-                    ? (event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setViewingSurvey(survey);
-                        }
-                      }
-                    : undefined
-                }
-                className={`rounded-lg border border-border-default bg-bg-surface p-3 shadow-sm ${
-                  canViewDetails
-                    ? "cursor-pointer transition hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                    : ""
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-medium uppercase text-text-muted">
-                      Bài khảo sát
-                    </p>
-                    <p className="text-sm font-semibold text-text-primary">
-                      {renderSurveyName(survey)}
-                    </p>
-                    <p className="mt-2 text-xs font-medium uppercase text-text-muted">
-                      Ngày báo cáo
-                    </p>
-                    <p className="text-sm text-text-primary">{formatSurveyDate(survey.reportDate)}</p>
-                    <p className="mt-2 text-xs font-medium uppercase text-text-muted">
-                      Người phụ trách
-                    </p>
-                    <p className="text-sm text-text-primary">{renderSurveyTeacher(survey)}</p>
-                  </div>
-                  <div className="flex shrink-0 gap-1">
-                    <IconButton
-                      label="Sao chép để dán Zalo"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void copySurveyReport(survey, className);
-                      }}
-                    >
-                      <ClipboardDocumentIcon className="size-4" aria-hidden />
-                    </IconButton>
-                    {canManage ? (
-                      <>
-                        <IconButton
-                          label="Sửa báo cáo"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setEditingSurvey(survey);
-                          }}
-                        >
-                          <PencilSquareIcon className="size-4" aria-hidden />
-                        </IconButton>
-                        <IconButton
-                          label="Xóa báo cáo"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setDeletingSurvey(survey);
-                          }}
-                        >
-                          <TrashIcon className="size-4" aria-hidden />
-                        </IconButton>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-                <p className="mt-3 border-t border-border-subtle pt-3 text-xs text-text-muted">
-                  {renderSurveyAssessmentSummary(survey)}
-                </p>
-              </article>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {sortedSurveys.length === 0 ? (
-        <p className="hidden py-6 text-center text-sm text-text-muted md:block">
-          Không có báo cáo khảo sát trong tháng này.
-        </p>
-      ) : (
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-            <caption className="sr-only">Báo cáo khảo sát lớp</caption>
-            <thead>
-              <tr className="border-b border-border-default bg-bg-secondary">
-                <th scope="col" className="px-4 py-3 font-medium text-text-primary">
-                  Bài khảo sát
-                </th>
-                <th scope="col" className="w-36 px-4 py-3 font-medium text-text-primary">
-                  Ngày báo cáo
-                </th>
-                <th scope="col" className="w-48 px-4 py-3 font-medium text-text-primary">
-                  Người phụ trách
-                </th>
-                <th scope="col" className="w-40 px-4 py-3 font-medium text-text-primary">
-                  Đánh giá
-                </th>
-                <th scope="col" className="w-32 px-2 py-3 font-medium text-text-primary">
-                  <span className="sr-only">Thao tác</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedSurveys.map((survey) => (
-                <tr
-                  key={survey.id}
-                  role={canViewDetails ? "button" : undefined}
-                  tabIndex={canViewDetails ? 0 : undefined}
-                  onClick={canViewDetails ? () => setViewingSurvey(survey) : undefined}
-                  onKeyDown={
-                    canViewDetails
-                      ? (event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            setViewingSurvey(survey);
-                          }
-                        }
-                      : undefined
-                  }
-                  className={`border-b border-border-default bg-bg-surface transition-colors duration-200 hover:bg-bg-secondary ${
-                    canViewDetails
-                      ? "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                      : ""
-                  }`}
-                >
-                  <td className="px-4 py-3 font-medium text-text-primary">
-                    {renderSurveyName(survey)}
-                  </td>
-                  <td className="px-4 py-3 text-text-primary">{formatSurveyDate(survey.reportDate)}</td>
-                  <td className="px-4 py-3 text-text-primary">{renderSurveyTeacher(survey)}</td>
-                  <td className="px-4 py-3 text-text-secondary">
-                    {renderSurveyAssessmentSummary(survey)}
-                  </td>
-                  <td className="px-2 py-3">
-                    <div className="flex justify-end gap-1">
-                      <IconButton
-                        label="Sao chép để dán Zalo"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void copySurveyReport(survey, className);
-                        }}
-                      >
-                        <ClipboardDocumentIcon className="size-4" aria-hidden />
-                      </IconButton>
-                      {canManage ? (
-                        <>
-                          <IconButton
-                            label="Sửa báo cáo"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setEditingSurvey(survey);
-                            }}
-                          >
-                            <PencilSquareIcon className="size-4" aria-hidden />
-                          </IconButton>
-                          <IconButton
-                            label="Xóa báo cáo"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setDeletingSurvey(survey);
-                            }}
-                          >
-                            <TrashIcon className="size-4" aria-hidden />
-                          </IconButton>
-                        </>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       {error ? (
-        <p className="mt-3 text-sm text-error" role="alert">
+        <p className="mb-3 text-sm text-error" role="alert">
           Không tải được danh sách báo cáo khảo sát.
         </p>
       ) : null}
-      </>
-      ) : null}
+
+      {renderList(surveyRows)}
 
       <SurveyFormDialog
         key={createOpen ? `create-${surveys.length}-${teachers.length}-${students.length}` : "create-closed"}
@@ -1071,6 +973,6 @@ export default function ClassSurveyPanel({
         className={className}
         onClose={() => setViewingSurvey(null)}
       />
-    </div>
+    </>
   );
 }

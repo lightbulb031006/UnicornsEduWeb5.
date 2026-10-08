@@ -17,6 +17,7 @@ import type {
 } from "@/dtos/staff.dto";
 import * as staffApi from "@/lib/apis/staff.api";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
+import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
 
 type Props = {
   open: boolean;
@@ -40,7 +41,7 @@ const USER_STATUS_LABELS: Record<string, string> = {
 const STAFF_ROLE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "teacher", label: "Giáo viên" },
   { value: "assistant", label: "Trợ lí" },
-  { value: "lesson_plan", label: "Giáo án" },
+  { value: "lesson_plan", label: LESSON_PLAN_LABEL },
   { value: "lesson_plan_head", label: "Trưởng giáo án" },
   { value: "accountant_income", label: "Kế toán thu" },
   { value: "accountant_expense", label: "Kế toán chi" },
@@ -71,10 +72,8 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
   const [birthDateInput, setBirthDateInput] = useState("");
   const [university, setUniversity] = useState("");
   const [highSchool, setHighSchool] = useState("");
-  const [specialization, setSpecialization] = useState("");
   const [bankAccount, setBankAccount] = useState("");
   const [bankQrLink, setBankQrLink] = useState("");
-  const [personalAchievementLink, setPersonalAchievementLink] = useState("");
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(
     () => new Set(["teacher"]),
   );
@@ -187,10 +186,8 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
           birth_date: birthDateInput.trim() || undefined,
           university: university.trim() || undefined,
           high_school: highSchool.trim() || undefined,
-          specialization: specialization.trim() || undefined,
           bank_account: bankAccount.trim() || undefined,
           bank_qr_link: bankQrLink.trim() || undefined,
-          personal_achievement_link: personalAchievementLink.trim() || null,
           roles: Array.from(selectedRoles),
           user_id: selectedUser.id,
         });
@@ -575,22 +572,6 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
                       </label>
 
                       <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-                        <span>Chuyên môn</span>
-                        <textarea
-                          value={specialization}
-                          onChange={(event) => setSpecialization(event.target.value)}
-                          disabled={!selectedUser?.isEligible}
-                          rows={3}
-                          placeholder="Ví dụ: Toán, tổ hợp, chuyên đề lớp 10-12"
-                          className="rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:bg-bg-tertiary disabled:text-text-muted"
-                        />
-                        <p className="text-xs text-text-muted">
-                          Có thể nhập Markdown (gạch đầu dòng <code className="rounded bg-bg-tertiary px-1">-</code> /{" "}
-                          <code className="rounded bg-bg-tertiary px-1">*</code>, …), trang hồ sơ sẽ hiển thị danh sách đúng định dạng.
-                        </p>
-                      </label>
-
-                      <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
                         <span>Link QR thanh toán</span>
                         <input
                           type="url"
@@ -600,24 +581,6 @@ function AddTutorPopupContent({ open, onClose, onCreated }: Props) {
                           placeholder="https://..."
                           className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:bg-bg-tertiary disabled:text-text-muted"
                         />
-                      </label>
-
-                      <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-                        <span>
-                          Thành tích cá nhân{" "}
-                          <span className="text-xs text-text-muted">(tùy chọn)</span>
-                        </span>
-                        <input
-                          type="url"
-                          value={personalAchievementLink}
-                          onChange={(event) => setPersonalAchievementLink(event.target.value)}
-                          disabled={!selectedUser?.isEligible}
-                          placeholder="https://drive.google.com/…"
-                          className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:bg-bg-tertiary disabled:text-text-muted"
-                        />
-                        <p className="text-xs text-text-muted">
-                          Link Google Drive lưu trữ thành tích. Không bắt buộc điền.
-                        </p>
                       </label>
                     </div>
                     </div>

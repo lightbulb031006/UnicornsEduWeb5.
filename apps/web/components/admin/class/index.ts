@@ -6,6 +6,7 @@ export { default as ClassStudentCaretakerCell } from "./ClassStudentCaretakerCel
 export { default as AddClassPopup } from "./AddClassPopup";
 export { default as CourseFormPopup } from "./CourseFormPopup";
 export type { CourseFormValues } from "./CourseFormPopup";
+export { default as CourseOneTimeBadge } from "./CourseOneTimeBadge";
 export { default as EditClassPopup } from "./EditClassPopup";
 export { default as EditClassBasicInfoPopup } from "./EditClassBasicInfoPopup";
 export { default as EditClassTeachersPopup } from "./EditClassTeachersPopup";

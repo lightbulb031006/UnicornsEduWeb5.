@@ -661,6 +661,11 @@ export interface AdminDashboardFinancialDetailItemDto {
   note: string | null;
   /** Chú thích nguồn thực tế. Chỉ có trên dòng Khác. */
   sourceNote?: string | null;
+  /**
+   * Số tiền theo `sources[].key` (có dấu, phạt âm). Có trên Chi phí nhân sự và
+   * Trợ cấp chờ thanh toán; FE dùng để lọc theo thẻ nguồn.
+   */
+  sourceAmounts?: Record<string, number>;
 }
 
 export interface AdminDashboardCustomerSourceRowDto {

@@ -37,7 +37,7 @@ import {
   BarChart3,
   RotateCcw,
 } from "lucide-react";
-import { classTimelineKeys } from "@/lib/query-keys";
+import { classKeys, classTimelineKeys } from "@/lib/query-keys";
 import Link from "next/link";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Card } from "@/components/ui/card";
@@ -49,11 +49,8 @@ import {
   ResponsiveDialogBody,
 } from "@/components/ui/ResponsiveDialog";
 import type { ClassContentItemDto } from "@/dtos/class-content.dto";
-import type { CourseLessonForClassDto } from "@/dtos/course-content.dto";
-import type { ClassQuestionDraft } from "@/dtos/class-topic-question.dto";
 import { lessonKindBadgeClass } from "@/lib/course-content-labels";
 import * as classApi from "@/lib/apis/class.api";
-import * as questionApi from "@/lib/apis/question.api";
 import CourseLessonPicker from "./CourseLessonPicker";
 import {
   AssignmentScheduleFields,
@@ -66,7 +63,6 @@ import {
   isOpenAtPairPartial,
   parseAssignmentDurationMinutes,
 } from "@/lib/assignment-schedule.helpers";
-import ClassPracticeQuestionComposer from "./ClassPracticeQuestionComposer";
 import { formatVnDateTime } from "@/lib/formatters";
 
 function formatOpenAt(iso: string | null): string {
@@ -412,7 +408,7 @@ export default function ClassContentManager({
             className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-text-inverse shadow-xs transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
           >
             <Plus className="size-4" />
-            Thêm tiết học
+            Giao tiết thực hành
           </button>
         </div>
       )}
@@ -496,6 +492,10 @@ export default function ClassContentManager({
   );
 }
 
+/**
+ * Giao một tiết thực hành của khoá cho lớp. Tiết lý thuyết không thêm lẻ ở đây:
+ * chúng vào lớp theo chuyên đề (`ClassModulesDialog`).
+ */
 function AddContentDialog({
   classId,
   onClose,
@@ -506,15 +506,7 @@ function AddContentDialog({
   onSuccess: () => void;
 }) {
   const queryClient = useQueryClient();
-  const formFieldId = useId();
-  const [modeTouched, setModeTouched] = useState(false);
-  const [userMode, setUserMode] = useState<"new" | "existing">("existing");
-  const [title, setTitle] = useState("");
   const [lessonId, setLessonId] = useState("");
-  const [kind, setKind] = useState<"theory" | "practice">("theory");
-  const [existingKind, setExistingKind] = useState<"theory" | "practice">(
-    "theory",
-  );
   const [step, setStep] = useState<"pick" | "schedule">("pick");
   const defaults = defaultAssignmentSchedule();
   const [openDate, setOpenDate] = useState("");
@@ -522,128 +514,42 @@ function AddContentDialog({
   const [durationMinutes, setDurationMinutes] = useState(
     defaults.durationMinutes,
   );
-  const [drafts, setDrafts] = useState<ClassQuestionDraft[]>([]);
-  const [videoUrl, setVideoUrl] = useState("");
-  const [theoryContent, setTheoryContent] = useState("");
 
-  const { data: courseLessons } = useQuery<CourseLessonForClassDto[]>({
-    queryKey: ["course-lessons-for-class", classId],
-    queryFn: () => classApi.getCourseLessonsForClass(classId),
-  });
-
-  const hasSelectableCourseLessons =
-    courseLessons?.some((t) => !t.alreadyAdded) ?? false;
-  const derivedMode: "new" | "existing" =
-    courseLessons === undefined
-      ? "existing"
-      : hasSelectableCourseLessons
-        ? "existing"
-        : "new";
-  const mode = modeTouched ? userMode : derivedMode;
-
-  const selectedIsPractice =
-    (mode === "new" && kind === "practice") ||
-    (mode === "existing" && existingKind === "practice");
-
-  const { data: cls } = useQuery({
-    queryKey: ["class", classId],
-    queryFn: () => classApi.getClassById(classId),
-    enabled: mode === "new",
-  });
-  const courseId = cls?.courseId ?? "";
-
-  const createMutation = useMutation({
-    mutationFn: async () => {
-      const duration = parseAssignmentDurationMinutes(durationMinutes);
-      if (selectedIsPractice && duration == null) {
-        throw new Error("invalid-duration");
-      }
-      const practiceSchedule =
-        selectedIsPractice && duration != null
-          ? {
-              ...(isOpenAtPairComplete(openDate, openTime)
-                ? { openAt: toOpenAtIso(openDate, openTime) }
-                : {}),
-              durationMinutes: duration,
-            }
-          : {};
-      const trimmedVideoUrl = videoUrl.trim();
-      const trimmedTheoryContent = theoryContent.trim();
-      if (mode === "new" && kind === "theory" && trimmedVideoUrl) {
-        if (trimmedVideoUrl.length > CONTENT_LIMITS.url) {
-          throw new Error("video-url-too-long");
-        }
-        if (!isHttpUrl(trimmedVideoUrl)) {
-          throw new Error("video-url-invalid");
-        }
-      }
-      const created = await classApi.createClassContent(classId, {
-        ...(mode === "existing" ? { lessonId: lessonId.trim() } : {}),
-        ...(mode === "new" ? { title: title.trim(), kind } : {}),
-        ...practiceSchedule,
-      });
-      if (
-        mode === "new" &&
-        kind === "theory" &&
-        (trimmedVideoUrl || trimmedTheoryContent)
-      ) {
-        await classApi.updateClassLesson(classId, created.lessonId, {
-          videoUrl: trimmedVideoUrl || null,
-          content: trimmedTheoryContent || null,
-        });
-      }
-      if (mode === "new" && kind === "practice" && drafts.length > 0) {
-        for (const draft of drafts) {
-          let questionId = draft.questionId;
-          if (!questionId && draft.createPayload) {
-            const q = await questionApi.createQuestion(draft.createPayload);
-            questionId = q.id;
-          }
-          if (!questionId) continue;
-          await classApi.addPracticeLessonQuestion(created.lessonId, {
-            questionId,
-          });
-        }
-      }
-      return created;
-    },
-    onSuccess: () => {
-      toast.success("Đã thêm tiết học");
-      queryClient.invalidateQueries({
-        queryKey: ["course-lessons-for-class", classId],
-      });
-      onSuccess();
-    },
-    onError: (err: {
-      message?: string;
-      response?: { data?: { message?: string } };
-    }) => {
-      if (err?.message === "video-url-invalid") {
-        toast.error("Link video phải bắt đầu bằng http:// hoặc https://");
-        return;
-      }
-      if (err?.message === "video-url-too-long") {
-        toast.error(`Link video tối đa ${CONTENT_LIMITS.url} ký tự.`);
-        return;
-      }
-      toast.error(err?.response?.data?.message || "Lỗi thêm tiết học");
-    },
-  });
-
-  const canPick =
-    (mode === "existing" && lessonId.trim()) ||
-    (mode === "new" && title.trim());
   const parsedDuration = parseAssignmentDurationMinutes(durationMinutes);
   const durationError =
     parsedDuration == null
       ? "Thời lượng phải từ 1 đến 720 phút."
       : null;
   const openAtPartial = isOpenAtPairPartial(openDate, openTime);
-  const canSubmitSchedule =
-    parsedDuration != null && !openAtPartial;
+  const canSubmitSchedule = parsedDuration != null && !openAtPartial;
+
+  const createMutation = useMutation({
+    mutationFn: () => {
+      if (parsedDuration == null) {
+        return Promise.reject(new Error("invalid-duration"));
+      }
+      return classApi.createClassContent(classId, {
+        lessonId: lessonId.trim(),
+        ...(isOpenAtPairComplete(openDate, openTime)
+          ? { openAt: toOpenAtIso(openDate, openTime) }
+          : {}),
+        durationMinutes: parsedDuration,
+      });
+    },
+    onSuccess: () => {
+      toast.success("Đã giao tiết thực hành");
+      queryClient.invalidateQueries({
+        queryKey: classKeys.courseLessons(classId),
+      });
+      onSuccess();
+    },
+    onError: (err: { response?: { data?: { message?: string } } }) => {
+      toast.error(err?.response?.data?.message || "Lỗi giao tiết thực hành");
+    },
+  });
 
   const handlePrimary = () => {
-    if (selectedIsPractice && step === "pick") {
+    if (step === "pick") {
       setStep("schedule");
       return;
     }
@@ -656,12 +562,12 @@ function AddContentDialog({
         <div className="flex items-center justify-between gap-3 border-b border-border-default pb-4 shrink-0">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-text-primary">
-              {step === "schedule" ? "Đặt lần giao" : "Thêm tiết học"}
+              {step === "schedule" ? "Đặt lần giao" : "Giao tiết thực hành"}
             </h2>
             <p className="text-xs text-text-muted mt-0.5">
               {step === "schedule"
                 ? "Thời điểm mở bài và thời lượng thuộc lần giao của lớp này, không đụng đề."
-                : "Chọn tiết học từ khoá học hoặc tạo mới cho lớp."}
+                : "Chọn chuyên đề lớp đã thêm, rồi chọn tiết thực hành. Tiết lý thuyết vào lớp theo chuyên đề."}
             </p>
           </div>
           <button
@@ -676,168 +582,28 @@ function AddContentDialog({
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-4 pr-1 [scrollbar-width:thin] space-y-4">
           {step === "schedule" ? (
             <>
-            <AssignmentScheduleFields
-              openDate={openDate}
-              openTime={openTime}
-              durationMinutes={durationMinutes}
-              openAtOptional
-              durationError={durationError}
-              onOpenDateChange={setOpenDate}
-              onOpenTimeChange={setOpenTime}
-              onDurationChange={setDurationMinutes}
-            />
-            {openAtPartial ? (
-              <p className="text-xs text-error">
-                Nhập cả ngày và giờ, hoặc để trống cả hai.
-              </p>
-            ) : null}
-            </>
-          ) : (
-            <>
-          {/* Mode toggle */}
-          <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-border-default bg-bg-surface p-1 shadow-2xs">
-            <button
-              type="button"
-              onClick={() => {
-                setModeTouched(true);
-                setUserMode("new");
-                setStep("pick");
-              }}
-              className={`inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
-                mode === "new"
-                  ? "bg-primary text-text-inverse shadow-xs"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-            >
-              Tạo mới cho lớp
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setModeTouched(true);
-                setUserMode("existing");
-                setStep("pick");
-              }}
-              className={`inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
-                mode === "existing"
-                  ? "bg-primary text-text-inverse shadow-xs"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-            >
-              Thêm từ khoá
-            </button>
-          </div>
-
-          {mode === "new" ? (
-            <>
-              <div>
-                <label
-                  htmlFor={`${formFieldId}-title`}
-                  className="text-xs font-semibold uppercase tracking-wider text-text-muted"
-                >
-                  Tiêu đề <span className="text-error">*</span>
-                </label>
-                <input
-                  id={`${formFieldId}-title`}
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-border-default bg-bg-surface px-4 py-2.5 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus font-medium"
-                  placeholder="Ví dụ: Tiết bổ trợ Phương trình bậc 2..."
-                />
-              </div>
-              <div>
-                <span
-                  id={`${formFieldId}-kind-label`}
-                  className="block text-xs font-semibold uppercase tracking-wider text-text-muted"
-                >
-                  Loại tiết học
-                </span>
-                <div
-                  role="group"
-                  aria-labelledby={`${formFieldId}-kind-label`}
-                  className="mt-1.5 inline-flex items-center gap-1 rounded-xl border border-border-default bg-bg-surface p-1 shadow-2xs"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setKind("theory");
-                      setDrafts([]);
-                    }}
-                    className={`inline-flex cursor-pointer items-center rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
-                      kind === "theory"
-                        ? "bg-primary text-text-inverse shadow-xs"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                  >
-                    Tiết lý thuyết
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setKind("practice")}
-                    className={`inline-flex cursor-pointer items-center rounded-lg px-3 py-1 text-xs font-semibold transition-all ${
-                      kind === "practice"
-                        ? "bg-primary text-text-inverse shadow-xs"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                  >
-                    Tiết thực hành
-                  </button>
-                </div>
-              </div>
-              {kind === "theory" ? (
-                <>
-                  <div>
-                    <label
-                      htmlFor={`${formFieldId}-video-url`}
-                      className="text-xs font-semibold uppercase tracking-wider text-text-muted"
-                    >
-                      Link video (tuỳ chọn)
-                    </label>
-                    <input
-                      id={`${formFieldId}-video-url`}
-                      type="text"
-                      value={videoUrl}
-                      onChange={(e) => setVideoUrl(e.target.value)}
-                      placeholder="https://youtube.com/watch?v=..."
-                      className="mt-1.5 w-full rounded-xl border border-border-default bg-bg-surface px-4 py-2.5 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                    />
-                  </div>
-                  <div>
-                    <span className="block text-xs font-semibold uppercase tracking-wider text-text-muted">
-                      Nội dung lý thuyết (hỗ trợ LaTeX: $x^2$)
-                    </span>
-                    <div className="mt-1.5">
-                      <MathRichTextEditor
-                        value={theoryContent}
-                        onChange={setTheoryContent}
-                        ariaLabel="Nội dung lý thuyết"
-                        placeholder="Nhập nội dung tiết lý thuyết..."
-                        minHeight="min-h-[120px]"
-                      />
-                    </div>
-                  </div>
-                </>
-              ) : null}
-              {kind === "practice" && courseId ? (
-                <ClassPracticeQuestionComposer
-                  courseId={courseId}
-                  drafts={drafts}
-                  onChange={setDrafts}
-                />
+              <AssignmentScheduleFields
+                openDate={openDate}
+                openTime={openTime}
+                durationMinutes={durationMinutes}
+                openAtOptional
+                durationError={durationError}
+                onOpenDateChange={setOpenDate}
+                onOpenTimeChange={setOpenTime}
+                onDurationChange={setDurationMinutes}
+              />
+              {openAtPartial ? (
+                <p className="text-xs text-error">
+                  Nhập cả ngày và giờ, hoặc để trống cả hai.
+                </p>
               ) : null}
             </>
           ) : (
             <CourseLessonPicker
               classId={classId}
               selectedLessonId={lessonId}
-              onSelect={(id, lessonKind) => {
-                setLessonId(id);
-                setExistingKind(lessonKind);
-              }}
+              onSelect={(id) => setLessonId(id)}
             />
-          )}
-            </>
           )}
         </div>
 
@@ -862,19 +628,17 @@ function AddContentDialog({
             type="button"
             onClick={handlePrimary}
             disabled={
-              (step === "pick" && !canPick) ||
+              (step === "pick" && !lessonId.trim()) ||
               (step === "schedule" && !canSubmitSchedule) ||
               createMutation.isPending
             }
             className="cursor-pointer rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-text-inverse transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60 shadow-xs"
           >
             {createMutation.isPending
-              ? "Đang thêm..."
-              : selectedIsPractice && step === "pick"
+              ? "Đang giao..."
+              : step === "pick"
                 ? "Tiếp theo"
-                : selectedIsPractice
-                  ? "Giao đề"
-                  : "Thêm tiết học"}
+                : "Giao đề"}
           </button>
         </div>
       </ResponsiveDialogBody>

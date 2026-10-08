@@ -23,6 +23,7 @@ import {
   CurrentUser,
   type JwtPayload,
 } from 'src/auth/decorators/current-user.decorator';
+import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
   type DeleteNotificationResponseDto,
@@ -37,20 +38,29 @@ import {
   PushNotificationDto,
   UpdateNotificationDto,
 } from 'src/dtos/notification.dto';
+import { NOTIFICATION_PUBLISHER_STAFF_ROLES } from './notification-publisher-roles';
 import { NotificationService } from './notification.service';
+
+const MANAGEMENT_FORBIDDEN_RESPONSE = {
+  status: 403,
+  description: 'Gia sư và CSKH chỉ nhận thông báo, không được quản lý.',
+};
 
 @Controller('notifications')
 @ApiTags('notifications')
 @ApiCookieAuth('access_token')
+// Route quản lý (`@Roles(admin)`) mở cho các staff role được tạo push; feed giữ `@Roles(admin, staff)`.
+@AllowStaffRolesOnAdminRoutes(...NOTIFICATION_PUBLISHER_STAFF_ROLES)
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
   @Get()
   @Roles(UserRole.admin)
+  @ApiResponse(MANAGEMENT_FORBIDDEN_RESPONSE)
   @ApiOperation({
     summary: 'List notifications for admin management',
     description:
-      'Return draft and published notifications so admins can create, edit, push, and delete them.',
+      'Return draft and published notifications so admins and publisher staff roles can create, edit, push, and delete them.',
   })
   @ApiQuery({
     name: 'status',
@@ -78,6 +88,7 @@ export class NotificationController {
 
   @Post()
   @Roles(UserRole.admin)
+  @ApiResponse(MANAGEMENT_FORBIDDEN_RESPONSE)
   @ApiOperation({
     summary: 'Create a notification draft',
     description:
@@ -104,6 +115,7 @@ export class NotificationController {
 
   @Get('recipient-options')
   @Roles(UserRole.admin)
+  @ApiResponse(MANAGEMENT_FORBIDDEN_RESPONSE)
   @ApiOperation({
     summary: 'Search eligible notification recipients for tagging',
     description:
@@ -160,6 +172,7 @@ export class NotificationController {
 
   @Patch(':id')
   @Roles(UserRole.admin)
+  @ApiResponse(MANAGEMENT_FORBIDDEN_RESPONSE)
   @ApiOperation({
     summary: 'Update a notification draft',
     description:
@@ -191,6 +204,7 @@ export class NotificationController {
 
   @Post(':id/push')
   @Roles(UserRole.admin)
+  @ApiResponse(MANAGEMENT_FORBIDDEN_RESPONSE)
   @ApiOperation({
     summary: 'Push a notification to its configured audience',
     description:
@@ -224,6 +238,7 @@ export class NotificationController {
 
   @Delete(':id')
   @Roles(UserRole.admin)
+  @ApiResponse(MANAGEMENT_FORBIDDEN_RESPONSE)
   @ApiOperation({
     summary: 'Delete a notification',
     description:
@@ -253,7 +268,7 @@ export class NotificationController {
   @ApiOperation({
     summary: 'Get the notification feed (staff, admin)',
     description:
-      'Return published notifications targeted to the current actor, with per-user readStatus. Admin: không cần staff profile. Staff: cần profile active.',
+      'Return published notifications with per-user readStatus. Admin (kể cả staff role admin): mọi thông báo đã đẩy, không cần staff profile. Staff khác: chỉ thông báo nhắm tới mình, cần profile active.',
   })
   @ApiQuery({
     name: 'limit',

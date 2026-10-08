@@ -21,6 +21,7 @@ import { UniojModule } from './unioj/unioj.module';
 import { CustomerCareModule } from './customer-care/customer-care.module';
 import { AssistantCommissionModule } from './assistant-commission/assistant-commission.module';
 import { TrainingManagerModule } from './training-manager/training-manager.module';
+import { TrainingTutorModule } from './training-tutor/training-tutor.module';
 import { ActionHistoryModule } from './action-history/action-history.module';
 import { LessonModule } from './lesson/lesson.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -86,6 +87,7 @@ function parsePositiveIntegerEnv(
     CustomerCareModule,
     AssistantCommissionModule,
     TrainingManagerModule,
+    TrainingTutorModule,
     ActionHistoryModule,
     LessonModule,
     DashboardModule,

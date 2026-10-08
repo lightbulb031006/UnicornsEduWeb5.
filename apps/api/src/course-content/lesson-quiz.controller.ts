@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
 import {
   ApiBody,
   ApiCookieAuth,
@@ -41,7 +34,11 @@ export class LessonQuizController {
   @ApiParam({ name: 'lessonId', description: 'ID tiết học' })
   @ApiBody({ type: LessonQuizLinkDto })
   @ApiResponse({ status: 200, description: 'Đã gắn câu hỏi.' })
-  @ApiResponse({ status: 400, description: 'Câu hỏi không thuộc khoá học, hoặc không phải tiết lý thuyết.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Câu hỏi không thuộc khoá học, hoặc không phải tiết lý thuyết.',
+  })
   @ApiResponse({ status: 404, description: 'Tiết học không tồn tại.' })
   @ApiResponse({ status: 403, description: COURSE_CONTENT_FORBIDDEN })
   async linkQuizQuestions(
@@ -81,7 +78,8 @@ export class LessonQuizController {
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(...COURSE_TREE_STAFF_ROLES)
   @ApiOperation({
-    summary: 'Danh sách câu hỏi ôn nhẹ của tiết lý thuyết (admin/staff soạn nội dung)',
+    summary:
+      'Danh sách câu hỏi ôn nhẹ của tiết lý thuyết (admin/staff soạn nội dung)',
     description:
       'Học sinh không dùng route này. Student đọc quiz đã enrollment-check qua GET /users/me/student-classes/:classId/lessons/:lessonId/quizzes.',
   })

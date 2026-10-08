@@ -13,6 +13,7 @@ import {
 import type { GradeEssayAnswerPayload } from "@/dtos/essay-grading.dto";
 import { Skeleton } from "@/components/ui/skeleton";
 import EssayGradeCard from "@/components/staff/grading/EssayGradeCard";
+import { staffClassDetailHref } from "@/lib/class-detail-tabs";
 
 function errorMessage(error: unknown, fallback: string): string {
   return (
@@ -46,7 +47,7 @@ export default function StaffEssayGradingPage() {
 
   const items = useMemo(() => data?.items ?? [], [data]);
   const current = items[cursor];
-  const backHref = `/staff/classes/${classId}?tab=content`;
+  const backHref = staffClassDetailHref(classId, "chuyen-de");
 
   // Snapshot-cursor: giữ `items` từ lần GET đầu, chỉ tăng cursor.
   // Không invalidate giữa chừng — invalidate làm list co lại *và* cursor+1

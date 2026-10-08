@@ -94,6 +94,7 @@ function ImageActions({
   onClearImage,
   onPreviewImage,
   onDelete,
+  allowClearImage,
 }: {
   item: AchievementDto;
   editable: boolean;
@@ -102,6 +103,7 @@ function ImageActions({
   onClearImage: (id: string) => void;
   onPreviewImage: (src: string, title: string) => void;
   onDelete: (id: string) => void;
+  allowClearImage: boolean;
 }) {
   const fileId = useId();
   const label = displayTitle(item);
@@ -124,7 +126,9 @@ function ImageActions({
           />
         </button>
       ) : (
-        <span className="text-xs text-text-muted">Chưa có ảnh minh chứng</span>
+        <span className="text-xs text-text-muted">
+          {allowClearImage ? "Chưa có ảnh minh chứng" : "Thiếu minh chứng"}
+        </span>
       )}
 
       {item.imageUrl ? (
@@ -161,7 +165,7 @@ function ImageActions({
               }}
             />
           </label>
-          {item.imageUrl ? (
+          {allowClearImage && item.imageUrl ? (
             <button
               type="button"
               disabled={busy}
@@ -286,6 +290,7 @@ function SortableStaffRow({
           onClearImage={onClearImage}
           onPreviewImage={onPreviewImage}
           onDelete={onDelete}
+          allowClearImage={false}
         />
       </div>
     </li>
@@ -478,6 +483,7 @@ function SortableStudentRow({
           onClearImage={onClearImage}
           onPreviewImage={onPreviewImage}
           onDelete={onDelete}
+          allowClearImage
         />
       </div>
     </li>
@@ -528,6 +534,9 @@ export default function AchievementListEditor({
       payload: { title: string } | CreateStudentAchievementPayload;
       file?: File;
     }) => {
+      if (owner.kind === "staff") {
+        return achievementApi.createAchievement(owner, payload, file);
+      }
       const created = await achievementApi.createAchievement(owner, payload);
       if (file) {
         await achievementApi.uploadAchievementImage(owner, created.id, file);

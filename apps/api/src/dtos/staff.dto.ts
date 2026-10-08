@@ -24,9 +24,15 @@ import {
   Max,
   Min,
   MinLength,
+  Validate,
   ValidateIf,
   ValidateNested,
+  ValidatorConstraint,
+  isUUID,
+  type ValidationArguments,
+  type ValidatorConstraintInterface,
 } from 'class-validator';
+import { isLessonOutputId } from '../common/entity-id';
 import { IsStaffId } from '../common/entity-id.validators';
 
 export class SearchAssignableStaffUsersDto {
@@ -156,11 +162,6 @@ export class CreateStaffDto {
   @IsString()
   high_school?: string;
 
-  @ApiPropertyOptional({ example: 'Math' })
-  @IsOptional()
-  @IsString()
-  specialization?: string;
-
   @ApiPropertyOptional({ example: '1234567890' })
   @IsOptional()
   @IsString()
@@ -190,15 +191,6 @@ export class CreateStaffDto {
   customer_care_managed_by_staff_id?: string | null;
 
   @ApiPropertyOptional({
-    example: 'https://drive.google.com/drive/folders/abc123',
-    description:
-      'Link Google Drive hoặc URL thành tích cá nhân của nhân sự (không bắt buộc)',
-  })
-  @IsOptional()
-  @IsString()
-  personal_achievement_link?: string | null;
-
-  @ApiPropertyOptional({
     example: 'https://meet.google.com/abc-defg-hij',
     description:
       'Link Google Meet cố định của gia sư (không bắt buộc; có thể để trống để hệ thống tự tạo khi cần)',
@@ -217,6 +209,17 @@ export class CreateStaffDto {
   @Min(0)
   @Max(100)
   revenue_share_percent?: number | null;
+
+  @ApiPropertyOptional({
+    example: 0.1,
+    description:
+      '% mặc định của CSKH, áp vào học sinh khi CSKH được gán. Phân số 0.00–0.99 (VD: 0.1 = 10%), cùng đơn vị customer_care_profit_percent của học sinh.',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(0.99)
+  customer_care_default_profit_percent?: number;
 }
 
 export class UpdateStaffDto extends PartialType(CreateStaffDto) {
@@ -539,6 +542,23 @@ export class UpdateStaffFixedSalaryPayableDto {
 export type StaffPaymentSourceTypeDto =
   (typeof STAFF_PAYMENT_SOURCE_TYPES)[number];
 
+/** Giáo án (`lesson_output`) dùng id ngắn `UNILOT-…`; các nguồn còn lại là UUID v4. */
+@ValidatorConstraint({ name: 'staffPaymentItemId' })
+class StaffPaymentItemIdConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown, args: ValidationArguments): boolean {
+    const { sourceType } = args.object as StaffPaySelectedPaymentItemDto;
+    if (sourceType === 'lesson_output') return isLessonOutputId(value);
+    return typeof value === 'string' && isUUID(value, '4');
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    const { sourceType } = args.object as StaffPaySelectedPaymentItemDto;
+    return sourceType === 'lesson_output'
+      ? `${args.property} must be a valid lesson output id (e.g. UNILOT-a1b2c3d4e5)`
+      : `${args.property} must be a UUID`;
+  }
+}
+
 export class StaffPaySelectedPaymentItemDto {
   @ApiProperty({
     description: 'Payment preview source type',
@@ -550,10 +570,11 @@ export class StaffPaySelectedPaymentItemDto {
   sourceType: StaffPaymentSourceTypeDto;
 
   @ApiProperty({
-    description: 'Entity id from payment preview item',
+    description:
+      'Entity id from payment preview item. UUID v4, except lesson_output which uses UNILOT-<10 hex>.',
     example: '53d7f00c-4ae7-4a1d-b4d3-67415159f4c8',
   })
-  @IsUUID('4')
+  @Validate(StaffPaymentItemIdConstraint)
   id: string;
 }
 
@@ -572,6 +593,15 @@ export class StaffPaySelectedPaymentsDto extends StaffPaymentMonthDto {
 export interface StaffOverdueSurveyWarningItemDto {
   surveyId: string;
   surveyName: string;
+  classNames: string[];
+}
+
+/** Bài khảo sát đang trong khung chặn khảo sát sắp hạn mà gia sư còn lớp chưa nộp. */
+export interface StaffSurveyDeadlineBlockWarningItemDto {
+  surveyId: string;
+  surveyName: string;
+  /** YYYY-MM-DD */
+  endDate: string;
   classNames: string[];
 }
 

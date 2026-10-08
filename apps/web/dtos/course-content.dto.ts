@@ -152,6 +152,27 @@ export interface CourseLessonForClassDto {
   alreadyAdded: boolean;
 }
 
+/** Một chuyên đề của khoá nhìn từ một lớp (GET /class/:classId/modules). */
+export interface ClassModuleDto {
+  moduleId: string;
+  title: string;
+  /** Thứ tự chuyên đề trong khoá. */
+  sortOrder: number;
+  /** Thứ tự nhóm của riêng lớp (nhỏ lên trước); null khi lớp chưa thêm. */
+  classSortOrder: number | null;
+  theoryLessonCount: number;
+  practiceLessonCount: number;
+  added: boolean;
+  addedAt: string | null;
+}
+
+/** Ảnh hưởng nếu gỡ chuyên đề — dialog xác nhận báo trước, không chặn gỡ. */
+export interface ClassModuleRemovalImpactDto {
+  moduleId: string;
+  ungradedEssayCount: number;
+  inProgressStudentCount: number;
+}
+
 export interface ExamLibraryItem extends CourseLesson {
   module: { id: string; title: string; sortOrder: number } | null;
   questionCount: number;

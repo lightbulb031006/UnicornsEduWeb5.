@@ -29,7 +29,12 @@ jest.mock('src/storage/image-watermark', () => ({
   ),
 }));
 
-import { BadRequestException, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AchievementLevel,
   StaffRole,
@@ -1659,6 +1664,125 @@ describe('StudentService', () => {
     expect(mockPrisma.studentClass.updateMany).not.toHaveBeenCalled();
   });
 
+  describe('drop-out reason', () => {
+    const buildStudentDetail = (status: StudentStatus) => ({
+      id: 'student-1',
+      fullName: 'Nguyen Van A',
+      email: 'student@example.com',
+      parentEmail: null,
+      accountBalance: 0,
+      school: null,
+      province: null,
+      status,
+      gender: 'male',
+      birthYear: 2010,
+      parentName: null,
+      parentPhone: null,
+      goal: null,
+      dropOutDate: null,
+      dropOutReason: 'Chuyển trường',
+      createdAt: new Date('2026-10-01T10:00:00.000Z'),
+      updatedAt: new Date('2026-10-02T10:00:00.000Z'),
+      studentClasses: [],
+      examSchedules: [],
+      customerCareServices: null,
+    });
+    const mockCurrentStudent = (status: StudentStatus) => {
+      mockPrisma.studentInfo.findUnique.mockResolvedValueOnce({
+        id: 'student-1',
+        status,
+        userId: 'user-1',
+        customerSource: null,
+        customerSourceNote: null,
+      });
+      mockPrisma.studentInfo.findUnique.mockResolvedValue(
+        buildStudentDetail(status),
+      );
+    };
+
+    it('rejects marking a student inactive without a reason', async () => {
+      mockCurrentStudent(StudentStatus.active);
+
+      await expect(
+        service.updateStudentStatus('student-1', {
+          status: StudentStatus.inactive,
+          reason: '   ',
+        }),
+      ).rejects.toThrow('Chuyển học sinh sang nghỉ học phải nhập lý do nghỉ.');
+      expect(mockPrisma.studentInfo.update).not.toHaveBeenCalled();
+    });
+
+    it('stores the trimmed reason when marking a student inactive', async () => {
+      mockCurrentStudent(StudentStatus.active);
+
+      await service.updateStudentStatus('student-1', {
+        status: StudentStatus.inactive,
+        reason: '  Chuyển trường  ',
+      });
+
+      expect(mockPrisma.studentInfo.update).toHaveBeenCalledWith({
+        where: { id: 'student-1' },
+        data: {
+          status: StudentStatus.inactive,
+          dropOutReason: 'Chuyển trường',
+        },
+      });
+    });
+
+    it('keeps the previous reason when the student comes back', async () => {
+      mockCurrentStudent(StudentStatus.inactive);
+
+      const result = await service.updateStudentStatus('student-1', {
+        status: StudentStatus.active,
+        reason: 'Học lại kỳ mới',
+      });
+
+      expect(mockPrisma.studentInfo.update).toHaveBeenCalledWith({
+        where: { id: 'student-1' },
+        data: { status: StudentStatus.active },
+      });
+      expect(mockPrisma.studentInfo.updateMany).toHaveBeenCalledWith({
+        where: { id: 'student-1', dropOutDate: { not: null } },
+        data: { dropOutDate: null },
+      });
+      expect(result).toMatchObject({ dropOutReason: 'Chuyển trường' });
+    });
+
+    it('rejects the profile form marking a student inactive without a reason', async () => {
+      mockCurrentStudent(StudentStatus.active);
+
+      await expect(
+        service.updateStudentById('student-1', {
+          status: StudentStatus.inactive,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects a drop-out reason on a studying student', async () => {
+      mockCurrentStudent(StudentStatus.active);
+
+      await expect(
+        service.updateStudentById('student-1', {
+          drop_out_reason: 'Chuyển trường',
+        }),
+      ).rejects.toThrow('Chỉ học sinh nghỉ học mới có lý do nghỉ.');
+    });
+
+    it('updates the reason of a student who already left', async () => {
+      mockCurrentStudent(StudentStatus.inactive);
+
+      await service.updateStudentById('student-1', {
+        drop_out_reason: ' Gia đình chuyển nhà ',
+      });
+
+      expect(mockPrisma.studentInfo.update).toHaveBeenCalledWith({
+        where: { id: 'student-1' },
+        data: { dropOutReason: 'Gia đình chuyển nhà' },
+      });
+    });
+  });
+
   it('returns sanitized student landing profiles without status filter', async () => {
     mockPrisma.studentInfo.count.mockResolvedValue(1);
     mockPrisma.studentInfo.findMany.mockResolvedValue([
@@ -1835,5 +1959,187 @@ describe('StudentService', () => {
     expect(mockPrisma.studentAchievement.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: {} }),
     );
+  });
+
+  describe('customer care transfer permission', () => {
+    const customerCareActor = {
+      userId: 'care-user-1',
+      userEmail: 'care@example.com',
+      roleType: UserRole.staff,
+    };
+
+    beforeEach(() => {
+      mockPrisma.customerCareService.findUnique.mockResolvedValue({
+        staffId: 'staff-care-1',
+      });
+      // Không tìm thấy học sinh ngay sau bước kiểm quyền: NotFound nghĩa là đã qua kiểm quyền.
+      mockPrisma.studentInfo.findUnique.mockResolvedValue(null);
+    });
+
+    it('rejects a customer care staff transferring the student to someone else', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.customer_care],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          { customer_care_staff_id: 'staff-care-2' },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects a customer care staff removing their own assignment', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.customer_care],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          { customer_care_staff_id: null },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('lets a customer care staff resend the same assignment', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.customer_care],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          { customer_care_staff_id: 'staff-care-1' },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('lets a customer care staff edit the profile without touching the assignment', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.customer_care],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          { school: 'THPT A' },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('lets an assistant transfer the student to another customer care staff', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-assistant-1',
+        roles: [StaffRole.assistant],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          { customer_care_staff_id: 'staff-care-2' },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('customer care assignment default percent', () => {
+    const buildTx = (
+      existing: { staffId: string; profitPercent: unknown } | null,
+    ) => ({
+      customerCareService: {
+        findUnique: jest.fn().mockResolvedValue(existing),
+        upsert: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn(),
+      },
+      staffInfo: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'cc-new',
+          roles: [StaffRole.customer_care],
+          customerCareDefaultProfitPercent: 0.15,
+        }),
+      },
+      attendance: { updateMany: jest.fn() },
+    });
+    const sync = (tx: unknown, dto: Record<string, unknown>) =>
+      (
+        service as unknown as {
+          syncCustomerCareAssignment: (
+            tx: unknown,
+            studentId: string,
+            dto: Record<string, unknown>,
+          ) => Promise<void>;
+        }
+      ).syncCustomerCareAssignment(tx, 'student-1', dto);
+
+    it('applies the staff default percent when a customer care staff is newly assigned', async () => {
+      const tx = buildTx(null);
+
+      await sync(tx, { customer_care_staff_id: 'cc-new' });
+
+      expect(tx.customerCareService.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: {
+            studentId: 'student-1',
+            staffId: 'cc-new',
+            profitPercent: 0.15,
+          },
+        }),
+      );
+    });
+
+    it('applies the new staff default percent when switching customer care staff', async () => {
+      const tx = buildTx({ staffId: 'cc-old', profitPercent: 0.3 });
+
+      await sync(tx, { customer_care_staff_id: 'cc-new' });
+
+      expect(tx.customerCareService.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: { staffId: 'cc-new', profitPercent: 0.15 },
+        }),
+      );
+      // Buổi đã tạo giữ hệ số đã chụp: không đụng attendance.
+      expect(tx.attendance.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps the current percent when the same customer care staff stays assigned', async () => {
+      const tx = buildTx({ staffId: 'cc-new', profitPercent: 0.3 });
+
+      await sync(tx, { customer_care_staff_id: 'cc-new' });
+
+      expect(tx.customerCareService.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: { staffId: 'cc-new', profitPercent: 0.3 },
+        }),
+      );
+    });
+
+    it('lets an explicit percent override the staff default', async () => {
+      const tx = buildTx(null);
+
+      await sync(tx, {
+        customer_care_staff_id: 'cc-new',
+        customer_care_profit_percent: null,
+      });
+
+      expect(tx.customerCareService.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: {
+            studentId: 'student-1',
+            staffId: 'cc-new',
+            profitPercent: null,
+          },
+        }),
+      );
+    });
   });
 });

@@ -43,6 +43,7 @@ enum StudentCustomerSource {
   fanpage_luyen_tin
   referral
   personal
+  returning_customer
   other
 }
 
@@ -62,9 +63,11 @@ enum ClassStatus {
 }
 
 /// Chế độ tính tiền của lớp. Mặc định theo buổi (hành vi cũ). Theo block 30 phút là opt-in.
+/// `one_time` = học phí cả khoá một lần, vào buổi có mặt/nghỉ phép đầu tiên.
 enum ClassPricingMode {
   per_session
   per_block
+  one_time
 }
 
 enum AttendanceStatus {

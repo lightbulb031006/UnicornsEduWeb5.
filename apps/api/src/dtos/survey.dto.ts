@@ -147,6 +147,8 @@ export interface TeacherSurveyWarningDto {
     name: string;
     startDate: string | null;
     endDate: string | null;
+    /** Đang trong khung **chặn khảo sát sắp hạn**: gia sư không tạo được buổi học, popup không có «Để sau». */
+    blocking: boolean;
   }[];
 }
 

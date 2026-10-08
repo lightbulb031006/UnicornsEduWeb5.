@@ -7,6 +7,7 @@ import { ChevronLeft } from "lucide-react";
 import { getMyClassDetail } from "@/lib/apis/student-class.api";
 import { Skeleton } from "@/components/ui/skeleton";
 import StudentClassTimelineList from "@/components/student/StudentClassTimelineList";
+import ClassStandingTeachers from "@/components/shared/class/ClassStandingTeachers";
 
 export default function StudentClassDetailPage() {
   const params = useParams();
@@ -37,19 +38,23 @@ export default function StudentClassDetailPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-                {classDetail?.class?.name || "Chi tiết lớp học"}
+                {classDetail?.className || "Chi tiết lớp học"}
               </h1>
-              {classDetail?.class?.course?.name && (
+              {classDetail?.courseName && (
                 <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                  {classDetail.class.course.name}
+                  {classDetail.courseName}
                 </span>
               )}
             </div>
             <p className="mt-1 text-xs text-text-muted sm:text-sm">
-              {classDetail?.class?.status === "running"
+              {classDetail?.classStatus === "running"
                 ? "Lớp đang mở"
                 : "Lớp đã kết thúc"}
             </p>
+            <ClassStandingTeachers
+              names={classDetail?.teacherNames ?? []}
+              className="mt-2"
+            />
           </div>
         )}
       </div>

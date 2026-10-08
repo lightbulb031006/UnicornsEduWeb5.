@@ -1,6 +1,7 @@
 import { StaffRole, UserRole } from 'generated/enums';
 import {
   redactClassStudentWalletBalances,
+  redactOtherTeachersIncome,
   resolveAccountantFinanceView,
 } from './accountant-finance-redaction.util';
 
@@ -72,5 +73,47 @@ describe('redactClassStudentWalletBalances', () => {
     });
     expect(redacted.students[0].accountBalance).toBe(100_000);
     expect(redacted.students[1]).not.toHaveProperty('accountBalance');
+  });
+});
+
+describe('redactOtherTeachersIncome', () => {
+  const classRecord = {
+    id: 'class-1',
+    allowancePerSessionPerStudent: 200_000,
+    teachers: [
+      {
+        id: 'teacher-self',
+        fullName: 'Self',
+        customAllowance: 250_000,
+        customScaleAmount: 0,
+        operatingDeductionRatePercent: 5,
+        taxRatePercent: 10,
+      },
+      {
+        id: 'teacher-other',
+        fullName: 'Other',
+        customAllowance: 300_000,
+        customScaleAmount: 50_000,
+        operatingDeductionRatePercent: 7,
+        taxRatePercent: 10,
+      },
+    ],
+  };
+
+  it('keeps the viewer income fields and strips other teachers', () => {
+    const redacted = redactOtherTeachersIncome(classRecord, 'teacher-self');
+
+    expect(redacted.teachers[0]).toEqual(classRecord.teachers[0]);
+    expect(redacted.teachers[1]).toEqual({
+      id: 'teacher-other',
+      fullName: 'Other',
+    });
+    expect(redacted.allowancePerSessionPerStudent).toBe(200_000);
+  });
+
+  it('does not mutate the input record', () => {
+    redactOtherTeachersIncome(classRecord, 'teacher-self');
+
+    expect(classRecord.teachers[1].customAllowance).toBe(300_000);
   });
 });

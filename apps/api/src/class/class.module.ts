@@ -6,6 +6,8 @@ import { NotificationModule } from 'src/notification/notification.module';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { StaffOperationsModule } from 'src/staff-ops/staff-operations.module';
 import { ClassController } from './class.controller';
+import { ClassCoverController } from './class-cover.controller';
+import { ClassCoverService } from './class-cover.service';
 import { CourseAccessService } from './course-access.service';
 import { CourseController } from './course.controller';
 import { CourseService } from './course.service';
@@ -28,6 +30,7 @@ import { SurveyService } from './survey.service';
   ],
   controllers: [
     ClassController,
+    ClassCoverController,
     CourseController,
     StaffOpsClassController,
     SurveysController,
@@ -35,6 +38,7 @@ import { SurveyService } from './survey.service';
   ],
   providers: [
     ClassService,
+    ClassCoverService,
     CourseService,
     CourseAccessService,
     ClassSurveyService,

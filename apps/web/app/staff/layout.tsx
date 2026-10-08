@@ -2,6 +2,7 @@
 
 import { StaffAccessGate, StaffSidebar } from "@/components/staff";
 import SurveyReminderGate from "@/components/staff/SurveyReminderGate";
+import DropOutReasonReminder from "@/components/staff/DropOutReasonReminder";
 
 const STAFF_LAYOUT_BACKGROUND_STYLE = {
   background:
@@ -16,6 +17,7 @@ export default function StaffLayout({
   return (
     <StaffAccessGate>
       <SurveyReminderGate />
+      <DropOutReasonReminder />
       <div className="min-h-screen bg-bg-primary">
         <a
           href="#staff-main-content"

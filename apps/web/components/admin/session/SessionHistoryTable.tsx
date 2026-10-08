@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -83,10 +91,24 @@ import { getFullProfile } from "@/lib/apis/auth.api";
 import * as classApi from "@/lib/apis/class.api";
 import * as sessionApi from "@/lib/apis/session.api";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
+import { mergeTimelineByDateDesc } from "@/lib/class-session-timeline";
 
 type SessionEntityMode = "teacher" | "class" | "none";
 type SessionStatusMode = "payment" | "timeline";
 type SessionTableVariant = "default" | "classDetail";
+
+/**
+ * Dòng không phải buổi học (vd báo cáo khảo sát) chen vào danh sách `variant="classDetail"`,
+ * xếp chung theo ngày mới → cũ. Không tham gia chọn hàng loạt.
+ */
+export type SessionHistoryExtraRow = {
+  id: string;
+  /** `YYYY-MM-DD…`, so với `session.date`. */
+  date: string;
+  mobileCard: ReactNode;
+  /** Trả về một `<tr>` đủ cột; `withBulkColumn` thì thêm ô trống đầu hàng. */
+  renderDesktopRow: (options: { withBulkColumn: boolean }) => ReactNode;
+};
 
 export type SessionTeacherOption = {
   id: string;
@@ -132,6 +154,8 @@ type Props = {
   hideList?: boolean;
   autoOpenSessionId?: string | null;
   autoOpenToken?: number;
+  /** Chỉ dùng với `variant="classDetail"`. */
+  extraRows?: SessionHistoryExtraRow[];
 };
 
 type AttendanceFormItem = {
@@ -223,19 +247,34 @@ function renderClassDetailSessionTime(session: SessionItem): string {
   return start !== "—" ? start : end;
 }
 
-export function ClassDetailDateTimeBlock({ session }: { session: SessionItem }) {
+/** Cột Thời gian bảng lớp: thứ, ngày, rồi một dòng phụ (giờ học, nhãn…). */
+export function ClassDetailDateLines({
+  date,
+  children,
+}: {
+  date: string;
+  children?: ReactNode;
+}) {
   return (
     <div className="flex min-w-[5.5rem] flex-col gap-0.5 text-left">
       <p className="text-xs leading-tight text-text-secondary">
-        {formatWeekdayLabel(session.date, { trailingColon: true })}
+        {formatWeekdayLabel(date, { trailingColon: true })}
       </p>
       <p className="text-sm font-bold leading-tight text-text-primary">
-        {formatDateOnly(session.date)}
+        {formatDateOnly(date)}
       </p>
+      {children}
+    </div>
+  );
+}
+
+export function ClassDetailDateTimeBlock({ session }: { session: SessionItem }) {
+  return (
+    <ClassDetailDateLines date={session.date}>
       <p className="font-mono text-[11px] leading-tight text-text-muted">
         {renderClassDetailSessionTime(session)}
       </p>
-    </div>
+    </ClassDetailDateLines>
   );
 }
 
@@ -835,6 +874,7 @@ export default function SessionHistoryTable({
   hideList = false,
   autoOpenSessionId = null,
   autoOpenToken = 0,
+  extraRows,
 }: Props) {
   const isWideEditor = editorLayout === "wide";
   const showActionsColumn = showActionsColumnProp ?? Boolean(onSessionUpdated);
@@ -852,6 +892,14 @@ export default function SessionHistoryTable({
     tdCheckbox: isClassDetailRowLayout ? "px-2 py-1.5" : "px-3 py-3",
     tdActions: isClassDetailRowLayout ? "px-1.5 py-1.5" : "px-2 py-3",
   } as const;
+  const timelineItems = useMemo(
+    () =>
+      mergeTimelineByDateDesc(
+        sessions,
+        isClassDetailRowLayout ? (extraRows ?? []) : [],
+      ),
+    [sessions, extraRows, isClassDetailRowLayout],
+  );
   const showBulkPaymentStatusBar =
     enableBulkPaymentStatusEdit &&
     statusMode === "payment" &&
@@ -1892,8 +1940,16 @@ export default function SessionHistoryTable({
       <div
         className={`${isClassDetailRowLayout ? "space-y-2" : "space-y-3"} ${className} lg:hidden ${hideList ? "hidden" : ""}`}
       >
-        {sessions.length > 0 ? (
-          sessions.map((session) => {
+        {timelineItems.length > 0 ? (
+          timelineItems.map((entry) => {
+            if (entry.kind === "extra") {
+              return (
+                <Fragment key={`extra-${entry.item.id}`}>
+                  {entry.item.mobileCard}
+                </Fragment>
+              );
+            }
+            const session = entry.item;
             const status = renderSessionStatus(session, statusMode);
             const commentDisplay = resolveSessionCommentDisplayContent({
               className: session.class?.name,
@@ -2212,8 +2268,18 @@ export default function SessionHistoryTable({
               </tr>
             </thead>
             <tbody>
-              {sessions.length > 0 ? (
-                sessions.map((session) => {
+              {timelineItems.length > 0 ? (
+                timelineItems.map((entry) => {
+                  if (entry.kind === "extra") {
+                    return (
+                      <Fragment key={`extra-${entry.item.id}`}>
+                        {entry.item.renderDesktopRow({
+                          withBulkColumn: showBulkPaymentStatusBar,
+                        })}
+                      </Fragment>
+                    );
+                  }
+                  const session = entry.item;
                   const status = renderSessionStatus(session, "payment");
                   const commentDisplay = resolveSessionCommentDisplayContent({
                     className: session.class?.name,

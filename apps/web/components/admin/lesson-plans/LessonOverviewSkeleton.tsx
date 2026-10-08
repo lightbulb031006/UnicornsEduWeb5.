@@ -1,5 +1,7 @@
 "use client";
 
+import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
+
 const DEFAULT_SKELETON_ROWS = 6;
 
 function SkeletonBlock({ className = "" }: { className?: string }) {
@@ -363,7 +365,7 @@ export function LessonWorkspaceLoadingSkeleton() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2.5">
                 <h1 className="text-xl font-semibold tracking-tight text-text-primary sm:text-2xl">
-                  Giáo Án
+                  {LESSON_PLAN_LABEL}
                 </h1>
                 <SkeletonBlock className="h-6 w-24 rounded-full border border-primary/20 bg-primary/10" />
               </div>

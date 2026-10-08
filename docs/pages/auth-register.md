@@ -4,7 +4,7 @@
 
 **Đăng ký công khai đã tắt.** Route `/auth/register` redirect về `/auth/login`. Endpoint `POST /auth/register` trả `403 Forbidden`.
 
-Tài khoản mới chỉ được tạo qua admin (`POST /users`, `POST /users/student` trên `/admin/users`).
+Tài khoản mới chỉ được tạo qua admin (`POST /users`, `POST /users/student` trên `/admin/users`), hoặc CSKH tạo học sinh kèm tài khoản (`POST /users/student` từ `/staff/customer-care-detail`).
 
 ## Hành vi hiện tại
 

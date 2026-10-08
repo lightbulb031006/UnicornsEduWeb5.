@@ -118,3 +118,18 @@ export interface CustomerCareStudentSummary {
   droppedStudentsThisMonth: number;
   revenueThisMonth: number;
 }
+
+/** Học sinh nghỉ trong tháng điền bù mà chưa có lý do nghỉ. */
+export interface CustomerCareMissingDropOutReason {
+  studentId: string;
+  fullName: string;
+  /** Ngày nghỉ học, dạng `YYYY-MM-DD`. */
+  dropOutDate: string;
+}
+
+/** GET /customer-care/me/missing-drop-out-reasons */
+export interface CustomerCareMissingDropOutReasonList {
+  /** Tháng cần điền bù lý do nghỉ, dạng `YYYY-MM`. */
+  monthKey: string;
+  items: CustomerCareMissingDropOutReason[];
+}

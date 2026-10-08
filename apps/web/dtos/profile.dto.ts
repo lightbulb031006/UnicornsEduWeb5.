@@ -15,10 +15,8 @@ export interface ProfileStaffInfoDto {
   birthDate?: string | null;
   university?: string | null;
   highSchool?: string | null;
-  specialization?: string | null;
   bankAccount?: string | null;
   bankQrLink?: string | null;
-  personalAchievementLink?: string | null;
   status: StaffStatus;
   roles: string[];
   createdAt?: string;
@@ -111,10 +109,8 @@ export interface UpdateMyStaffProfileDto {
   birth_date?: string;
   university?: string;
   high_school?: string;
-  specialization?: string;
   bank_account?: string;
   bank_qr_link?: string;
-  personal_achievement_link?: string | null;
 }
 
 /** Payload to update current user's student: PATCH /auth/me/student */
@@ -126,7 +122,7 @@ export interface UpdateMyStudentProfileDto {
   birth_year?: number;
   parent_name?: string;
   parent_phone?: string;
-  parent_email?: string;
+  parent_email?: string | null;
   parent_receipt_email_enabled?: boolean;
   status?: StudentStatus;
   gender?: StudentGender;

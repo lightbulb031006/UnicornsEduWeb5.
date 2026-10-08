@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { AchievementService } from './achievement.service';
 
-describe('AchievementService.assertCompleteReorder', () => {
+describe('AchievementService', () => {
   const service = Object.create(
     AchievementService.prototype,
   ) as AchievementService;
@@ -28,5 +28,17 @@ describe('AchievementService.assertCompleteReorder', () => {
     expect(() => service.assertCompleteReorder(['a', 'b'], ['a', 'z'])).toThrow(
       BadRequestException,
     );
+  });
+
+  it('rejects a new staff achievement that has no proof image', async () => {
+    await expect(
+      service.createStaffAchievement('UNISTAFF-x', { title: 'Giải' }, undefined),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects clearing a staff proof image', async () => {
+    await expect(
+      service.deleteStaffAchievementImage('UNISTAFF-x', 'ach-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

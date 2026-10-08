@@ -218,7 +218,17 @@ export class AchievementService {
     return this.toStudentDtoList(rows);
   }
 
-  async createStaffAchievement(staffId: string, dto: CreateAchievementDto) {
+  async createStaffAchievement(
+    staffId: string,
+    dto: CreateAchievementDto,
+    file: UploadableFile | undefined,
+  ) {
+    if (!file) {
+      throw new BadRequestException(
+        'Thành tích nhân sự phải kèm ảnh minh chứng.',
+      );
+    }
+    validateImageFile(file, 'Ảnh minh chứng');
     await this.assertStaffExists(staffId);
     const title = this.normalizeTitle(dto.title);
     const sortOrder = dto.sortOrder ?? (await this.nextStaffSortOrder(staffId));
@@ -226,7 +236,14 @@ export class AchievementService {
     const row = await this.prisma.staffAchievement.create({
       data: { staffId, title, sortOrder },
     });
-    return this.toStaffDto(row);
+    try {
+      return await this.uploadStaffAchievementImage(staffId, row.id, file);
+    } catch (error) {
+      await this.prisma.staffAchievement
+        .delete({ where: { id: row.id } })
+        .catch(() => undefined);
+      throw error;
+    }
   }
 
   async createStudentAchievement(
@@ -537,26 +554,13 @@ export class AchievementService {
     return this.toStudentDto(row);
   }
 
-  async deleteStaffAchievementImage(staffId: string, achievementId: string) {
-    const existing = await this.prisma.staffAchievement.findFirst({
-      where: { id: achievementId, staffId },
-    });
-    if (!existing) {
-      throw new NotFoundException('Achievement not found.');
-    }
-    if (!existing.imagePath && !existing.imageWatermarkedPath) {
-      return this.toStaffDto(existing);
-    }
-
-    await this.removeAchievementImages(
-      existing.imagePath,
-      existing.imageWatermarkedPath,
+  async deleteStaffAchievementImage(
+    _staffId: string,
+    _achievementId: string,
+  ): Promise<never> {
+    throw new BadRequestException(
+      'Không gỡ ảnh minh chứng của thành tích nhân sự. Hãy thay ảnh khác hoặc xoá cả thành tích.',
     );
-    const row = await this.prisma.staffAchievement.update({
-      where: { id: achievementId },
-      data: { imagePath: null, imageWatermarkedPath: null },
-    });
-    return this.toStaffDto(row);
   }
 
   async deleteStudentAchievementImage(

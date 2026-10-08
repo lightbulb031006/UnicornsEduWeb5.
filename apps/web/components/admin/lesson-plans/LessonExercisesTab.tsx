@@ -11,6 +11,7 @@ import LessonWorkQuickFilters, {
 } from "./LessonWorkQuickFilters";
 import LessonOutputQuickPopup from "./LessonOutputQuickPopup";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
+import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
 
 const EX_PAGE_SIZE = 15;
 
@@ -691,7 +692,7 @@ export default function LessonExercisesTab({
           <div className="space-y-6">
             <div className="flex flex-col gap-3 border-b border-border-default/60 pb-4 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="text-lg font-semibold text-text-primary sm:text-xl">
-                Giáo Án ({total})
+                {LESSON_PLAN_LABEL} ({total})
               </h3>
               <button
                 type="button"
@@ -701,12 +702,12 @@ export default function LessonExercisesTab({
                 className="group inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-border-default bg-bg-surface px-4 text-sm font-medium text-text-secondary shadow-sm transition-[transform,color,background-color,border-color] hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:size-10 sm:w-10 sm:px-0"
                 aria-label={
                   expandedView
-                    ? "Thu gọn về trang Giáo Án"
-                    : "Phóng to quản lí Giáo Án"
+                    ? `Thu gọn về trang ${LESSON_PLAN_LABEL}`
+                    : `Phóng to quản lí ${LESSON_PLAN_LABEL}`
                 }
                 title={
                   expandedView
-                    ? "Thu gọn về trang Giáo Án"
+                    ? `Thu gọn về trang ${LESSON_PLAN_LABEL}`
                     : "Mở trang lesson-manage-details"
                 }
               >

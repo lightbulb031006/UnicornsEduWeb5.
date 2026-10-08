@@ -20,7 +20,11 @@ import type {
 } from 'src/dtos/assistant-commission.dto';
 import { getPreferredUserFullName } from 'src/common/user-name.util';
 import { resolveTaxDeductionRate } from 'src/payroll/deduction-rates';
-import { ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL } from 'src/payroll/assistant-share.util';
+import {
+  ASSISTANT_SHARE_EXCLUDE_SELF_MANAGED_SQL,
+  ATTENDANCE_COMMISSION_TUITION_BASIS_SQL,
+  commissionTuitionBasisVnd,
+} from 'src/payroll/assistant-share.util';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 const DEFAULT_PAGE = 1;
@@ -403,19 +407,19 @@ export class AssistantCommissionService {
       SELECT
         attendance.customer_care_staff_id AS "customerCareStaffId",
         COALESCE(SUM(
-          ROUND((COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric, 0)
+          ROUND((${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric, 0)
         ), 0) AS "totalShareAmount",
         COALESCE(SUM(
           CASE
             WHEN COALESCE(attendance.assistant_payment_status::text, ${PaymentStatus.pending}) = ${PaymentStatus.pending}
-            THEN ROUND((COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric, 0)
+            THEN ROUND((${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric, 0)
             ELSE 0
           END
         ), 0) AS "pendingShareAmount",
         COALESCE(SUM(
           CASE
             WHEN attendance.assistant_payment_status::text = ${PaymentStatus.paid}
-            THEN ROUND((COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric, 0)
+            THEN ROUND((${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric, 0)
             ELSE 0
           END
         ), 0) AS "paidShareAmount"
@@ -504,19 +508,19 @@ export class AssistantCommissionService {
           student_info.id AS "studentId",
           COALESCE(student_info.full_name, '') AS "fullName",
           COALESCE(SUM(
-            ROUND((COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric, 0)
+            ROUND((${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric, 0)
           ), 0) AS "totalShareAmount",
           COALESCE(SUM(
             CASE
               WHEN COALESCE(attendance.assistant_payment_status::text, ${PaymentStatus.pending}) = ${PaymentStatus.pending}
-              THEN ROUND((COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric, 0)
+              THEN ROUND((${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric, 0)
               ELSE 0
             END
           ), 0) AS "pendingShareAmount",
           COALESCE(SUM(
             CASE
               WHEN attendance.assistant_payment_status::text = ${PaymentStatus.paid}
-              THEN ROUND((COALESCE(attendance.tuition_fee, 0) * 0.03)::numeric, 0)
+              THEN ROUND((${ATTENDANCE_COMMISSION_TUITION_BASIS_SQL} * 0.03)::numeric, 0)
               ELSE 0
             END
           ), 0) AS "paidShareAmount"
@@ -617,6 +621,7 @@ export class AssistantCommissionService {
       select: {
         id: true,
         tuitionFee: true,
+        payrollBasisTuitionFee: true,
         status: true,
         assistantPaymentStatus: true,
         session: {
@@ -647,7 +652,7 @@ export class AssistantCommissionService {
     void sessionDateFilter;
 
     return attendances.map((attendance) => {
-      const tuitionFee = toNumber(attendance.tuitionFee);
+      const tuitionFee = toNumber(commissionTuitionBasisVnd(attendance));
       const shareAmount = Math.round(tuitionFee * ASSISTANT_SHARE_RATE);
 
       return {

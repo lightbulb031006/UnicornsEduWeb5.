@@ -22,9 +22,7 @@ export class LessonQuizService extends CourseContentSupportService {
       throw new NotFoundException(`Lesson ${lessonId} not found`);
     }
     if (lesson.kind !== LessonKind.theory) {
-      throw new BadRequestException(
-        'Chỉ tiết lý thuyết mới có bài tập ôn nhẹ',
-      );
+      throw new BadRequestException('Chỉ tiết lý thuyết mới có bài tập ôn nhẹ');
     }
     return lesson;
   }

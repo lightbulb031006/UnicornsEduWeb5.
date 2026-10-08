@@ -972,12 +972,20 @@ export default function StaffSelfDetailPage() {
         <StaffIdentityOverview
           staffId={staff.id}
           achievementMode="self"
+          email={staff.user?.email ?? profile.email}
+          phone={staff.user?.phone ?? profile.phone}
+          accountHandle={staff.user?.accountHandle ?? profile.accountHandle}
           birthDateLabel={formatDate(staff.birthDate)}
           province={province}
           ethnicity={staff.ethnicity}
           gender={staff.gender}
+          cccdNumber={staff.cccdNumber}
+          cccdIssuedDateLabel={formatDate(staff.cccdIssuedDate)}
+          cccdIssuedPlace={staff.cccdIssuedPlace}
           currentAddress={staff.currentAddress}
           university={staff.university}
+          highSchool={staff.highSchool}
+          bankAccount={staff.bankAccount}
           googleMeetLink={staff.googleMeetLink}
           qrLink={resolvedQrLink}
           onQrEdit={() => setEditPopupOpen(true)}

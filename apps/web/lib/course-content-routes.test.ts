@@ -5,6 +5,8 @@ import {
   moduleLessonsHref,
   newLessonHref,
   studentClassLessonsHref,
+  studentAssignmentHref,
+  studentClassTabHref,
   studentLessonHref,
 } from "@/lib/course-content-routes";
 
@@ -27,10 +29,16 @@ describe("course-content-routes (Next.js hrefs)", () => {
 
   it("builds student class lesson pages", () => {
     expect(studentClassLessonsHref("cl1")).toBe(
-      "/student/classes/cl1?tab=lessons",
+      "/student/classes/cl1?tab=chuyen-de",
+    );
+    expect(studentClassTabHref("cl1", "buoi-hoc")).toBe(
+      "/student/classes/cl1?tab=buoi-hoc",
     );
     expect(studentLessonHref("cl1", "l1")).toBe(
       "/student/classes/cl1/lessons/l1",
+    );
+    expect(studentAssignmentHref("cl1", "cci1")).toBe(
+      "/student/classes/cl1/assignments/cci1",
     );
   });
 });

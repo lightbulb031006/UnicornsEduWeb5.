@@ -40,12 +40,18 @@ import {
   computeDefaultSessionAllowanceAmountVnd,
   hasSessionAllowanceSnapshots,
   resolveLiveSessionAllowanceSnapshots,
+  resolveTeacherScaleAmountVnd,
 } from './session-allowance.util';
 import {
   isBlockPricingMode,
+  isOneTimePricingMode,
   resolveAllowanceReconstructionBlockCount,
   resolveSnapshotBlockCountForPricingMode,
 } from '../common/class-pricing-mode.util';
+import {
+  findOneTimeChargedStudentIds,
+  lockOneTimeClassCharges,
+} from '../common/one-time-charge.util';
 import {
   presentCustomAllowanceAsPerSession,
   standardBlockCountFromSlots,
@@ -108,6 +114,7 @@ function normalizeSessionPaymentStatus(
 
 type ClassTeacherAllowanceSource = {
   customAllowance: number | null;
+  customScaleAmount: number | null;
   class: {
     name: string;
     pricingMode?: string | null;
@@ -139,7 +146,10 @@ function liveAllowanceFromClassTeacher(
     classDefaultPerStudent: classTeacher.class.allowancePerSessionPerStudent,
     classDefaultPerBlock:
       classTeacher.class.allowancePerBlockPerStudent ?? null,
-    scaleAmount: classTeacher.class.scaleAmount,
+    scaleAmount: resolveTeacherScaleAmountVnd({
+      customScaleAmount: classTeacher.customScaleAmount,
+      classScaleAmount: classTeacher.class.scaleAmount,
+    }),
     reconstructionBlocks,
     storedAsPerBlock,
     snapshotBlockCount: options.snapshotBlockCount,
@@ -635,6 +645,7 @@ export class SessionUpdateService {
         let snapshotScaleAmountUpdate: number | undefined;
         let classTeacherForAllowance: {
           customAllowance: number | null;
+          customScaleAmount: number | null;
           operatingDeductionRatePercent?:
             | Prisma.Decimal
             | number
@@ -662,6 +673,7 @@ export class SessionUpdateService {
             },
             select: {
               customAllowance: true,
+              customScaleAmount: true,
               operatingDeductionRatePercent: true,
               class: {
                 select: {
@@ -726,6 +738,7 @@ export class SessionUpdateService {
                 },
                 select: {
                   customAllowance: true,
+                  customScaleAmount: true,
                   operatingDeductionRatePercent: true,
                   class: {
                     select: {
@@ -862,6 +875,7 @@ export class SessionUpdateService {
               },
               select: {
                 customAllowance: true,
+                customScaleAmount: true,
                 class: {
                   select: {
                     pricingMode: true,
@@ -875,6 +889,7 @@ export class SessionUpdateService {
             if (classTeacher) {
               classTeacherForAllowance = {
                 customAllowance: classTeacher.customAllowance,
+                customScaleAmount: classTeacher.customScaleAmount,
                 class: {
                   name: existingSession.class.name,
                   pricingMode: classTeacher.class.pricingMode,
@@ -902,6 +917,23 @@ export class SessionUpdateService {
               live.snapshotPerStudentAllowance;
             snapshotScaleAmountUpdate = live.snapshotScaleAmount;
           }
+        }
+
+        const oneTimeAlreadyChargedStudentIds = new Set<string>();
+        if (
+          shouldRebuildAttendanceState &&
+          nextAttendanceStudentIds.length > 0 &&
+          isOneTimePricingMode(existingSession.class.pricingMode)
+        ) {
+          await lockOneTimeClassCharges(tx, nextClassId);
+          const charged = await findOneTimeChargedStudentIds(tx, {
+            classId: nextClassId,
+            studentIds: nextAttendanceStudentIds,
+            excludeSessionId: existingSession.id,
+          });
+          charged.forEach((studentId) =>
+            oneTimeAlreadyChargedStudentIds.add(studentId),
+          );
         }
 
         const studentTuitionFeeByStudentId = new Map<string, number | null>();
@@ -957,6 +989,9 @@ export class SessionUpdateService {
                   classTuitionPackageSession:
                     studentClass.class?.tuitionPackageSession,
                   blockCount: existingSession.snapshotBlockCount,
+                  oneTimeAlreadyCharged: oneTimeAlreadyChargedStudentIds.has(
+                    studentClass.studentId,
+                  ),
                 },
               ),
             );
@@ -1033,8 +1068,14 @@ export class SessionUpdateService {
               const defaultTuitionFee =
                 studentTuitionFeeByStudentId.get(attendanceItem.studentId) ??
                 null;
-              const resolvedTuitionFee =
-                data.attendance !== undefined
+              const oneTimeAlreadyCharged = oneTimeAlreadyChargedStudentIds.has(
+                attendanceItem.studentId,
+              );
+              const resolvedTuitionFee = oneTimeAlreadyCharged
+                ? this.sessionValidationService.resolveOneTimeAlreadyChargedTuitionFee(
+                    attendanceItem.status,
+                  )
+                : data.attendance !== undefined
                   ? this.sessionValidationService.resolveChargeableAttendanceTuitionFee(
                       attendanceItem.status,
                       attendanceItem.tuitionFee,
@@ -1506,10 +1547,7 @@ export class SessionUpdateService {
           );
         }
 
-        if (
-          sessionDate !== undefined ||
-          sessionStartTime !== undefined
-        ) {
+        if (sessionDate !== undefined || sessionStartTime !== undefined) {
           await syncClassTimelineSortByTime(tx, nextClassId);
         }
 

@@ -39,6 +39,15 @@ export class CreateCourseDto {
   @IsInt()
   @Min(0)
   sort_order?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Khoá bán một lần: mọi lớp của khoá trừ tổng gói ở buổi có mặt/nghỉ phép đầu tiên của từng học sinh. Chỉ admin/trợ lí đổi được. Chỉ bật được khi chưa lớp nào của khoá thu học phí; tắt không tính lại tiền.',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_one_time?: boolean;
 }
 
 export class UpdateCourseDto {
@@ -74,6 +83,15 @@ export class UpdateCourseDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Khoá bán một lần: mọi lớp của khoá trừ tổng gói ở buổi có mặt/nghỉ phép đầu tiên của từng học sinh. Chỉ admin/trợ lí đổi được. Chỉ bật được khi chưa lớp nào của khoá thu học phí; tắt không tính lại tiền.',
+    example: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_one_time?: boolean;
 }
 
 export class CreateCourseDifficultyLevelDto {

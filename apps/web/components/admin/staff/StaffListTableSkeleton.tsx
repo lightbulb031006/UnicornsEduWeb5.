@@ -49,12 +49,11 @@ export default function StaffListTableSkeleton({
           <caption className="sr-only">Đang tải danh sách nhân sự</caption>
           <thead>
             <tr className="border-b border-border-default bg-bg-secondary">
-              <th scope="col" className="w-[3%] min-w-10 px-2 py-3" aria-label="Trạng thái" />
-              <th scope="col" className="w-[13%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Tên</th>
+              <th scope="col" className="w-[8%] min-w-14 px-2 py-3" aria-label="Trạng thái" />
+              <th scope="col" className="w-[20%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Tên</th>
               <th scope="col" className="w-[20%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Role</th>
               <th scope="col" className="w-[10%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Tỉnh</th>
-              <th scope="col" className="w-[14%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Thành tích</th>
-              <th scope="col" className="w-[16%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Lớp</th>
+              <th scope="col" className="w-[23%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Lớp</th>
               <th scope="col" className="w-[14%] min-w-0 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary overflow-x-hidden">Chưa thanh toán</th>
               {showActions ? (
                 <th scope="col" className="w-[5%] min-w-16 px-4 py-3">
@@ -66,10 +65,10 @@ export default function StaffListTableSkeleton({
           <tbody>
             {Array.from({ length: rows }).map((_, i) => (
               <tr key={i} className="border-b border-border-default bg-bg-surface">
-                <td className="w-[3%] min-w-10 px-2 py-3 align-middle">
+                <td className="w-[8%] min-w-14 px-2 py-3 align-middle">
                   <span className="inline-block size-2 rounded-full bg-bg-tertiary animate-pulse" />
                 </td>
-                <td className="w-[13%] min-w-0 px-4 py-3">
+                <td className="w-[20%] min-w-0 px-4 py-3">
                   <span className="inline-block h-5 w-full max-w-[8rem] animate-pulse rounded bg-bg-tertiary" />
                 </td>
                 <td className="w-[20%] min-w-0 px-4 py-3 align-middle">
@@ -81,10 +80,7 @@ export default function StaffListTableSkeleton({
                 <td className="w-[10%] min-w-0 px-4 py-3">
                   <span className="inline-block h-5 w-full max-w-[5rem] animate-pulse rounded bg-bg-tertiary" />
                 </td>
-                <td className="w-[14%] min-w-0 px-4 py-3">
-                  <span className="inline-block h-5 w-full max-w-[7rem] animate-pulse rounded bg-bg-tertiary" />
-                </td>
-                <td className="w-[16%] min-w-0 px-4 py-3 align-middle">
+                <td className="w-[23%] min-w-0 px-4 py-3 align-middle">
                   <div className="flex min-w-0 flex-col gap-1">
                     <span className="inline-block h-5 w-full animate-pulse rounded-full bg-bg-tertiary" />
                     <span className="inline-block h-5 w-3/4 animate-pulse rounded-full bg-bg-tertiary" />

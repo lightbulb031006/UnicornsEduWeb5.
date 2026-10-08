@@ -138,11 +138,11 @@ export class UserController {
   }
 
   @Post('student')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
   @ApiOperation({
     summary: 'Create student user with profile and classes',
     description:
-      'Create pending user, assign student role, upsert student profile, and assign classes in a single admin flow.',
+      'Create pending user, assign student role, upsert student profile, and assign classes in a single admin flow. Customer care staff (without admin/assistant role) cannot assign classes and become the student customer care owner with their default profit percent.',
   })
   @ApiBody({
     type: AdminCreateStudentUserDto,
@@ -158,7 +158,11 @@ export class UserController {
     description: 'Validation error or email/handle exists.',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
-  @ApiResponse({ status: 403, description: 'Forbidden. Admin only.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Forbidden. Admin, assistant or customer care only; customer care cannot assign classes.',
+  })
   @ApiResponse({ status: 404, description: 'One or more classes not found.' })
   async createStudentUser(
     @CurrentUser() user: JwtPayload,

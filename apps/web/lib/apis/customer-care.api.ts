@@ -4,6 +4,7 @@ import type {
   CustomerCareBulkProfitPercentUpdatePayload,
   CustomerCareBulkProfitPercentUpdateResult,
   CustomerCareCommissionListParams,
+  CustomerCareMissingDropOutReasonList,
   CustomerCarePaymentStatus,
   CustomerCareStudentListResponse,
   CustomerCareCommissionItem,
@@ -37,6 +38,17 @@ export async function getCustomerCareStudents(
       page: payload?.meta?.page ?? page,
       limit: payload?.meta?.limit ?? limit,
     },
+  };
+}
+
+export async function getMyMissingDropOutReasons(): Promise<CustomerCareMissingDropOutReasonList> {
+  const res = await api.get<CustomerCareMissingDropOutReasonList>(
+    "/customer-care/me/missing-drop-out-reasons",
+  );
+  const payload = res.data;
+  return {
+    monthKey: payload?.monthKey ?? "",
+    items: Array.isArray(payload?.items) ? payload.items : [],
   };
 }
 

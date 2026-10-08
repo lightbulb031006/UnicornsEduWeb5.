@@ -21,6 +21,21 @@ export function isSelfManagedAssistantShareAttendance(params: {
   );
 }
 
+/**
+ * Tuition that commissions (assistant 3%, CSKH) read. Historical rows of a
+ * one-time class keep their pre-backfill tuition in `payrollBasisTuitionFee`
+ * so already-accrued commission does not move onto the first session. Rows
+ * without a basis read `tuitionFee`.
+ */
+export function commissionTuitionBasisVnd(row: {
+  tuitionFee?: number | null;
+  payrollBasisTuitionFee?: number | null;
+}): number {
+  return row.payrollBasisTuitionFee ?? row.tuitionFee ?? 0;
+}
+
+export const ATTENDANCE_COMMISSION_TUITION_BASIS_SQL = Prisma.sql`COALESCE(attendance.payroll_basis_tuition_fee, attendance.tuition_fee, 0)`;
+
 export function resolveAssistantManagerStaffIdForAttendance(params: {
   customerCareStaffId: string | null | undefined;
   customerCareManagedByStaffId: string | null | undefined;

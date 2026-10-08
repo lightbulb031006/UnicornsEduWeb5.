@@ -43,7 +43,7 @@ export default function StudentWalletSection() {
   });
 
   if (isLoading) {
-    return <Skeleton className="h-40 w-full rounded-2xl" />;
+    return <Skeleton className="h-52 w-full rounded-2xl" />;
   }
 
   if (!student) {

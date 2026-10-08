@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import CreateCustomerCareStudentPopup from "@/components/customer-care/CreateCustomerCareStudentPopup";
 import CustomerCareDetailPanels from "@/components/customer-care/CustomerCareDetailPanels";
 import { useQuery } from "@tanstack/react-query";
 import { getFullProfile } from "@/lib/apis/auth.api";
@@ -17,6 +19,7 @@ export default function StaffCustomerCareDetailPage() {
     (profile?.roleType === "staff" || profile?.roleType === "admin") &&
     (staffInfo?.roles ?? []).includes("customer_care");
   const canOpenStaffClassDetail = isCustomerCare;
+  const [createStudentOpen, setCreateStudentOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -74,8 +77,23 @@ export default function StaffCustomerCareDetailPage() {
               Bảng công việc CSKH của bạn
             </h1>
           </div>
+          <div className="flex items-start lg:justify-end">
+            <button
+              type="button"
+              onClick={() => setCreateStudentOpen(true)}
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-text-inverse shadow-sm transition-colors hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:w-auto"
+            >
+              Tạo học sinh
+            </button>
+          </div>
         </div>
       </section>
+
+      {createStudentOpen ? (
+        <CreateCustomerCareStudentPopup
+          onClose={() => setCreateStudentOpen(false)}
+        />
+      ) : null}
 
       <CustomerCareDetailPanels
         staffId={staffInfo.id}

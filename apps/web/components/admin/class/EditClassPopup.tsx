@@ -17,6 +17,7 @@ import type {
   UpdateClassStudentsPayload,
   UpdateClassTeachersPayload,
 } from "@/dtos/class.dto";
+import { oneTimePackageError } from "@/lib/class-pricing-mode";
 import CourseSelect from "@/components/shared/class/CourseSelect";
 import * as classApi from "@/lib/apis/class.api";
 import * as staffApi from "@/lib/apis/staff.api";
@@ -486,6 +487,14 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
       toast.error(tuitionPkg.message);
       return;
     }
+    const oneTimePkgError = oneTimePackageError(
+      classDetail.pricingMode ?? "per_session",
+      tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total,
+    );
+    if (oneTimePkgError) {
+      toast.error(oneTimePkgError);
+      return;
+    }
     const studentTuitionPerSession =
       tuitionPkg.mode === "empty"
         ? undefined
@@ -700,6 +709,7 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
                   name="edit-class-type"
                   value={courseId}
                   onValueChange={setCourseId}
+                  isOneTime={classDetail.pricingMode === "one_time"}
                   labelId="edit-class-type-label"
                   buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />

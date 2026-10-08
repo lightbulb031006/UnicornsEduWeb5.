@@ -1,6 +1,6 @@
 # ADR: Timeline lớp là bảng join riêng, không nhồi vào `ClassContentItem`
 
-- **Status:** Accepted
+- **Status:** Accepted — phần sắp tay (DnD, `POST .../timeline/reorder`, `timeline_custom_order`) bị thay bởi `2026-10-05-class-module-order-and-removal.md`
 - **Date:** 2026-09-07
 
 ## Context

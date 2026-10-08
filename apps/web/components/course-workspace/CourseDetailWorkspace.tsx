@@ -7,7 +7,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, m } from "framer-motion";
 import { toast } from "sonner";
 import * as classApi from "@/lib/apis/class.api";
-import { CourseFormPopup, type CourseFormValues } from "@/components/admin/class";
+import {
+  CourseFormPopup,
+  CourseOneTimeBadge,
+  type CourseFormValues,
+} from "@/components/admin/class";
 import { Switch } from "@/components/ui/switch";
 import { confirmOrderDirtyLeave, useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { authKeys, classKeys, courseKeys } from "@/lib/query-keys";
@@ -124,6 +128,11 @@ function CourseDetailWorkspaceInner({
           name: values.name,
           sort_order: values.sortOrder,
           default_duration_days: values.defaultDurationDays,
+          ...(capabilities.canChangeCourseSaleMode &&
+          course &&
+          values.isOneTime !== course.isOneTime
+            ? { is_one_time: values.isOneTime }
+            : {}),
         }),
       onSuccess: invalidateCourseData,
     });
@@ -228,6 +237,7 @@ function CourseDetailWorkspaceInner({
                 {!course.isActive ? (
                   <span className="rounded bg-error/10 px-1.5 py-0.5 text-xs text-error">Đã ẩn</span>
                 ) : null}
+                <CourseOneTimeBadge isOneTime={course.isOneTime} />
               </div>
               <p className="mt-1 text-sm text-text-secondary">
                 Thời hạn mặc định:{" "}
@@ -351,6 +361,7 @@ function CourseDetailWorkspaceInner({
           course={course}
           onClose={() => setFormOpen(false)}
           onSubmit={handleSubmit}
+          canChangeSaleMode={capabilities.canChangeCourseSaleMode}
         />
       ) : null}
       {dialog}

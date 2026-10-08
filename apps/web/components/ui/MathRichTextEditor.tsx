@@ -6,6 +6,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Mathematics from "@tiptap/extension-mathematics";
 import { useEffect, useRef, useState } from "react";
 import { Bold, Italic, List, ListOrdered, Sigma, SquareFunction } from "lucide-react";
+import MathLatexInputPanel, { type MathLatexMode } from "@/components/ui/MathLatexInputPanel";
 
 export type MathRichTextEditorProps = {
   value: string;
@@ -19,6 +20,19 @@ export type MathRichTextEditorProps = {
 };
 
 const DEFAULT_MIN_HEIGHT = "min-h-[180px]";
+
+/** Công thức đang nhập trong panel; `pos` có giá trị khi sửa node có sẵn. */
+type MathDraft = {
+  mode: MathLatexMode;
+  latex: string;
+  pos: number | null;
+  token: number;
+};
+
+const MATH_NODE_MODE: Record<string, MathLatexMode | undefined> = {
+  inlineMath: "inline",
+  blockMath: "block",
+};
 const EMPTY_PARAGRAPH_HTML = "<p></p>";
 
 function isEmptyEditorHtml(html: string): boolean {
@@ -45,22 +59,14 @@ function toolbarBtnClass(active: boolean, disabled: boolean): string {
 function MathEditorToolbar({
   editor,
   disabled,
+  activeMathMode,
+  onOpenMath,
 }: {
   editor: Editor;
   disabled: boolean;
+  activeMathMode: MathLatexMode | null;
+  onOpenMath: (mode: MathLatexMode) => void;
 }) {
-  const insertInline = () => {
-    const latex = window.prompt("Nhập công thức LaTeX (cùng dòng):", "x^2");
-    if (!latex?.trim()) return;
-    editor.chain().focus().insertInlineMath({ latex: latex.trim() }).run();
-  };
-
-  const insertBlock = () => {
-    const latex = window.prompt("Nhập công thức LaTeX (khối riêng dòng):", "\\frac{a}{b}");
-    if (!latex?.trim()) return;
-    editor.chain().focus().insertBlockMath({ latex: latex.trim() }).run();
-  };
-
   return (
     <div
       className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-border-default px-1.5 py-1"
@@ -112,8 +118,9 @@ function MathEditorToolbar({
         type="button"
         disabled={disabled}
         aria-label="Chèn công thức cùng dòng"
-        className={toolbarBtnClass(false, disabled)}
-        onClick={insertInline}
+        aria-pressed={activeMathMode === "inline"}
+        className={toolbarBtnClass(activeMathMode === "inline", disabled)}
+        onClick={() => onOpenMath("inline")}
       >
         <Sigma className="size-3.5" />
       </button>
@@ -121,13 +128,14 @@ function MathEditorToolbar({
         type="button"
         disabled={disabled}
         aria-label="Chèn công thức khối"
-        className={toolbarBtnClass(false, disabled)}
-        onClick={insertBlock}
+        aria-pressed={activeMathMode === "block"}
+        className={toolbarBtnClass(activeMathMode === "block", disabled)}
+        onClick={() => onOpenMath("block")}
       >
         <SquareFunction className="size-3.5" />
       </button>
       <span className="ml-1 hidden text-[11px] text-text-muted sm:inline">
-        Công thức hiện ngay trong ô soạn.
+        Bấm vào công thức để sửa.
       </span>
     </div>
   );
@@ -144,6 +152,7 @@ export default function MathRichTextEditor({
 }: MathRichTextEditorProps) {
   const onChangeRef = useRef(onChange);
   const lastEmittedHtmlRef = useRef(value);
+  const [mathDraft, setMathDraft] = useState<MathDraft | null>(null);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -170,6 +179,18 @@ export default function MathRichTextEditor({
     ],
     content: value || "",
     editorProps: {
+      // Bấm vào công thức có sẵn → mở panel sửa. `view.editable` false khi `disabled`.
+      handleClickOn: (view, _pos, node, nodePos) => {
+        const mode = MATH_NODE_MODE[node.type.name];
+        if (!mode || !view.editable) return false;
+        setMathDraft({
+          mode,
+          latex: String(node.attrs.latex ?? ""),
+          pos: nodePos,
+          token: Date.now(),
+        });
+        return true;
+      },
       attributes: {
         class: `px-3 py-2 text-text-primary [&_a]:text-primary [&_a]:underline [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_strong]:font-bold [&_h1]:text-xl [&_h2]:text-lg [&_h3]:text-base [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1 [&_.katex]:text-text-primary ${fill ? "min-h-full" : minHeight}`,
         "aria-label": ariaLabel,
@@ -223,6 +244,60 @@ export default function MathRichTextEditor({
 
   if (!editor) return null;
 
+  // Bị khoá giữa chừng thì ẩn panel; mở lại sẽ tạo draft mới.
+  const activeMathDraft = disabled ? null : mathDraft;
+
+  const openNewMath = (mode: MathLatexMode) => {
+    setMathDraft((current) =>
+      current?.mode === mode && current.pos === null
+        ? null
+        : { mode, latex: "", pos: null, token: Date.now() },
+    );
+  };
+
+  // Doc có thể đã đổi khi panel mở (gõ tiếp trong editor) → pos cũ không còn trỏ đúng node.
+  const isMathNodeAt = (mode: MathLatexMode, pos: number) => {
+    const name = editor.state.doc.nodeAt(pos)?.type.name;
+    return name !== undefined && MATH_NODE_MODE[name] === mode;
+  };
+
+  const submitMath = (latex: string) => {
+    if (!mathDraft) return;
+    const { mode } = mathDraft;
+    const pos =
+      mathDraft.pos !== null && isMathNodeAt(mode, mathDraft.pos) ? mathDraft.pos : null;
+    const chain = editor.chain().focus();
+    if (pos === null) {
+      if (mode === "inline") chain.insertInlineMath({ latex });
+      else chain.insertBlockMath({ latex });
+    } else if (mode === "inline") {
+      chain.updateInlineMath({ latex, pos });
+    } else {
+      chain.updateBlockMath({ latex, pos });
+    }
+    chain.run();
+    setMathDraft(null);
+  };
+
+  const deleteMath = () => {
+    if (!mathDraft || mathDraft.pos === null) return;
+    const { mode, pos } = mathDraft;
+    if (!isMathNodeAt(mode, pos)) {
+      setMathDraft(null);
+      return;
+    }
+    const chain = editor.chain().focus();
+    if (mode === "inline") chain.deleteInlineMath({ pos });
+    else chain.deleteBlockMath({ pos });
+    chain.run();
+    setMathDraft(null);
+  };
+
+  const cancelMath = () => {
+    setMathDraft(null);
+    editor.commands.focus();
+  };
+
   return (
     <div
       className={`overflow-hidden rounded-md border border-border-default transition-colors ${
@@ -235,7 +310,23 @@ export default function MathRichTextEditor({
           : minHeight
       }`}
     >
-      <MathEditorToolbar editor={editor} disabled={disabled} />
+      <MathEditorToolbar
+        editor={editor}
+        disabled={disabled}
+        activeMathMode={activeMathDraft?.pos === null ? activeMathDraft.mode : null}
+        onOpenMath={openNewMath}
+      />
+      {activeMathDraft ? (
+        <MathLatexInputPanel
+          key={activeMathDraft.token}
+          mode={activeMathDraft.mode}
+          initialLatex={activeMathDraft.latex}
+          editing={activeMathDraft.pos !== null}
+          onSubmit={submitMath}
+          onCancel={cancelMath}
+          onDelete={deleteMath}
+        />
+      ) : null}
       {fill ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <EditorContent editor={editor} />

@@ -381,4 +381,71 @@ describe('CustomerCareService', () => {
       updatedCount: 1,
     });
   });
+
+  describe('missing drop-out reasons', () => {
+    it('lists assigned students who dropped out in 9/2026 without a reason', async () => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue({
+        id: 'staff-1',
+        roles: [StaffRole.customer_care],
+      });
+      mockPrisma.customerCareService.findMany.mockResolvedValue([
+        {
+          student: {
+            id: 'student-1',
+            fullName: 'Hoc Sinh A',
+            dropOutDate: new Date('2026-09-15T00:00:00.000Z'),
+          },
+        },
+      ]);
+
+      const result = await service.getMyMissingDropOutReasons('user-1');
+
+      expect(result).toEqual({
+        monthKey: '2026-09',
+        items: [
+          {
+            studentId: 'student-1',
+            fullName: 'Hoc Sinh A',
+            dropOutDate: '2026-09-15',
+          },
+        ],
+      });
+      expect(mockPrisma.customerCareService.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            staffId: 'staff-1',
+            student: {
+              status: StudentStatus.inactive,
+              dropOutReason: null,
+              dropOutDate: {
+                gte: new Date('2026-09-01T00:00:00.000Z'),
+                lt: new Date('2026-10-01T00:00:00.000Z'),
+              },
+            },
+          },
+        }),
+      );
+    });
+
+    it('returns an empty list for staff without the customer_care role', async () => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue({
+        id: 'staff-2',
+        roles: [StaffRole.teacher],
+      });
+
+      const result = await service.getMyMissingDropOutReasons('user-2');
+
+      expect(result).toEqual({ monthKey: '2026-09', items: [] });
+      expect(mockPrisma.customerCareService.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty list for users without a staff profile', async () => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue(null);
+
+      const result = await service.getMyMissingDropOutReasons('admin-user');
+
+      expect(result.items).toEqual([]);
+      expect(mockPrisma.customerCareService.findMany).not.toHaveBeenCalled();
+    });
+  });
 });

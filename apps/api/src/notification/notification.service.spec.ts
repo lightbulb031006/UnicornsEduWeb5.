@@ -205,6 +205,48 @@ describe('NotificationService', () => {
     ]);
   });
 
+  it.each([
+    {
+      label: 'admin account',
+      roleType: UserRole.admin,
+      staffRoles: [] as StaffRole[],
+    },
+    {
+      label: 'staff with admin role',
+      roleType: UserRole.staff,
+      staffRoles: [StaffRole.admin],
+    },
+  ])(
+    'shows every published notification to $label, even ones not targeted to admin',
+    async ({ roleType, staffRoles }) => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-1',
+        status: StaffStatus.active,
+        roles: staffRoles,
+      });
+      mockPrisma.notification.findMany.mockResolvedValue([]);
+
+      await service.getNotificationFeed(
+        {
+          id: 'admin-user-1',
+          email: 'admin@example.com',
+          accountHandle: 'admin',
+          roleType,
+        },
+        { limit: 20 },
+      );
+
+      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            status: NotificationStatus.published,
+            lastPushedAt: { not: null },
+          },
+        }),
+      );
+    },
+  );
+
   it('rejects student actor from accessing notification feed', async () => {
     await expect(
       service.getNotificationFeed(

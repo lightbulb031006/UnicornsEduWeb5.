@@ -49,11 +49,102 @@ describe('SurveyService', () => {
     );
   });
 
+  describe('getTeacherWarnings', () => {
+    afterEach(() => jest.useRealTimers());
+
+    it('flags pending surveys inside the deadline block window as blocking', async () => {
+      jest.useFakeTimers({
+        now: new Date('2026-10-09T17:00:00.000Z'),
+        doNotFake: ['nextTick', 'setImmediate'],
+      });
+      prisma.class.findMany.mockResolvedValue([
+        {
+          id: 'class-1',
+          name: 'Lớp 1',
+          sessions: [{ date: new Date('2026-09-01T00:00:00.000Z') }],
+          teachers: [{ createdAt: new Date('2026-09-01T03:00:00.000Z') }],
+        },
+      ]);
+      prisma.survey.findMany.mockResolvedValue([
+        {
+          id: 'survey-soon',
+          createdAt: new Date('2026-10-01T03:00:00.000Z'),
+          name: 'Hạn 11/10',
+          startDate: new Date('2026-10-01T00:00:00.000Z'),
+          endDate: new Date('2026-10-11T00:00:00.000Z'),
+          excludedClasses: [],
+        },
+        {
+          id: 'survey-later',
+          createdAt: new Date('2026-10-01T03:00:00.000Z'),
+          name: 'Hạn 12/10',
+          startDate: new Date('2026-10-01T00:00:00.000Z'),
+          endDate: new Date('2026-10-12T00:00:00.000Z'),
+          excludedClasses: [],
+        },
+      ]);
+      prisma.classSurvey.findMany.mockResolvedValue([]);
+
+      const [warning] = await service.getTeacherWarnings('teacher-1');
+
+      expect(
+        warning.pendingSurveys.map(({ surveyId, blocking }) => ({
+          surveyId,
+          blocking,
+        })),
+      ).toEqual([
+        { surveyId: 'survey-soon', blocking: true },
+        { surveyId: 'survey-later', blocking: false },
+      ]);
+    });
+  });
+
+  describe('getTeacherWarnings exemptions', () => {
+    it('skips classes that started, or that the teacher joined, after the survey was created', async () => {
+      prisma.class.findMany.mockResolvedValue([
+        {
+          id: 'class-new',
+          name: 'Lớp mới mở',
+          sessions: [{ date: new Date('2026-10-03T00:00:00.000Z') }],
+          teachers: [{ createdAt: new Date('2026-09-01T03:00:00.000Z') }],
+        },
+        {
+          id: 'class-joined-late',
+          name: 'Lớp nhận sau',
+          sessions: [{ date: new Date('2026-09-01T00:00:00.000Z') }],
+          teachers: [{ createdAt: new Date('2026-10-03T03:00:00.000Z') }],
+        },
+        {
+          id: 'class-old',
+          name: 'Lớp cũ',
+          sessions: [{ date: new Date('2026-09-01T00:00:00.000Z') }],
+          teachers: [{ createdAt: new Date('2026-09-01T03:00:00.000Z') }],
+        },
+      ]);
+      prisma.survey.findMany.mockResolvedValue([
+        {
+          id: 'survey-1',
+          name: 'Khảo sát tháng 10',
+          startDate: new Date('2026-10-01T00:00:00.000Z'),
+          endDate: new Date('2026-10-20T00:00:00.000Z'),
+          createdAt: new Date('2026-10-01T03:00:00.000Z'),
+          excludedClasses: [],
+        },
+      ]);
+      prisma.classSurvey.findMany.mockResolvedValue([]);
+
+      const warnings = await service.getTeacherWarnings('teacher-1');
+
+      expect(warnings.map((warning) => warning.classId)).toEqual(['class-old']);
+    });
+  });
+
   describe('getMissingClasses', () => {
     it('returns missing running classes not in excluded list', async () => {
-      prisma.surveyExcludedClass.findMany.mockResolvedValue([
-        { classId: 'excluded-1' },
-      ]);
+      prisma.survey.findUnique.mockResolvedValue({
+        createdAt: new Date('2026-09-20T01:00:00.000Z'),
+        excludedClasses: [{ classId: 'excluded-1' }],
+      });
       prisma.class.count.mockResolvedValue(1);
       prisma.class.findMany.mockResolvedValue([
         {
@@ -78,6 +169,16 @@ describe('SurveyService', () => {
           teachers: ['Nguyễn Văn A'],
         },
       ]);
+      expect(prisma.class.count).toHaveBeenCalledWith({
+        where: {
+          status: 'running',
+          id: { notIn: ['excluded-1'] },
+          surveys: { none: { surveyId: 'survey-1' } },
+          sessions: {
+            some: { date: { lte: new Date('2026-09-20T00:00:00.000Z') } },
+          },
+        },
+      });
     });
   });
 

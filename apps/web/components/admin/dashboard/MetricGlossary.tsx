@@ -1,3 +1,5 @@
+import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
+
 type MetricGlossaryItem = {
   term: string;
   definition: string;
@@ -41,7 +43,7 @@ export const FINANCE_METRIC_GLOSSARY: MetricGlossaryItem[] = [
   {
     term: "Chi phí",
     definition:
-      "Toàn bộ tiền trung tâm đã chi trong tháng: trả nhân sự (dạy, chăm sóc khách hàng, giáo án, thưởng, trợ cấp…) và các khoản chi vận hành khác.",
+      "Toàn bộ tiền trung tâm đã chi trong tháng: trả nhân sự (dạy, chăm sóc khách hàng, giáo án học sinh giỏi, thưởng, trợ cấp…) và các khoản chi vận hành khác.",
   },
   {
     term: "Lợi nhuận",
@@ -64,8 +66,8 @@ export const EXPENSE_METRIC_GLOSSARY: MetricGlossaryItem[] = [
     definition: "Hoa hồng trả cho nhân viên chăm sóc khách hàng trong tháng.",
   },
   {
-    term: "Giáo án",
-    definition: "Chi phí làm / mua giáo án trong tháng.",
+    term: LESSON_PLAN_LABEL,
+    definition: "Chi phí làm / mua giáo án học sinh giỏi trong tháng.",
   },
   {
     term: "Thưởng",

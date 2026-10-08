@@ -14,6 +14,7 @@ import {
   isRestrictedByEmailVerification,
   OPEN_EMAIL_VERIFICATION_MODAL_EVENT,
 } from "@/lib/email-verification-access";
+import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
 
 export default function AdminAccessGate({
   children,
@@ -74,12 +75,12 @@ export default function AdminAccessGate({
     const title = strictAdminRoute
       ? "Route này chỉ mở cho admin."
       : access.isLessonPlanHead
-        ? "Role Trưởng giáo án chỉ mở được module Giáo Án."
+        ? `Role Trưởng giáo án chỉ mở được module ${LESSON_PLAN_LABEL}.`
         : "Tài khoản này không mở được khu quản trị.";
     const description = strictAdminRoute
       ? "Flow nạp thẳng tiền cho học sinh chỉ mở cho admin đầy đủ. Assistant vẫn dùng các luồng QR/SePay thông thường và không được mở queue duyệt nạp ví."
       : access.isLessonPlanHead
-        ? "Bạn có toàn quyền trên phần giáo án, nhưng các module admin khác vẫn bị khóa."
+        ? `Bạn có toàn quyền trên phần ${LESSON_PLAN_LABEL}, nhưng các module admin khác vẫn bị khóa.`
         : "Route này hiện chỉ mở cho admin, hoặc các staff role được cấp quyền riêng trên từng module admin.";
 
     return (
@@ -100,7 +101,7 @@ export default function AdminAccessGate({
               {strictAdminRoute
                 ? "Đi tới học sinh"
                 : access.isLessonPlanHead
-                  ? "Đi tới Giáo Án"
+                  ? `Đi tới ${LESSON_PLAN_LABEL}`
                   : "Về trang chủ"}
             </Link>
             <Link

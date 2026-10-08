@@ -30,6 +30,7 @@ import {
   toPerBlockTuitionForApi,
   toPerSessionAmountForApi,
   toPerSessionMaxAllowanceForApi,
+  oneTimePackageError,
 } from "@/lib/class-pricing-mode";
 import {
   moneyInputInitialFromNumber,
@@ -199,6 +200,14 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
     const tuitionPkg = parseTuitionPackageInputs(tuitionPackageTotalInput, tuitionPackageSessionInput);
     if (!tuitionPkg.ok) {
       toast.error(tuitionPkg.message);
+      return;
+    }
+    const oneTimePkgError = oneTimePackageError(
+      pricingMode,
+      tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total,
+    );
+    if (oneTimePkgError) {
+      toast.error(oneTimePkgError);
       return;
     }
     // Chỉ chặn khi admin thực sự BẬT chế độ block. Lớp đã ở per_block mà lịch
@@ -421,6 +430,7 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
                   name="edit-class-basic-info-type"
                   value={courseId}
                   onValueChange={setCourseId}
+                  isOneTime={classDetail.pricingMode === "one_time"}
                   buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>

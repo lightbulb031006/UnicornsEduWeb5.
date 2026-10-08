@@ -24,6 +24,7 @@ import {
   WalletTransactionType,
 } from 'generated/enums';
 import { Prisma } from '../../generated/client';
+import { normalizeCustomerCareProfitPercent } from '../customer-care/customer-care-profit-percent';
 import {
   CreateStudentSePayTopUpOrderDto,
   CreateStudentWalletDirectTopUpRequestDto,
@@ -73,10 +74,10 @@ import {
 } from 'src/common/entity-id';
 import {
   hasCustomTuitionOverride,
-  hasCustomPackageOverride,
   normalizeNullableMoney,
   normalizeStudentClassCustomTuitionMoney,
-  resolveEffectiveTuitionPerSession,
+  resolveEffectivePackageFields,
+  resolveSessionChargeTuitionFee,
 } from 'src/common/student-class-tuition.util';
 import { GoogleCalendarService } from 'src/google-calendar/google-calendar.service';
 import {
@@ -118,6 +119,7 @@ const studentClassDetailInclude = {
         tuitionPackageTotal: true,
         tuitionPackageSession: true,
         studentTuitionPerSession: true,
+        pricingMode: true,
       },
     },
   },
@@ -226,33 +228,6 @@ function normalizeNullableDecimal(
 
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function normalizeCustomerCareProfitPercent(
-  value: number | null | undefined,
-): Prisma.Decimal | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (value === null) {
-    return null;
-  }
-
-  if (!Number.isFinite(value)) {
-    throw new BadRequestException(
-      'Customer care profit percent must be a valid number.',
-    );
-  }
-
-  const rounded = Math.round(value * 100) / 100;
-  if (rounded < 0 || rounded > 0.99) {
-    throw new BadRequestException(
-      'Customer care profit percent must be between 0.00 and 0.99.',
-    );
-  }
-
-  return new Prisma.Decimal(rounded.toFixed(2));
 }
 
 function normalizeOptionalText(value: string | null | undefined) {
@@ -413,21 +388,22 @@ export class StudentService {
     const customTuitionPackageSession = normalizeStudentClassCustomTuitionMoney(
       studentClass.customTuitionPackageSession,
     );
-    const effectiveTuitionPackageTotal =
-      customTuitionPackageTotal ??
-      normalizeNullableMoney(studentClass.class.tuitionPackageTotal);
+    const packageFields = resolveEffectivePackageFields({
+      customTuitionPackageTotal,
+      customTuitionPackageSession,
+      classTuitionPackageTotal: studentClass.class.tuitionPackageTotal,
+      classTuitionPackageSession: studentClass.class.tuitionPackageSession,
+    });
+    const effectiveTuitionPackageTotal = packageFields.effectivePackageTotal;
     const effectiveTuitionPackageSession =
-      customTuitionPackageSession ??
-      normalizeNullableMoney(studentClass.class.tuitionPackageSession);
-    const effectiveTuitionPerSession = resolveEffectiveTuitionPerSession({
+      packageFields.effectivePackageSession;
+    const effectiveTuitionPerSession = resolveSessionChargeTuitionFee({
+      pricingMode: studentClass.class.pricingMode,
       customTuitionPerSession,
       classTuitionPerSession: studentClass.class.studentTuitionPerSession,
       effectivePackageTotal: effectiveTuitionPackageTotal,
       effectivePackageSession: effectiveTuitionPackageSession,
-      hasCustomPackageOverride: hasCustomPackageOverride({
-        customTuitionPackageTotal,
-        customTuitionPackageSession,
-      }),
+      hasCustomPackageOverride: packageFields.hasCustomPackageOverride,
     });
 
     return {
@@ -493,6 +469,7 @@ export class StudentService {
       parentReceiptEmailEnabled: student.parentReceiptEmailEnabled,
       goal: student.goal,
       dropOutDate: student.dropOutDate,
+      dropOutReason: student.dropOutReason,
       customerSource: student.customerSource,
       customerSourceNote: student.customerSourceNote,
       customerCare: student.customerCareServices
@@ -892,7 +869,8 @@ export class StudentService {
 
   /**
    * Ensures the actor may mutate the student profile (admin, assistant, or
-   * assigned customer_care). Only admin/assistant can change profit percent.
+   * assigned customer_care). Only admin/assistant can change profit percent
+   * or transfer the student to another customer care staff.
    */
   private async assertCanMutateStudentProfile(
     studentId: string,
@@ -919,7 +897,13 @@ export class StudentService {
       return;
     }
 
-    if (dto?.customer_care_profit_percent === undefined) {
+    const changesProfitPercent =
+      dto?.customer_care_profit_percent !== undefined;
+    const changesCustomerCareStaff =
+      dto?.customer_care_staff_id !== undefined &&
+      (dto.customer_care_staff_id ?? null) !==
+        (await this.getAssignedCustomerCareStaffId(studentId));
+    if (!changesProfitPercent && !changesCustomerCareStaff) {
       return;
     }
 
@@ -928,16 +912,26 @@ export class StudentService {
       select: { roles: true },
     });
 
-    const canEditProfitPercent = Boolean(
+    const canManageCustomerCareAssignment = Boolean(
       staff?.roles.includes(StaffRole.admin) ||
       staff?.roles.includes(StaffRole.assistant),
     );
 
-    if (!canEditProfitPercent) {
+    if (!canManageCustomerCareAssignment) {
       throw new ForbiddenException(
-        'Only admin or assistant staff can change customer care profit percent',
+        changesCustomerCareStaff
+          ? 'Only admin or assistant staff can transfer the student to another customer care staff'
+          : 'Only admin or assistant staff can change customer care profit percent',
       );
     }
+  }
+
+  private async getAssignedCustomerCareStaffId(studentId: string) {
+    const assignment = await this.prisma.customerCareService.findUnique({
+      where: { studentId },
+      select: { staffId: true },
+    });
+    return assignment?.staffId ?? null;
   }
 
   private resolveCustomerSourceWrite(
@@ -993,6 +987,37 @@ export class StudentService {
       StudentCustomerSource.other,
       dto.customer_source_note,
     );
+  }
+
+  /**
+   * Lý do nghỉ học cần lưu khi học sinh ở trạng thái nghỉ sau thao tác. Chuyển
+   * sang nghỉ học bắt buộc có lý do; học sinh đã nghỉ thì chỉ cập nhật khi có
+   * lý do mới. Học sinh học lại giữ nguyên lý do cũ (không bao giờ xoá ở đây).
+   */
+  private resolveDropOutReasonWrite(params: {
+    currentStatus: StudentStatus;
+    nextStatus: StudentStatus | undefined;
+    reason: string | undefined;
+  }): { dropOutReason?: string } {
+    if (
+      (params.nextStatus ?? params.currentStatus) !== StudentStatus.inactive
+    ) {
+      return {};
+    }
+
+    const normalized = params.reason?.trim() ?? '';
+    if (normalized) {
+      return { dropOutReason: normalized };
+    }
+    if (params.currentStatus !== StudentStatus.inactive) {
+      throw new BadRequestException(
+        'Chuyển học sinh sang nghỉ học phải nhập lý do nghỉ.',
+      );
+    }
+    if (params.reason !== undefined) {
+      throw new BadRequestException('Lý do nghỉ học không được để trống.');
+    }
+    return {};
   }
 
   private buildUpdateData(dto: UpdateStudentBodyDto) {
@@ -1093,12 +1118,6 @@ export class StudentService {
       dto.customer_care_staff_id !== undefined
         ? (dto.customer_care_staff_id ?? null)
         : (existingAssignment?.staffId ?? null);
-    const nextProfitPercent =
-      dto.customer_care_profit_percent !== undefined
-        ? normalizeCustomerCareProfitPercent(
-            dto.customer_care_profit_percent ?? null,
-          )
-        : (existingAssignment?.profitPercent ?? null);
 
     if (nextStaffId == null) {
       if (dto.customer_care_profit_percent != null) {
@@ -1121,6 +1140,7 @@ export class StudentService {
       select: {
         id: true,
         roles: true,
+        customerCareDefaultProfitPercent: true,
       },
     });
 
@@ -1136,6 +1156,18 @@ export class StudentService {
         'Selected staff is not eligible for customer care assignment.',
       );
     }
+
+    // % gửi kèm luôn thắng; không gửi thì CSKH mới gán nhận % mặc định trên hồ sơ,
+    // còn giữ nguyên CSKH thì giữ % cũ. Buổi đã tạo giữ `attendance.customer_care_coef` đã chụp.
+    const isNewCustomerCareStaff = existingAssignment?.staffId !== nextStaffId;
+    const nextProfitPercent =
+      dto.customer_care_profit_percent !== undefined
+        ? normalizeCustomerCareProfitPercent(
+            dto.customer_care_profit_percent ?? null,
+          )
+        : isNewCustomerCareStaff
+          ? customerCareStaff.customerCareDefaultProfitPercent
+          : (existingAssignment?.profitPercent ?? null);
 
     await tx.customerCareService.upsert({
       where: { studentId },
@@ -2591,9 +2623,21 @@ export class StudentService {
       throw new NotFoundException('Student not found');
     }
 
+    if (
+      dto.drop_out_reason !== undefined &&
+      (dto.status ?? student.status) !== StudentStatus.inactive
+    ) {
+      throw new BadRequestException('Chỉ học sinh nghỉ học mới có lý do nghỉ.');
+    }
+
     const updateData = {
       ...this.buildUpdateData(dto),
       ...this.resolveCustomerSourceUpdate(dto, student),
+      ...this.resolveDropOutReasonWrite({
+        currentStatus: student.status,
+        nextStatus: dto.status,
+        reason: dto.drop_out_reason,
+      }),
     };
     const shouldSyncCustomerCare =
       dto.customer_care_staff_id !== undefined ||
@@ -2672,10 +2716,16 @@ export class StudentService {
       ? await this.getStudentAuditSnapshot(this.prisma, id)
       : null;
 
+    const dropOutReasonWrite = this.resolveDropOutReasonWrite({
+      currentStatus: student.status,
+      nextStatus: dto.status,
+      reason: dto.reason,
+    });
+
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.studentInfo.update({
         where: { id },
-        data: { status: dto.status },
+        data: { status: dto.status, ...dropOutReasonWrite },
       });
 
       await this.applyStudentStatusSideEffects(tx, id, dto.status);

@@ -61,10 +61,8 @@ type StaffProfileForAccess = {
   birthDate: Date | string | null;
   university: string | null;
   highSchool: string | null;
-  specialization: string | null;
   bankAccount: string | null;
   bankQrLink: string | null;
-  personalAchievementLink: string | null;
 };
 
 type StudentProfileForAccess = {
@@ -257,10 +255,8 @@ export class AuthAccessService {
             birthDate: true,
             university: true,
             highSchool: true,
-            specialization: true,
             bankAccount: true,
             bankQrLink: true,
-            personalAchievementLink: true,
           },
         },
         studentInfo: { select: { id: true, status: true } },

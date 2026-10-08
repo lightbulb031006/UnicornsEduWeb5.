@@ -6,6 +6,27 @@ import {
 } from './student-class-tuition.util';
 
 describe('student-class-tuition.util', () => {
+  it('charges the package total once for a one-time class', () => {
+    expect(
+      resolveSessionChargeTuitionFee({
+        pricingMode: 'one_time',
+        classTuitionPerSession: 91400,
+        effectivePackageTotal: 3199000,
+        effectivePackageSession: 35,
+      }),
+    ).toBe(3199000);
+  });
+
+  it('charges zero after the first one-time attendance', () => {
+    expect(
+      resolveSessionChargeTuitionFee({
+        pricingMode: 'one_time',
+        effectivePackageTotal: 3199000,
+        oneTimeAlreadyCharged: true,
+      }),
+    ).toBe(0);
+  });
+
   it('treats custom tuition 0 as unset for effective per-session resolution', () => {
     expect(
       resolveEffectiveTuitionPerSession({

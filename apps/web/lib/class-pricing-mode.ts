@@ -177,13 +177,16 @@ export function convertDisplayedRateInput(options: {
   to: ClassPricingMode;
   standardBlockCount: number | null;
 }): string {
-  if (options.from === options.to) return options.input;
+  // Lớp bán một lần vẫn nhập đơn giá theo buổi (trợ cấp gia sư).
+  const from = options.from === "per_block" ? "per_block" : "per_session";
+  const to = options.to === "per_block" ? "per_block" : "per_session";
+  if (from === to) return options.input;
   const parsed = parseOptionalMoneyInt(options.input);
   if (parsed == null) return options.input;
   if (options.standardBlockCount == null || options.standardBlockCount <= 0) {
     return options.input;
   }
-  if (options.from === "per_session" && options.to === "per_block") {
+  if (to === "per_block") {
     const next = perSessionToPerBlock(parsed, options.standardBlockCount);
     return next == null ? options.input : moneyInputInitialFromNumber(next);
   }
@@ -281,4 +284,28 @@ export function compactTuitionChargeLine(options: {
   const perSessionMatch = options.perSessionLine.match(/^(.+)\/buổi$/);
   if (!perSessionMatch) return options.perSessionLine;
   return `${options.perSessionLine} chuẩn · chia ${options.standardBlockCount} block / 30 phút để đối chiếu.`;
+}
+
+/**
+ * Chế độ tính tiền của lớp theo khoá đang chọn: khoá bán một lần ép `one_time`;
+ * rời khoá bán một lần thì về theo buổi. Bán một lần là cài đặt của khoá.
+ */
+export function pricingModeForCourse(
+  current: ClassPricingMode,
+  courseIsOneTime: boolean,
+): ClassPricingMode {
+  if (courseIsOneTime) return "one_time";
+  return current === "one_time" ? "per_session" : current;
+}
+
+/** Lớp bán một lần phải có Tổng gói > 0đ. Trả lỗi để toast, hoặc null nếu hợp lệ. */
+export function oneTimePackageError(
+  mode: ClassPricingMode,
+  packageTotal: number | null | undefined,
+): string | null {
+  if (mode !== "one_time") return null;
+  if (packageTotal == null || !Number.isFinite(packageTotal) || packageTotal <= 0) {
+    return "Lớp thuộc khoá bán một lần phải có Tổng gói lớn hơn 0đ.";
+  }
+  return null;
 }

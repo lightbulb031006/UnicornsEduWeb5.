@@ -4,6 +4,7 @@ import {
   computeTeacherSessionAllowanceGrossPreviewVnd,
   formatSessionAllowanceBreakdownVnd,
   resolveSessionAllowancePreviewInputs,
+  resolveTeacherScaleAmountVnd,
 } from "./session-allowance.helpers";
 
 describe("resolveSessionAllowancePreviewInputs", () => {
@@ -84,6 +85,61 @@ describe("resolveSessionAllowancePreviewInputs", () => {
 
     expect(result?.perStudent).toBe(90_000);
     expect(result?.rawBase).toBe(190_000);
+  });
+
+  it("live: dùng scale riêng của gia sư dạy buổi, 0 = không có scale", () => {
+    const classDetail = {
+      allowancePerSessionPerStudent: 40_000,
+      scaleAmount: 60_000,
+      teachers: [
+        { id: "teacher-zero", customScaleAmount: 0 },
+        { id: "teacher-custom", customScaleAmount: 25_000 },
+        { id: "teacher-inherit", customScaleAmount: null },
+      ],
+    };
+    const preview = (teacherId: string) =>
+      resolveSessionAllowancePreviewInputs({
+        session: null,
+        classDetail,
+        teacherId,
+        chargeableStudentCount: 2,
+      });
+
+    expect(preview("teacher-zero")?.scaleAmount).toBe(0);
+    expect(preview("teacher-zero")?.rawBase).toBe(80_000);
+    expect(preview("teacher-custom")?.scaleAmount).toBe(25_000);
+    expect(preview("teacher-inherit")?.scaleAmount).toBe(60_000);
+  });
+
+  it("per_block: scale riêng vẫn phẳng, không nhân block", () => {
+    const result = resolveSessionAllowancePreviewInputs({
+      session: null,
+      classDetail: {
+        allowancePerSessionPerStudent: 90_000,
+        allowancePerBlockPerStudent: 30_000,
+        scaleAmount: 10_000,
+        pricingMode: "per_block",
+        teachers: [{ id: "teacher-1", customScaleAmount: 20_000 }],
+      },
+      teacherId: "teacher-1",
+      chargeableStudentCount: 2,
+      blockCount: 4,
+    });
+
+    expect(result?.scaleAmount).toBe(20_000);
+    expect(result?.rawBase).toBe(260_000);
+  });
+});
+
+describe("resolveTeacherScaleAmountVnd", () => {
+  it("giữ 0 làm override, null/undefined theo lớp", () => {
+    expect(
+      resolveTeacherScaleAmountVnd({ customScaleAmount: 0, classScaleAmount: 50_000 }),
+    ).toBe(0);
+    expect(
+      resolveTeacherScaleAmountVnd({ customScaleAmount: null, classScaleAmount: 50_000 }),
+    ).toBe(50_000);
+    expect(resolveTeacherScaleAmountVnd({ classScaleAmount: null })).toBe(0);
   });
 });
 

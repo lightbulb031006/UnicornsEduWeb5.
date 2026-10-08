@@ -25,6 +25,7 @@ import type {
   CustomerCareBulkProfitPercentUpdateResultDto,
   CustomerCareCommissionDto,
   CustomerCareCommissionListDto,
+  CustomerCareMissingDropOutReasonListDto,
   CustomerCareSessionCommissionDto,
   CustomerCareStudentListDto,
   CustomerCareStudentSummaryDto,
@@ -38,6 +39,22 @@ import { CustomerCareService } from './customer-care.service';
 @Roles(UserRole.staff, UserRole.admin)
 export class CustomerCareController {
   constructor(private readonly customerCareService: CustomerCareService) {}
+
+  @Get('me/missing-drop-out-reasons')
+  @ApiOperation({
+    summary: 'Students missing drop-out reason for the logged-in CSKH',
+    description:
+      'Học sinh CSKH đang đăng nhập phụ trách, nghỉ trong tháng 9/2026 (`status = inactive`) mà chưa có lý do nghỉ. Người không có role customer_care nhận danh sách rỗng.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách học sinh cần điền bù lý do nghỉ.',
+  })
+  async getMyMissingDropOutReasons(
+    @CurrentUser() user: JwtPayload,
+  ): Promise<CustomerCareMissingDropOutReasonListDto> {
+    return this.customerCareService.getMyMissingDropOutReasons(user.id);
+  }
 
   @Get('staff/:staffId/students')
   @ApiOperation({

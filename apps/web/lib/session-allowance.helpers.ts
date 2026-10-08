@@ -75,6 +75,18 @@ export function resolveLivePreviewPerStudentAllowanceVnd(options: {
   return custom ?? classDefault;
 }
 
+/**
+ * Scale hiệu lực của gia sư trên lớp (VNĐ phẳng / buổi): scale riêng nếu có
+ * (kể cả 0 = không có scale), không thì scale lớp. Đồng bộ API `resolveTeacherScaleAmountVnd`.
+ */
+export function resolveTeacherScaleAmountVnd(options: {
+  customScaleAmount?: number | null;
+  classScaleAmount?: number | null;
+}): number {
+  const raw = Number(options.customScaleAmount ?? options.classScaleAmount ?? 0);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+}
+
 /** Resolve allowance preview inputs from session snapshot or live class config. */
 export function resolveSessionAllowancePreviewInputs(options: {
   session?: {
@@ -86,7 +98,11 @@ export function resolveSessionAllowancePreviewInputs(options: {
     allowancePerBlockPerStudent?: number | null;
     scaleAmount?: number | null;
     pricingMode?: string | null;
-    teachers?: Array<{ id: string; customAllowance?: number | null }>;
+    teachers?: Array<{
+      id: string;
+      customAllowance?: number | null;
+      customScaleAmount?: number | null;
+    }>;
   } | null;
   teacherId?: string | null;
   chargeableStudentCount: number;
@@ -116,10 +132,10 @@ export function resolveSessionAllowancePreviewInputs(options: {
 
   if (!classDetail) return null;
 
-  const teacherCustom = teacherId
-    ? classDetail.teachers?.find((teacher) => teacher.id === teacherId)
-        ?.customAllowance
-    : null;
+  const teacher = teacherId
+    ? classDetail.teachers?.find((item) => item.id === teacherId)
+    : undefined;
+  const teacherCustom = teacher?.customAllowance ?? null;
   const perStudent = resolveLivePreviewPerStudentAllowanceVnd({
     pricingMode: classDetail.pricingMode,
     teacherCustomPerSession: teacherCustom,
@@ -127,7 +143,10 @@ export function resolveSessionAllowancePreviewInputs(options: {
     classDefaultPerBlock: classDetail.allowancePerBlockPerStudent,
     blockCount: options.blockCount,
   });
-  const scaleAmount = classDetail.scaleAmount ?? 0;
+  const scaleAmount = resolveTeacherScaleAmountVnd({
+    customScaleAmount: teacher?.customScaleAmount,
+    classScaleAmount: classDetail.scaleAmount,
+  });
 
   return {
     source: "live",

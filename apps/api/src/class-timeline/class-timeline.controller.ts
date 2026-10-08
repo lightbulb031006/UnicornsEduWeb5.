@@ -1,14 +1,11 @@
 import {
-  Body,
   Controller,
   Get,
   NotFoundException,
   Param,
-  Post,
   Query,
 } from '@nestjs/common';
 import {
-  ApiBody,
   ApiCookieAuth,
   ApiOperation,
   ApiParam,
@@ -24,9 +21,6 @@ import {
 } from 'src/auth/decorators/current-user.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { ParseClassIdPipe } from 'src/common/pipes/parse-entity-id.pipe';
-import {
-  ReorderClassTimelineDto,
-} from 'src/dtos/class-timeline.dto';
 import { ClassTimelineService } from './class-timeline.service';
 
 @Controller('class/:classId/timeline')
@@ -54,30 +48,6 @@ export class ClassTimelineController {
     @Param('classId', new ParseClassIdPipe()) classId: string,
   ) {
     return this.timeline.listForStaff(classId, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
-  }
-
-  @Post('reorder')
-  @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
-  @ApiOperation({ summary: 'Sắp xếp lại timeline lớp' })
-  @ApiParam({ name: 'classId' })
-  @ApiBody({ type: ReorderClassTimelineDto })
-  @ApiResponse({ status: 200, description: 'Đã lưu thứ tự.' })
-  @ApiResponse({
-    status: 400,
-    description:
-      'orderedIds trùng, thiếu item của lớp, hoặc chứa id không thuộc timeline lớp.',
-  })
-  async reorder(
-    @CurrentUser() user: JwtPayload,
-    @Param('classId', new ParseClassIdPipe()) classId: string,
-    @Body() dto: ReorderClassTimelineDto,
-  ) {
-    return this.timeline.reorder(classId, dto.orderedIds, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,

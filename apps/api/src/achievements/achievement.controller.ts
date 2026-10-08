@@ -84,17 +84,33 @@ export class StaffAchievementController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create staff achievement' })
+  @UseInterceptors(imageUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Create staff achievement with a required proof image',
+  })
   @ApiParam({ name: 'staffId', description: 'Staff id (UNISTAFF-…)' })
-  @ApiBody({ type: CreateAchievementDto })
-  @ApiResponse({ status: 201, description: 'Created achievement.' })
-  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['title', 'image'],
+      properties: {
+        title: { type: 'string' },
+        sortOrder: { type: 'integer' },
+        image: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Created achievement with proof image.' })
+  @ApiResponse({ status: 400, description: 'Missing title or proof image.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
   create(
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Body() body: CreateAchievementDto,
+    @UploadedFile()
+    file?: { buffer: Buffer; mimetype: string; size: number },
   ) {
-    return this.achievementService.createStaffAchievement(staffId, body);
+    return this.achievementService.createStaffAchievement(staffId, body, file);
   }
 
   @Patch(':achievementId')
@@ -180,10 +196,15 @@ export class StaffAchievementController {
 
   @Delete(':achievementId/image')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Clear staff achievement proof image' })
+  @ApiOperation({
+    summary: 'Reject clearing a staff achievement proof image',
+  })
   @ApiParam({ name: 'staffId', description: 'Staff id (UNISTAFF-…)' })
   @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
-  @ApiResponse({ status: 200, description: 'Achievement without image.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Staff proof images can be replaced, not removed.',
+  })
   deleteImage(
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Param('achievementId', ParseUUIDPipe) achievementId: string,
@@ -344,14 +365,32 @@ export class MyAchievementController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create my staff achievement' })
-  @ApiBody({ type: CreateAchievementDto })
+  @UseInterceptors(imageUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Create my staff achievement with a required proof image',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['title', 'image'],
+      properties: {
+        title: { type: 'string' },
+        sortOrder: { type: 'integer' },
+        image: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Created achievement with proof image.' })
+  @ApiResponse({ status: 400, description: 'Missing title or proof image.' })
   async create(
     @CurrentUser() user: JwtPayload,
     @Body() body: CreateAchievementDto,
+    @UploadedFile()
+    file?: { buffer: Buffer; mimetype: string; size: number },
   ) {
     const staffId = await this.staffIdFor(user);
-    return this.achievementService.createStaffAchievement(staffId, body);
+    return this.achievementService.createStaffAchievement(staffId, body, file);
   }
 
   @Patch(':achievementId')
@@ -426,8 +465,14 @@ export class MyAchievementController {
 
   @Delete(':achievementId/image')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Clear my achievement proof image' })
+  @ApiOperation({
+    summary: 'Reject clearing my staff achievement proof image',
+  })
   @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
+  @ApiResponse({
+    status: 400,
+    description: 'Staff proof images can be replaced, not removed.',
+  })
   async deleteImage(
     @CurrentUser() user: JwtPayload,
     @Param('achievementId', ParseUUIDPipe) achievementId: string,
