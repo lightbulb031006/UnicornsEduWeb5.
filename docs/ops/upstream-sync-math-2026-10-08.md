@@ -2,7 +2,15 @@
 
 ## Phạm vi
 
-Gộp `upstream/main` tại `52869056a2fc5ae76b962faef934f8dc10d4e0f3` vào local `main` của Toán, từ `5134e9d1`. Có ba commit mới (#175, #176, #177), 358 file upstream thay đổi và 10 migration mới so với mốc `451f60d`. Chỉ đồng bộ nguồn; chưa push hoặc triển khai, chưa chạy migration/seed hay khởi động API trên database thật.
+Gộp `upstream/main` tại `52869056a2fc5ae76b962faef934f8dc10d4e0f3` vào local `main` của Toán, từ `5134e9d1`. Có ba commit mới (#175, #176, #177), 358 file upstream thay đổi và 10 migration mới so với mốc `451f60d`. Lượt đồng bộ đầu chỉ cập nhật nguồn tại máy. Sau đó người dùng yêu cầu triển khai lên website Toán để sử dụng tính năng CSKH tự tạo học sinh.
+
+## Phát hành theo yêu cầu 08/10/2026
+
+Triển khai qua workflow `Build and Deploy` của repo Toán, chỉ instance `math`. Preflight phải kiểm tra read-only các target Tin, lưu backup public trên VPS, khôi phục và thử migration trên PostgreSQL riêng, giữ checksum tài chính/ví trước khi áp dụng thật. Không seed hoặc tạo học sinh thật để thử.
+
+Luồng CSKH đã đối chiếu với upstream: `/staff/customer-care-detail` có nút **Tạo học sinh**, API `POST /users/student` cho `customer_care`, tự gán CSKH tạo với % mặc định và chặn xếp lớp. Kiểm tra tập trung trước phát hành: 4 tests user service + 4 tests form pass. Các chỉnh sửa local có trước sync vẫn giữ ngoài release commit.
+
+Trạng thái triển khai và kết quả kiểm tra public/database sẽ được ghi lại sau khi workflow hoàn tất.
 
 Các nhóm chính: quản lý chuyên đề của lớp và hai tab Buổi học/Chuyên đề; học phí bán một lần; Ban Đào Tạo tra cứu gia sư; trợ cấp/scale riêng; hồ sơ/thành tích, nguồn khách cũ và lý do nghỉ; khảo sát và thông báo theo quyền; giao diện lớp/học sinh; nhập và hiển thị LaTeX.
 

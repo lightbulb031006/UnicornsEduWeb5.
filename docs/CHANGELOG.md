@@ -23,6 +23,8 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed — Math upstream sync 2026-10-08
 
+- Phát hành lên website Toán theo yêu cầu người dùng để dùng CSKH tự tạo học sinh. CD bắt buộc qua kiểm tra target Tin, backup public và rehearsal migration trước cập nhật database; giữ các thay đổi local ngoài commit phát hành. Kết quả thực tế ghi tại `docs/ops/upstream-sync-math-2026-10-08.md` sau workflow.
+
 - Đồng bộ ba cập nhật upstream (#175–#177) tới `52869056`: chuyên đề theo lớp, tab Buổi học/Chuyên đề, học phí một lần, Ban Đào Tạo, hồ sơ, khảo sát, trợ cấp riêng gia sư và giao diện học sinh. Giữ biên lai/logo Toán, nguồn khách Toán, quyền admin tạo buổi ngoài lịch, popup thống kê và cấu hình triển khai Math.
 - Preflight Math kiểm tra read-only cả tên khoá THPTQG/PREVOI và ID lớp/học sinh bị hai backfill học phí mới tác động, dừng nếu có trùng. Giữ nguyên migration upstream; chưa push, triển khai hoặc áp dụng 10 migration mới. Chi tiết: `docs/ops/upstream-sync-math-2026-10-08.md`.
 - Trang chi tiết lớp dùng `ConfirmDialog` cho kết thúc lớp và cho học sinh nghỉ học (cả mobile/desktop), giữ ô lý do tuỳ chọn khi kết thúc lớp. Dọn import trợ cấp thừa và assertion mới từ nguồn để các file xử lý xung đột qua lint.
