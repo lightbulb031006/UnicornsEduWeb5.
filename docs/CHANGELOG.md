@@ -23,10 +23,10 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ### Changed — Math upstream sync 2026-10-08
 
-- Phát hành lên website Toán theo yêu cầu người dùng để dùng CSKH tự tạo học sinh. CD bắt buộc qua kiểm tra target Tin, backup public và rehearsal migration trước cập nhật database; giữ các thay đổi local ngoài commit phát hành. Kết quả thực tế ghi tại `docs/ops/upstream-sync-math-2026-10-08.md` sau workflow.
+- Phát hành thành công lên website Toán lúc 13:54 ngày 08/10/2026 để dùng CSKH tự tạo học sinh: workflow `37739185458`, image/source commit `35a52ae0`. Đã backup public, thử và áp dụng 10 migration; không còn migration chờ, không trùng target Tin. Số bản ghi chính, tổng ví và checksum tài chính giữ nguyên. Trang đăng nhập/API/nginx và 22 asset public hoạt động; giữ các thay đổi local ngoài commit phát hành. Kết quả tại `docs/ops/upstream-sync-math-2026-10-08.md`.
 
 - Đồng bộ ba cập nhật upstream (#175–#177) tới `52869056`: chuyên đề theo lớp, tab Buổi học/Chuyên đề, học phí một lần, Ban Đào Tạo, hồ sơ, khảo sát, trợ cấp riêng gia sư và giao diện học sinh. Giữ biên lai/logo Toán, nguồn khách Toán, quyền admin tạo buổi ngoài lịch, popup thống kê và cấu hình triển khai Math.
-- Preflight Math kiểm tra read-only cả tên khoá THPTQG/PREVOI và ID lớp/học sinh bị hai backfill học phí mới tác động, dừng nếu có trùng. Giữ nguyên migration upstream; chưa push, triển khai hoặc áp dụng 10 migration mới. Chi tiết: `docs/ops/upstream-sync-math-2026-10-08.md`.
+- Preflight Math kiểm tra read-only cả tên khoá THPTQG/PREVOI và ID lớp/học sinh bị hai backfill học phí mới tác động, dừng nếu có trùng. Giữ nguyên migration upstream; đã áp dụng 10 migration sau khi preflight và rehearsal pass. Chi tiết: `docs/ops/upstream-sync-math-2026-10-08.md`.
 - Trang chi tiết lớp dùng `ConfirmDialog` cho kết thúc lớp và cho học sinh nghỉ học (cả mobile/desktop), giữ ô lý do tuỳ chọn khi kết thúc lớp. Dọn import trợ cấp thừa và assertion mới từ nguồn để các file xử lý xung đột qua lint.
 - Kiểm tra local: typecheck và build web/API pass; backend 105 suites / 1.220 tests, frontend sau khôi phục chỉnh sửa có sẵn 41 suites / 288 tests, preflight mock 5 tests pass. Giữ nguyên migration nguồn và khôi phục đầy đủ chỉnh sửa chưa commit trước sync.
 

@@ -1,6 +1,6 @@
 # Ops / data migrations
 
-Đồng bộ nguồn Tin → Toán mới nhất: [08/10/2026 — phạm vi, backup và migration cần kiểm tra](upstream-sync-math-2026-10-08.md). Chưa triển khai bản đồng bộ này.
+Đồng bộ nguồn Tin → Toán mới nhất: [08/10/2026 — phạm vi, backup và kết quả triển khai](upstream-sync-math-2026-10-08.md). Đã phát hành thành công lúc 13:54 ngày 08/10/2026; 10 migration qua backup/rehearsal và đối chiếu dữ liệu production.
 
 ## Multi-instance VPS deploy
 
