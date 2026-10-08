@@ -26,6 +26,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 - Đồng bộ ba cập nhật upstream (#175–#177) tới `52869056`: chuyên đề theo lớp, tab Buổi học/Chuyên đề, học phí một lần, Ban Đào Tạo, hồ sơ, khảo sát, trợ cấp riêng gia sư và giao diện học sinh. Giữ biên lai/logo Toán, nguồn khách Toán, quyền admin tạo buổi ngoài lịch, popup thống kê và cấu hình triển khai Math.
 - Preflight Math kiểm tra read-only cả tên khoá THPTQG/PREVOI và ID lớp/học sinh bị hai backfill học phí mới tác động, dừng nếu có trùng. Giữ nguyên migration upstream; chưa push, triển khai hoặc áp dụng 10 migration mới. Chi tiết: `docs/ops/upstream-sync-math-2026-10-08.md`.
 - Trang chi tiết lớp dùng `ConfirmDialog` cho kết thúc lớp và cho học sinh nghỉ học (cả mobile/desktop), giữ ô lý do tuỳ chọn khi kết thúc lớp. Dọn import trợ cấp thừa và assertion mới từ nguồn để các file xử lý xung đột qua lint.
+- Kiểm tra local: typecheck và build web/API pass; backend 105 suites / 1.220 tests, frontend sau khôi phục chỉnh sửa có sẵn 41 suites / 288 tests, preflight mock 5 tests pass. Giữ nguyên migration nguồn và khôi phục đầy đủ chỉnh sửa chưa commit trước sync.
 
 ### Changed — Math upstream sync 2026-10-02
 

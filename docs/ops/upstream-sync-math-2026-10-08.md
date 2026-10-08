@@ -34,4 +34,10 @@ Giữ nguyên lịch sử migration nguồn. Chưa kiểm tra tác động trên
 
 ## Kiểm tra
 
-Kết quả kiểm tra được bổ sung sau khi hoàn tất gộp và khôi phục các chỉnh sửa local.
+- Merge commit local `056392f3`; `upstream/main` là ancestor của HEAD, không còn commit nguồn bị thiếu hay conflict marker.
+- Prisma Client 7.2.0 tạo bằng script workspace; typecheck web/API và build Next.js/NestJS thành công. Next.js tạo đủ 77 trang trong bước build; chưa kiểm tra UI có đăng nhập.
+- Backend: 105 suites / 1.220 tests pass. Sau chỉnh assertion để qua lint, chạy lại riêng tạo buổi: 17 tests pass (gồm admin bỏ kiểm tra lịch và staff vẫn kiểm tra, scale gia sư, học phí, noAttendance).
+- Frontend sau khôi phục popup/test local: 41 suites / 288 tests pass. Lint hai trang lớp và popup/test thống kê, cùng service/spec tạo buổi pass.
+- `node --test scripts/math-release-preflight.test.cjs`: 5 tests pass, mô phỏng các nhánh trùng tên/ID, chỉ migration cũ hơn còn chờ, không trùng, đã áp dụng, và giữ chốt legacy. Test chỉ dùng client PostgreSQL giả; chưa chạy rehearsal SQL/database thật.
+- Các file Prisma schema/migration trong kết quả gộp có blob trùng upstream. Branding/mail/watermark, workflow, registry Math, Compose và script deploy/rehearsal không thay đổi so với nhánh trước sync.
+- Tám file local ngoài AGENTS khớp SHA256 bản sao trước sync. AGENTS giữ nguyên phần local có sẵn, chỉ bổ sung quy tắc kiểm tra backfill học phí mới trong commit đồng bộ. Stash dự phòng vẫn được giữ.
