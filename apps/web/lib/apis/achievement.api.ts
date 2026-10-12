@@ -63,7 +63,32 @@ export async function createAchievement(
     return response.data;
   }
 
-  const response = await api.post<AchievementDto>(ownerBasePath(owner), payload);
+  const studentPayload = payload as CreateStudentAchievementPayload;
+  if (file) {
+    const formData = new FormData();
+    formData.append("award", studentPayload.award);
+    formData.append("exam", studentPayload.exam);
+    formData.append("year", String(studentPayload.year));
+    formData.append("level", studentPayload.level);
+    if (studentPayload.courseLabel != null) {
+      formData.append("courseLabel", studentPayload.courseLabel);
+    }
+    if (studentPayload.sortOrder != null) {
+      formData.append("sortOrder", String(studentPayload.sortOrder));
+    }
+    formData.append("image", file);
+    const response = await api.post<AchievementDto>(
+      ownerBasePath(owner),
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    return response.data;
+  }
+
+  const response = await api.post<AchievementDto>(
+    ownerBasePath(owner),
+    studentPayload,
+  );
   return response.data;
 }
 

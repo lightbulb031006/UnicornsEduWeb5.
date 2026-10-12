@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  assertStorageBucketsAvailable,
   createSignedStorageUrl,
   removeStorageObjects,
   uploadStorageObject,
@@ -81,6 +82,7 @@ export class AchievementService {
       bucket: ACHIEVEMENT_STORAGE_BUCKET,
       path: row.imagePath,
       expiresIn: ACHIEVEMENT_SIGNED_URL_TTL_SECONDS,
+      required: Boolean(row.imagePath),
     });
 
     return {
@@ -104,6 +106,7 @@ export class AchievementService {
       bucket: ACHIEVEMENT_STORAGE_BUCKET,
       path: row.imagePath,
       expiresIn: ACHIEVEMENT_SIGNED_URL_TTL_SECONDS,
+      required: Boolean(row.imagePath),
     });
 
     return {
@@ -239,6 +242,10 @@ export class AchievementService {
     try {
       return await this.uploadStaffAchievementImage(staffId, row.id, file);
     } catch (error) {
+      await this.removeAchievementImages(
+        this.buildImageStoragePath('staff', staffId, row.id, file.mimetype),
+        buildAchievementWatermarkedPath('staff', staffId, row.id),
+      ).catch(() => undefined);
       await this.prisma.staffAchievement
         .delete({ where: { id: row.id } })
         .catch(() => undefined);
@@ -249,7 +256,9 @@ export class AchievementService {
   async createStudentAchievement(
     studentId: string,
     dto: CreateStudentAchievementDto,
+    file?: UploadableFile,
   ) {
+    validateImageFile(file, 'Ảnh minh chứng');
     await this.assertStudentExists(studentId);
     const fields = this.normalizeStudentFields(dto);
     const sortOrder =
@@ -258,7 +267,22 @@ export class AchievementService {
     const row = await this.prisma.studentAchievement.create({
       data: { studentId, ...fields, sortOrder },
     });
-    return this.toStudentDto(row);
+    if (!file) {
+      return this.toStudentDto(row);
+    }
+
+    try {
+      return await this.uploadStudentAchievementImage(studentId, row.id, file);
+    } catch (error) {
+      await this.removeAchievementImages(
+        this.buildImageStoragePath('student', studentId, row.id, file.mimetype),
+        buildAchievementWatermarkedPath('student', studentId, row.id),
+      ).catch(() => undefined);
+      await this.prisma.studentAchievement
+        .delete({ where: { id: row.id } })
+        .catch(() => undefined);
+      throw error;
+    }
   }
 
   private async nextStaffSortOrder(staffId: string) {
@@ -554,10 +578,9 @@ export class AchievementService {
     return this.toStudentDto(row);
   }
 
-  async deleteStaffAchievementImage(
-    _staffId: string,
-    _achievementId: string,
-  ): Promise<never> {
+  deleteStaffAchievementImage(staffId: string, achievementId: string): never {
+    void staffId;
+    void achievementId;
     throw new BadRequestException(
       'Không gỡ ảnh minh chứng của thành tích nhân sự. Hãy thay ảnh khác hoặc xoá cả thành tích.',
     );
@@ -595,6 +618,10 @@ export class AchievementService {
     previousImagePath: string | null;
     previousWatermarkedPath: string | null;
   }) {
+    await assertStorageBucketsAvailable([
+      { name: ACHIEVEMENT_STORAGE_BUCKET, public: false },
+      { name: ACHIEVEMENT_PUBLIC_BUCKET, public: true },
+    ]);
     const watermarked = await bakeDiagonalWatermark(options.file.buffer);
 
     await uploadStorageObject({

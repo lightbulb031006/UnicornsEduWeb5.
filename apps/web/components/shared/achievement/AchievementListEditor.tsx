@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState, type CSSProperties } from "react";
+import { useId, useState, type CSSProperties } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -40,7 +40,9 @@ import { ACHIEVEMENT_LEVEL_OPTIONS } from "@/dtos/achievement.dto";
 import * as achievementApi from "@/lib/apis/achievement.api";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { downloadAvatar, suggestAvatarFilename } from "@/lib/avatar";
+import { getMutationErrorMessage } from "@/lib/mutation-feedback";
 
 type Props = {
   owner: AchievementOwnerRef;
@@ -59,6 +61,23 @@ const iconBtnClass =
 const fieldClass =
   "w-full rounded-md border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus";
 
+const MAX_ACHIEVEMENT_IMAGE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_ACHIEVEMENT_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+function achievementImageError(file: File): string | null {
+  if (!ALLOWED_ACHIEVEMENT_IMAGE_TYPES.has(file.type)) {
+    return "Ảnh minh chứng chỉ hỗ trợ JPEG, PNG hoặc WEBP.";
+  }
+  if (file.size > MAX_ACHIEVEMENT_IMAGE_BYTES) {
+    return "Ảnh minh chứng vượt quá giới hạn 5MB.";
+  }
+  return null;
+}
+
 function displayTitle(item: AchievementDto) {
   if (item.award && item.exam) return `${item.award} · ${item.exam}`;
   return item.title || "Thành tích";
@@ -66,7 +85,9 @@ function displayTitle(item: AchievementDto) {
 
 function levelLabel(level: AchievementLevel | null | undefined) {
   return (
-    ACHIEVEMENT_LEVEL_OPTIONS.find((opt) => opt.value === level)?.label ?? level ?? ""
+    ACHIEVEMENT_LEVEL_OPTIONS.find((opt) => opt.value === level)?.label ??
+    level ??
+    ""
   );
 }
 
@@ -148,7 +169,9 @@ function ImageActions({
         <>
           <label
             className={`${iconBtnClass} cursor-pointer`}
-            aria-label={item.imageUrl ? "Đổi ảnh minh chứng" : "Tải ảnh minh chứng lên"}
+            aria-label={
+              item.imageUrl ? "Đổi ảnh minh chứng" : "Tải ảnh minh chứng lên"
+            }
             title={item.imageUrl ? "Đổi ảnh" : "Tải ảnh lên"}
           >
             <ImagePlus className="h-4 w-4" aria-hidden />
@@ -161,7 +184,13 @@ function ImageActions({
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 e.target.value = "";
-                if (file) onUpload(item.id, file);
+                if (!file) return;
+                const error = achievementImageError(file);
+                if (error) {
+                  toast.error(error);
+                  return;
+                }
+                onUpload(item.id, file);
               }}
             />
           </label>
@@ -222,10 +251,6 @@ function SortableStaffRow({
     transition,
     isDragging,
   } = useSortable({ id: item.id, disabled: !editable || busy });
-
-  useEffect(() => {
-    setDraft(item.title);
-  }, [item.title]);
 
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -318,7 +343,9 @@ function SortableStudentRow({
 }) {
   const [award, setAward] = useState(item.award ?? "");
   const [exam, setExam] = useState(item.exam ?? "");
-  const [year, setYear] = useState(String(item.year ?? new Date().getFullYear()));
+  const [year, setYear] = useState(
+    String(item.year ?? new Date().getFullYear()),
+  );
   const [level, setLevel] = useState<AchievementLevel>(
     item.level ?? "HSG_TINH_THANH_PHO",
   );
@@ -331,14 +358,6 @@ function SortableStudentRow({
     transition,
     isDragging,
   } = useSortable({ id: item.id, disabled: !editable || busy });
-
-  useEffect(() => {
-    setAward(item.award ?? "");
-    setExam(item.exam ?? "");
-    setYear(String(item.year ?? new Date().getFullYear()));
-    setLevel(item.level ?? "HSG_TINH_THANH_PHO");
-    setCourseLabel(item.courseLabel ?? "");
-  }, [item.award, item.exam, item.year, item.level, item.courseLabel]);
 
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -434,7 +453,8 @@ function SortableStudentRow({
                   const nextAward = award.trim();
                   const nextExam = exam.trim();
                   const nextYear = Number(year);
-                  if (!nextAward || !nextExam || !Number.isFinite(nextYear)) return;
+                  if (!nextAward || !nextExam || !Number.isFinite(nextYear))
+                    return;
                   onSaveFields(item.id, {
                     award: nextAward,
                     exam: nextExam,
@@ -499,17 +519,23 @@ export default function AchievementListEditor({
   const isStudent = owner.kind === "student";
   const headingId = useId();
   const queryClient = useQueryClient();
+  const { confirm, dialog } = useConfirmDialog();
   const queryKey = achievementApi.achievementQueryKey(owner);
   const [newTitle, setNewTitle] = useState("");
   const [newTitleFile, setNewTitleFile] = useState<File | null>(null);
-  const [draftStudent, setDraftStudent] = useState<CreateStudentAchievementPayload>({
-    award: "",
-    exam: "",
-    year: new Date().getFullYear(),
-    level: "HSG_TINH_THANH_PHO",
-    courseLabel: "",
-  });
+  const [staffCreateError, setStaffCreateError] = useState<string | null>(null);
+  const [draftStudent, setDraftStudent] =
+    useState<CreateStudentAchievementPayload>({
+      award: "",
+      exam: "",
+      year: new Date().getFullYear(),
+      level: "HSG_TINH_THANH_PHO",
+      courseLabel: "",
+    });
   const [draftStudentFile, setDraftStudentFile] = useState<File | null>(null);
+  const [studentCreateError, setStudentCreateError] = useState<string | null>(
+    null,
+  );
   const [isEditing, setIsEditing] = useState(false);
   const [preview, setPreview] = useState<{ src: string; title: string } | null>(
     null,
@@ -523,29 +549,20 @@ export default function AchievementListEditor({
 
   const items = listQuery.data ?? [];
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey });
 
   const createMutation = useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       payload,
       file,
     }: {
       payload: { title: string } | CreateStudentAchievementPayload;
       file?: File;
-    }) => {
-      if (owner.kind === "staff") {
-        return achievementApi.createAchievement(owner, payload, file);
-      }
-      const created = await achievementApi.createAchievement(owner, payload);
-      if (file) {
-        await achievementApi.uploadAchievementImage(owner, created.id, file);
-      }
-      return created;
-    },
+    }) => achievementApi.createAchievement(owner, payload, file),
     onSuccess: async () => {
       setNewTitle("");
       setNewTitleFile(null);
+      setStaffCreateError(null);
       setDraftStudent({
         award: "",
         exam: "",
@@ -554,10 +571,19 @@ export default function AchievementListEditor({
         courseLabel: "",
       });
       setDraftStudentFile(null);
+      setStudentCreateError(null);
       await invalidate();
       toast.success("Đã thêm thành tích.");
     },
-    onError: () => toast.error("Không thể thêm thành tích."),
+    onError: (error) => {
+      const message = getMutationErrorMessage(
+        error,
+        "Không thể thêm thành tích. Vui lòng kiểm tra ảnh và thử lại.",
+      );
+      if (isStudent) setStudentCreateError(message);
+      else setStaffCreateError(message);
+      toast.error(message);
+    },
   });
 
   const updateMutation = useMutation({
@@ -572,7 +598,10 @@ export default function AchievementListEditor({
       await invalidate();
       toast.success("Đã cập nhật thành tích.");
     },
-    onError: () => toast.error("Không thể cập nhật thành tích."),
+    onError: (error) =>
+      toast.error(
+        getMutationErrorMessage(error, "Không thể cập nhật thành tích."),
+      ),
   });
 
   const deleteMutation = useMutation({
@@ -581,7 +610,8 @@ export default function AchievementListEditor({
       await invalidate();
       toast.success("Đã xoá thành tích.");
     },
-    onError: () => toast.error("Không thể xoá thành tích."),
+    onError: (error) =>
+      toast.error(getMutationErrorMessage(error, "Không thể xoá thành tích.")),
   });
 
   const reorderMutation = useMutation({
@@ -591,9 +621,14 @@ export default function AchievementListEditor({
       queryClient.setQueryData(queryKey, data);
       toast.success("Đã cập nhật thứ tự.");
     },
-    onError: async () => {
+    onError: async (error) => {
       await invalidate();
-      toast.error("Không thể sắp xếp lại. Danh sách đã được tải lại.");
+      toast.error(
+        getMutationErrorMessage(
+          error,
+          "Không thể sắp xếp lại. Danh sách đã được tải lại.",
+        ),
+      );
     },
   });
 
@@ -604,7 +639,13 @@ export default function AchievementListEditor({
       await invalidate();
       toast.success("Đã tải ảnh minh chứng.");
     },
-    onError: () => toast.error("Không thể tải ảnh minh chứng."),
+    onError: (error) =>
+      toast.error(
+        getMutationErrorMessage(
+          error,
+          "Không thể tải ảnh minh chứng. Vui lòng thử lại.",
+        ),
+      ),
   });
 
   const clearImageMutation = useMutation({
@@ -614,7 +655,10 @@ export default function AchievementListEditor({
       await invalidate();
       toast.success("Đã xoá ảnh minh chứng.");
     },
-    onError: () => toast.error("Không thể xoá ảnh minh chứng."),
+    onError: (error) =>
+      toast.error(
+        getMutationErrorMessage(error, "Không thể xoá ảnh minh chứng."),
+      ),
   });
 
   const busy =
@@ -649,6 +693,19 @@ export default function AchievementListEditor({
   const exitEditMode = () => {
     setIsEditing(false);
     setNewTitle("");
+    setNewTitleFile(null);
+    setStaffCreateError(null);
+    setStudentCreateError(null);
+  };
+
+  const requestDelete = async (id: string) => {
+    const accepted = await confirm({
+      title: "Xoá thành tích?",
+      description: "Thành tích và ảnh minh chứng đi kèm sẽ bị xoá.",
+      confirmLabel: "Xoá thành tích",
+      variant: "destructive",
+    });
+    if (accepted) deleteMutation.mutate(id);
   };
 
   const canCreateStudent =
@@ -657,10 +714,7 @@ export default function AchievementListEditor({
     Number.isFinite(draftStudent.year);
 
   return (
-    <section
-      className={`space-y-3 ${className}`}
-      aria-labelledby={headingId}
-    >
+    <section className={`space-y-3 ${className}`} aria-labelledby={headingId}>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
           {heading ? (
@@ -706,7 +760,12 @@ export default function AchievementListEditor({
       </div>
 
       {listQuery.isError ? (
-        <p className="text-sm text-danger">Không tải được danh sách thành tích.</p>
+        <p className="text-sm text-danger" role="alert">
+          {getMutationErrorMessage(
+            listQuery.error,
+            "Không tải được danh sách thành tích.",
+          )}
+        </p>
       ) : null}
 
       {!listQuery.isLoading && items.length === 0 ? (
@@ -726,41 +785,29 @@ export default function AchievementListEditor({
             {items.map((item) =>
               isStudent ? (
                 <SortableStudentRow
-                  key={item.id}
+                  key={`${item.id}:${item.updatedAt}`}
                   item={item}
                   editable={canMutate}
                   busy={busy}
                   onSaveFields={(id, fields) =>
                     updateMutation.mutate({ id, payload: fields })
                   }
-                  onDelete={(id) => {
-                    if (window.confirm("Xoá thành tích này?")) {
-                      deleteMutation.mutate(id);
-                    }
-                  }}
-                  onUpload={(id, file) =>
-                    uploadMutation.mutate({ id, file })
-                  }
+                  onDelete={(id) => void requestDelete(id)}
+                  onUpload={(id, file) => uploadMutation.mutate({ id, file })}
                   onClearImage={(id) => clearImageMutation.mutate(id)}
                   onPreviewImage={(src, title) => setPreview({ src, title })}
                 />
               ) : (
                 <SortableStaffRow
-                  key={item.id}
+                  key={`${item.id}:${item.updatedAt}`}
                   item={item}
                   editable={canMutate}
                   busy={busy}
                   onSaveTitle={(id, title) =>
                     updateMutation.mutate({ id, payload: { title } })
                   }
-                  onDelete={(id) => {
-                    if (window.confirm("Xoá thành tích này?")) {
-                      deleteMutation.mutate(id);
-                    }
-                  }}
-                  onUpload={(id, file) =>
-                    uploadMutation.mutate({ id, file })
-                  }
+                  onDelete={(id) => void requestDelete(id)}
+                  onUpload={(id, file) => uploadMutation.mutate({ id, file })}
                   onClearImage={(id) => clearImageMutation.mutate(id)}
                   onPreviewImage={(src, title) => setPreview({ src, title })}
                 />
@@ -785,7 +832,10 @@ export default function AchievementListEditor({
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
               value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
+              onChange={(e) => {
+                setNewTitle(e.target.value);
+                setStaffCreateError(null);
+              }}
               disabled={busy}
               className={`min-w-0 flex-1 ${fieldClass}`}
               aria-label="Thêm thành tích mới"
@@ -806,18 +856,45 @@ export default function AchievementListEditor({
                 className="sr-only"
                 disabled={busy}
                 onChange={(e) => {
-                  setNewTitleFile(e.target.files?.[0] ?? null);
+                  const file = e.target.files?.[0] ?? null;
+                  if (!file) {
+                    setNewTitleFile(null);
+                    return;
+                  }
+                  const error = achievementImageError(file);
+                  if (error) {
+                    e.target.value = "";
+                    setNewTitleFile(null);
+                    setStaffCreateError(error);
+                    return;
+                  }
+                  setNewTitleFile(file);
+                  setStaffCreateError(null);
                 }}
               />
             </label>
             <button
               type="button"
-              disabled={busy || !newTitle.trim() || !newTitleFile}
+              disabled={busy}
               onClick={() => {
                 const title = newTitle.trim();
-                if (title && newTitleFile) {
-                  createMutation.mutate({ payload: { title }, file: newTitleFile });
+                if (!title) {
+                  setStaffCreateError(
+                    "Hãy nhập tên thành tích; chữ mờ trong ô chỉ là gợi ý.",
+                  );
+                  return;
                 }
+                if (!newTitleFile) {
+                  setStaffCreateError(
+                    "Hãy chọn ảnh minh chứng trước khi thêm.",
+                  );
+                  return;
+                }
+                setStaffCreateError(null);
+                createMutation.mutate({
+                  payload: { title },
+                  file: newTitleFile,
+                });
               }}
               className={`${iconBtnClass} bg-primary text-text-inverse hover:bg-primary/90 disabled:opacity-50`}
               aria-label="Thêm thành tích"
@@ -826,6 +903,15 @@ export default function AchievementListEditor({
               <Plus className="h-4 w-4" aria-hidden />
             </button>
           </div>
+          <p className="text-xs text-text-muted">
+            Cần nhập tên và chọn ảnh JPEG/PNG/WEBP tối đa 5MB.
+            {newTitleFile ? ` Đã chọn: ${newTitleFile.name}.` : ""}
+          </p>
+          {staffCreateError ? (
+            <p className="text-xs text-danger" role="alert" aria-live="polite">
+              {staffCreateError}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -837,9 +923,10 @@ export default function AchievementListEditor({
           <div className="grid gap-2 sm:grid-cols-2">
             <input
               value={draftStudent.award}
-              onChange={(e) =>
-                setDraftStudent((prev) => ({ ...prev, award: e.target.value }))
-              }
+              onChange={(e) => {
+                setDraftStudent((prev) => ({ ...prev, award: e.target.value }));
+                setStudentCreateError(null);
+              }}
               disabled={busy}
               className={fieldClass}
               aria-label="Giải thưởng"
@@ -847,9 +934,10 @@ export default function AchievementListEditor({
             />
             <input
               value={draftStudent.exam}
-              onChange={(e) =>
-                setDraftStudent((prev) => ({ ...prev, exam: e.target.value }))
-              }
+              onChange={(e) => {
+                setDraftStudent((prev) => ({ ...prev, exam: e.target.value }));
+                setStudentCreateError(null);
+              }}
               disabled={busy}
               className={fieldClass}
               aria-label="Kỳ thi"
@@ -858,24 +946,26 @@ export default function AchievementListEditor({
             <input
               type="number"
               value={draftStudent.year}
-              onChange={(e) =>
+              onChange={(e) => {
                 setDraftStudent((prev) => ({
                   ...prev,
                   year: Number(e.target.value) || new Date().getFullYear(),
-                }))
-              }
+                }));
+                setStudentCreateError(null);
+              }}
               disabled={busy}
               className={fieldClass}
               placeholder="Năm"
             />
             <UpgradedSelect
               value={draftStudent.level}
-              onValueChange={(value) =>
+              onValueChange={(value) => {
                 setDraftStudent((prev) => ({
                   ...prev,
                   level: value as AchievementLevel,
-                }))
-              }
+                }));
+                setStudentCreateError(null);
+              }}
               options={ACHIEVEMENT_LEVEL_OPTIONS.map((opt) => ({
                 value: opt.value,
                 label: opt.label,
@@ -884,12 +974,13 @@ export default function AchievementListEditor({
             />
             <input
               value={draftStudent.courseLabel ?? ""}
-              onChange={(e) =>
+              onChange={(e) => {
                 setDraftStudent((prev) => ({
                   ...prev,
                   courseLabel: e.target.value,
-                }))
-              }
+                }));
+                setStudentCreateError(null);
+              }}
               disabled={busy}
               className={`sm:col-span-2 ${fieldClass}`}
               placeholder='Nhãn khóa học (VD "KHỐI THPT")'
@@ -903,7 +994,9 @@ export default function AchievementListEditor({
             >
               <ImagePlus className="h-4 w-4" aria-hidden />
               <span className="text-xs">
-                {draftStudentFile ? "Đã chọn ảnh" : "Chọn ảnh minh chứng (tuỳ chọn)"}
+                {draftStudentFile
+                  ? "Đã chọn ảnh"
+                  : "Chọn ảnh minh chứng (tuỳ chọn)"}
               </span>
               <input
                 type="file"
@@ -911,15 +1004,34 @@ export default function AchievementListEditor({
                 className="sr-only"
                 disabled={busy}
                 onChange={(e) => {
-                  setDraftStudentFile(e.target.files?.[0] ?? null);
+                  const file = e.target.files?.[0] ?? null;
+                  if (!file) {
+                    setDraftStudentFile(null);
+                    return;
+                  }
+                  const error = achievementImageError(file);
+                  if (error) {
+                    e.target.value = "";
+                    setDraftStudentFile(null);
+                    setStudentCreateError(error);
+                    return;
+                  }
+                  setDraftStudentFile(file);
+                  setStudentCreateError(null);
                 }}
               />
             </label>
             <button
               type="button"
-              disabled={busy || !canCreateStudent}
+              disabled={busy}
               onClick={() => {
-                if (!canCreateStudent) return;
+                if (!canCreateStudent) {
+                  setStudentCreateError(
+                    "Hãy nhập đủ giải thưởng, kỳ thi và năm hợp lệ.",
+                  );
+                  return;
+                }
+                setStudentCreateError(null);
                 createMutation.mutate({
                   payload: {
                     award: draftStudent.award.trim(),
@@ -938,8 +1050,19 @@ export default function AchievementListEditor({
               <Plus className="h-4 w-4" aria-hidden />
             </button>
           </div>
+          <p className="text-xs text-text-muted">
+            Ảnh minh chứng là tuỳ chọn; nếu chọn, ảnh và thành tích sẽ được lưu
+            cùng một lần. JPEG/PNG/WEBP, tối đa 5MB.
+            {draftStudentFile ? ` Đã chọn: ${draftStudentFile.name}.` : ""}
+          </p>
+          {studentCreateError ? (
+            <p className="text-xs text-danger" role="alert" aria-live="polite">
+              {studentCreateError}
+            </p>
+          ) : null}
         </div>
       ) : null}
+      {dialog}
     </section>
   );
 }

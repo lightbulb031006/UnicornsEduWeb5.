@@ -101,7 +101,10 @@ export class StaffAchievementController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Created achievement with proof image.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Created achievement with proof image.',
+  })
   @ApiResponse({ status: 400, description: 'Missing title or proof image.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
   create(
@@ -246,15 +249,41 @@ export class StudentAchievementController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create student achievement' })
+  @UseInterceptors(imageUploadInterceptor)
+  @ApiConsumes('multipart/form-data', 'application/json')
+  @ApiOperation({
+    summary: 'Create student achievement with an optional proof image',
+  })
   @ApiParam({ name: 'studentId', description: 'Student id (UNIST-…)' })
-  @ApiBody({ type: CreateStudentAchievementDto })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['award', 'exam', 'year', 'level'],
+      properties: {
+        award: { type: 'string' },
+        exam: { type: 'string' },
+        year: { type: 'integer' },
+        level: { type: 'string' },
+        courseLabel: { type: 'string', nullable: true },
+        sortOrder: { type: 'integer' },
+        image: { type: 'string', format: 'binary' },
+      },
+    },
+  })
   @ApiResponse({ status: 201, description: 'Created achievement.' })
+  @ApiResponse({ status: 400, description: 'Invalid fields or image.' })
+  @ApiResponse({ status: 503, description: 'Achievement buckets unavailable.' })
   create(
     @Param('studentId', new ParseStudentIdPipe()) studentId: string,
     @Body() body: CreateStudentAchievementDto,
+    @UploadedFile()
+    file?: { buffer: Buffer; mimetype: string; size: number },
   ) {
-    return this.achievementService.createStudentAchievement(studentId, body);
+    return this.achievementService.createStudentAchievement(
+      studentId,
+      body,
+      file,
+    );
   }
 
   @Patch(':achievementId')
@@ -381,7 +410,10 @@ export class MyAchievementController {
       },
     },
   })
-  @ApiResponse({ status: 201, description: 'Created achievement with proof image.' })
+  @ApiResponse({
+    status: 201,
+    description: 'Created achievement with proof image.',
+  })
   @ApiResponse({ status: 400, description: 'Missing title or proof image.' })
   async create(
     @CurrentUser() user: JwtPayload,

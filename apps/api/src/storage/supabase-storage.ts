@@ -1,4 +1,8 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { createClient } from '@supabase/supabase-js';
 
 export type UploadableFile = {
@@ -25,7 +29,32 @@ type MulterFileFilterCallback = (
   acceptFile: boolean,
 ) => void;
 
-export function tryGetSupabaseAdminClient() {
+type StorageError = { message: string };
+type SupabaseAdminClientLike = {
+  storage: {
+    getBucket(name: string): Promise<{
+      data: { public: boolean } | null;
+      error: StorageError | null;
+    }>;
+    from(bucket: string): {
+      createSignedUrl(
+        path: string,
+        expiresIn: number,
+      ): Promise<{
+        data: { signedUrl?: string } | null;
+        error: StorageError | null;
+      }>;
+      upload(
+        path: string,
+        body: Buffer,
+        options: { upsert: boolean; contentType: string },
+      ): Promise<{ error: StorageError | null }>;
+      remove(paths: string[]): Promise<{ error: StorageError | null }>;
+    };
+  };
+};
+
+export function tryGetSupabaseAdminClient(): SupabaseAdminClientLike | null {
   const supabaseUrl = process.env.SUPABASE_URL?.trim();
   const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
@@ -33,18 +62,42 @@ export function tryGetSupabaseAdminClient() {
     return null;
   }
 
-  return createClient(supabaseUrl, supabaseServiceRoleKey);
+  return createClient(
+    supabaseUrl,
+    supabaseServiceRoleKey,
+  ) as unknown as SupabaseAdminClientLike;
 }
 
 export function getSupabaseAdminClient() {
   const client = tryGetSupabaseAdminClient();
   if (!client) {
-    throw new BadRequestException(
-      'Thiếu cấu hình SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY.',
+    throw new ServiceUnavailableException(
+      'Kho ảnh chưa được cấu hình: thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_ROLE_KEY.',
     );
   }
 
   return client;
+}
+
+export async function assertStorageBucketsAvailable(
+  buckets: Array<{ name: string; public: boolean }>,
+) {
+  const supabase = getSupabaseAdminClient();
+
+  for (const bucket of buckets) {
+    const { data, error } = await supabase.storage.getBucket(bucket.name);
+    if (error || !data) {
+      throw new ServiceUnavailableException(
+        `Kho ảnh chưa sẵn sàng: không tìm thấy hoặc không truy cập được bucket "${bucket.name}". ${error?.message ?? 'Hãy kiểm tra bucket và service role key.'}`,
+      );
+    }
+
+    if (data.public !== bucket.public) {
+      throw new ServiceUnavailableException(
+        `Bucket "${bucket.name}" phải ở chế độ ${bucket.public ? 'public' : 'private'}.`,
+      );
+    }
+  }
 }
 
 export function validateImageFile(
@@ -136,6 +189,7 @@ export async function createSignedStorageUrl(options: {
   bucket: string;
   path?: string | null;
   expiresIn: number;
+  required?: boolean;
 }) {
   if (!options.path) {
     return null;
@@ -143,6 +197,11 @@ export async function createSignedStorageUrl(options: {
 
   const supabase = tryGetSupabaseAdminClient();
   if (!supabase) {
+    if (options.required) {
+      throw new ServiceUnavailableException(
+        'Không thể đọc ảnh minh chứng: thiếu cấu hình Supabase Storage.',
+      );
+    }
     return null;
   }
 
@@ -151,10 +210,22 @@ export async function createSignedStorageUrl(options: {
     .createSignedUrl(options.path, options.expiresIn);
 
   if (error) {
+    if (options.required) {
+      throw new BadGatewayException(
+        `Không thể tạo đường dẫn xem ảnh minh chứng từ bucket "${options.bucket}": ${error.message}`,
+      );
+    }
     return null;
   }
 
-  return data.signedUrl ?? null;
+  const signedUrl = data?.signedUrl ?? null;
+  if (!signedUrl && options.required) {
+    throw new BadGatewayException(
+      `Supabase không trả về đường dẫn xem ảnh từ bucket "${options.bucket}".`,
+    );
+  }
+
+  return signedUrl;
 }
 
 /** Public object URL for watermarked twins (bucket must be public-read). */
