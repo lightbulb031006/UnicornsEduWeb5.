@@ -21,6 +21,10 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ## [Unreleased]
 
+### Fixed — Preflight triển khai Toán
+
+- Chờ database rehearsal `math_release_check` thực sự nhận được truy vấn `SELECT 1` trước khi restore backup; tránh `pg_isready` báo sẵn sàng trong khoảng ngắn PostgreSQL đã mở kết nối nhưng database khởi tạo chưa tồn tại.
+
 ### Fixed — Ảnh minh chứng thành tích
 
 - Form thành tích nhân sự giải thích rõ phải nhập tên thật và chọn ảnh JPEG/PNG/WEBP tối đa 5MB; nút thêm không còn bị vô hiệu hoá im lặng, lỗi validation hiện ngay cạnh form. Các lỗi API/Storage cụ thể được hiển thị thay cho thông báo chung.

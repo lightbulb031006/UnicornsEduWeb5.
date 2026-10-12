@@ -41,7 +41,8 @@ docker run -d --name "${CHECK_CONTAINER}" --network none --memory=256m \
   -c shared_buffers=32MB -c max_connections=20 >/dev/null
 READY=false
 for attempt in $(seq 1 30); do
-  if docker exec "${CHECK_CONTAINER}" pg_isready -U postgres -d math_release_check >/dev/null 2>&1; then
+  if docker exec "${CHECK_CONTAINER}" psql -U postgres -d math_release_check \
+    -v ON_ERROR_STOP=1 -Atqc 'SELECT 1' >/dev/null 2>&1; then
     READY=true
     break
   fi
