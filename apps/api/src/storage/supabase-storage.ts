@@ -37,6 +37,10 @@ type SupabaseAdminClientLike = {
       error: StorageError | null;
     }>;
     from(bucket: string): {
+      download(path: string): Promise<{
+        data: { arrayBuffer(): Promise<ArrayBuffer> } | null;
+        error: StorageError | null;
+      }>;
       createSignedUrl(
         path: string,
         expiresIn: number,
