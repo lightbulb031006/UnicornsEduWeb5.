@@ -21,6 +21,10 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 
 ## [Unreleased]
 
+### Fixed — Tạo mức khấu trừ theo role
+
+- Sửa lỗi 500 khi bấm **Thêm mức theo role** trong Cài đặt hệ thống: tạo `role_tax_deduction_rates` qua Prisma để điền `updated_at` bắt buộc sau migration đã bỏ database default. Giữ audit trong cùng transaction và lỗi 400 khi trùng role/ngày hiệu lực; không cần migration mới.
+
 ### Changed — Math upstream sync 2026-10-08
 
 - Phát hành thành công lên website Toán lúc 13:54 ngày 08/10/2026 để dùng CSKH tự tạo học sinh: workflow `37739185458`, image/source commit `35a52ae0`. Đã backup public, thử và áp dụng 10 migration; không còn migration chờ, không trùng target Tin. Số bản ghi chính, tổng ví và checksum tài chính giữ nguyên. Trang đăng nhập/API/nginx và 22 asset public hoạt động; giữ các thay đổi local ngoài commit phát hành. Kết quả tại `docs/ops/upstream-sync-math-2026-10-08.md`.

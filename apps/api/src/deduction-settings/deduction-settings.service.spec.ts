@@ -9,6 +9,7 @@ import { DeductionSettingsService } from './deduction-settings.service';
 describe('DeductionSettingsService', () => {
   const mockPrisma = {
     roleTaxDeductionRate: {
+      create: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
     },
@@ -37,6 +38,76 @@ describe('DeductionSettingsService', () => {
       mockPrisma as never,
       actionHistoryService as never,
     );
+  });
+
+  it('creates a role default through Prisma so required timestamps are populated and records audit history', async () => {
+    mockPrisma.roleTaxDeductionRate.create.mockResolvedValue({
+      id: 'role-rate-1',
+      roleType: StaffRole.teacher,
+      ratePercent: 7,
+      effectiveFrom: new Date('2026-10-12T00:00:00.000Z'),
+      createdAt: new Date('2026-10-12T08:00:00.000Z'),
+      updatedAt: new Date('2026-10-12T08:00:00.000Z'),
+    });
+    const actor = {
+      userId: 'admin-1',
+      userEmail: 'admin@example.com',
+      roleType: 'admin',
+    };
+
+    const result = await service.appendRoleTaxDeductionRate(
+      {
+        roleType: StaffRole.teacher,
+        ratePercent: 7,
+        effectiveFrom: '2026-10-12',
+      },
+      actor,
+    );
+
+    expect(mockPrisma.roleTaxDeductionRate.create).toHaveBeenCalledWith({
+      data: {
+        roleType: StaffRole.teacher,
+        ratePercent: 7,
+        effectiveFrom: new Date('2026-10-12T00:00:00.000Z'),
+      },
+    });
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      id: 'role-rate-1',
+      roleType: StaffRole.teacher,
+      ratePercent: 7,
+      effectiveFrom: '2026-10-12',
+      createdAt: '2026-10-12T08:00:00.000Z',
+    });
+    expect(actionHistoryService.recordCreate).toHaveBeenCalledWith(mockPrisma, {
+      actor,
+      entityType: 'tax_deduction_role_rate',
+      entityId: 'role-rate-1',
+      description: 'Append tax deduction role default rate',
+      afterValue: result,
+    });
+  });
+
+  it('rejects duplicate role default dates with a bad request and does not record a successful creation', async () => {
+    mockPrisma.roleTaxDeductionRate.create.mockRejectedValue({ code: 'P2002' });
+
+    await expect(
+      service.appendRoleTaxDeductionRate(
+        {
+          roleType: StaffRole.teacher,
+          ratePercent: 7,
+          effectiveFrom: '2026-10-12',
+        },
+        {
+          userId: 'admin-1',
+          userEmail: 'admin@example.com',
+          roleType: 'admin',
+        },
+      ),
+    ).rejects.toThrow(
+      new BadRequestException('A rate already exists for this effective date.'),
+    );
+    expect(actionHistoryService.recordCreate).not.toHaveBeenCalled();
   });
 
   it('updates an existing role default tax rate and records audit history', async () => {

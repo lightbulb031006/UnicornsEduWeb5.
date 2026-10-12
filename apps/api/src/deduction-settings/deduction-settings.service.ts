@@ -239,45 +239,31 @@ export class DeductionSettingsService {
   ) {
     const ratePercent = normalizeRatePercent(dto.ratePercent);
     const effectiveFrom = parseAsOfDateOrThrow(dto.effectiveFrom);
-    const rowId = randomUUID();
 
     try {
-      const createdRows = await this.prisma.$transaction(async (tx) => {
-        const rows = await tx.$queryRaw<RoleTaxRateRow[]>(Prisma.sql`
-          INSERT INTO role_tax_deduction_rates (
-            id,
-            role_type,
-            rate_percent,
-            effective_from
-          )
-          VALUES (
-            ${rowId},
-            ${dto.roleType}::"StaffRole",
-            ${ratePercent},
-            ${effectiveFrom}
-          )
-          RETURNING
-            id,
-            role_type AS "roleType",
-            rate_percent AS "ratePercent",
-            effective_from AS "effectiveFrom",
-            created_at AS "createdAt"
-        `);
+      const created = await this.prisma.$transaction(async (tx) => {
+        const row = await tx.roleTaxDeductionRate.create({
+          data: {
+            roleType: dto.roleType,
+            ratePercent,
+            effectiveFrom,
+          },
+        });
 
-        if (rows.length > 0 && actor) {
+        if (actor) {
           await this.actionHistoryService.recordCreate(tx, {
             actor,
             entityType: 'tax_deduction_role_rate',
-            entityId: rows[0].id,
+            entityId: row.id,
             description: 'Append tax deduction role default rate',
-            afterValue: this.mapRoleTaxRateRow(rows[0]),
+            afterValue: this.mapRoleTaxRateRow(row),
           });
         }
 
-        return rows;
+        return row;
       });
 
-      return this.mapRoleTaxRateRow(createdRows[0]);
+      return this.mapRoleTaxRateRow(created);
     } catch (error) {
       normalizePostgresError(error);
       throw error;
