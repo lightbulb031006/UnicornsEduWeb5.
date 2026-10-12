@@ -24,6 +24,7 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 ### Fixed — Tạo mức khấu trừ theo role
 
 - Sửa lỗi 500 khi bấm **Thêm mức theo role** trong Cài đặt hệ thống: tạo `role_tax_deduction_rates` qua Prisma để điền `updated_at` bắt buộc sau migration đã bỏ database default. Giữ audit trong cùng transaction và lỗi 400 khi trùng role/ngày hiệu lực; không cần migration mới.
+- Đã triển khai source `52711761` lên `math.uniedu.vn` lúc 16:40 ngày 12/10/2026 qua [workflow 38230213644](https://github.com/lightbulb031006/UnicornsEduWeb5./actions/runs/38230213644). Backup public và rehearsal đạt, không có migration chờ; số bản ghi, tổng ví và checksum tài chính giữ nguyên. 6 tests khấu trừ, typecheck/lint API đạt; kiểm tra SQL Prisma sinh ra có `updated_at` hợp lệ bằng adapter giả, không ghi database. Login/API/nginx public trả 200, endpoint tạo mức thuế trả 401 khi không đăng nhập; chưa tạo mức thuế thử trên production.
 
 ### Changed — Math upstream sync 2026-10-08
 
