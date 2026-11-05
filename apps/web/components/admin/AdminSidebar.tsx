@@ -11,6 +11,10 @@ import { useAuth } from "@/context/AuthContext";
 import { Role } from "@/dtos/Auth.dto";
 import { SidebarNotificationTray, SidebarThemePicker } from "@/components/shell";
 import {
+  isGiftedLessonPlanRoute,
+  useGiftedLessonPlanEnabled,
+} from "@/lib/gifted-lesson-plan";
+import {
   getAccountantVisibleAdminHrefs,
   resolveAdminShellAccess,
 } from "@/lib/admin-shell-access";
@@ -264,7 +268,9 @@ export default function AdminSidebar() {
       : "/admin/dashboard";
   const accountantVisibleHrefs = getAccountantVisibleAdminHrefs(adminShellAccess);
 
-  const menuItems = isProfileLoading || isProfileError || !fullProfile
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
+
+  const roleMenuItems = isProfileLoading || isProfileError || !fullProfile
     ? []
     : isAssistant || isAdmin
       ? MENU_ITEMS.filter((item) => isAdmin || !item.adminOnly)
@@ -273,6 +279,10 @@ export default function AdminSidebar() {
         : isLessonPlanHead
           ? MENU_ITEMS.filter((item) => item.href === "/admin/lesson-plans")
           : [];
+  // Giáo án học sinh giỏi chỉ có trên IT.
+  const menuItems = giftedLessonPlanEnabled === false
+    ? roleMenuItems.filter((item) => !isGiftedLessonPlanRoute(item.href))
+    : roleMenuItems;
 
   useEffect(() => {
     if (!isMobile) {
@@ -374,14 +384,13 @@ export default function AdminSidebar() {
       >
         <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border-default px-2.5 py-1.5 sm:px-3">
           <div
-            className={`flex min-w-0 flex-1 items-center overflow-hidden transition-[justify-content] duration-300 ease-out ${compact ? "justify-center" : "justify-start"}`}
+            className={`flex min-w-0 flex-1 items-center overflow-hidden transition-[justify-content] duration-300 ease-out justify-center ${compact ? "" : "pl-[3.25rem] md:pl-11"}`}
           >
             <BrandLogoLockup
               variant="navbar"
               showWordmark={!compact}
               dense={compact}
-              className="w-full min-w-0 transition-[width,opacity] duration-300 ease-out"
-              wordmarkClassName="truncate"
+              className="w-full min-w-0 justify-center transition-[width,opacity] duration-300 ease-out"
             />
           </div>
           <button

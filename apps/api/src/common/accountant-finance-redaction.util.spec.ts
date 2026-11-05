@@ -1,5 +1,6 @@
 import { StaffRole, UserRole } from 'generated/enums';
 import {
+  redactClassForTrainingManagerView,
   redactClassStudentWalletBalances,
   redactOtherTeachersIncome,
   resolveAccountantFinanceView,
@@ -115,5 +116,53 @@ describe('redactOtherTeachersIncome', () => {
     redactOtherTeachersIncome(classRecord, 'teacher-self');
 
     expect(classRecord.teachers[1].customAllowance).toBe(300_000);
+  });
+});
+
+describe('redactClassForTrainingManagerView', () => {
+  const classRecord = {
+    id: 'class-1',
+    allowancePerSessionPerStudent: 100_000,
+    maxAllowancePerSession: 500_000,
+    scaleAmount: 20_000,
+    studentTuitionPerSession: 250_000,
+    studentTuitionPerBlock: 250_000,
+    tuitionPackageTotal: 3_000_000,
+    teachers: [
+      {
+        id: 'teacher-1',
+        customAllowance: 120_000,
+        customScaleAmount: 10_000,
+        operatingDeductionRatePercent: 5,
+      },
+    ],
+    students: [
+      {
+        id: 'student-1',
+        customTuitionPerSession: 200_000,
+        accountBalance: 1_000_000,
+      },
+    ],
+  };
+
+  it('keeps teacher pay but strips tuition and student wallets', () => {
+    const result = redactClassForTrainingManagerView(classRecord);
+
+    expect(result).toMatchObject({
+      allowancePerSessionPerStudent: 100_000,
+      maxAllowancePerSession: 500_000,
+      scaleAmount: 20_000,
+      teachers: [
+        {
+          customAllowance: 120_000,
+          customScaleAmount: 10_000,
+          operatingDeductionRatePercent: 5,
+        },
+      ],
+    });
+    expect(result).not.toHaveProperty('studentTuitionPerSession');
+    expect(result).not.toHaveProperty('studentTuitionPerBlock');
+    expect(result).not.toHaveProperty('tuitionPackageTotal');
+    expect(result.students[0]).toEqual({ id: 'student-1' });
   });
 });

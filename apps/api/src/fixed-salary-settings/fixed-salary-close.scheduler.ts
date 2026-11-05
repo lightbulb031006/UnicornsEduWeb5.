@@ -19,14 +19,8 @@ export class FixedSalaryCloseScheduler {
     );
 
     try {
-      const result =
-        await this.fixedSalaryCloseService.closeCurrentMonthAutomatically();
-      if (result.skippedBecauseAlreadyClosed) {
-        this.logger.log(
-          `Skipped automatic close for ${result.month}: month already has payables`,
-        );
-        return;
-      }
+      // Chốt nốt mọi nhân sự chưa chốt / chốt dở; khoản đã chốt tay giữ nguyên.
+      const result = await this.fixedSalaryCloseService.closeCurrentMonth();
       this.logger.log(
         `Closed ${result.month}: created=${result.createdCount} skipped=${result.skippedCount}`,
       );

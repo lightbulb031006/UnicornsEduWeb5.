@@ -15,6 +15,8 @@ export const CONTENT_LIMITS = {
   url: 2_048,
   /** Per-student attendance note. Matches existing FE cap. */
   attendanceNotes: 500,
+  /** Plain-text field of the structured session review (tiến độ, điểm tốt, BTVN…). */
+  sessionReviewText: 2_000,
 } as const;
 
 export const HTTP_URL_OPTIONS = {

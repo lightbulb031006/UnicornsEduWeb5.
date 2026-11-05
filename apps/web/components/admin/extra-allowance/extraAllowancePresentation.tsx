@@ -131,6 +131,12 @@ export const EXTRA_ALLOWANCE_ROLE_META = {
     pillClassName:
       `border border-secondary/20 bg-secondary/10 text-secondary ${insetSurfaceShadow}`,
   },
+  sale: {
+    label: ROLE_LABELS.sale,
+    badgeClassName: "bg-success/12 text-success ring-1 ring-success/20",
+    pillClassName:
+      `border border-success/20 bg-success/10 text-success ${insetSurfaceShadow}`,
+  },
 } satisfies Record<
   ExtraAllowanceRoleType,
   {
@@ -219,6 +225,10 @@ export const EXTRA_ALLOWANCE_ROLE_OPTIONS = (
     {
       value: "training",
       label: renderExtraAllowanceRoleOptionLabel("training"),
+    },
+    {
+      value: "sale",
+      label: renderExtraAllowanceRoleOptionLabel("sale"),
     },
     {
       value: "customer_care",

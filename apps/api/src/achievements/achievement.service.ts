@@ -40,9 +40,17 @@ type StaffAchievementRow = {
   imagePath: string | null;
   imageWatermarkedPath?: string | null;
   sortOrder: number;
+  isHighlight: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
+
+/** Thành tích nổi bật luôn đứng đầu, sau đó theo thứ tự gia sư sắp xếp. */
+const STAFF_ACHIEVEMENT_ORDER_BY = [
+  { isHighlight: 'desc' as const },
+  { sortOrder: 'asc' as const },
+  { createdAt: 'asc' as const },
+];
 
 type StudentAchievementRow = {
   id: string;
@@ -96,6 +104,7 @@ export class AchievementService {
       imagePath: row.imagePath,
       imageUrl,
       sortOrder: row.sortOrder,
+      isHighlight: row.isHighlight,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -120,6 +129,7 @@ export class AchievementService {
       imagePath: row.imagePath,
       imageUrl,
       sortOrder: row.sortOrder,
+      isHighlight: false,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -207,7 +217,7 @@ export class AchievementService {
     await this.assertStaffExists(staffId);
     const rows = await this.prisma.staffAchievement.findMany({
       where: { staffId },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+      orderBy: STAFF_ACHIEVEMENT_ORDER_BY,
     });
     return this.toStaffDtoList(rows);
   }
@@ -235,9 +245,12 @@ export class AchievementService {
     await this.assertStaffExists(staffId);
     const title = this.normalizeTitle(dto.title);
     const sortOrder = dto.sortOrder ?? (await this.nextStaffSortOrder(staffId));
+    // Thành tích đầu tiên của hồ sơ tự là nổi bật (không có gì để chọn).
+    const isHighlight =
+      (await this.prisma.staffAchievement.count({ where: { staffId } })) === 0;
 
     const row = await this.prisma.staffAchievement.create({
-      data: { staffId, title, sortOrder },
+      data: { staffId, title, sortOrder, isHighlight },
     });
     try {
       return await this.uploadStaffAchievementImage(staffId, row.id, file);
@@ -389,6 +402,9 @@ export class AchievementService {
       existing.imageWatermarkedPath,
     );
     await this.prisma.staffAchievement.delete({ where: { id: achievementId } });
+    if (existing.isHighlight) {
+      await this.highlightSoleRemainingStaffAchievement(staffId);
+    }
     return { ok: true as const };
   }
 
@@ -411,24 +427,83 @@ export class AchievementService {
   }
 
   /**
+   * Xoá thành tích nổi bật mà chỉ còn đúng một thành tích thì thành tích đó tự
+   * là nổi bật. Còn từ hai trở lên thì để trống — gia sư phải tự chọn lại.
+   */
+  private async highlightSoleRemainingStaffAchievement(staffId: string) {
+    const remaining = await this.prisma.staffAchievement.findMany({
+      where: { staffId },
+      select: { id: true },
+      take: 2,
+    });
+    if (remaining.length !== 1) return;
+    await this.prisma.staffAchievement.update({
+      where: { id: remaining[0].id },
+      data: { isHighlight: true },
+    });
+  }
+
+  /**
+   * Đặt thành tích nổi bật: bỏ sao cũ, gắn sao mới và đưa nó lên đầu
+   * (sortOrder 0), các thành tích còn lại giữ thứ tự tương đối.
+   */
+  async setStaffHighlightAchievement(staffId: string, achievementId: string) {
+    await this.assertStaffExists(staffId);
+    const rows = await this.prisma.staffAchievement.findMany({
+      where: { staffId },
+      orderBy: STAFF_ACHIEVEMENT_ORDER_BY,
+      select: { id: true },
+    });
+    if (!rows.some((row) => row.id === achievementId)) {
+      throw new NotFoundException('Achievement not found.');
+    }
+    const orderedIds = [
+      achievementId,
+      ...rows.map((row) => row.id).filter((id) => id !== achievementId),
+    ];
+
+    await this.prisma.$transaction([
+      // Bỏ sao cũ trước để không vi phạm unique index một-sao-mỗi-nhân-sự.
+      this.prisma.staffAchievement.updateMany({
+        where: { staffId, isHighlight: true, id: { not: achievementId } },
+        data: { isHighlight: false },
+      }),
+      ...orderedIds.map((id, index) =>
+        this.prisma.staffAchievement.update({
+          where: { id },
+          data: {
+            sortOrder: index,
+            ...(id === achievementId ? { isHighlight: true } : {}),
+          },
+        }),
+      ),
+    ]);
+
+    return this.listStaffAchievements(staffId);
+  }
+
+  /**
    * Validate that `orderedIds` is a complete permutation of the owner's
-   * current achievement ids, then apply sortOrder = index.
-   *
-   * TODO(you): implement assertCompleteReorder — see learning prompt in chat.
+   * current achievement ids, then apply sortOrder = index. Thành tích nổi bật
+   * luôn bị ghim ở đầu, bất kể vị trí client gửi lên.
    */
   async reorderStaffAchievements(staffId: string, dto: ReorderAchievementsDto) {
     await this.assertStaffExists(staffId);
     const existing = await this.prisma.staffAchievement.findMany({
       where: { staffId },
-      select: { id: true },
+      select: { id: true, isHighlight: true },
     });
     this.assertCompleteReorder(
       existing.map((row) => row.id),
       dto.orderedIds,
     );
+    const highlightId = existing.find((row) => row.isHighlight)?.id;
+    const orderedIds = highlightId
+      ? [highlightId, ...dto.orderedIds.filter((id) => id !== highlightId)]
+      : dto.orderedIds;
 
     await this.prisma.$transaction(
-      dto.orderedIds.map((id, index) =>
+      orderedIds.map((id, index) =>
         this.prisma.staffAchievement.update({
           where: { id },
           data: { sortOrder: index },

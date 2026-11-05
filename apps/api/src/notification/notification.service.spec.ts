@@ -12,7 +12,7 @@ jest.mock('generated/client', () => ({
   },
 }));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
   NotificationStatus,
   StaffRole,
@@ -30,6 +30,7 @@ describe('NotificationService', () => {
       findMany: jest.fn(),
       create: jest.fn(),
       findUnique: jest.fn(),
+      delete: jest.fn(),
     },
     staffInfo: {
       findUnique: jest.fn(),
@@ -296,6 +297,204 @@ describe('NotificationService', () => {
       }),
     );
   });
+  describe('quyền người tạo / kiểm duyệt (CONTEXT.md "Người tạo thông báo")', () => {
+    const staffActor = (id: string) => ({
+      id,
+      email: `${id}@example.com`,
+      accountHandle: id,
+      roleType: UserRole.staff,
+    });
+    const adminActor = {
+      id: 'admin-1',
+      email: 'admin-1@example.com',
+      accountHandle: 'admin-1',
+      roleType: UserRole.admin,
+    };
+    const auditActor = { userId: 'x', userEmail: null, roleType: null };
+
+    const withStaffRoles = (roles: StaffRole[]) =>
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({ roles });
+
+    const publishedBy = (
+      author: ReturnType<typeof makeAuthor> | null,
+      id = 'notif-pub',
+    ) =>
+      makeNotificationRow({
+        id,
+        status: NotificationStatus.published,
+        createdByUserId: author?.id ?? null,
+        createdBy: author,
+      });
+
+    beforeEach(() => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+    });
+
+    it('staff thường chỉ thấy thông báo do mình tạo', async () => {
+      withStaffRoles([StaffRole.communication]);
+      mockPrisma.notification.findMany.mockResolvedValue([]);
+
+      await service.getAdminNotifications({}, staffActor('staff-1'));
+
+      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { createdByUserId: 'staff-1' } }),
+      );
+    });
+
+    it('admin và trợ lí thấy nháp của mình + mọi thông báo đã đẩy', async () => {
+      withStaffRoles([StaffRole.assistant]);
+      mockPrisma.notification.findMany.mockResolvedValue([]);
+
+      await service.getAdminNotifications(
+        { status: NotificationStatus.published },
+        staffActor('assistant-1'),
+      );
+
+      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              { status: NotificationStatus.published },
+              {
+                OR: [
+                  { createdByUserId: 'assistant-1' },
+                  { status: NotificationStatus.published },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('trả canEdit/canDelete theo từng thông báo cho trợ lí', async () => {
+      withStaffRoles([StaffRole.assistant]);
+      mockPrisma.notification.findMany.mockResolvedValue([
+        publishedBy(makeAuthor('assistant-1', UserRole.staff), 'own'),
+        publishedBy(
+          makeAuthor('staff-2', UserRole.staff, [StaffRole.training]),
+          'staff',
+        ),
+        publishedBy(makeAuthor('admin-9', UserRole.admin), 'admin'),
+      ]);
+
+      const items = await service.getAdminNotifications(
+        {},
+        staffActor('assistant-1'),
+      );
+
+      expect(
+        items.map(({ id, canEdit, canDelete }) => ({ id, canEdit, canDelete })),
+      ).toEqual([
+        { id: 'own', canEdit: true, canDelete: true },
+        { id: 'staff', canEdit: false, canDelete: true },
+        { id: 'admin', canEdit: false, canDelete: false },
+      ]);
+    });
+
+    it('admin không được sửa nháp của người khác', async () => {
+      mockPrisma.notification.findUnique.mockResolvedValue(
+        makeNotificationRow({ createdByUserId: 'staff-2' }),
+      );
+
+      await expect(
+        service.updateNotificationDraft(
+          'notif-1',
+          { title: 'Sửa' },
+          auditActor,
+          adminActor,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('admin không được đẩy lại thông báo của người khác', async () => {
+      mockPrisma.notification.findUnique.mockResolvedValue(
+        publishedBy(makeAuthor('staff-2', UserRole.staff)),
+      );
+
+      await expect(
+        service.pushNotification('notif-pub', {}, auditActor, adminActor),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockGateway.emitNotificationPushed).not.toHaveBeenCalled();
+    });
+
+    it('admin xoá được thông báo đã đẩy của bất kỳ ai', async () => {
+      mockPrisma.notification.findUnique.mockResolvedValue(
+        publishedBy(makeAuthor('staff-2', UserRole.staff)),
+      );
+
+      await expect(
+        service.deleteNotification('notif-pub', auditActor, adminActor),
+      ).resolves.toEqual({ id: 'notif-pub' });
+    });
+
+    it('admin không xoá được nháp của người khác', async () => {
+      mockPrisma.notification.findUnique.mockResolvedValue(
+        makeNotificationRow({ createdByUserId: 'staff-2' }),
+      );
+
+      await expect(
+        service.deleteNotification('notif-1', auditActor, adminActor),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('trợ lí không xoá được thông báo của người hiện là admin', async () => {
+      withStaffRoles([StaffRole.assistant]);
+      mockPrisma.notification.findUnique.mockResolvedValue(
+        publishedBy(
+          makeAuthor('staff-admin', UserRole.staff, [StaffRole.admin]),
+        ),
+      );
+
+      await expect(
+        service.deleteNotification(
+          'notif-pub',
+          auditActor,
+          staffActor('assistant-1'),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.notification.delete).not.toHaveBeenCalled();
+    });
+
+    it('trợ lí xoá được thông báo khi người tạo không còn tài khoản', async () => {
+      withStaffRoles([StaffRole.assistant]);
+      mockPrisma.notification.findUnique.mockResolvedValue(publishedBy(null));
+
+      await expect(
+        service.deleteNotification(
+          'notif-pub',
+          auditActor,
+          staffActor('assistant-1'),
+        ),
+      ).resolves.toEqual({ id: 'notif-pub' });
+    });
+
+    it('staff thường không xoá được thông báo người khác, xoá được của mình', async () => {
+      withStaffRoles([StaffRole.accountant_income]);
+      mockPrisma.notification.findUnique.mockResolvedValueOnce(
+        publishedBy(makeAuthor('staff-2', UserRole.staff)),
+      );
+
+      await expect(
+        service.deleteNotification(
+          'notif-pub',
+          auditActor,
+          staffActor('staff-1'),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      mockPrisma.notification.findUnique.mockResolvedValueOnce(
+        publishedBy(makeAuthor('staff-1', UserRole.staff)),
+      );
+      await expect(
+        service.deleteNotification(
+          'notif-pub',
+          auditActor,
+          staffActor('staff-1'),
+        ),
+      ).resolves.toEqual({ id: 'notif-pub' });
+    });
+  });
 });
 
 function makeNotificationRow(
@@ -313,6 +512,16 @@ function makeNotificationRow(
     lastPushedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
+    createdByUserId: string | null;
+    createdBy: {
+      id: string;
+      email: string;
+      accountHandle: string;
+      first_name: string | null;
+      last_name: string | null;
+      roleType: UserRole;
+      staffInfo: { roles: StaffRole[] } | null;
+    } | null;
   }> = {},
 ) {
   return {
@@ -328,9 +537,28 @@ function makeNotificationRow(
     pushCount: overrides.pushCount ?? 0,
     lastPushedAt:
       overrides.lastPushedAt === undefined ? null : overrides.lastPushedAt,
-    createdByUserId: 'admin-1',
+    createdByUserId:
+      overrides.createdByUserId === undefined
+        ? 'admin-1'
+        : overrides.createdByUserId,
     createdAt: overrides.createdAt ?? new Date('2026-04-07T09:00:00.000Z'),
     updatedAt: overrides.updatedAt ?? new Date('2026-04-07T09:30:00.000Z'),
-    createdBy: null,
+    createdBy: overrides.createdBy ?? null,
+  };
+}
+
+function makeAuthor(
+  id: string,
+  roleType: UserRole,
+  staffRoles: StaffRole[] = [],
+) {
+  return {
+    id,
+    email: `${id}@example.com`,
+    accountHandle: id,
+    first_name: null,
+    last_name: null,
+    roleType,
+    staffInfo: roleType === UserRole.staff ? { roles: staffRoles } : null,
   };
 }

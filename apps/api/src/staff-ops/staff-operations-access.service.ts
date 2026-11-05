@@ -144,6 +144,46 @@ export class StaffOperationsAccessService {
     return staff;
   }
 
+  /**
+   * Quyền chỉnh gia sư / lương gia sư của lớp từ staff workspace.
+   * Admin (user hoặc staff role) và trợ lí: toàn quyền. Ban Đào Tạo: chỉ lớp
+   * có `training_manager_staff_id` là chính mình, và không được đụng dòng của
+   * chính mình (`lockedTeacherId`).
+   */
+  async resolveClassTeacherManagerScope(
+    userId: string,
+    roleType: UserRole,
+    classId: string,
+  ): Promise<{ lockedTeacherId: string | null }> {
+    if (roleType === UserRole.admin) {
+      return { lockedTeacherId: null };
+    }
+
+    const staff = await this.resolveStaffActor(userId);
+
+    if (
+      staff.roles.includes(StaffRole.admin) ||
+      staff.roles.includes(StaffRole.assistant)
+    ) {
+      return { lockedTeacherId: null };
+    }
+
+    if (staff.roles.includes(StaffRole.training)) {
+      const managedClass = await this.prisma.class.findFirst({
+        where: { id: classId, trainingManagerStaffId: staff.id },
+        select: { id: true },
+      });
+
+      if (managedClass) {
+        return { lockedTeacherId: staff.id };
+      }
+    }
+
+    throw new ForbiddenException(
+      'Chỉ quản lý lớp (Đào Tạo), trợ lí hoặc admin mới được chỉnh gia sư của lớp này.',
+    );
+  }
+
   async assertTeacherAssignedToClass(
     teacherId: string,
     classId: string,

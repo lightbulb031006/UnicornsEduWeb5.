@@ -1,5 +1,6 @@
 "use client";
 
+import type { Ref } from "react";
 import { cn } from "@/lib/utils";
 import type { AttemptQuestionDto } from "@/dtos/attempt.dto";
 import { getAttemptQuestionVisualStatus } from "@/lib/attempt-autosave.helpers";
@@ -40,10 +41,17 @@ function LegendSwatch({
 
 export default function StudentAttemptQuestionGrid({
   questions,
-  stickyTopClassName = "top-0",
+  labels,
+  className,
+  ref,
 }: {
   questions: AttemptQuestionDto[];
-  stickyTopClassName?: string;
+  /** Nhãn từng ô (đề IT: "1".."24", "II.1", "TC1·3"…). Mặc định 1..n. */
+  labels?: string[];
+  /** Vị trí (sticky/top…) do trang quyết định. */
+  className?: string;
+  /** Trang đo chiều cao để thanh dính khác xếp ngay bên dưới. */
+  ref?: Ref<HTMLElement>;
 }) {
   const scrollToQuestion = (questionId: string) => {
     document
@@ -53,9 +61,10 @@ export default function StudentAttemptQuestionGrid({
 
   return (
     <section
+      ref={ref}
       className={cn(
-        "sticky z-10 -mx-1 rounded-2xl border border-border-default bg-bg-surface/95 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-bg-surface/80",
-        stickyTopClassName,
+        "z-20 rounded-2xl border border-border-default bg-bg-surface/95 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-bg-surface/80",
+        className,
       )}
       aria-label="Danh sách câu hỏi"
     >
@@ -64,15 +73,17 @@ export default function StudentAttemptQuestionGrid({
         <LegendSwatch status="answered" label="Đã làm" />
         <LegendSwatch status="marked_for_review" label="Quay lại" />
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      {/* Lưới cột đều: mọi ô cùng kích thước, kể cả nhãn dài "TC1·3". */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1.5">
         {questions.map((q, index) => {
           const status = getAttemptQuestionVisualStatus(q);
+          const label = labels?.[index] ?? String(index + 1);
           return (
             <button
               key={q.questionId}
               type="button"
               onClick={() => scrollToQuestion(q.questionId)}
-              aria-label={`Câu ${index + 1}${
+              aria-label={`Câu ${label}${
                 status === "answered"
                   ? ", đã làm"
                   : status === "marked_for_review"
@@ -80,11 +91,12 @@ export default function StudentAttemptQuestionGrid({
                     : ", chưa làm"
               }`}
               className={cn(
-                "inline-flex size-9 min-h-9 items-center justify-center rounded-md border text-xs font-semibold sm:size-10",
+                "inline-flex h-10 w-full min-w-0 items-center justify-center rounded-md border px-0.5 font-semibold tabular-nums",
+                label.length > 4 ? "text-[10px] tracking-tight" : "text-xs",
                 cellClass(status),
               )}
             >
-              {index + 1}
+              {label}
             </button>
           );
         })}

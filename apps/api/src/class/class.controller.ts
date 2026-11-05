@@ -349,7 +349,11 @@ export class ClassController {
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: ClassStatusActionDto, required: false })
-  @ApiResponse({ status: 200, description: 'Class ended.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Class ended. Response = class detail + `calendarSyncWarnings: string[]` (Google Calendar cleanup errors after commit; class is still ended).',
+  })
   @ApiResponse({
     status: 400,
     description:
@@ -378,7 +382,11 @@ export class ClassController {
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiParam({ name: 'teacherId', description: 'Staff id of the teacher' })
   @ApiBody({ type: ClassStatusActionDto, required: false })
-  @ApiResponse({ status: 200, description: 'Teacher assignment stopped.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Teacher assignment stopped. Response = class detail + `calendarSyncWarnings: string[]` (Google Calendar cleanup errors after commit).',
+  })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({
     status: 404,

@@ -72,6 +72,8 @@ type Props = {
   className?: string;
   surveys: ClassSurveyRecord[];
   availableSurveys: ClassSurveyPickerOption[];
+  /** Trạng thái query bài khảo sát — chỉ báo "chưa có bài" khi đã tải xong và rỗng. */
+  availableSurveysStatus?: "pending" | "error" | "success";
   teachers: ClassSurveyTeacherOption[];
   students: ClassSurveyStudentOption[];
   error?: boolean;
@@ -269,7 +271,7 @@ function SurveySummary({ survey }: { survey: ClassSurveyRecord }) {
 
 function SurveyTeacher({ survey }: { survey: ClassSurveyRecord }) {
   return (
-    <p className="truncate text-xs font-medium text-primary">
+    <p className="break-words text-xs font-medium text-primary">
       {renderSurveyTeacher(survey)}
     </p>
   );
@@ -809,6 +811,7 @@ export default function ClassSurveyPanel({
   className,
   surveys,
   availableSurveys,
+  availableSurveysStatus = "success",
   teachers,
   students,
   error = false,
@@ -897,10 +900,17 @@ export default function ClassSurveyPanel({
           Lớp chưa có gia sư phụ trách nên chưa thể tạo báo cáo khảo sát.
         </div>
       ) : null}
-      {availableSurveys.length === 0 && canManage ? (
+      {availableSurveysStatus === "success" &&
+      availableSurveys.length === 0 &&
+      canManage ? (
         <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           Chưa có bài khảo sát nào được tạo. Vui lòng liên hệ admin/đội giáo án.
         </div>
+      ) : null}
+      {availableSurveysStatus === "error" && canManage ? (
+        <p className="mb-3 text-sm text-error" role="alert">
+          Không tải được danh sách bài khảo sát.
+        </p>
       ) : null}
       {error ? (
         <p className="mb-3 text-sm text-error" role="alert">

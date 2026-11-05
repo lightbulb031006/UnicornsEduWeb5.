@@ -14,6 +14,7 @@ import {
   ExtraAllowanceSummaryCardsSkeleton,
 } from "@/components/admin/extra-allowance/ExtraAllowanceListTableSkeleton";
 import MonthNav from "@/components/admin/MonthNav";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   getExtraAllowanceRoleChipClass,
   getExtraAllowanceRoleLabel,
@@ -33,6 +34,7 @@ import type { StaffOption } from "@/dtos/staff.dto";
 import { resolveCanonicalUserName } from "@/dtos/user-name.dto";
 import {
   createMyStaffExtraAllowance,
+  deleteMyStaffExtraAllowance,
   getMyStaffExtraAllowances,
   getMyStaffDetail,
   updateMyStaffExtraAllowance,
@@ -51,6 +53,7 @@ type SupportedRoleType = Extract<
   | "communication"
   | "technical"
   | "training"
+  | "sale"
   | "accountant"
   | "accountant_income"
   | "accountant_expense"
@@ -82,6 +85,11 @@ const ROLE_THEMES: Record<SupportedRoleType, RoleTheme> = {
     listGradientClassName: "bg-bg-surface",
     listGlowTopClassName: "bg-primary/12",
     listGlowBottomClassName: "bg-success/10",
+  },
+  sale: {
+    listGradientClassName: "bg-bg-surface",
+    listGlowTopClassName: "bg-success/12",
+    listGlowBottomClassName: "bg-warning/10",
   },
   accountant: {
     listGradientClassName: "bg-bg-surface",
@@ -142,6 +150,23 @@ function resolveNote(note: string | null | undefined) {
   return note?.trim() || "Chưa có ghi chú.";
 }
 
+function resolveStudentName(item: ExtraAllowanceListItem) {
+  return item.student?.fullName?.trim() || "Học sinh đã xoá";
+}
+
+const SELF_MANAGED_ROLE_TYPES: readonly SelfManagedExtraAllowanceRoleType[] = [
+  "communication",
+  "technical",
+  "training",
+  "sale",
+];
+
+function isSelfManagedRoleType(
+  roleType: SupportedRoleType,
+): roleType is SelfManagedExtraAllowanceRoleType {
+  return (SELF_MANAGED_ROLE_TYPES as readonly string[]).includes(roleType);
+}
+
 function SummaryCard({
   label,
   value,
@@ -196,16 +221,10 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
   const theme = ROLE_THEMES[roleType];
   const roleLabel = getExtraAllowanceRoleLabel(roleType);
   const canSelfCreateAllowance = Boolean(allowCreate);
-  const canSelfEditAllowance =
-    roleType === "communication" ||
-    roleType === "technical" ||
-    roleType === "training";
   const selfManagedRoleType: SelfManagedExtraAllowanceRoleType | null =
-    roleType === "communication" ||
-    roleType === "technical" ||
-    roleType === "training"
-      ? roleType
-      : null;
+    isSelfManagedRoleType(roleType) ? roleType : null;
+  const canSelfEditAllowance = selfManagedRoleType !== null;
+  const showStudentColumn = roleType === "sale";
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [createFormKey, setCreateFormKey] = useState(0);
@@ -213,6 +232,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
   const [editFormKey, setEditFormKey] = useState(0);
   const [editingAllowance, setEditingAllowance] =
     useState<ExtraAllowanceListItem | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [assistantDetailTab, setAssistantDetailTab] = useState<
     "allowance" | "commission"
   >("allowance");
@@ -257,6 +277,8 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
         status: editingAllowance.status ?? "pending",
         note: editingAllowance.note ?? "",
         roleType,
+        studentId: editingAllowance.studentId ?? null,
+        student: editingAllowance.student ?? null,
         staff: {
           id: lockedStaffOption.id,
           fullName: lockedStaffOption.fullName,
@@ -303,6 +325,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
         month: payload.month,
         amount: payload.amount,
         note: payload.note,
+        studentId: payload.studentId,
       });
     },
     onSuccess: async () => {
@@ -332,6 +355,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
         month: payload.form.month,
         amount: payload.form.amount,
         note: payload.form.note,
+        studentId: payload.form.studentId,
       });
     },
     onSuccess: async () => {
@@ -344,6 +368,20 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
       toast.error(
         getErrorMessage(err, "Không cập nhật được trợ cấp. Vui lòng thử lại."),
       );
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteMyStaffExtraAllowance(id),
+    onSuccess: async () => {
+      toast.success("Đã xoá khoản trợ cấp.");
+      setDeleteConfirmOpen(false);
+      setEditOpen(false);
+      setEditingAllowance(null);
+      await refreshSelfAllowanceData();
+    },
+    onError: (err) => {
+      toast.error(getErrorMessage(err, "Không xoá được trợ cấp. Vui lòng thử lại."));
     },
   });
 
@@ -392,21 +430,24 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
       : `Đang xem ${selectedMonthLabel} · lịch sử trợ cấp ${roleLabel.toLowerCase()} của chính bạn.`;
 
   const scopeChipLabel = canSelfCreateAllowance
-    ? "Được thêm và chỉnh sửa"
+    ? "Được thêm, sửa, xoá khi chưa thanh toán"
     : canSelfEditAllowance
-      ? "Được chỉnh sửa, không được xóa"
+      ? "Được sửa, xoá khi chưa thanh toán"
       : "Không cho phép thêm hoặc đổi trạng thái";
-  const scopeDescription = canSelfCreateAllowance
-    ? "Bạn có thể khai báo hoặc điều chỉnh khoản trợ cấp của chính mình. Trạng thái thanh toán vẫn do kế toán xác nhận riêng, và thao tác xóa tiếp tục bị khóa."
-    : canSelfEditAllowance
-      ? "Bạn có thể chỉnh sửa ghi nhận trợ cấp của chính mình, nhưng không được xóa hoặc đổi trạng thái thanh toán."
-      : "Trang này chỉ hiển thị lịch sử trợ cấp theo đúng role của chính bạn.";
+  const scopeDescription = canSelfEditAllowance
+    ? `Bạn ${canSelfCreateAllowance ? "khai báo, " : ""}sửa hoặc xoá được khoản trợ cấp của chính mình khi khoản đó chưa thanh toán. Khoản đã thanh toán bị khoá; trạng thái thanh toán do kế toán xác nhận.${
+        roleType === "sale" ? " Mỗi khoản phải chọn đúng một học sinh và có ghi chú." : ""
+      }`
+    : "Trang này chỉ hiển thị lịch sử trợ cấp theo đúng role của chính bạn.";
+  const canEditAllowanceRow = (allowance: ExtraAllowanceListItem) =>
+    canManageOwnAllowances && allowance.status !== "paid";
 
   const openEditAllowance = (allowance: ExtraAllowanceListItem) => {
     if (
-      !canManageOwnAllowances ||
+      !canEditAllowanceRow(allowance) ||
       updateMutation.isPending ||
-      createMutation.isPending
+      createMutation.isPending ||
+      deleteMutation.isPending
     ) {
       return;
     }
@@ -417,7 +458,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
   };
 
   const closeEditPopup = () => {
-    if (updateMutation.isPending) {
+    if (updateMutation.isPending || deleteMutation.isPending) {
       return;
     }
 
@@ -582,7 +623,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                   </span>
                   {canManageOwnAllowances ? (
                     <span className="inline-flex rounded-full border border-error/20 bg-error/8 px-2.5 py-1 text-xs font-semibold text-error">
-                      Chạm vào khoản để chỉnh sửa
+                      Chạm vào khoản chưa thanh toán để sửa hoặc xoá
                     </span>
                   ) : null}
                 </div>
@@ -666,7 +707,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                 <>
                   <div className="mt-5 space-y-3 lg:hidden">
                     {allowances.map((allowance) => {
-                      const isInteractive = canManageOwnAllowances;
+                      const isInteractive = canEditAllowanceRow(allowance);
 
                       return (
                         <article
@@ -713,6 +754,10 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                                 <span className="inline-flex rounded-full border border-border-default bg-bg-secondary px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
                                   Chỉnh sửa
                                 </span>
+                              ) : canManageOwnAllowances ? (
+                                <span className="inline-flex rounded-full border border-border-default bg-bg-secondary px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
+                                  Đã khoá
+                                </span>
                               ) : null}
                               <StatusPill status={allowance.status} />
                             </div>
@@ -721,6 +766,13 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                           <p className="mt-3 text-2xl font-semibold tabular-nums text-text-primary">
                             {formatCurrency(allowance.amount)}
                           </p>
+                          {showStudentColumn ? (
+                            <p
+                              className={`mt-2 text-sm font-medium ${allowance.student ? "text-text-primary" : "italic text-text-muted"}`}
+                            >
+                              Học sinh: {resolveStudentName(allowance)}
+                            </p>
+                          ) : null}
                           <p className="mt-3 break-words text-sm leading-6 text-text-secondary">
                             {resolveNote(allowance.note)}
                           </p>
@@ -743,7 +795,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                         <thead className="bg-bg-secondary">
                           <tr className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                             <th className="px-3 py-2.5" scope="col">
-                              Nhân sự
+                              {showStudentColumn ? "Học sinh" : "Nhân sự"}
                             </th>
                             <th className="px-3 py-2.5" scope="col">
                               Tháng
@@ -764,7 +816,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                         </thead>
                         <tbody>
                           {allowances.map((allowance) => {
-                            const isInteractive = canManageOwnAllowances;
+                            const isInteractive = canEditAllowanceRow(allowance);
 
                             return (
                               <tr
@@ -792,9 +844,17 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
                                   }`}
                               >
                                 <td className="px-3 py-2.5 align-top">
-                                  <p className="text-sm font-semibold text-text-primary">
-                                    {resolveStaffName(allowance)}
-                                  </p>
+                                  {showStudentColumn ? (
+                                    <p
+                                      className={`text-sm font-semibold ${allowance.student ? "text-text-primary" : "italic text-text-muted"}`}
+                                    >
+                                      {resolveStudentName(allowance)}
+                                    </p>
+                                  ) : (
+                                    <p className="text-sm font-semibold text-text-primary">
+                                      {resolveStaffName(allowance)}
+                                    </p>
+                                  )}
                                 </td>
                                 <td className="px-3 py-2.5 align-top text-sm text-text-secondary">
                                   {formatMonthKeyLabel(allowance.month)}
@@ -835,6 +895,7 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
               initialData={createPopupInitialData}
               lockedContext={lockedRoleContext}
               lockStatusToPending
+              studentOptionsSource="self"
               isSubmitting={createMutation.isPending}
               onSubmit={async (payload) => {
                 await createMutation.mutateAsync(payload);
@@ -854,7 +915,10 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
               initialData={editPopupInitialData}
               lockedContext={lockedRoleContext}
               lockedStatus={editingAllowance.status ?? "pending"}
+              studentOptionsSource="self"
               isSubmitting={updateMutation.isPending}
+              onDelete={() => setDeleteConfirmOpen(true)}
+              isDeleting={deleteMutation.isPending}
               onSubmit={async (payload) => {
                 await updateMutation.mutateAsync({
                   id: editingAllowance.id,
@@ -863,6 +927,25 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
               }}
             />
           ) : null}
+
+          <ConfirmDialog
+            open={deleteConfirmOpen && Boolean(editingAllowance)}
+            onOpenChange={(nextOpen) => {
+              if (!deleteMutation.isPending) setDeleteConfirmOpen(nextOpen);
+            }}
+            title="Xoá khoản trợ cấp?"
+            description={
+              editingAllowance
+                ? `Khoản ${formatCurrency(editingAllowance.amount)} tháng ${formatMonthKeyLabel(editingAllowance.month)} sẽ bị xoá vĩnh viễn.`
+                : undefined
+            }
+            confirmLabel="Xoá"
+            variant="destructive"
+            confirmPending={deleteMutation.isPending}
+            onConfirm={() => {
+              if (editingAllowance) deleteMutation.mutate(editingAllowance.id);
+            }}
+          />
         </>
       ) : null}
     </div>

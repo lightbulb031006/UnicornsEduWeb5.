@@ -13,7 +13,49 @@ export type LessonOutputPricingItems = {
   includesTest: boolean;
   includesSolution: boolean;
   includesLectureVideo: boolean;
+  includesTheoryLecture: boolean;
 };
+
+/** Bài giảng lý thuyết: giá theo `level` (0–5), không theo bậc. Khớp `apps/api`. */
+export const LESSON_OUTPUT_THEORY_LECTURE_PRICES: Record<number, number> = {
+  0: 170000,
+  1: 180000,
+  2: 190000,
+  3: 200000,
+  4: 250000,
+  5: 250000,
+};
+
+export const LESSON_OUTPUT_THEORY_LECTURE_MAX_LINKS = 20;
+
+/** Nhận `"Level 3"` hoặc `"3"`. */
+export function parseLessonOutputLevel(
+  value: string | null | undefined,
+): number | null {
+  const match = /^(?:level\s*)?([0-5])$/i.exec(value?.trim() ?? "");
+  return match ? Number(match[1]) : null;
+}
+
+/** Lỗi nghiệp vụ khi tick Bài giảng lý thuyết (cùng luật backend), hoặc `null`. */
+export function getLessonOutputPricingError(
+  band: LessonOutputDifficultyBand | null | undefined,
+  level: string | null | undefined,
+  items: LessonOutputPricingItems,
+): string | null {
+  if (!items.includesTheoryLecture) {
+    return null;
+  }
+  if (parseLessonOutputLevel(level) == null) {
+    return "Bài giảng lý thuyết tính tiền theo level — vui lòng chọn Level 0–5.";
+  }
+  if (
+    (items.includesTest || items.includesSolution || items.includesLectureVideo) &&
+    !isLessonOutputDifficultyBand(band)
+  ) {
+    return "Vui lòng chọn bậc độ khó cho Sinh test / Lời giải / Bài giảng video.";
+  }
+  return null;
+}
 
 export const LESSON_OUTPUT_DIFFICULTY_META: Record<
   LessonOutputDifficultyBand,
@@ -50,21 +92,31 @@ export function isLessonOutputDifficultyBand(
 export function computeLessonOutputCost(
   band: LessonOutputDifficultyBand | null | undefined,
   items: LessonOutputPricingItems,
+  level?: string | null,
 ): number | null {
-  if (!isLessonOutputDifficultyBand(band)) {
+  const hasBand = isLessonOutputDifficultyBand(band);
+  if (!hasBand && !items.includesTheoryLecture) {
     return null;
   }
 
-  const prices = LESSON_OUTPUT_DIFFICULTY_META[band];
   let total = 0;
-  if (items.includesTest) {
-    total += prices.test;
+  if (hasBand) {
+    const prices = LESSON_OUTPUT_DIFFICULTY_META[band];
+    if (items.includesTest) {
+      total += prices.test;
+    }
+    if (items.includesSolution) {
+      total += prices.solution;
+    }
+    if (items.includesLectureVideo) {
+      total += prices.lecture;
+    }
   }
-  if (items.includesSolution) {
-    total += prices.solution;
-  }
-  if (items.includesLectureVideo) {
-    total += prices.lecture;
+  if (items.includesTheoryLecture) {
+    const parsedLevel = parseLessonOutputLevel(level);
+    if (parsedLevel != null) {
+      total += LESSON_OUTPUT_THEORY_LECTURE_PRICES[parsedLevel];
+    }
   }
   return total;
 }

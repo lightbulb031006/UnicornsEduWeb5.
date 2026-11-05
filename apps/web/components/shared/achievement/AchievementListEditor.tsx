@@ -20,12 +20,17 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AUTH_FULL_PROFILE_QUERY_KEY,
+  PROFILE_FULL_QUERY_KEY,
+} from "@/lib/profile-full-query";
+import {
   Check,
   Download,
   GripVertical,
   ImagePlus,
   Pencil,
   Plus,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
@@ -38,11 +43,16 @@ import type {
 } from "@/dtos/achievement.dto";
 import { ACHIEVEMENT_LEVEL_OPTIONS } from "@/dtos/achievement.dto";
 import * as achievementApi from "@/lib/apis/achievement.api";
+import { useRefreshAuthSession } from "@/hooks/use-refresh-auth-session";
 import ImageLightbox from "@/components/ui/ImageLightbox";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { downloadAvatar, suggestAvatarFilename } from "@/lib/avatar";
 import { getMutationErrorMessage } from "@/lib/mutation-feedback";
+import {
+  HighlightAchievementBadge,
+  HighlightAchievementGuide,
+} from "./HighlightAchievementGuide";
 
 type Props = {
   owner: AchievementOwnerRef;
@@ -222,10 +232,48 @@ function ImageActions({
   );
 }
 
+function HighlightStarButton({
+  item,
+  busy,
+  onHighlight,
+}: {
+  item: AchievementDto;
+  busy: boolean;
+  onHighlight: (id: string) => void;
+}) {
+  const label = item.isHighlight
+    ? "Thành tích nổi bật (đang hiển thị trên website)"
+    : "Đặt làm thành tích nổi bật";
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (!item.isHighlight) onHighlight(item.id);
+      }}
+      disabled={busy}
+      aria-pressed={item.isHighlight}
+      aria-label={label}
+      title={label}
+      className={`${iconBtnClass} ${
+        item.isHighlight
+          ? "border-warning/40 bg-warning/10 text-warning hover:bg-warning/15"
+          : "hover:text-warning"
+      }`}
+    >
+      <Star
+        className={`h-4 w-4 ${item.isHighlight ? "fill-current" : ""}`}
+        aria-hidden
+      />
+    </button>
+  );
+}
+
 function SortableStaffRow({
   item,
   editable,
+  canHighlight,
   busy,
+  onHighlight,
   onSaveTitle,
   onDelete,
   onUpload,
@@ -234,7 +282,10 @@ function SortableStaffRow({
 }: {
   item: AchievementDto;
   editable: boolean;
+  /** Nút sao luôn hiện (không cần bật chế độ chỉnh sửa) với người được sửa thành tích. */
+  canHighlight: boolean;
   busy: boolean;
+  onHighlight: (id: string) => void;
   onSaveTitle: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onUpload: (id: string, file: File) => void;
@@ -250,7 +301,12 @@ function SortableStaffRow({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id, disabled: !editable || busy });
+  } = useSortable({
+    id: item.id,
+    // Thành tích nổi bật ghim cứng ở đầu, không kéo được.
+    disabled: !editable || busy || item.isHighlight,
+  });
+
 
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -271,22 +327,38 @@ function SortableStaffRow({
     <li
       ref={setNodeRef}
       style={style}
-      className="flex flex-col gap-2 rounded-lg border border-border-default bg-bg-surface p-3 sm:flex-row sm:items-start sm:gap-3"
+      className={`flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-start sm:gap-3 ${
+        item.isHighlight
+          ? "border-warning/40 bg-warning/5"
+          : "border-border-default bg-bg-surface"
+      }`}
     >
-      {editable ? (
-        <button
-          type="button"
-          className={`${iconBtnClass} cursor-grab touch-none active:cursor-grabbing`}
-          aria-label="Kéo để sắp xếp"
-          disabled={busy}
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="h-4 w-4" aria-hidden />
-        </button>
+      {editable || canHighlight ? (
+        <div className="flex shrink-0 items-center gap-2 sm:flex-col">
+          {editable && !item.isHighlight ? (
+            <button
+              type="button"
+              className={`${iconBtnClass} cursor-grab touch-none active:cursor-grabbing`}
+              aria-label="Kéo để sắp xếp"
+              disabled={busy}
+              {...attributes}
+              {...listeners}
+            >
+              <GripVertical className="h-4 w-4" aria-hidden />
+            </button>
+          ) : null}
+          {canHighlight ? (
+            <HighlightStarButton
+              item={item}
+              busy={busy}
+              onHighlight={onHighlight}
+            />
+          ) : null}
+        </div>
       ) : null}
 
       <div className="min-w-0 flex-1 space-y-2">
+        {item.isHighlight ? <HighlightAchievementBadge /> : null}
         {editable ? (
           <input
             id={inputId}
@@ -519,6 +591,7 @@ export default function AchievementListEditor({
   const isStudent = owner.kind === "student";
   const headingId = useId();
   const queryClient = useQueryClient();
+  const refreshAuthSession = useRefreshAuthSession();
   const { confirm, dialog } = useConfirmDialog();
   const queryKey = achievementApi.achievementQueryKey(owner);
   const [newTitle, setNewTitle] = useState("");
@@ -541,6 +614,7 @@ export default function AchievementListEditor({
     null,
   );
   const canMutate = editable && isEditing;
+  const canHighlight = editable && owner.kind === "staff" && owner.mode !== "training";
 
   const listQuery = useQuery({
     queryKey,
@@ -550,6 +624,20 @@ export default function AchievementListEditor({
   const items = listQuery.data ?? [];
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey });
+
+  // Gia sư cần >= 1 thành tích + thành tích nổi bật để qua gate hồ sơ: thêm/xoá/
+  // đổi sao của chính mình thì tải lại hồ sơ + session (ghi vào AuthContext) để form
+  // và gate client nhận mới — không thì bấm "Quay lại" bị gate đẩy về `/user-profile`.
+  const refreshSelfProfileGate = () =>
+    owner.kind === "staff" && owner.mode === "self"
+      ? Promise.all([
+          queryClient.invalidateQueries({ queryKey: PROFILE_FULL_QUERY_KEY }),
+          queryClient.invalidateQueries({
+            queryKey: AUTH_FULL_PROFILE_QUERY_KEY,
+          }),
+          refreshAuthSession(),
+        ])
+      : Promise.resolve();
 
   const createMutation = useMutation({
     mutationFn: ({
@@ -572,7 +660,7 @@ export default function AchievementListEditor({
       });
       setDraftStudentFile(null);
       setStudentCreateError(null);
-      await invalidate();
+      await Promise.all([invalidate(), refreshSelfProfileGate()]);
       toast.success("Đã thêm thành tích.");
     },
     onError: (error) => {
@@ -607,7 +695,7 @@ export default function AchievementListEditor({
   const deleteMutation = useMutation({
     mutationFn: (id: string) => achievementApi.deleteAchievement(owner, id),
     onSuccess: async () => {
-      await invalidate();
+      await Promise.all([invalidate(), refreshSelfProfileGate()]);
       toast.success("Đã xoá thành tích.");
     },
     onError: (error) =>
@@ -629,6 +717,19 @@ export default function AchievementListEditor({
           "Không thể sắp xếp lại. Danh sách đã được tải lại.",
         ),
       );
+    },
+  });
+
+  const highlightMutation = useMutation({
+    mutationFn: (id: string) => achievementApi.setHighlightAchievement(owner, id),
+    onSuccess: async (data) => {
+      queryClient.setQueryData(queryKey, data);
+      await refreshSelfProfileGate();
+      toast.success("Đã đổi thành tích nổi bật.");
+    },
+    onError: async () => {
+      await invalidate();
+      toast.error("Không thể đổi thành tích nổi bật.");
     },
   });
 
@@ -666,6 +767,7 @@ export default function AchievementListEditor({
     updateMutation.isPending ||
     deleteMutation.isPending ||
     reorderMutation.isPending ||
+    highlightMutation.isPending ||
     uploadMutation.isPending ||
     clearImageMutation.isPending;
 
@@ -683,7 +785,7 @@ export default function AchievementListEditor({
 
     const oldIndex = items.findIndex((row) => row.id === active.id);
     const newIndex = items.findIndex((row) => row.id === over.id);
-    if (oldIndex < 0 || newIndex < 0) return;
+    if (oldIndex < 0 || newIndex < 0 || items[newIndex]?.isHighlight) return;
 
     const next = arrayMove(items, oldIndex, newIndex);
     queryClient.setQueryData(queryKey, next);
@@ -772,6 +874,12 @@ export default function AchievementListEditor({
         <p className="text-sm text-text-muted">Chưa có thành tích nào.</p>
       ) : null}
 
+      {canHighlight && items.length > 0 ? (
+        <HighlightAchievementGuide
+          hasHighlight={items.some((item) => item.isHighlight)}
+        />
+      ) : null}
+
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -803,6 +911,8 @@ export default function AchievementListEditor({
                   item={item}
                   editable={canMutate}
                   busy={busy}
+                  canHighlight={canHighlight}
+                  onHighlight={(id) => highlightMutation.mutate(id)}
                   onSaveTitle={(id, title) =>
                     updateMutation.mutate({ id, payload: { title } })
                   }

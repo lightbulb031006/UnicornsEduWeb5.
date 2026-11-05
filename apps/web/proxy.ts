@@ -8,6 +8,7 @@ import { getUser } from "./lib/auth-server";
 import { getServerApiOrigin } from "./lib/api-base-url";
 import { shouldVerifySessionInProxy } from "./lib/proxy-auth-guard";
 import { resolveStaffShellRouteAccess } from "./lib/staff-shell-access";
+import { isMissingRequiredStaffAchievement } from "./lib/staff-achievement-requirement";
 import { Role } from "./dtos/Auth.dto";
 
 const API_URL = getServerApiOrigin();
@@ -35,6 +36,8 @@ type FullProfileGuardPayload = {
     highSchool?: string | null;
     bankAccount?: string | null;
     bankQrLink?: string | null;
+    roles?: string[] | null;
+    achievementCount?: number | null;
   } | null;
 };
 
@@ -71,7 +74,8 @@ function isStaffProfileComplete(profile: FullProfileGuardPayload): boolean {
     hasText(staffInfo.university) &&
     hasText(staffInfo.highSchool) &&
     hasText(staffInfo.bankAccount) &&
-    hasText(staffInfo.bankQrLink)
+    hasText(staffInfo.bankQrLink) &&
+    !isMissingRequiredStaffAchievement(staffInfo)
   );
 }
 

@@ -16,6 +16,7 @@ import {
   type AdminDashboardFinancialDetailDto,
   type AdminDashboardFinancialExportDto,
   type AdminDashboardMonthlyStatisticsDto,
+  type AdminMonthlyReportDto,
   type AdminDashboardTopupHistoryItemDto,
   type AdminDashboardActiveClassBreakdownDto,
   type AdminDashboardStudentBalanceItemDto,
@@ -25,6 +26,7 @@ import {
   GetAdminDashboardActionAlertsQueryDto,
   GetAdminDashboardFinancialDetailQueryDto,
   GetAdminDashboardFinancialExportQueryDto,
+  GetAdminMonthlyReportQueryDto,
   GetAdminMonthlyStatisticsQueryDto,
   GetAdminStudentBalanceDetailsQueryDto,
   GetAdminStudentChurnDetailsQueryDto,
@@ -46,6 +48,7 @@ function toSafeFilenameSlug(label: string): string {
 import { DashboardService } from './dashboard.service';
 import { FinancialExportExcelService } from './financial-export-excel.service';
 import { FinancialExportPdfService } from './financial-export-pdf.service';
+import { MonthlyReportService } from './monthly-report.service';
 import { MonthlyStatisticsExportPdfService } from './monthly-statistics-export-pdf.service';
 
 @Controller('dashboard')
@@ -60,6 +63,7 @@ export class DashboardController {
     private readonly financialExportPdfService: FinancialExportPdfService,
     private readonly financialExportExcelService: FinancialExportExcelService,
     private readonly monthlyStatisticsExportPdfService: MonthlyStatisticsExportPdfService,
+    private readonly monthlyReportService: MonthlyReportService,
   ) {}
 
   @Get()
@@ -259,7 +263,7 @@ export class DashboardController {
     required: true,
     type: String,
     description:
-      'Churn type: new, dropped, or active (snapshot, ignores month/dateFrom/dateTo).',
+      'Churn type: new, dropped (Học sinh cũ nghỉ), trial_dropped (Học sinh thử nghỉ), or active (snapshot, ignores month/dateFrom/dateTo).',
     example: 'new',
   })
   @ApiQuery({
@@ -363,6 +367,36 @@ export class DashboardController {
     @Query() query: GetAdminMonthlyStatisticsQueryDto,
   ): Promise<AdminDashboardMonthlyStatisticsDto> {
     return this.dashboardService.getAdminMonthlyStatistics(query);
+  }
+
+  @Get('monthly-report')
+  // Báo cáo tháng: admin + trợ lí xem; CSKH và kế toán thu không xem.
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Get the monthly operations report (Báo cáo tháng)',
+    description:
+      'Return KPI, new-student matrix (customer source × course of first class, with early drops and total top-up from first top-up to month end), dropped students by drop-out reason group, per customer-care staff table and appendix lists for one month. New student = first qualifying wallet top-up in the month. Computed live, not snapshotted. Admin and assistant only.',
+  })
+  @ApiQuery({
+    name: 'month',
+    required: true,
+    type: String,
+    description: 'Report month in 01-12 format.',
+    example: '09',
+  })
+  @ApiQuery({
+    name: 'year',
+    required: true,
+    type: String,
+    description: 'Report year in YYYY format.',
+    example: '2026',
+  })
+  @ApiResponse({ status: 200, description: 'Monthly report payload.' })
+  @ApiResponse({ status: 403, description: 'Not admin or assistant.' })
+  async getAdminMonthlyReport(
+    @Query() query: GetAdminMonthlyReportQueryDto,
+  ): Promise<AdminMonthlyReportDto> {
+    return this.monthlyReportService.getAdminMonthlyReport(query);
   }
 
   @Get('monthly-statistics/pdf')

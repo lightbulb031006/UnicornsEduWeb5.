@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  Fragment,
+  useCallback,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -134,7 +140,9 @@ export function SortableOrderList<T extends { id: string }>({
         strategy={verticalListSortingStrategy}
       >
         <div className="flex flex-col gap-2">
-          {items.map((item) => children(item))}
+          {items.map((item) => (
+            <Fragment key={item.id}>{children(item)}</Fragment>
+          ))}
         </div>
       </SortableContext>
     </DndContext>

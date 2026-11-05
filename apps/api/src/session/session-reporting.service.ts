@@ -3,6 +3,10 @@ import { Prisma } from '../../generated/client';
 import { UserRole } from '../../generated/enums';
 import { SessionUnpaidSummaryItem } from '../dtos/session.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  previewNextSessionOrdinal,
+  withSessionOrdinals,
+} from './session-ordinal.util';
 import { StaffOperationsAccessService } from '../staff-ops/staff-operations-access.service';
 import { getUserFullNameFromParts } from '../common/user-name.util';
 import { SQL_TEACHER_SESSION_CAPPED_GROSS } from '../common/teacher-session-allowance-sql.util';
@@ -115,7 +119,10 @@ export class SessionReportingService {
       },
     });
 
-    return sessions.map((session) => this.withDerivedTeacherFullName(session));
+    return withSessionOrdinals(
+      this.prisma,
+      sessions.map((session) => this.withDerivedTeacherFullName(session)),
+    );
   }
 
   async getSessionsByClassIdForStaff(
@@ -161,8 +168,9 @@ export class SessionReportingService {
       },
     });
 
-    const mappedSessions = sessions.map((session) =>
-      this.withDerivedTeacherFullName(session),
+    const mappedSessions = await withSessionOrdinals(
+      this.prisma,
+      sessions.map((session) => this.withDerivedTeacherFullName(session)),
     );
 
     if (accessMode === 'training_manager') {
@@ -173,6 +181,48 @@ export class SessionReportingService {
       mappedSessions,
       resolveAccountantFinanceView(roleType, actor.roles),
     );
+  }
+
+  /** Số thứ tự buổi mới nếu tạo tại (date, startTime) — dùng cho bản copy Nhận xét lúc tạo buổi. */
+  async getNextSessionOrdinal(
+    classId: string,
+    date: string,
+    startTime?: string,
+  ): Promise<{ ordinal: number }> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date ?? ''))) {
+      throw new BadRequestException('date không hợp lệ.');
+    }
+    const normalizedStartTime = startTime?.trim() || null;
+    if (
+      normalizedStartTime &&
+      !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(normalizedStartTime)
+    ) {
+      throw new BadRequestException('startTime không hợp lệ.');
+    }
+
+    return {
+      ordinal: await previewNextSessionOrdinal(
+        this.prisma,
+        classId,
+        date,
+        normalizedStartTime,
+      ),
+    };
+  }
+
+  async getNextSessionOrdinalForStaff(
+    userId: string,
+    roleType: UserRole,
+    classId: string,
+    date: string,
+    startTime?: string,
+  ) {
+    const actor = await this.staffOperationsAccess.resolveClassViewerActor(
+      userId,
+      roleType,
+    );
+    await this.staffOperationsAccess.resolveClassViewAccessMode(actor, classId);
+    return this.getNextSessionOrdinal(classId, date, startTime);
   }
 
   async getSessionsByTeacherId(teacherId: string, month: string, year: string) {
@@ -206,7 +256,10 @@ export class SessionReportingService {
       },
     });
 
-    return sessions.map((session) => this.withDerivedTeacherFullName(session));
+    return withSessionOrdinals(
+      this.prisma,
+      sessions.map((session) => this.withDerivedTeacherFullName(session)),
+    );
   }
 
   async getUnpaidSessionsByTeacherId(

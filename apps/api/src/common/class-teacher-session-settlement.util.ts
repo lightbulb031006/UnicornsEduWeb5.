@@ -5,47 +5,25 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export type ClassTeacherSessionSettlement = {
   sessionCount: number;
   unpaidSessionCount: number;
-  canEndClass: boolean;
-  blockReason: string | null;
 };
 
+/**
+ * Kết thúc lớp không còn phụ thuộc trợ cấp gia sư: buổi chưa thanh toán vẫn
+ * thanh toán sau được. `unpaidSessionCount` chỉ để FE cảnh báo khi xác nhận.
+ */
 export type ClassEndEligibility = ClassTeacherSessionSettlement & {
   canEnd: boolean;
 };
 
 type SessionSettlementDb = Pick<PrismaService, '$queryRaw'>;
 
-export function resolveClassTeacherSessionSettlementCounts(
-  sessionCount: number,
-  unpaidSessionCount: number,
-): ClassTeacherSessionSettlement {
-  const canEndClass = unpaidSessionCount === 0;
-
-  return {
-    sessionCount,
-    unpaidSessionCount,
-    canEndClass,
-    blockReason: canEndClass
-      ? null
-      : `Còn ${unpaidSessionCount} buổi chưa thanh toán trợ cấp gia sư.`,
-  };
-}
-
 export function buildClassEndEligibility(
   classStatus: ClassStatus,
   settlement: ClassTeacherSessionSettlement,
 ): ClassEndEligibility {
-  if (classStatus !== ClassStatus.running) {
-    return {
-      ...settlement,
-      canEnd: false,
-      blockReason: null,
-    };
-  }
-
   return {
     ...settlement,
-    canEnd: settlement.canEndClass,
+    canEnd: classStatus === ClassStatus.running,
   };
 }
 
@@ -65,8 +43,8 @@ export async function getClassTeacherSessionSettlement(
     WHERE class_id = ${classId}
   `);
 
-  return resolveClassTeacherSessionSettlementCounts(
-    row?.session_count ?? 0,
-    row?.unpaid_session_count ?? 0,
-  );
+  return {
+    sessionCount: row?.session_count ?? 0,
+    unpaidSessionCount: row?.unpaid_session_count ?? 0,
+  };
 }

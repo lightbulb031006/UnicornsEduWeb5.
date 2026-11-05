@@ -1,4 +1,4 @@
-# Database Schema – Unicorns Edu (apps/api)
+# Database Schema – UniEdu (apps/api)
 
 > Đồng bộ Toán 02/10/2026 bổ sung 53 migration từ upstream, chưa áp dụng vào database. Hai migration sửa/xoá học sinh import thành tích có ID riêng Tin phải được kiểm tra trước rollout; xem [hướng dẫn đồng bộ Toán](ops/upstream-sync-math-2026-10-02.md). Enum nguồn khách giữ mã gốc, nhãn UI/API dùng thương hiệu Toán.
 
@@ -47,7 +47,10 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - `cf_problem_tutorials` (tutorial theo bài Codeforces)
 - `modules` (chuyên đề — nhóm tiết học bên trong khoá học)
 - `lessons` (tiết học — lý thuyết hoặc thực hành; thuộc chuyên đề của khoá — tiết riêng lớp cũ đã lưu trữ)
-- `class_modules` (chuyên đề lớp đã thêm — nguồn đồng bộ tiết lý thuyết vào lớp)
+- `class_modules` (thứ tự nhóm chuyên đề của lớp — dòng tạo khi thêm chuyên đề hoặc tiết đầu tiên của chuyên đề)
+- `shared_materials` (phần đầu Bộ câu hỏi — hồ sơ JP; câu trong bộ theo `questions.set_position`)
+- `audio_assets` (Audio tư liệu — hồ sơ JP; file trong bucket private `question-audio`)
+- `attempt_audio_plays` (số lần đã nghe từng audio trong một lượt làm — Giới hạn nghe)
 - `lesson_quizzes` (liên kết câu hỏi từ ngân hàng vào bài tập ôn nhẹ của tiết lý thuyết)
 - `lesson_quiz_answers` (trả lời bài tập ôn nhẹ — không sinh Attempt, không tính điểm)
 - `class_theory_lesson_views` (lượt mở trang tiết lý thuyết của học sinh trong phạm vi lớp)
@@ -109,6 +112,7 @@ Tài liệu này được tổng hợp trực tiếp từ Prisma schema tại `a
 - **CustomerCareService**: liên kết `student_info` và `staff_info`.
 - **StaffMonthlyStat → StaffInfo**: N-1.
 - **ExtraAllowance → StaffInfo**: N-1.
+- **ExtraAllowance → StudentInfo**: N-1 tuỳ chọn (`student_id`, chỉ dòng `sale`; `SetNull`).
 - **ClassSurvey → Class / StaffInfo**: optional FK, `onDelete: SetNull`.
 - **ClassSurvey → Survey**: optional FK `survey_id` (nullable cho data cũ trước khi có Bài khảo sát).
 - **ClassSurveyStudentAssessment → ClassSurvey / StudentInfo**: required FK, `onDelete: Cascade`; unique `(class_survey_id, student_id)`.
@@ -162,10 +166,12 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - `device_info` (`JSONB`, nullable): thông tin trình duyệt/device (user-agent, accept-language)
   - `ip_address` (`TEXT`, nullable): IP address khi đăng nhập
   - `last_active_at` (`TIMESTAMPTZ(6)`): lần hoạt động cuối cùng, dùng để auto-expire sau 60 ngày; backend chỉ ghi lại khi cách lần trước ≥ 1 phút
+  - `refresh_expires_at` (`TIMESTAMPTZ(6)`, nullable): hạn của refresh JWT đang gắn với thiết bị (now + 1 ngày, hoặc + 30 ngày khi `rememberMe`), ghi mỗi lần cấp/rotate token. Quá hạn → thiết bị không còn "sống" (không tính cho `DEVICE_ACTIVE`, JWT `deviceId` bị 401). `NULL` (row legacy) chỉ xét idle 60 ngày. Thêm bởi migration `20261026090000_user_device_refresh_expires_at` (backfill: học sinh `last_active_at + 1 ngày` để gỡ chặn oan ngay sau deploy; staff/admin `last_active_at + 30 ngày` để không cắt phiên «Ghi nhớ»).
   - `created_at` (`TIMESTAMPTZ(6)`)
 - Luật: mỗi học sinh chỉ có đúng 1 device active tại một thời điểm. Staff/admin được nhiều device (thu hồi từng máy). Xóa row = thu hồi phiên tức thời trên request kế tiếp.
-- Auto-expire: device bị xóa sau 60 ngày không hoạt động (lazy cleanup khi tạo login request mới).
-- Index: `user_id`, `token_hash`, `last_active_at`
+- Thiết bị **sống** = `last_active_at` trong 60 ngày **và** (`refresh_expires_at IS NULL` hoặc `> now()`) — `UserDeviceService.isLive` / `liveDeviceWhere`.
+- Auto-expire: device bị xóa khi idle 60 ngày hoặc refresh đã hết hạn (lazy cleanup lúc học sinh đăng nhập, `DELETE /device/cleanup-expired`).
+- Index: `user_id`, `token_hash`, `last_active_at`, `refresh_expires_at`
 
 ### 4.1.2 `login_requests` (Magic link verification)
 
@@ -184,7 +190,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 ### 4.2 `staff_info`
 
 - **PK format:** `UNISTAFF-[0-9a-f]{10}` — ví dụ `UNISTAFF-1a2b3c4d5e`. Đây là **mã định danh hệ thống** ngắn cho nhân sự; migration `20260523110000_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
-- Thông tin nhân sự: hồ sơ cá nhân, CCCD, ngân hàng, `roles` (`StaffRole[]` dạng Postgres enum array: `admin`, `teacher`, `lesson_plan`, `lesson_plan_head`, `accountant`, `accountant_income`, `accountant_expense`, `communication`, `technical`, `customer_care`, `training`, `assistant`), `status`
+- Thông tin nhân sự: hồ sơ cá nhân, CCCD, ngân hàng, `roles` (`StaffRole[]` dạng Postgres enum array: `admin`, `teacher`, `lesson_plan`, `lesson_plan_head`, `accountant`, `accountant_income`, `accountant_expense`, `communication`, `technical`, `customer_care`, `training`, `assistant`, `sale`), `status`
 - `status` là trạng thái vận hành hồ sơ nhân sự: `active` = **Hoạt động**, `inactive` = **Ngừng hoạt động**. Chỉ staff `active` được resolve staff/admin-through-staff workspace và được chọn cho phân công mới (gia sư lớp, trợ lí quản lí CSKH, giáo án, trợ cấp thêm). Staff `inactive` vẫn giữ trong lịch sử, payroll và các bản ghi đã phát sinh.
 - Khi hồ sơ nhân sự chuyển sang `inactive`, backend dừng các assignment vận hành đang mở: phân công gia sư-lớp hiện tại chuyển sang `inactive`, slot lịch cố định và buổi bù tương lai của nhân sự đó được dọn khỏi vận hành, liên kết CSKH đang chăm sóc bị gỡ. `users.status` không đổi.
 - Index: unique B-tree `staff_info_user_id_key` trên `user_id` kèm **`INCLUDE ("id", "roles")`** (covering) để tối ưu các đọc theo `user_id` (auth/session, roles guard). Trong Prisma: `@@unique([userId], map: "staff_info_user_id_key")` trên model `StaffInfo` (phần `INCLUDE` chỉ có trong migration SQL, Prisma chưa có DSL tương ứng).
@@ -215,12 +221,13 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - `image_path` (`TEXT`, nullable): path ảnh gốc (private) trong bucket `achievements` dạng `staff/{staffId}/{achievementId}.{ext}`
   - `image_watermarked_path` (`TEXT`, nullable): twin watermarked public trong bucket `achievements-public`, path ổn định `staff/{staffId}/{achievementId}.jpg` (JPEG). Landing chỉ expose twin này.
   - `sort_order` (`INT`, mặc định 0): thứ tự kéo-thả; API reorder yêu cầu **full permutation** của mọi id hiện có
+  - `is_highlight` (`BOOLEAN`, mặc định `false`): **thành tích nổi bật** (CONTEXT.md) — dòng nhân sự tích sao, hiện trên landing. Tối đa 1 dòng/nhân sự; list luôn sắp `is_highlight DESC, sort_order, created_at` nên dòng có sao đứng đầu, reorder cũng ghim nó ở `sort_order = 0`. Tạo dòng đầu tiên → tự có sao; xoá dòng có sao mà chỉ còn 1 dòng → dòng còn lại tự có sao; còn ≥ 2 dòng thì không tự chọn (gia sư bị gate chặn tới khi chọn lại).
   - `created_at`, `updated_at`
-- Index: `(staff_id, sort_order)`
-- API: `GET/PATCH/DELETE /staff/:staffId/achievements`, `PUT .../reorder`, `POST .../:id/image` (thay ảnh). `POST /staff/:staffId/achievements` nhận multipart `title` + `image` (thiếu ảnh thì 400, và không giữ dòng nếu upload lỗi). `DELETE .../:id/image` của nhân sự trả 400. Self-service cùng rule tại `/users/me/achievements/*`. Không ghi `action_history`.
+- Index: `(staff_id, sort_order)`; partial unique `staff_achievements_one_highlight_per_staff` trên `(staff_id) WHERE is_highlight` (migration `20261104090000_staff_highlight_achievement`, đồng thời backfill sao cho nhân sự có đúng 1 thành tích).
+- API: `GET/PATCH/DELETE /staff/:staffId/achievements`, `PUT .../reorder`, `PUT .../:id/highlight` (đặt sao, bỏ sao cũ trong cùng transaction), `POST .../:id/image` (thay ảnh). `POST /staff/:staffId/achievements` nhận multipart `title` + `image` (thiếu ảnh thì 400, và không giữ dòng nếu upload lỗi). `DELETE .../:id/image` của nhân sự trả 400. Self-service cùng rule tại `/users/me/achievements/*`. Không ghi `action_history`.
 - Backfill từ `staff_info.specialization`: tách bullet Markdown (`-` / `*` / `•`, kể cả `-Giải` không space; chèn newline trước pattern `.- ` bị dính), bỏ header ngắn kết thúc bằng `:`; nếu không có bullet thì mỗi dòng non-empty là 1 row; cuối cùng fallback cả khối text. Không backfill `personal_achievement_link`.
 - Watermark twins: script `apps/api/scripts/backfill-watermarked-images.ts`; ADR landing watermark.
-- ADR: `docs/adr/2026-08-11-achievement-separate-owner-tables.md`, `...-single-image-per-row.md`, `...-gate-and-legacy-columns.md`, `...-landing-watermarked-public-images.md`, `docs/adr/2026-10-01-staff-achievement-proof-required.md`
+- ADR: `docs/adr/2026-08-11-achievement-separate-owner-tables.md`, `...-single-image-per-row.md`, `...-gate-and-legacy-columns.md`, `...-landing-watermarked-public-images.md`, `docs/adr/2026-10-01-staff-achievement-proof-required.md`, `docs/adr/2026-11-04-staff-highlight-achievement.md`
 
 ### 4.3 `student_info`
 
@@ -232,8 +239,9 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 - `drop_out_reason` (`VARCHAR(500)`, nullable): **lý do nghỉ học**. Từ 10/2026 bắt buộc khi chuyển `status` `active` → `inactive` (qua `PATCH /student/:id/status` field `reason` hoặc `PATCH /student/:id` field `drop_out_reason`), backend trim và từ chối khi trống. **Không xoá** khi học sinh học lại, lần nghỉ sau ghi đè. Học sinh đã nghỉ có thể sửa lý do bằng `drop_out_reason` (không nhận chuỗi trống, không nhận cho học sinh đang học). Tạo hồ sơ mới với `status = inactive` chưa bắt lý do. Migration `20261003020000_add_student_drop_out_reason`; hồ sơ nghỉ trước đó để `NULL`.
 - `parent_email` là email nhận biên nhận nạp ví SePay của phụ huynh; không fallback sang email học sinh.
 - `parent_receipt_email_enabled` (`BOOLEAN`, mặc định `true`): khi `false`, webhook SePay **không** gửi email biên lai nạp ví cho phụ huynh lẫn CSKH (ví vẫn được cộng bình thường).
-- `customer_source` (`StudentCustomerSource`, nullable): **Nguồn khách** trên hồ sơ. Tập đóng `tiktok`, `fanpage_hoc_tin`, `fanpage_luyen_tin`, `referral`, `personal`, `returning_customer` (Khách cũ), `other`. `NULL` là **Chưa gán**, không phải một giá trị enum. Hồ sơ tạo mới phải có giá trị. Migration `20260929220000_backfill_student_customer_source` gán mọi hồ sơ còn `NULL` thành `other` với `customer_source_note = 'Nguồn cũ'`. Migration `20261003010000_add_returning_customer_source` thêm `returning_customer` ngay trước `other`, không đổi dữ liệu nguồn đang có.
-- `customer_source_note` (`VARCHAR(200)`, nullable): chú thích nguồn thực tế, chỉ khi `customer_source = other`. Đổi sang nguồn khác thì cột về `NULL`. Thống kê dashboard đọc nguồn hiện tại, không khóa nguồn tại buổi học.
+- `customer_source` (`StudentCustomerSource`, NOT NULL, default `acquaintance`): **Nguồn khách** trên hồ sơ. Tập đóng 4 giá trị theo thứ tự hiển thị: `tiktok`, `fanpage_hoc_tin`, `fanpage_luyen_tin`, `acquaintance` (**Người quen**). Không còn trạng thái Chưa gán. Migration `20261018090000_customer_source_merge_acquaintance` gộp `referral`, `personal`, `returning_customer`, `other` và `NULL` vào `acquaintance` (ADR `2026-10-18-customer-source-merge-into-acquaintance`). Thống kê dashboard đọc nguồn hiện tại, không khóa nguồn tại buổi học.
+- `legacy_customer_source` (`VARCHAR(32)`, nullable): nguồn trước khi gộp vào Người quen (`referral`/`personal`/`returning_customer`/`other`, hoặc `unassigned` khi trước đó `NULL`). Chỉ lưu DB để tra cứu, không hiện UI, API không đọc/ghi.
+- `legacy_customer_source_note` (`VARCHAR(200)`, nullable): chú thích nguồn «Khác» cũ (đổi tên từ `customer_source_note`). Chỉ lưu DB, không hiện UI.
 - Được tham chiếu bởi: `users`, `student_classes`, `attendance`, `wallet_transactions_history`, `student_wallet_sepay_orders`, `customer_care_service`, `student_exam_schedules`, `student_achievements`, `student_gallery_items`
 
 ### 4.3.0 `student_achievements`
@@ -282,7 +290,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 - **PK format:** `UNICL-[0-9a-f]{10}` — ví dụ `UNICL-1a2b3c4d5e`. Đây là **mã định danh hệ thống** ngắn cho lớp; migration `20260523110000_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
 - Trường nghiệp vụ chính:
   - `course_id` (FK → `courses.id`, `onDelete: Restrict`), `status` (`ClassStatus`). Migration `20260818090000_add_class_category` thay enum cố định `ClassType` (`vip|basic|advance|hardcore`) bằng bảng `courses` để admin tự thêm/sửa/ẩn/xoá khoá học qua CRUD `/courses` (xem mục 4.4.0-cat). Khi tạo lớp không truyền `course_id`, backend fallback về khoá học `isActive=true` có `sort_order` nhỏ nhất (không còn hardcode `code='basic'`).
-  - `status`: `running` = lớp đang vận hành; `ended` = lớp đã kết thúc. `POST /class/:id/end` chỉ cho phép khi mọi `sessions` của lớp có `teacher_payment_status = paid` (case-insensitive); nếu còn `unpaid`/`pending`/`deposit` backend trả `400`. Khi kết thúc lớp, backend xóa lịch cố định hiện tại, chuyển membership học sinh đang học và phân công gia sư đang mở sang `inactive`, đồng thời dọn buổi bù tương lai của lớp. Response `GET /class/:id` trả thêm `endClassEligibility` (`canEnd`, `sessionCount`, `unpaidSessionCount`, `blockReason`) để FE disable nút **Kết thúc lớp** và chặn chọn trạng thái **Đã kết thúc** trong popup thông tin lớp khi chưa đủ điều kiện. `PATCH /class/:id/basic-info` **không** được dùng để chuyển `running → ended` (trả `400`; phải dùng `POST /end`). Lịch sử session, attendance, ví và payroll đã phát sinh vẫn giữ nguyên.
+  - `status`: `running` = lớp đang vận hành; `ended` = lớp đã kết thúc. `POST /class/:id/end` cho phép kết thúc lớp `running` kể cả khi còn `sessions` có `teacher_payment_status` ≠ `paid` (trợ cấp gia sư thanh toán sau); chỉ trả `400` nếu lớp đã `ended`. Khi kết thúc lớp, backend xóa lịch cố định hiện tại, chuyển membership học sinh đang học và phân công gia sư đang mở sang `inactive`, đồng thời dọn buổi bù tương lai của lớp. Response `GET /class/:id` trả thêm `endClassEligibility` (`canEnd` = lớp đang `running`, `sessionCount`, `unpaidSessionCount`) để FE nhắc số buổi chưa thanh toán trợ cấp trong confirm kết thúc lớp (không chặn). `PATCH /class/:id/basic-info` **không** được dùng để chuyển `running → ended` (trả `400`; phải dùng `POST /end`). Lịch sử session, attendance, ví và payroll đã phát sinh vẫn giữ nguyên.
   - `max_students`, `allowance_per_session_per_student`, `max_allowance_per_session`, `scale_amount`
   - **Chế độ tính tiền (`pricing_mode`, enum `ClassPricingMode`, NOT NULL, mặc định `per_session`):** `per_session` = theo buổi (hành vi cũ, backfill mọi lớp hiện có); `per_block` = opt-in đơn giá / 30 phút; `one_time` = **Lớp bán một lần** (học phí cả khoá vào buổi có mặt/nghỉ phép đầu tiên của từng học sinh). Migration `20260909100000_class_pricing_mode`, thêm giá trị `one_time` ở `20261002090000_add_one_time_pricing_mode`. `20261002100000_backfill_one_time_course_tuition` gắn `one_time` cho mọi lớp của khoá `THPTQG` và `PREVOI`, dồn `attendance.tuition_fee` present/excused về buổi sớm nhất, đưa các buổi sau về 0, và không sửa ví hay trợ cấp gia sư. `attendance.payroll_basis_tuition_fee` giữ học phí cũ của mọi dòng present/excused để hoa hồng trợ lí 3% và CSKH không bị tính lại (xem 4.6). Buổi mới: học sinh chưa có dòng present/excused mang học phí > 0 ở buổi khác của lớp thì bị trừ cả gói ở buổi này; tạo/sửa buổi khoá advisory lock theo lớp để không thu trùng. **Từ `20261004000000_one_time_course_setting`, `one_time` đi theo cờ `courses.is_one_time` (xem 4.4.0-cat), không theo tên khoá:** lớp của khoá bán một lần luôn `one_time` (`POST /class` bỏ qua `pricing_mode` client gửi); lớp của khoá thường nhận `per_session`/`per_block`, gửi `one_time` trả `400`. Lớp bán một lần phải có `tuition_package_total > 0` khi tạo/sửa (`400` nếu không). Học phí trừ ở buổi đầu = gói riêng `student_classes.custom_tuition_package_total` (0 coi như không có) nếu có, không thì gói lớp; sửa gói sau khi đã trừ không tính lại. Đổi `course_id` chỉ được sang khoá cùng chế độ (`400` nếu khác). Migration này cũng backfill ví cho THPTQG 02 (`UNICL-c1f789b32e`, chuyển từ khoá Basic sang THPTQG) và PREVOI 02 (`UNICL-dc32916487`), chỉ học sinh `student_classes.status = active` (hai học sinh THPTQG 02 đăng ký chung `UNIST-9b344d2867`, `UNIST-c17f8016fe` được đặt gói riêng 1.440.000 trước khi tính): xoá hẳn mọi giao dịch trừ/hoàn học phí của lớp (link qua `attendance.transaction_id` hoặc note `Đóng học phí lớp <lớp> buổi học …` / `Hoàn trả số dư lớp <lớp> buổi học …`), cộng lại số đã trừ ròng vào `student_info.account_balance`, ghi một giao dịch `extend` bằng gói tại ngày buổi present/excused đầu tiên, buổi đó mang gói + link giao dịch mới, các buổi sau về 0 không link, rồi tính lại `sessions.tuition_fee`. Số dư có thể âm; không có bản ghi đối soát giao dịch đã xoá (ADR `docs/adr/2026-10-04-one-time-course-setting.md`). Đổi chế độ có dính `one_time` không chạy tính lại học phí hàng loạt. Cột `*_per_session` sống vĩnh viễn (contract xoá #138 đã huỷ). `PATCH /class/:id/pricing-mode` đổi giữa `per_session`/`per_block`; trả `400` nếu gửi `one_time` hoặc lớp đang `one_time` (đổi trên khoá). Từ chối bật `per_block` nếu không suy được số block chuẩn (thiếu lịch active, hoặc có khung giờ không phải bội số 30 phút — các khung giờ **không** cần dài bằng nhau, số block chuẩn là GCD). Buổi unpaid được tính lại; buổi paid/deposit/cọc không đổi.
   - **Expand (song song):** `allowance_per_block_per_student`, `max_allowance_per_block`, `student_tuition_per_block` — đơn giá mỗi block 30 phút, backfill `ROUND(giá_cũ / số_block_chuẩn)` từ lịch cố định; `null` khi không suy được số block. Dual-write khi ghi cột per-session, trừ `student_tuition_per_block` khi admin gửi số tay trên `POST/PATCH /class` / `PATCH /class/:id/basic-info` (#141): số dương được giữ nguyên; `null`/omit thì vẫn suy từ `student_tuition_per_session`. Đổi lịch cố định dual-write lại trợ cấp per-block, không ghi đè học phí / 30 phút đã nhập tay. **Học phí học sinh không gói:** chỉ khi lớp `pricing_mode = per_block` thì charge buổi đọc `student_tuition_per_block × sessions.snapshot_block_count` (thiếu per-block hoặc số block thì fallback cột per-session). Lớp `per_session` luôn dùng chuỗi theo buổi. **Trợ cấp gia sư (#135):** lớp `per_block` snapshot `allowance_amount` = `đơn_giá_block × sĩ số present/excused × snapshot_block_count + scale_amount`; trần payroll `max_allowance_per_block × snapshot_block_count`. Lớp `per_session` giữ công thức và trần `max_allowance_per_session` cũ. Cột `*_per_session` không xoá. Xem ADR `docs/adr/2026-09-09-expand-block-pricing.md`.
@@ -308,7 +316,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - **Ảnh bìa lớp:**
     - `cover_image_path` (`TEXT`, nullable): path ảnh bìa trong bucket **private** `class-covers`, dạng `{classId}/cover.{jpg|png|webp}`; null = thẻ lớp hiện mascot kỳ lân theo ID lớp. API trả signed URL (TTL 1 giờ), không trả path. Upload/gỡ qua `POST`/`DELETE /class/:id/cover-image`: admin, trợ lí với mọi lớp; Gia sư đứng lớp (`class_teachers.status = 'active'`) và Quản lý lớp (`training_manager_staff_id`) chỉ với lớp của mình. Migration `20261002110000_add_class_cover_image`. **Ops phải tạo bucket private `class-covers` trên Supabase trước khi dùng.**
   - **Quản lý lớp (Đào tạo):**
-    - `training_manager_staff_id` (nullable FK → `staff_info.id`): nhân sự ban Đào tạo được gán quản lý lớp; chỉnh qua `PATCH /class/:id/training-manager` (admin/assistant).
+    - `training_manager_staff_id` (nullable FK → `staff_info.id`): nhân sự ban Đào tạo được gán quản lý lớp; chỉnh qua `PATCH /class/:id/training-manager` (admin/assistant). Chấp nhận staff `active` có role `training` hoặc `teacher` (gia sư kiêm quản lý); staff chưa có `training` được tự thêm role này vào `staff_info.roles` cùng transaction, bỏ gán không gỡ role.
     - `training_manager_rate_percent` (`DECIMAL(5,2)`, nullable): % trợ cấp quản lý lớp trên tổng học phí buổi (attendance `present`/`excused`); `0` hoặc chưa gán QLL = không phát sinh khoản phải trả.
   - **Không điểm danh (noAttendance):**
     - `no_attendance` (`BOOLEAN`, default `false`): bật=True nghĩa là lớp **không điểm danh**; khi tạo buổi học hệ thống tự tạo `Attendance.present` cho tất cả học sinh active, bỏ qua form điểm danh. Gán/tắt chỉ bởi admin/assistant (`PATCH /class/:id/basic-info`). Session snapshot giá trị này vào `sessions.snapshot_no_attendance` để FE hiển thị đúng cho buổi đã tạo. Đổi cờ lớp **không** hồi tố buổi cũ.
@@ -365,13 +373,15 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - `DELETE /courses/:id` — cùng guard với `POST`. `400` nếu còn lớp đang dùng khoá học này (`classes.count > 0`); message: `Không thể xoá: còn N lớp đang dùng khoá học này. Hãy chuyển lớp sang khoá khác hoặc chỉ ẩn (is_active=false) khoá học này.` `CourseService.remove(actor, id)` gọi `assertCanManageCourse` như `PATCH`.
 - Guard phân quyền nội dung khoá (reusable `CourseAccessService`, dùng lại cho mọi ticket nội dung khoá về sau): admin đầy đủ / trợ lí quản lý được mọi khoá; đội giáo án (`lesson_plan`, `lesson_plan_head`) chỉ thấy/sửa khoá mình được gán (qua `course_lesson_plan_members`); gia sư đang dạy lớp thuộc khoá X **không** vì thế mà sửa được nội dung cấp khoá của X. Các service resource trong `CourseContentModule` gọi `assertCanManageCourse` (qua `CourseContentSupportService`) trước mọi ghi Module / Lesson nhánh khoá / tiết thực hành cấp khoá và trước GET câu hỏi/quiz trả đáp án cấp khoá; `assertCanWriteCourseQuestions` chỉ áp dụng khi ghi **ngân hàng câu hỏi**.
 - Controller cây nội dung khoá (`course-modules`, `course-lessons` CRUD/reorder, chưa gồm quiz): `@AllowStaffRolesOnAdminRoutes(assistant, teacher, lesson_plan_head)`. **Không** mở `lesson_plan` thuần ở tầng controller (họ soạn câu hỏi/tiết thực hành, không soạn cây Chuyên đề). `StaffRole.teacher` vẫn nằm trên decorator; tầng service tiếp tục 403 nếu không thuộc đội giáo án. Chi tiết bảng: `docs/api/courses.md`.
+- Khoá chính tên `courses_pkey` (trước migration `20261027090000_fix_schema_drift` còn tên cũ `class_categories_pkey`).
 - Seed dữ liệu ban đầu gồm các mã cũ (`vip`, `basic`, `advance`, `hardcore`) cộng 3 mã mới: `thpt_basic` (THPT BASIC), `thpt_advanced` (THPT ADVANCED), `thpt_luyen_de` (THPT Luyện Đề).
 - Khi tạo lớp không truyền `course_id`, `ClassService.resolveDefaultCourseId` fallback về khoá học `is_active=true` có `sort_order` nhỏ nhất (tie-break theo `name`) — không còn hardcode `code='basic'` để tránh vỡ khi admin đổi/xoá phân loại mặc định cũ.
 
 ### 4.4.0-cat-diff `course_difficulty_levels` (Mức độ khó của khoá học)
 
 - Mỗi `course` có nhiều mức độ khó (vd. "Dễ", "Trung bình", "Khó"), quản lý qua CRUD `/courses/:courseId/difficulty-levels`. Không dùng thang cố định Dễ/TB/Khó toàn hệ thống.
-- Cột: `id` (PK, `@default(uuid())` tự sinh), `course_id` (FK → `courses.id`, `onDelete: Cascade`), `name` (TEXT), `sort_order` (INT, default `0`), `is_active` (BOOLEAN, default `true`), `created_at`, `updated_at`.
+- Cột: `id` (PK, default DB `gen_random_uuid()`), `course_id` (FK → `courses.id`, `onDelete: Cascade`), `name` (TEXT), `sort_order` (INT, default `0`), `is_active` (BOOLEAN, default `true`), `created_at`, `updated_at`.
+- FK `course_id` chỉ có thật trong DB từ migration `20261027090000_fix_schema_drift` (bảng tạo ở `20260906000000` thiếu FK → xoá khoá để lại mức khó mồ côi). Xoá khoá cascade mức khó; câu hỏi của khoá bị cascade theo `questions.course_id` trước, nên `questions.difficulty_level_id` (`Restrict`) không chặn.
 - Index: `(course_id)`, unique `(course_id, name)`.
 - Unique business logic: tên mức khó duy nhất trong cùng một khoá học (enforce ở service layer + unique index).
 - Hành vi API:
@@ -383,7 +393,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 ### 4.4.0-cat-members `course_lesson_plan_members` (đội giáo án của khoá học)
 
 - Bảng quan hệ N-N giữa `courses` và `staff_info`: nhân sự được gán soạn nội dung học thuật + ngân hàng câu hỏi của một khoá. Việc gán do admin, `lesson_plan_head` hoặc `assistant` thực hiện (giới hạn ở controller `CourseController`).
-- Cột: `id` (PK, `@default(uuid())` tự sinh), `course_id` (FK → `courses.id`, `onDelete: Cascade`), `staff_id` (FK → `staff_info.id`, `onDelete: Cascade`), `created_at`.
+- Cột: `id` (PK, default DB `gen_random_uuid()`), `course_id` (FK → `courses.id`, `onDelete: Cascade`), `staff_id` (FK → `staff_info.id`, `onDelete: Cascade`), `created_at`.
 - Index: unique `(course_id, staff_id)`, `(course_id)`, `(staff_id)`. Migration: `20260907000000_add_course_lesson_plan_members`.
 - Chỉ gán được nhân sự `staff_info.status = active` có `roles` chứa `lesson_plan` hoặc `lesson_plan_head`.
 - Hành vi API (`/courses/:courseId/lesson-plan-members`):
@@ -403,7 +413,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - `custom_tuition_per_block` (học phí riêng mỗi block 30 phút; học sinh không gói: charge buổi = cột này × `sessions.snapshot_block_count` nếu có; `null` khi không có override hoặc lớp không có số block chuẩn)
   - `custom_tuition_package_total`
   - `custom_tuition_package_session`
-- **Semantics thống nhất với backend:** giá trị `0` trên các cột override được xử lý như **không override** (kế thừa học phí/gói từ `classes`), tương đương `null` trong logic tính `effective*` và trong SQL aggregate dashboard (`NULLIF(..., 0)` trên các cột custom). Khi cập nhật danh sách học sinh lớp hoặc `PATCH /class/:id/student-tuition`, API chuẩn hóa `0` → lưu `null` và **derive** `custom_student_tuition_per_session` từ gói riêng (`custom_tuition_package_total ÷ custom_tuition_package_session`, làm tròn) khi có gói hợp lệ.
+- **Semantics thống nhất với backend (từ migration `20261026100000_student_class_zero_tuition`):** `null` = **không override** (kế thừa học phí/gói từ `classes`); `0` là **override thật = miễn phí** (vd tài khoản test): buổi học charge 0đ ở mọi `pricing_mode` (`one_time` với gói riêng 0đ cũng charge 0, không fallback học phí lớp). Dữ liệu cũ lưu `0` với nghĩa "kế thừa" đã được migration đổi về `NULL`. Gói riêng `custom_tuition_package_total = 0` → học phí/buổi dẫn xuất = 0, `custom_tuition_package_session` được để trống hoặc `0`; `custom_tuition_package_session = 0` với tổng gói > 0 bị API từ chối (400). Khi cập nhật danh sách học sinh lớp hoặc `PATCH /class/:id/student-tuition`, API giữ nguyên `0`, bỏ trống/`null` = kế thừa, và **derive** `custom_student_tuition_per_session` từ gói riêng (`custom_tuition_package_total ÷ custom_tuition_package_session`, làm tròn; gói 0đ → 0) khi có gói hợp lệ. SQL cảnh báo sắp hết tiền của dashboard đọc thẳng `custom_student_tuition_per_session` (không còn `NULLIF(..., 0)`) và lọc `referenceTuition > 0`, nên học sinh miễn phí không bị cảnh báo.
 - Index read path:
   - `student_id`
   - `class_id`
@@ -413,30 +423,38 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 
 ### 4.4.0b `class_content_items` (Nội dung lớp học)
 
-- Bảng liên kết lớp ↔ nội dung: mỗi hàng là một mục nội dung (hiện tại chỉ `lesson`) trong danh sách nội dung của lớp. Với tiết luyện tập, hàng này chính là **lần giao** (xem `CONTEXT.md`): tiết (`lessons`/`question_links`) dùng chung nhiều lớp; lịch mở bài thuộc lớp. Với tiết lý thuyết, hàng được **materialize** từ `class_modules` (không thêm lẻ): thêm chuyên đề tạo/khôi phục item, gỡ chuyên đề ẩn mềm, tạo tiết lý thuyết trong chuyên đề đồng bộ sang mọi lớp đã thêm, xoá tiết lý thuyết xoá item của nó. ADR `docs/adr/2026-10-02-class-content-by-module.md`.
+- Bảng liên kết lớp ↔ nội dung: mỗi hàng là một mục nội dung (hiện tại chỉ `lesson`) trong danh sách nội dung của lớp. Với tiết luyện tập, hàng này chính là **lần giao** (xem `CONTEXT.md`): tiết (`lessons`/`question_links`) dùng chung nhiều lớp; lịch mở bài thuộc lớp. Nội dung lớp là **tập tiết học** (ADR `docs/adr/2026-10-18-class-content-as-lesson-set.md`): gia sư thêm lẻ từng tiết lý thuyết/thực hành của khoá (#231) hoặc thêm cả chuyên đề (chép một lần tiết lý thuyết đang có); gỡ tiết/chuyên đề đánh dấu `removed_at` (#233); tạo tiết mới ở khoá không tự thêm vào lớp; xoá tiết lý thuyết xoá item của nó.
 - `class_id` (FK → `classes.id`, `onDelete: Cascade`)
 - `kind` (`ClassContentItemKind`, default `lesson`) — phân loại nội dung. Hiện tại chỉ có `lesson`.
 - `lesson_id` (nullable FK → `lessons.id`, `onDelete: Restrict`) — FK đến tiết học. Nullable để hỗ trợ future kinds không cần lesson. Không Cascade/SetNull: xóa Chuyên đề / Tiết học cấp khoá khi còn lần giao **tiết thực hành** (kể cả đã ẩn) bị chặn 409; item tiết lý thuyết được ứng dụng xoá trước trong cùng transaction. ADR `docs/adr/2026-09-07-class-content-soft-hide-restrict-knowledge-tree.md` (sửa bởi ADR 2026-10-02).
 - `sort_order` (`INT`, default 0) — thứ tự hiển thị trong danh sách nội dung lớp.
 - `open_at` (`TIMESTAMPTZ`, nullable) — thời điểm mở bài của **lần giao**. Chỉ dùng khi lesson `kind = practice`. Không nằm trên `lessons`. Khi `POST /class/:id/content` luyện tập **không** gửi `openAt`, backend ghi thời điểm tạo lần giao (đồng hồ server), không lấy giờ máy client.
-- `duration_minutes` (`INT`, nullable) — thời lượng làm bài (phút) của lần giao. 1–720. Chỉ dùng khi lesson `kind = practice`. Không nằm trên `lessons`.
+- `duration_minutes` (`INT`, nullable) — **thời lượng đã chốt** của lần giao tạo trước #228 (legacy). Lần giao mới để `NULL`: thời lượng hiệu lực = `COALESCE(class_content_items.duration_minutes, lessons.duration_minutes)` (`assignmentDurationMinutes`), dùng cho snapshot lượt làm, hạn lần giao và DTO. Sửa lịch lần giao không còn nhận thời lượng.
+- `close_at` (`TIMESTAMPTZ(6)`, nullable, #229) — **hạn làm bài** của lần giao: từ mốc này không bắt đầu lượt mới (lượt đang làm dở chạy hết thời lượng). `NULL` = không có hạn. Giao mới bỏ qua `closeAt` → lấy hạn xem nội dung của lớp (`classes.content_access_expires_at`). Phải sau `open_at`. Không còn suy ra từ `open_at + duration_minutes`; kết quả lượt hiện ngay khi nộp, không chờ hạn.
+- `shuffle_questions` (`BOOLEAN`, default `true`) — **Đảo câu**: mỗi lượt làm bắt đầu sau đó xáo thứ tự câu (hồ sơ IT: xáo trong từng nhóm Phần I / bắt buộc / Tự chọn 1 / Tự chọn 2, giữ thứ tự nhóm) và thứ tự phương án / nhận định. Câu có phương án nhắc vị trí (`isPositionDependent`: «ở trên», «Cả A và B», «ý a»…) giữ thứ tự phương án. Đổi cờ không ảnh hưởng lượt đã bắt đầu.
 - `hidden_at` (`TIMESTAMPTZ`, nullable, default null) — thời điểm ẩn mềm khỏi học sinh. Null = đang hiện.
 - `hidden_by_staff_id` (nullable FK → `staff_info.id`, `onDelete: SetNull`) — staff đã ẩn.
-- `hidden_reason` (`ClassContentHiddenReason`, nullable) — null khi đang hiện. `manual` = gia sư tự ẩn; `module_removed` = ẩn do gỡ chuyên đề (cả tiết lý thuyết lẫn **lần giao tiết thực hành** của chuyên đề; attempt giữ nguyên). Thêm lại chuyên đề chỉ hiện lại item `module_removed`, item `manual` vẫn ẩn. ADR `docs/adr/2026-10-05-class-module-order-and-removal.md`.
+- `hidden_reason` (`ClassContentHiddenReason`, nullable) — null khi đang hiện. `manual` = gia sư tự ẩn; `module_removed` = ẩn kèm lần gỡ (item đang hiện lúc gỡ tiết/chuyên đề). Thêm lại chỉ hiện lại item `module_removed`, item `manual` vẫn ẩn.
+- `removed_at` (`TIMESTAMPTZ(6)`, nullable, #233) — thời điểm **gỡ khỏi lớp** (khác Ẩn): item có `removed_at` không hiện ở **mọi** phía (staff lẫn học sinh, timeline, nhóm chuyên đề, khoá `alreadyAdded`), kể cả item đang Ẩn tay. Gỡ lẻ một tiết hoặc cả chuyên đề; bài làm, điểm, lượt xem giữ nguyên. Thêm lại tiết/chuyên đề xoá `removed_at`, giữ trạng thái Ẩn tay. Gỡ tiết cuối của chuyên đề thì xoá dòng `class_modules`. ADR `docs/adr/2026-10-05-class-module-order-and-removal.md`.
 - Unique constraint: `(class_id, lesson_id)` — mỗi tiết chỉ xuất hiện tối đa 1 lần trong nội dung của một lớp; cùng một tiết vẫn giao được cho nhiều lớp (mỗi lớp một hàng độc lập). Item đã ẩn vẫn chiếm unique — khôi phục, không thêm lại.
 - Migration: `20260910000000_add_class_content_items` — tạo bảng + backfill các topic (cũ) `class_id IS NOT NULL`.
 - Migration: `20260912000000_add_class_content_assignment_schedule` — thêm `open_at` + `duration_minutes`.
+- Migration: `20261018100000_practice_lesson_duration` — thời lượng chuyển lên `lessons.duration_minutes`; lần giao cũ giữ giá trị đã chốt.
+- Migration: `20261018110000_assignment_close_at` — thêm `close_at`; backfill lần giao thực hành = `classes.content_access_expires_at` (lớp không có hạn → `NULL`).
+- Migration: `20261008000000_assignment_shuffle` — thêm `class_content_items.shuffle_questions` (default true, kể cả lần giao cũ) + `attempt_answers.option_order`.
 - Migration: `20260918000000_soft_hide_class_content` — `hidden_at` / `hidden_by_staff_id`; FK Cascade → Restrict; `attempts.assignment_id` Cascade → Restrict.
 - Migration: `20260921000000_rename_three_level_content` — `topic_id` → `lesson_id`; enum value `topic` → `lesson`; lớp từng gán một chuyên đề lý thuyết N bài có N hàng (ẩn/người ẩn copy nguyên trạng).
 - Migration: `20261002120000_add_class_modules` — lớp có tiết lý thuyết thêm lẻ (đang hiện) được thêm nguyên chuyên đề + tiết lý thuyết còn thiếu (item + dòng timeline); lớp không bật thứ tự timeline tuỳ chỉnh được sắp lại theo thời gian; item + dòng timeline của tiết riêng lớp bị ẩn.
 - Migration: `20261005120000_class_module_order_and_hidden_reason` — thêm enum `ClassContentHiddenReason` + cột `hidden_reason`; backfill item đang ẩn (lý thuyết của chuyên đề lớp không còn = `module_removed`, còn lại `manual`); ẩn (`module_removed`) lần giao thực hành đang hiện thuộc chuyên đề lớp đã gỡ, kèm dòng timeline.
+- Migration: `20261018130000_class_content_removed_at` — thêm `removed_at`; backfill item `hidden_reason = module_removed` (= `hidden_at`) và item đang ẩn thuộc chuyên đề lớp không còn dòng `class_modules` (= `NOW()`).
+- Migration: `20261018120000_class_content_lesson_set` — **nội dung lớp là tập tiết học** (ADR `docs/adr/2026-10-18-class-content-as-lesson-set.md`): materialize mỗi chuyên đề lớp đã thêm → tiết lý thuyết đang có (chưa lưu trữ) còn thiếu thành item + dòng timeline (idempotent; item có sẵn giữ trạng thái Ẩn), rồi sắp lại timeline theo thời gian. Từ đây tạo tiết mới ở khoá **không** tự thêm vào lớp.
 
 ### 4.4.0b-mod `class_modules` (Chuyên đề của lớp)
 
-- Một hàng = lớp đã thêm một Chuyên đề của khoá. Nguồn sự thật để đồng bộ tiết lý thuyết của chuyên đề vào `class_content_items`. Tiết thực hành không tự kéo theo.
+- Một hàng = lớp đã thêm một Chuyên đề của khoá; giữ **thứ tự nhóm** của lớp. Không còn là nguồn quyền xem: nội dung lớp và nhóm chuyên đề trên lớp đọc từ tập tiết `class_content_items` (item có `removed_at` = đã gỡ, không tạo nhóm). Thêm chuyên đề chép một lần các tiết lý thuyết đang có; tiết khoá thêm sau không tự lan.
 - `id` (UUID, PK), `class_id` (FK → `classes.id`, `onDelete: Cascade`), `module_id` (FK → `modules.id`, `onDelete: Cascade`), `sort_order` (`INT`, default 0), `created_at` (`TIMESTAMPTZ`).
 - `sort_order` — thứ tự nhóm chuyên đề **của riêng lớp** (nhỏ lên trước); admin/staff kéo-thả trên tab **Chuyên đề** (`PUT /class/:id/modules/order`), học sinh thấy cùng thứ tự. Thêm (hoặc thêm lại) chuyên đề → lên đầu. Không đọc/ghi `modules.sort_order` (thứ tự cấp khoá).
-- Gỡ chuyên đề = xoá hàng (coi như chưa từng thêm): tiết lý thuyết + lần giao thực hành của chuyên đề bị ẩn `hidden_reason = module_removed`.
+- Gỡ chuyên đề = xoá hàng (coi như chưa từng thêm): mọi item của chuyên đề trong lớp nhận `removed_at` (item đang hiện thêm `hidden_reason = module_removed`). Gỡ lẻ tiết cuối cùng của chuyên đề cũng xoá hàng.
 - Unique `(class_id, module_id)`; index `(module_id)` (tra lớp khi tạo tiết lý thuyết mới), `(class_id, sort_order)`.
 - Chuyên đề phải thuộc khoá của lớp (guard ứng dụng, 400).
 - Migration: `20261002120000_add_class_modules` (test SQL: `apps/api/prisma/tests/20261002120000_add_class_modules.test.sql`).
@@ -468,14 +486,27 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 - Mỗi `attempts` là **một lượt** học sinh làm một lần giao luyện tập. FK `assignment_id` → `class_content_items.id` (không có `topic_id`) — cùng một đề giao nhiều lớp cho ra bảng điểm độc lập (ADR live-link). `onDelete: Restrict` — không xoá lịch sử khi ẩn/cố xoá lần giao.
 - `student_id` (FK → `student_info.id`, `onDelete: Cascade`)
 - `started_at` — mốc đồng hồ **của học sinh này** (lúc bấm bắt đầu), không phải `open_at` của lớp.
-- `duration_minutes` — snapshot thời lượng lần giao lúc bắt đầu; sửa lịch lớp sau đó không đổi đồng hồ lượt đang chạy.
+- `duration_minutes` — snapshot thời lượng hiệu lực (lần giao cũ đã chốt, không thì của tiết thực hành) lúc bắt đầu; sửa thời lượng tiết sau đó không đổi đồng hồ lượt đang chạy.
 - `status` (`AttemptStatus`): `in_progress` | `submitted` | `timed_out`. Hết giờ → `timed_out`, chốt câu đã trả lời và chấm MCQ, **không huỷ**. `endsAt` là trường tính (`started_at + duration_minutes`), không lưu cột. Cron `@nestjs/schedule` `EVERY_MINUTE` (`AttemptExpiryJob` → `AttemptService.finalizeExpiredInProgress`) quét `in_progress` đã quá `endsAt` và gọi cùng `gradeAndClose` với GET/nộp — học sinh đóng tab không làm lượt kẹt. Claim bằng `updateMany` `WHERE id AND status = in_progress` trong transaction: trùng nút Nộp không double-grade. Job log số lượt đã chốt; 0 bản ghi không nổ. `ScheduleModule.forRoot` tắt cron khi `NODE_ENV=test`.
 - Unique partial: tối đa một `in_progress` trên `(assignment_id, student_id)`. Làm lại = tạo lượt mới; lượt cũ giữ nguyên.
-- `attempt_answers`: một hàng / câu. Lúc `start` snapshot toàn bộ đề: `type`, `content`, `options`, `correct_index`, `explanation`, `answer_guide`, `difficulty_label`, thứ tự, và `points_possible`. `points_possible` = chia 100 đều N câu (Hamilton: phần dư +1 từ câu đầu); **không** lấy `question_links.points`. Chấm MCQ/tự luận chỉ đọc snapshot, không join `questions` live. `onDelete: Restrict` với `questions`. Không cascade theo `question_links`.
+- `attempt_answers`: một hàng / câu. Lúc `start` snapshot toàn bộ đề: `type`, `content`, `options`, `correct_index`, `explanation`, `answer_guide`, `difficulty_label`, thứ tự, và `points_possible`. `points_possible` = chia 100 đều N câu (Hamilton: phần dư +1 từ câu đầu); **không** lấy `question_links.points` — trừ hồ sơ JP: chia 100 theo trọng số `question_links.points` (null = 1, Hamilton theo phần lẻ lớn nhất), ADR `docs/adr/2026-10-09-jp-weighted-scoring.md`. Chấm MCQ/tự luận chỉ đọc snapshot, không join `questions` live. `onDelete: Restrict` với `questions`. Không cascade theo `question_links`.
 - Chấm tự động chỉ `single_choice` (so `choice_index` với snapshot `correct_index`). Tự luận để `points_awarded`/`is_correct` null (`has_ungraded_essay`).
 - `attempt_answers.feedback` (`TEXT`, nullable) — nhận xét của gia sư cho câu tự luận đó; chỉ có sau khi chấm. Ticket #63.
 - `attempt_answers.marked_for_review` (`BOOLEAN`, default `false`) — học sinh đánh dấu quay lại xem trước nộp trong lượt `in_progress`; autosave qua `PATCH .../answers`; không ảnh hưởng chấm điểm.
-- Chấm tự luận (#63): gia sư chấm từng câu qua `points_awarded` (0..`points_possible` snapshot 100/N, không đụng `auto_graded_score`/`auto_graded_max` vốn chỉ của MCQ) + `feedback`. `is_correct` giữ `null` cho tự luận (chấm theo thang điểm, không phải đúng/sai). Khi không còn câu tự luận `points_awarded IS NULL` trong lượt → set `has_ungraded_essay = false`. Hàng đợi chấm chỉ gồm câu tự luận chưa chấm của **lượt mới nhất** mỗi học sinh (`DISTINCT ON (student_id) ORDER BY started_at DESC`); lượt cũ tra cứu được nhưng không vào hàng đợi và bị từ chối chấm (404). N = 0 → `start` không tạo Attempt.
+- Chấm tự luận (#63): gia sư chấm từng câu qua `points_awarded` (0..`points_possible` snapshot 100/N, không đụng `auto_graded_score`/`auto_graded_max` vốn chỉ của MCQ) + `feedback`. `is_correct` giữ `null` cho tự luận (chấm theo thang điểm, không phải đúng/sai). Khi không còn câu tự luận `points_awarded IS NULL` trong lượt → set `has_ungraded_essay = false`. Chỉ chấm được câu tự luận của **lượt mới nhất** mỗi học sinh (`ORDER BY started_at DESC`, tính cả lượt đang làm) và lượt đó đã nộp; lượt cũ chỉ xem, chấm → 404. Điểm hiển thị lấy từ lượt đã chấm xong gần nhất (`has_ungraded_essay = false`, `submitted_at` muộn nhất) — ADR 2026-10-26. N = 0 → `start` không tạo Attempt.
+- **Hồ sơ IT (`LMS_PROFILE=it`, migration `20261007000000_it_question_types`)** — ADR `docs/adr/2026-10-07-it-absolute-scoring-and-answer-key-regrade.md`:
+  - `attempts.scoring` (`AttemptScoring`, default `equal_100`): snapshot hồ sơ lúc start. `equal_100` = thang 100/N như trên; `absolute_it` = điểm tuyệt đối đơn vị 1/100 điểm: trắc nghiệm `points_possible = 25` (0,25đ), nhóm Đúng/Sai `points_possible = 100` (1đ, bậc thang 1 ý → 10, 2 → 25, 3 → 50, 4 → 100). Bài cũ giữ `equal_100`.
+  - `attempts.elective_voided` (`BOOLEAN`, default `false`): học sinh có ít nhất một nhận định được chọn ở **cả hai** nhóm tự chọn → mọi câu `elective_1`/`elective_2` chấm 0.
+  - `attempt_answers.slot` (`QuestionSlot`): snapshot vị trí câu lúc start (từ `question_links.slot`).
+  - `attempt_answers.essay_input_size` (`EssayInputSize?`): snapshot kiểu ô tự luận lúc start (`null` = ô dài).
+  - `attempt_answers.shared_material_id` (`UUID?`, không FK) + `shared_material_content` (`TEXT?`): snapshot Tư liệu dùng chung lúc start (JP). Các câu cùng tư liệu đứng liền nhau trong `order`; Đảo câu xáo cả khối. Sửa tư liệu không đổi bài đã bắt đầu.
+  - `attempt_answers.audio_id` + `shared_material_audio_id` (`UUID?`, không FK): snapshot audio của câu và của tư liệu lúc start (JP). URL ký mới mỗi lần tải bài; audio có Giới hạn nghe thì lượt đang làm không nhận URL sẵn (xin qua endpoint phát, xem `attempt_audio_plays`).
+  - `attempt_answers.tf_label_style` (`TrueFalseLabelStyle?`): snapshot kiểu nhãn Câu Đúng/Sai lúc start (`null` = ○/×). Câu `true_false` lưu lựa chọn ở `tf_choices[0]`.
+  - `attempt_answers.blank_answer_key` (`JSONB?`, `string[][]`): snapshot đáp án hợp lệ từng ô của câu `fill_blank` lúc start; `blank_answers` (`JSONB?`, `(string|null)[]`): chữ học sinh gõ vào từng ô. Chấm từng ô: điểm = `round(points_possible × số ô đúng / số ô)`, `is_correct` = đúng mọi ô. Sửa đáp án ô ở ngân hàng → chấm lại như `correct_index`/`tf_answer_key`, nhưng chỉ cập nhật snapshot có **cùng số ô** (thêm/bớt ô sau khi lượt bắt đầu không chấm lại).
+  - Câu `ordering` (sắp xếp): `options` = thẻ **đã xáo** (luôn xáo lúc start, kể cả khi tắt Đảo câu; không bao giờ trùng thứ tự đúng trừ khi mọi thẻ cùng chữ), `option_order[i]` = vị trí gốc của thẻ hiển thị thứ i → thứ tự đúng = thẻ xếp theo `option_order`. `order_answer` (`TEXT[]`, mặc định `{}`): chữ thẻ theo thứ tự học sinh xếp (so theo chữ nên thẻ trùng chữ đổi chỗ vẫn đúng). Chấm cả chuỗi: khớp toàn bộ = đủ điểm, ngược lại 0; đã làm = dùng hết thẻ. Sửa thẻ ở ngân hàng → tính lại `option_order` cho snapshot cùng bộ thẻ (khác bộ thẻ thì bỏ qua) rồi chấm lại.
+  - `attempt_answers.tf_answer_key` (`BOOLEAN[]`): snapshot đáp án 4 nhận định; `tf_choices` (`JSONB`, `(boolean|null)[4]`): lựa chọn của học sinh.
+  - Sửa đáp án câu ở ngân hàng (`correct_index` / `tf_answer_key`) → cập nhật snapshot các `attempt_answers` của lượt đã nộp và chấm lại im lặng (`auto_graded_score`), không thông báo. Snapshot đã đảo đáp án được đổi sang thứ tự hiển thị qua `option_order` (`remapAnswerKey`); phương án đúng mới không có trong snapshot (thêm phương án sau khi lượt bắt đầu) → `correct_index = null` (không ai đúng).
+  - `attempt_answers.option_order` (`INT[]`, default `{}`): hoán vị lúc đảo đáp án — `option_order[i]` = chỉ số gốc của phương án hiển thị thứ i. Rỗng = không đảo. `options`, `correct_index`, `tf_answer_key`, `choice_index`, `tf_choices` trong snapshot đều theo **thứ tự hiển thị**, nên chấm điểm không cần biết hoán vị.
 - Migration: `20260913000000_add_attempts`, `20260914000000_add_attempt_answer_feedback` (thêm cột `feedback`), `20260918000000_attempt_answer_exam_snapshot` (snapshot đề + thang 100), `20260920000000_attempt_answer_marked_for_review` (cột `marked_for_review`). ADR `docs/adr/2026-09-07-attempt-exam-snapshot.md`.
 
 ### 4.4.1 `makeup_schedule_events`
@@ -539,7 +570,15 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 - `lesson_content` (`TEXT`, nullable): nội dung bài học (LEVEL, CONTEST, kiến thức đã dạy); bắt buộc khi tạo/cập nhật buổi qua API.
 - `homework` (`TEXT`, nullable): bài tập về nhà; bắt buộc khi tạo/cập nhật buổi qua API.
 - `tutorial` (`TEXT`, nullable): **Tutorial các buổi học** (hướng dẫn/tài liệu tham khảo buổi); bắt buộc khi tạo/cập nhật buổi qua API. Khác `cf_problem_tutorials.tutorial` (tutorial bài Codeforces).
-- `notes` (`TEXT`, nullable): bản ghi text template Zalo 5 phần (đồng bộ với nút **Copy nhận xét**); FE ghi khi tạo/cập nhật buổi từ `lesson_content`, `homework`, `tutorial` và `attendance.notes`. Dữ liệu cũ có thể là HTML legacy hoặc đã backfill sang `lesson_content`. Form mới không còn ô nhập trực tiếp `notes`.
+- `notes` (`TEXT`, nullable): **legacy** — text template Zalo 5 phần của buổi tạo trước Nhận xét buổi học có cấu trúc. Form mới luôn gửi `notes: null`; text **Copy nhận xét** dựng lại từ các field có cấu trúc bên dưới. Dữ liệu cũ có thể là HTML legacy hoặc đã backfill sang `lesson_content`.
+- **Nhận xét buổi học có cấu trúc — phần chung** (migration `20261017090000_structured_session_review`, ADR `docs/adr/2026-10-17-structured-session-review.md`). Bắt buộc/điều kiện kiểm ở `SessionValidationService` khi tạo/cập nhật buổi có gửi nội dung buổi:
+  - `progress_status` (`SessionProgressStatus`, nullable): **Tiến độ buổi**, bắt buộc với buổi mới (kể cả **Buổi không điểm danh**). `NULL` = buổi legacy → đọc `notes` / `attendance.notes` và hiển thị format cũ; không migrate dữ liệu cũ. Sửa buổi legacy phải nhập đủ field mới.
+  - `progress_done`, `progress_remaining` (`TEXT`, nullable, plain text mỗi dòng 1 ý, ≤ 2.000): `completed` → cả hai bị null hoá; `partial` → bắt buộc cả hai; `not_completed` → bắt buộc `progress_remaining`.
+  - `has_in_class_test` (`BOOLEAN`, default `false`), `in_class_test_content` (`TEXT`), `in_class_test_total` (`INTEGER`, ≥ 1): **Kiểm tra trong buổi**; tick thì bắt buộc nội dung + tổng số câu.
+  - `homework_due_at` (`TIMESTAMPTZ`, nullable): hạn nộp BTVN (ngày + giờ 24h, giờ Việt Nam), tuỳ chọn.
+  - `next_session_plan` (`TEXT`): nội dung buổi sau, bắt buộc.
+  - `has_retest` (`BOOLEAN`, default `false`), `retest_content` (`TEXT`): kiểm tra lại buổi sau; tick thì bắt buộc nội dung, không tick → copy in «Không».
+  - **Số thứ tự buổi** không lưu cột: suy ra bằng `ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY date, start_time NULLS FIRST, created_at, id)` (`apps/api/src/session/session-ordinal.util.ts`), tính cả buổi bù; response session/timeline có `ordinal`.
 - Snapshot khấu trừ theo buổi:
   - `teacher_tax_rate_percent` (`DECIMAL(5,2)`, default `0`, Prisma field `teacherOperatingDeductionRatePercent`): snapshot mức **khấu trừ vận hành** effective của cặp gia sư-lớp; trước thanh toán được refresh khi tạo/cập nhật session, khi chuyển sang `paid` được snapshot lại theo thời điểm thanh toán.
     - Buổi mới/cập nhật luôn snapshot theo `class_teachers.operatingDeductionRatePercent` hiện hành; FE không còn toggle tắt phí vận hành từng buổi. Field request `includeTeacherOperatingDeduction=false` vẫn tồn tại ở API (legacy) nhưng UI không gửi; buổi cũ đã snapshot `0%` giữ nguyên cho lịch sử thanh toán.
@@ -565,7 +604,14 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 
 - Điểm danh theo từng session & student
 - Unique composite: `(session_id, student_id)`
-- Trạng thái dùng enum `AttendanceStatus`
+- Trạng thái dùng enum `AttendanceStatus` (`present | excused | absent | trial`). `trial` = **Học thử**: không trừ ví, không tính doanh thu/hoa hồng/sĩ số (mọi query whitelist `present/excused`), mỗi học sinh tối đa 1 buổi `trial` trên một lớp, không áp dụng cho lớp bán một lần, và chỉ được đánh khi học sinh chưa bị thu học phí ở buổi trước đó của lớp. ADR `docs/adr/2026-10-12-trial-attendance-catch-up-charge.md`.
+- **Nhận xét buổi học có cấu trúc — phần từng học sinh** (cùng migration `20261017090000_structured_session_review`), plain text ≤ 2.000:
+  - `present`/`trial`: bắt buộc `strengths` (Điểm tốt), `improvements` (Cần cải thiện); buổi có kiểm tra thì bắt buộc `test_correct_count` (`INTEGER`, 0..`sessions.in_class_test_total`) + `test_comment`.
+  - Chỉ `present`: bắt buộc `homework_quality` (`HomeworkQuality`) + `homework_comment` (**Chất lượng BTVN buổi trước**; không nộp tính là `failed`).
+  - `excused`/`absent`: mọi field nhận xét null (không đánh giá, copy chỉ in tên + trạng thái). **Buổi không điểm danh**: bỏ toàn bộ phần này.
+  - `notes` (`TEXT`, DTO ≤ 500): với `excused` là **Lý do nghỉ**, bắt buộc (`SessionValidationService.validateAttendanceItems` trả `400` *«Học sinh nghỉ phép phải có lý do nghỉ (attendance.notes).»* ở `POST /sessions` và `PATCH` có `attendance`; form web toast *«Vui lòng nhập lý do nghỉ phép của …»*). Lý do nghỉ không in vào bản copy nhận xét Zalo. Trạng thái khác: form gửi `notes: null`; giá trị cũ là **legacy** — nhận xét tự do của buổi trước mô hình có cấu trúc. Sửa buổi cũ có HS nghỉ phép chưa có lý do phải nhập bổ sung mới lưu được.
+- `trial_catch_up_fee` (`INTEGER`, nullable): phần **thu bù học thử** đã gộp vào `tuition_fee` của buổi đích (buổi `present`/`excused` đầu tiên sau buổi học thử, cùng lớp, học phí gốc > 0). Buổi đích vì vậy có `tuition_fee` = học phí gốc × 2, nên doanh thu và hoa hồng tự tính gấp đôi. Null = không gộp. Học phí gốc = `tuition_fee − coalesce(trial_catch_up_fee, 0)`.
+- `trial_catch_up_transaction_id` (nullable, unique FK → `wallet_transactions_history.id`, `ON DELETE SET NULL`): dòng ví `extend` thứ hai (note «Thu bù học thử lớp …») trừ phần thu bù; tách khỏi `transaction_id` (dòng thu học phí gốc). `SessionTrialCatchUpService.reconcile` chạy cuối tạo/sửa/xoá buổi và đổi giá lớp để chuyển, hoàn (`topup`) hoặc thu lại phần bù cho đúng buổi đích. Migration `20261012120000_attendance_trial_catch_up` (thêm enum value + 2 cột).
 - Index read path:
   - `session_id`, `student_id`
   - `(customer_care_staff_id, customer_care_payment_status)` với tên index thực tế `attendance_customer_care_staff_id_customer_care_payment_sta_idx`
@@ -626,6 +672,8 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - `video_url` (`TEXT`, nullable) — chỉ tiết lý thuyết
   - `content` (`TEXT`, nullable) — chỉ tiết lý thuyết
   - `order` (`INTEGER`, default 0) — thứ tự trong chuyên đề (hoặc trong lớp, với tiết riêng lớp)
+  - `elective_1_name`, `elective_2_name` (`TEXT`, nullable) — tên hai nhóm tự chọn của tiết thực hành (hồ sơ IT, vd "Khoa học máy tính" / "Tin học ứng dụng"); sửa qua `PATCH` tiết học.
+  - `duration_minutes` (`INTEGER`, nullable) — **thời lượng làm bài** (phút/lượt, 1–720, tính từ lúc học sinh bấm bắt đầu) của tiết thực hành; `NULL` với tiết lý thuyết. Bắt buộc khi tạo tiết thực hành (`400` nếu thiếu); `PATCH` trên tiết lý thuyết → `400`. Sửa áp cho mọi lớp từ lượt bắt đầu sau đó; lượt đang làm giữ `attempts.duration_minutes`. Migration `20261018100000_practice_lesson_duration` backfill từ lần giao gần nhất của tiết, chưa giao lần nào → 60.
   - `archived_at` (`TIMESTAMPTZ`, nullable) — tiết đã lưu trữ (hiện chỉ tiết riêng lớp cũ). Tiết lưu trữ không đồng bộ theo chuyên đề, không giao/khôi phục vào lớp được.
   - `created_by`, `updated_by` (nullable FK → `users.id`)
   - `created_at`, `updated_at` (`TIMESTAMPTZ`)
@@ -636,7 +684,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 ### 4.6c-c `lesson_quizzes` / `lesson_quiz_answers` (Bài tập ôn nhẹ)
 
 - `lesson_quizzes`: câu hỏi ngân hàng gắn vào một tiết lý thuyết. Unique `(lesson_id, question_id)`. FK `lesson_id` cascade; `question_id` restrict.
-- `lesson_quiz_answers`: trả lời ôn nhẹ theo `(lesson_id, question_id, student_id)`. Không sinh Attempt, không tính điểm.
+- `lesson_quiz_answers`: trả lời ôn nhẹ theo `(lesson_id, question_id, student_id)`. Không sinh Attempt, không tính điểm. Câu Đúng/Sai lưu lựa chọn ở `tf_choices` (`JSONB`, `(boolean|null)[4]`). Câu điền vào ô trống lưu chữ gõ ở `blank_answers` (`JSONB?`, `(string|null)[]`). Câu sắp xếp lưu chữ thẻ theo thứ tự xếp ở `order_answer` (`TEXT[]`, mặc định `{}`).
 - Đổi tên in-place từ `lecture_quizzes` / `lecture_quiz_answers` (`lecture_id` → `lesson_id`) ở `20260921000000_rename_three_level_content`.
 
 ### 4.6d `questions` (Ngân hàng câu hỏi)
@@ -647,17 +695,48 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - `course_id` (FK → `courses.id`, cascade)
   - `module_id` (FK → `modules.id`, cascade)
   - `difficulty_level_id` (FK → `course_difficulty_levels.id`, restrict)
-  - `type` (`QuestionType`): `single_choice` | `essay`
-  - `content` (`TEXT`): nội dung câu hỏi (HTML từ TipTap)
-  - `options` (`JSONB`, nullable): mảng phương án (HTML hoặc LaTeX) — chỉ cho `single_choice`
+  - `type` (`QuestionType`): `single_choice` | `essay` | `true_false_group` | `true_false` | `fill_blank` | `ordering`. Hồ sơ IT không cho tạo `essay`; `true_false` (Câu Đúng/Sai một nhận định), `fill_blank` (Câu điền vào ô trống) và `ordering` (Câu sắp xếp: 2–12 thẻ không rỗng trong `options` theo **đúng thứ tự**, thẻ trùng chữ hợp lệ; không `correct_index`/`tf_answer_key`) chỉ hồ sơ JP.
+  - `content` (`TEXT`): nội dung câu hỏi (HTML từ TipTap; có thể chứa bảng, ảnh, `<pre><code class="language-*">`, `<div data-code-parallel>`). Web sanitize (DOMPurify) trước khi render.
+  - `options` (`JSONB`, nullable): `single_choice` — 2–6 phương án; `true_false_group` — đúng 4 nhận định a–d (HTML)
+  - `tf_answer_key` (`BOOLEAN[]`, default `{}`): đáp án 4 nhận định (true = Đúng) cho `true_false_group`; đúng 1 phần tử cho `true_false` (nhận định nằm ở `content`, không có `options`)
+  - `tf_label_style` (`TrueFalseLabelStyle?`: `maru_batsu` | `dung_sai` | `true_false`): kiểu nhãn hai lựa chọn của Câu Đúng/Sai (○/×, Đúng/Sai, True/False) — chỉ câu `true_false`. `null` = ○/×. Không xáo; chấm cả câu (đúng = đủ điểm, sai/bỏ trống = 0).
+  - `blank_answer_key` (`JSONB?`, `string[][]`): đáp án hợp lệ từng ô của câu `fill_blank` (chỉ loại này). Ô trống là dấu `[[___]]` trong `content`, thứ tự xuất hiện = số ô; số phần tử phải bằng số dấu (1–10 ô, mỗi ô 1–10 đáp án ≤ 200 ký tự). So khớp: bỏ khoảng trắng đầu/cuối (kể cả khoảng trắng toàn góc), số/chữ Latin toàn góc = nửa góc, không phân biệt hoa/thường; kana và kanji **không** tự coi là nhau (nhập thành nhiều đáp án). Không có `options`/`correct_index`/`tf_answer_key`; không xáo.
   - `correct_index` (`INT`, nullable): chỉ số 0-based của đáp án đúng — cần cho `single_choice`
   - `explanation` (`TEXT`, nullable): giải thích sau khi trả lời (HTML)
   - `answer_guide` (`TEXT`, nullable): hướng dẫn cho câu tự luận (HTML)
+  - `skills` (`QuestionSkill[]`, default `{}`): Kỹ năng — chỉ hồ sơ JP, chọn nhiều: `kanji` | `vocabulary` | `grammar` | `reading` | `listening` | `conversation` | `writing`. JP bắt buộc ≥1 khi tạo/sửa (câu cũ rỗng chỉ bị đòi khi sửa; nhập hàng loạt chưa bắt buộc); IT/ENG luôn rỗng.
+  - `shared_material_id` (`UUID?` → `shared_materials.id`, `ON DELETE NO ACTION`): Bộ câu hỏi (JP) — tối đa một; phải cùng khoá **và cùng chuyên đề** với bộ. Index `(shared_material_id)`.
+  - `set_position` (`INT?`): vị trí của câu trong bộ (0-based) — câu mới vào bộ xếp cuối bộ. CHECK `questions_set_position_check`: có `shared_material_id` ⇔ có `set_position`. Làm bài / xem lại / ôn nhẹ xếp câu trong khối bộ theo `set_position`.
+  - `audio_id` (`UUID?` → `audio_assets.id`, `ON DELETE SET NULL`): audio nhúng của câu (JP) — tối đa một; phải cùng khoá.
+  - `essay_input_size` (`EssayInputSize?`: `short` | `long`): kiểu ô nhập câu tự luận — chỉ hồ sơ JP, chỉ câu `essay`. `null` = ô dài (câu cũ, hồ sơ khác); form JP mặc định `short` cho câu mới. Chỉ đổi giao diện làm bài/ôn nhẹ (ô ngắn một dòng, tự xuống dòng), không giới hạn độ dài, không ảnh hưởng chấm.
   - `deleted_at` (`TIMESTAMPTZ`, nullable): soft-delete timestamp
   - `created_at`, `updated_at` (`TIMESTAMPTZ`)
 - Indexes: `(course_id)`, `(module_id)`, `(difficulty_level_id)`
 - Quan hệ: `courses` (1-N), `modules` (1-N), `course_difficulty_levels` (1-N), `question_links` (1-N)
 - Table: `questions` (via `@@map`)
+
+### 4.6d-sm `shared_materials` (phần đầu Bộ câu hỏi — hồ sơ JP)
+
+- Fields: `id` (UUID), `course_id` (→ `courses.id`, `ON DELETE CASCADE`), `module_id` (→ `modules.id`, `ON DELETE CASCADE`; chuyên đề của bộ — đổi chuyên đề thì mọi câu trong bộ đổi theo), `title` (≤ 200, để chọn/lọc), `content` (`TEXT`, HTML TipTap; có thể chứa **vị trí trống** `[[#<questionId>]]` nối tới câu gắn tư liệu — web đổi thành số câu trong lượt làm `（27）`, câu vắng/đã gỡ hiện `（　　）`), `deleted_at` (`TIMESTAMPTZ?`, xoá mềm), `created_at`, `updated_at`.
+- Quan hệ: `questions.shared_material_id` (1-N). Xoá bộ = xoá mềm: `deleted_at` của bộ và mọi câu chưa xoá trong bộ được đặt, link `question_links` / `lesson_quizzes` của câu trong bộ bị gỡ; dòng bộ và `questions.shared_material_id` giữ nguyên để lượt đã làm còn xem lại. Bộ đã xoá không hiện trong danh sách, không gắn câu / thêm vào tiết được (migration `20261010110000_shared_material_soft_delete`).
+- Index `(course_id)`, `(module_id)`. Migration `20261009050000_shared_material`; chuyên đề + thứ tự trong bộ: `20261009080000_question_set` (tách tư liệu dùng ở nhiều chuyên đề thành bộ riêng từng chuyên đề, tách audio tham chiếu nhiều nơi thành bản riêng, thứ tự trong bộ theo thời gian tạo câu). ADR `docs/adr/2026-10-09-question-set.md` (thay một phần `2026-10-09-shared-material.md`). Bộ trong tiết: `question_links` vật chất hoá theo từng câu của bộ (câu của một bộ liền nhau trong tiết); migration `20261010090000_question_set_lesson_links` bổ sung link câu thiếu và đánh số lại `order` để bộ liền khối. Bài ôn nhẹ (`lesson_quizzes`) theo cùng luật; migration `20261010100000_question_set_lesson_quizzes`.
+- `audio_id` (`UUID?` → `audio_assets.id`, `ON DELETE SET NULL`): audio dùng chung cho cả nhóm câu (bài nghe). Migration `20261009060000_audio_asset`.
+
+### 4.6d-au `audio_assets` (Audio tư liệu — hồ sơ JP)
+
+- Fields: `id` (UUID), `course_id` (→ `courses.id`, `ON DELETE CASCADE`), `storage_path` (object path trong bucket private `question-audio`, dạng `{courseId}/{id}.{mp3|m4a|aac|wav}`), `mime_type`, `size_bytes` (≤ 20MB), `original_name` (≤ 200), `created_at`.
+- **Bất biến:** thay audio = tải asset mới và đổi `audio_id`; file cũ giữ lại để bài làm đã bắt đầu (snapshot `audio_id`) vẫn nghe được.
+- Gắn vào: `questions.audio_id` (audio nhúng của câu) và `shared_materials.audio_id` (audio dùng chung) — tối đa một mỗi nơi, phải cùng khoá. Mỗi asset thuộc đúng một chỗ (migration `20261009080000_question_set` tách bản dùng chung thành bản riêng cùng file storage).
+- Học sinh chỉ nhận signed URL ngắn hạn (6 giờ) qua endpoint đã kiểm quyền xem câu; không lộ `storage_path`.
+- **Giới hạn nghe** (cấu hình duy nhất sửa được trên asset, `PATCH /audio-assets/:id/limits`): `max_plays` (`INT?`, `null` = không giới hạn, cho phép 1 hoặc 2), `allow_seek` (`BOOLEAN`, default `true`). Đọc live — đổi giới hạn áp luôn cho lượt đang làm. Không áp khi xem lại sau nộp và ôn nhẹ.
+- Index `(course_id)`. Migration `20261009060000_audio_asset`; giới hạn nghe: `20261009070000_audio_play_limit`.
+
+### 4.6d-ap `attempt_audio_plays` (Lần nghe trong lượt làm — hồ sơ JP)
+
+- Fields: `id` (UUID), `attempt_id` (→ `attempts.id`, `ON DELETE CASCADE`), `audio_id` (→ `audio_assets.id`, `ON DELETE CASCADE`), `play_count` (`INT`, default 0), `updated_at`.
+- Unique `(attempt_id, audio_id)`. Chỉ ghi cho audio có `max_plays`.
+- Bấm phát = tạo hàng nếu chưa có (`skipDuplicates`) rồi `UPDATE ... SET play_count = play_count + 1 WHERE play_count < max_plays` — nguyên tử, hai tab bấm cùng lúc không vượt giới hạn; 0 hàng cập nhật = hết lượt (`409`). Tải lại trang không hồi lượt.
+- Migration `20261009070000_audio_play_limit`.
 
 ### 4.6e `question_links` (Liên kết câu hỏi — tiết luyện tập)
 
@@ -668,6 +747,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - `question_id` (FK → `questions.id`, restrict)
   - `order` (`INT`, nullable): thứ tự câu trong tiết
   - `points` (`INT`, nullable): trọng số soạn đề (tuỳ chọn). **Không** dùng khi chấm Attempt — thang chấm = 100/N snapshot lúc start.
+  - `slot` (`QuestionSlot`, default `required`): vị trí câu trong đề — `required` (Bắt buộc) / `elective_1` / `elective_2` (Tự chọn). Chỉ câu `true_false_group` được đặt vào nhóm tự chọn.
 - Unique: `(lesson_id, question_id)`
 - Indexes: `(lesson_id)`, `(question_id)`
 - Table: `question_links` (via `@@map`)
@@ -690,6 +770,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 - `customer_care_service`: map staff chăm sóc theo học viên + % profit (mặc định chép từ `staff_info.customer_care_default_profit_percent` khi gán CSKH mới)
 - `staff_monthly_stats`: số liệu tổng hợp lương/việc theo tháng
 - `extra_allowances`: khoản trợ cấp bổ sung theo staff/tháng/role, có `amount`, `status`, `note`, `month`, `role_type`, và snapshot `tax_deduction_rate_percent`
+  - `student_id` (nullable, FK → `student_info.id`, `ON DELETE SET NULL`, index `extra_allowances_student_id_idx`): học sinh (khách hàng) của **Trợ cấp sale**. Chỉ có nghĩa khi `role_type = sale`; lúc tạo/sửa dòng sale, service bắt buộc `student_id` + `note` khác rỗng, role khác gửi `student_id` bị `400`. Không có CHECK constraint và không unique: xoá học sinh để lại dòng sale với `student_id = NULL` (UI hiện "Học sinh đã xoá"). Migration `20261023120000_sale_role_allowance`. ADR `docs/adr/2026-10-23-sale-allowance-on-extra-allowances.md`.
 - Index read path mới cho finance:
   - `bonuses`: composite `(staff_id, month, status)` cho payroll preview/listing theo nhân sự-tháng-trạng thái; composite `(status, date, staff_id)` cho batch thanh toán/lọc theo trạng thái-ngày
   - `wallet_transactions_history`: composite `(student_id, created_at)` cho feed lịch sử ví theo học sinh; composite `(type, created_at)` cho phân loại lịch sử theo loại giao dịch
@@ -830,12 +911,14 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - index read path hiện có: `created_at`, `updated_at`
 - `lesson_outputs`: sản phẩm bài học gắn optional với `lesson_task`
   - **PK format:** `UNILOT-[0-9a-f]{10}` — ví dụ `UNILOT-a1b2c3d4e5`. Đây là **mã định danh hệ thống** ngắn cho output bài học; migration `20260524110000_lesson_short_system_entity_ids` dùng `pgcrypto.gen_random_bytes(5)` để sinh ID mới cho dữ liệu hiện có, không cắt từ UUID cũ. Không còn dùng `@default(uuid())` trong Prisma cho PK này.
-  - field chính cho work tab / popup chi tiết output: `lesson_task_id`, `lesson_name`, `contest_uploaded`, `date`, `status`, `payment_status`, `staff_id`, `cost`, `difficulty_band`, `includes_test`, `includes_solution`, `includes_lecture_video`, `link`, `original_link`, `source`, `level`, `tags`
+  - field chính cho work tab / popup chi tiết output: `lesson_task_id`, `lesson_name`, `contest_uploaded`, `date`, `status`, `payment_status`, `staff_id`, `cost`, `difficulty_band`, `includes_test`, `includes_solution`, `includes_lecture_video`, `includes_theory_lecture`, `theory_lecture_links`, `link`, `original_link`, `source`, `level`, `tags`
   - `staff_id` là nhân sự nhận thanh toán / đứng tên output
   - `difficulty_band` (nullable enum `LessonOutputDifficultyBand`): bậc độ khó giáo án, nguồn sự thật để backend tự tính `cost`. Dòng legacy `NULL` giữ nguyên `cost` đã lưu.
   - `includes_test` / `includes_solution` / `includes_lecture_video`: cờ hạng mục đã làm, mặc định `false`; cộng vào `cost` theo bảng giá hằng số khi có bậc.
-  - `level` vẫn dùng để lọc tab Bài tập (`GET /lesson-work?level=`), không liên quan tới tiền.
-  - `cost` không nhận giá trị client; tạo/sửa có bậc thì backend ghi tổng theo bảng giá (tick trống → `0`).
+  - `includes_theory_lecture` (bool, mặc định `false`): hạng mục **Bài giảng lý thuyết**, giá theo `level` (Level 0 170k · 1 180k · 2 190k · 3 200k · 4/5 250k), **cộng dồn** với phần theo bậc. Tick thì bắt buộc có `level` 0–5; nếu cùng tick Test / Lời giải / Bài giảng video thì bắt buộc có bậc. Tick trên dòng chưa có bậc → `cost` tính lại theo bảng giá (bỏ mức cũ). Migration `20261103090000_lesson_output_theory_lecture`.
+  - `theory_lecture_links` (`text[]`, mặc định `{}`): link video bàn giao của Bài giảng lý thuyết; tick thì cần ≥1 link (http/https, tối đa 20, backend trim + gộp trùng); bỏ tick thì backend xoá về `{}`. Output chỉ có Bài giảng lý thuyết thì `link` (Link output) không bắt buộc trên form.
+  - `level` dùng để lọc tab Bài tập (`GET /lesson-work?level=`) và là nguồn giá riêng của Bài giảng lý thuyết; không ảnh hưởng giá ba hạng mục theo bậc.
+  - `cost` không nhận giá trị client; tạo/sửa có bậc hoặc có tick Bài giảng lý thuyết thì backend ghi tổng theo bảng giá (tick trống → `0`).
   - relation optional:
     - `lesson_task_id -> lesson_task.id`
     - `staff_id -> staff_info.id`
@@ -851,6 +934,18 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
     - `(payment_status, date, staff_id)`
     - `level`
     - `updated_at`
+
+### 4.10b Video bảo vệ (`protected_videos`)
+
+ADR: `docs/adr/2026-10-18-protected-video-via-unioj-sync.md`. Một dòng mỗi `youtube_id` xuất hiện ở `lessons.video_url` hoặc `sessions.recording_url` (không FK — nhiều tiết/buổi dùng chung video).
+
+- PK `youtube_id` (11 ký tự, parse bằng `extractYouTubeId` — `apps/api/src/protected-video/youtube-id.ts`).
+- `video_id`: ULID Video trong kho UniVideo do UNIOJ trả; null tới khi kho nhận job; không bị xoá khi UNIOJ trả null lần sau.
+- `status` (`ProtectedVideoStatus`): `pending` = LMS chưa gửi được sang UNIOJ; còn lại mirror UNIOJ `video-sync`.
+- `progress` (0–100), `error_code` (UNIOJ, chỉ khi `failed`), `last_sync_error` (lỗi LMS gọi UNIOJ), `queue_position` / `queue_total`.
+- `requested_at`: cron gửi `pending` theo thứ tự mới nhất trước; `synced_at`: lần gọi UNIOJ gần nhất (poll cũ nhất trước).
+- Index: `(status, requested_at)`, `(status, synced_at)`.
+- Migration `20261023100000_protected_videos` backfill mọi link YouTube hiện có thành `pending` (`requested_at` = `updated_at` mới nhất của tiết/buổi dùng link).
 
 ### 4.11 Contract notes for authoritative ID generation
 
@@ -879,7 +974,8 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 
 - `UserRole`: `admin | staff | student | guest`
 - `UserStatus`: `active | inactive | pending`
-- `StaffRole`: `admin | teacher | assistant | lesson_plan | lesson_plan_head | accountant | accountant_income | accountant_expense | communication | technical | customer_care`
+- `StaffRole`: `admin | teacher | assistant | sale | lesson_plan | lesson_plan_head | accountant | accountant_income | accountant_expense | communication | technical | customer_care | training`
+  - `sale` (migration `20261023120000_sale_role_allowance`): nhân sự Sale, ăn lương cứng, tự ghi **Trợ cấp sale** trên `extra_allowances`.
   - `accountant` là legacy value; migration `20260529100000_split_accountant_roles` thêm enum mới, rồi `20260529100001_migrate_accountant_role_data` chuyển dữ liệu hiện hữu sang `accountant_income`.
 - `StaffStatus`: `active | inactive`
 - `StudentStatus`: `active | inactive`
@@ -890,12 +986,17 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 - `ClassStatus`: `running | ended`
 - `ClassType`: **đã xoá** (migration `20260818090000_add_class_category`) — thay bằng bảng `courses` tuỳ chỉnh được, xem mục 4.4.0-cat.
 - `StudentClassStatus`: `active | inactive`
-- `AttendanceStatus`: `present | excused | absent`
+- `AttendanceStatus`: `present | excused | absent | trial` (`trial` thêm ở `20261012120000_attendance_trial_catch_up`)
+- `SessionProgressStatus`: `completed | partial | not_completed` — Tiến độ buổi (`sessions.progress_status`, `20261017090000_structured_session_review`)
+- `HomeworkQuality`: `passed | needs_revision | failed` — Chất lượng BTVN buổi trước (`attendance.homework_quality`, cùng migration)
 - `LessonKind`: `theory | practice` — phân loại tiết học: `theory` (lý thuyết, video + nội dung) hoặc `practice` (thực hành, thuần câu hỏi). Đổi tên enum từ `TopicKind` ở `20260921000000_rename_three_level_content`.
 - `ClassContentItemKind`: `lesson` — phân loại nội dung lớp học (đổi value từ `topic` cùng migration)
 - `ClassContentHiddenReason`: `manual`, `module_removed` — lý do ẩn mềm `class_content_items` (`20261005120000_class_module_order_and_hidden_reason`)
 - `ClassTimelineItemKind`: `session` | `class_survey` | `content_item` — loại mục trên timeline lớp (`class_timeline_items`)
-- `QuestionType`: `single_choice | essay` — phân loại câu hỏi trong ngân hàng câu hỏi
+- `QuestionType`: `single_choice | essay | true_false_group | true_false | fill_blank | ordering` — phân loại câu hỏi trong ngân hàng câu hỏi (`true_false_group`: nhóm 4 nhận định Đúng/Sai, hồ sơ IT; `true_false`: Câu Đúng/Sai một nhận định, hồ sơ JP; `fill_blank`: Câu điền vào ô trống, hồ sơ JP; `ordering`: Câu sắp xếp, hồ sơ JP)
+- `TrueFalseLabelStyle`: `maru_batsu | dung_sai | true_false` — kiểu nhãn Câu Đúng/Sai (JP)
+- `QuestionSlot`: `required | elective_1 | elective_2` — vị trí câu trong đề thực hành
+- `AttemptScoring`: `equal_100 | absolute_it` — thang điểm của Bài làm
 - `AttemptStatus`: `in_progress | submitted | timed_out` — trạng thái lượt làm bài
 
 ### Finance
@@ -909,6 +1010,7 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
 - `LessonTaskPriority`: `low | medium | high`
 - `LessonOutputStatus`: `pending | completed | cancelled`
 - `LessonOutputDifficultyBand`: `easy | medium | hard | very_hard | extreme` (nullable trên `lesson_outputs.difficulty_band`)
+- `ProtectedVideoStatus`: `pending | queued | downloading | transcoding | uploading | ready | failed` (`protected_videos.status`)
 
 ### Notification
 
@@ -930,6 +1032,8 @@ Bảng `user_devices` và `login_requests` được tạo bởi migration `20260
   - `staff_communication`
   - `staff_technical`
   - `staff_customer_care`
+  - `staff_training`
+  - `staff_sale` (migration `20261023120000_sale_role_allowance`)
 
 ---
 

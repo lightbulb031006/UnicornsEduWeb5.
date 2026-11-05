@@ -1,14 +1,22 @@
 "use client";
 
+import { attemptScoreLabel } from "@/lib/attempt-score";
+import { refetchIntervalUntilClose } from "@/lib/assignment-window";
+import { formatDateTime } from "@/lib/class.helpers";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Play, RotateCcw } from "lucide-react";
+import { ChevronLeft, Lock, Play, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { getAssignmentLobby, startAssignmentAttempt } from "@/lib/apis/attempt.api";
+import {
+  getAssignmentLobby,
+  startAssignmentAttempt,
+} from "@/lib/apis/attempt.api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { PrintExamButton } from "@/components/practice/PrintExamButton";
+import { useAppConfig } from "@/lib/hooks/useAppConfig";
 import { studentClassLessonsHref } from "@/lib/course-content-routes";
 
 function statusLabel(status: string) {
@@ -22,10 +30,17 @@ export default function StudentAssignmentLobbyPage() {
   const router = useRouter();
   const classId = params.id as string;
   const assignmentId = params.assignmentId as string;
+  const { data: appConfig } = useAppConfig();
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["assignment-lobby", classId, assignmentId],
     queryFn: () => getAssignmentLobby(classId, assignmentId),
+    // Tới hạn: khoá nút làm bài mà không cần F5.
+    refetchInterval: (q) =>
+      refetchIntervalUntilClose(
+        q.state.data?.closeAt,
+        q.state.data?.closed === false,
+      ),
   });
 
   const startMutation = useMutation({
@@ -90,29 +105,55 @@ export default function StudentAssignmentLobbyPage() {
           Thời lượng {data.durationMinutes} phút — đồng hồ chạy riêng từ lúc bạn
           bấm bắt đầu.
         </p>
-        <button
-          type="button"
-          onClick={() => startMutation.mutate()}
-          disabled={startMutation.isPending}
-          className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-text-inverse sm:w-auto"
-        >
-          {inProgress ? (
-            <>
-              <Play className="size-4" />
-              Tiếp tục làm bài
-            </>
-          ) : data.attempts.length > 0 ? (
-            <>
-              <RotateCcw className="size-4" />
-              Làm lại
-            </>
+        {data.closeAt ? (
+          <p className="mt-1 text-sm text-text-muted">
+            Hạn làm bài:{" "}
+            <span className="font-medium text-text-primary">
+              {formatDateTime(data.closeAt)}
+            </span>
+          </p>
+        ) : null}
+        <p className="mt-1 text-sm text-text-muted">
+          Điểm tính theo lượt đã chấm gần nhất — làm lại sẽ thay điểm cũ.
+        </p>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+          {data.closed && !inProgress ? (
+            <p className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-border-default bg-bg-tertiary px-4 text-sm font-medium text-text-secondary sm:w-auto">
+              <Lock className="size-4" aria-hidden />
+              Đã hết hạn làm bài
+            </p>
           ) : (
-            <>
-              <Play className="size-4" />
-              Bắt đầu làm bài
-            </>
+            <button
+              type="button"
+              onClick={() => startMutation.mutate()}
+              disabled={startMutation.isPending}
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-text-inverse sm:w-auto"
+            >
+              {inProgress ? (
+                <>
+                  <Play className="size-4" />
+                  Tiếp tục làm bài
+                </>
+              ) : data.attempts.length > 0 ? (
+                <>
+                  <RotateCcw className="size-4" />
+                  Làm lại
+                </>
+              ) : (
+                <>
+                  <Play className="size-4" />
+                  Bắt đầu làm bài
+                </>
+              )}
+            </button>
           )}
-        </button>
+          {appConfig?.examPrint ? (
+            <PrintExamButton
+              target={{ kind: "student-assignment", classId, assignmentId }}
+              className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-border-default bg-bg-surface px-4 text-sm font-semibold text-text-primary hover:bg-bg-secondary disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+            />
+          ) : null}
+        </div>
       </header>
 
       <Card>
@@ -134,11 +175,7 @@ export default function StudentAssignmentLobbyPage() {
                       {statusLabel(att.status)}
                     </span>
                     <span className="text-xs text-text-muted">
-                      {att.autoGradedScore != null
-                        ? `${att.autoGradedScore}/${att.autoGradedMax} MCQ`
-                        : att.hasUngradedEssay
-                          ? "Chờ chấm tự luận"
-                          : "—"}
+                      {attemptScoreLabel(att)}
                     </span>
                   </Link>
                 </li>

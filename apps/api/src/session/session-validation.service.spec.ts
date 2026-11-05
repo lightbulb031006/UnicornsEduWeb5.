@@ -1,5 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
-import { AttendanceStatus } from '../../generated/enums';
+import {
+  AttendanceStatus,
+  HomeworkQuality,
+  SessionProgressStatus,
+} from '../../generated/enums';
+import { lmsProfileConfig } from '../lms-profile/lms-profile';
+import { LmsProfileService } from '../lms-profile/lms-profile.service';
 import { SessionValidationService } from './session-validation.service';
 
 describe('SessionValidationService', () => {
@@ -11,9 +17,10 @@ describe('SessionValidationService', () => {
 
   it('accepts rich text longer than 500 HTML characters with short plain text', () => {
     expect(() =>
-      service.validateAttendanceNotes(
+      service.validateAttendanceItems(
         [
           {
+            studentId: 'student-1',
             status: AttendanceStatus.present,
             notes: '<p>' + '<strong>ok</strong>'.repeat(30) + '</p>',
           },
@@ -27,8 +34,8 @@ describe('SessionValidationService', () => {
     'rejects notes above 500 plain-text characters for %s',
     (status) => {
       expect(() =>
-        service.validateAttendanceNotes(
-          [{ status, notes: '<p>' + 'x'.repeat(501) + '</p>' }],
+        service.validateAttendanceItems(
+          [{ studentId: 'student-1', status, notes: '<p>' + 'x'.repeat(501) + '</p>' }],
           { required: true },
         ),
       ).toThrow('Ghi chú điểm danh tối đa 500 ký tự.');
@@ -66,6 +73,40 @@ describe('SessionValidationService', () => {
         { required: true },
       ),
     ).toThrow(new BadRequestException('attendance.tuitionFee không hợp lệ.'));
+  });
+
+  it('rejects excused attendance without a reason', () => {
+    expect(() =>
+      service.validateAttendanceItems(
+        [
+          {
+            studentId: 'student-1',
+            status: AttendanceStatus.excused,
+            notes: '   ',
+          },
+        ],
+        { required: true },
+      ),
+    ).toThrow(
+      new BadRequestException(
+        'Học sinh nghỉ phép phải có lý do nghỉ (attendance.notes).',
+      ),
+    );
+  });
+
+  it('accepts excused attendance with a reason', () => {
+    expect(() =>
+      service.validateAttendanceItems(
+        [
+          {
+            studentId: 'student-1',
+            status: AttendanceStatus.excused,
+            notes: 'Ốm',
+          },
+        ],
+        { required: true },
+      ),
+    ).not.toThrow();
   });
 
   it('uses default tuition when present attendance has no override', () => {
@@ -112,10 +153,21 @@ describe('SessionValidationService', () => {
     ).toBe(131250);
   });
 
-  it('treats custom per-session 0 as inherit (falls back to class tuition)', () => {
+  it('treats custom per-session 0 as free (does not fall back to class tuition)', () => {
     expect(
       service.resolveDefaultStudentTuitionPerSession({
         customTuitionPerSession: 0,
+        classTuitionPerSession: 180000,
+        classTuitionPackageTotal: null,
+        classTuitionPackageSession: null,
+      }),
+    ).toBe(0);
+  });
+
+  it('treats null custom per-session as inherit (falls back to class tuition)', () => {
+    expect(
+      service.resolveDefaultStudentTuitionPerSession({
+        customTuitionPerSession: null,
         classTuitionPerSession: 180000,
         classTuitionPackageTotal: null,
         classTuitionPackageSession: null,
@@ -222,46 +274,261 @@ describe('SessionValidationService', () => {
     );
   });
 
-  it('requires notes for present and excused attendance', () => {
-    expect(() =>
-      service.validateAttendanceNotes(
-        [
-          { status: AttendanceStatus.present, notes: '  ' },
-          { status: AttendanceStatus.absent, notes: null },
-        ],
-        { required: false },
-      ),
-    ).toThrow(
-      new BadRequestException(
-        'Nhận xét học sinh có mặt/nghỉ phép là bắt buộc.',
-      ),
-    );
+  describe('resolveSessionReviewFields', () => {
+    const base = {
+      progressStatus: SessionProgressStatus.completed,
+      nextSessionPlan: '  Ôn tập vòng lặp ',
+    };
+
+    it('requires progress status', () => {
+      expect(() =>
+        service.resolveSessionReviewFields({ nextSessionPlan: 'x' }),
+      ).toThrow(new BadRequestException('Tiến độ buổi là bắt buộc.'));
+    });
+
+    it('clears done/remaining and unticked test/retest fields', () => {
+      const result = service.resolveSessionReviewFields({
+        ...base,
+        progressDone: 'a',
+        progressRemaining: 'b',
+        hasInClassTest: false,
+        inClassTestContent: 'stale',
+        inClassTestTotal: 10,
+        hasRetest: false,
+        retestContent: 'stale',
+      });
+      expect(result).toMatchObject({
+        progressDone: null,
+        progressRemaining: null,
+        inClassTestContent: null,
+        inClassTestTotal: null,
+        retestContent: null,
+        nextSessionPlan: 'Ôn tập vòng lặp',
+        homeworkDueAt: null,
+      });
+    });
+
+    it('requires both done and remaining for partial progress', () => {
+      expect(() =>
+        service.resolveSessionReviewFields({
+          ...base,
+          progressStatus: SessionProgressStatus.partial,
+          progressRemaining: 'Bài 3 – hết giờ',
+        }),
+      ).toThrow(new BadRequestException('Tiến độ «Đã xong» là bắt buộc.'));
+    });
+
+    it('allows not_completed without done but requires remaining', () => {
+      expect(() =>
+        service.resolveSessionReviewFields({
+          ...base,
+          progressStatus: SessionProgressStatus.not_completed,
+        }),
+      ).toThrow(new BadRequestException('Tiến độ «Chưa xong» là bắt buộc.'));
+    });
+
+    it('requires test content and total ≥ 1 when ticked', () => {
+      expect(() =>
+        service.resolveSessionReviewFields({
+          ...base,
+          hasInClassTest: true,
+          inClassTestContent: 'Từ vựng N5',
+          inClassTestTotal: 0,
+        }),
+      ).toThrow(new BadRequestException('Tổng số câu kiểm tra phải ≥ 1.'));
+    });
+
+    it('requires next session plan and retest content when ticked', () => {
+      expect(() =>
+        service.resolveSessionReviewFields({
+          progressStatus: SessionProgressStatus.completed,
+        }),
+      ).toThrow(new BadRequestException('Nội dung buổi sau là bắt buộc.'));
+      expect(() =>
+        service.resolveSessionReviewFields({ ...base, hasRetest: true }),
+      ).toThrow(new BadRequestException('Nội dung kiểm tra lại là bắt buộc.'));
+    });
   });
 
-  it('accepts absent attendance without notes', () => {
-    expect(() =>
-      service.validateAttendanceNotes(
-        [{ status: AttendanceStatus.absent, notes: null }],
-        { required: true },
-      ),
-    ).not.toThrow();
-  });
+  describe('resolveAttendanceReview', () => {
+    const noTest = { hasInClassTest: false, inClassTestTotal: null };
+    const filled = {
+      strengths: 'Tập trung',
+      improvements: 'Chữ viết',
+      homeworkQuality: HomeworkQuality.passed,
+      homeworkComment: 'Làm đủ',
+    };
 
-  it('includes student name in attendance notes validation error when provided', () => {
-    expect(() =>
-      service.validateAttendanceNotes(
-        [
+    it('ignores and clears review for excused/absent', () => {
+      expect(
+        service.resolveAttendanceReview(
+          { status: AttendanceStatus.absent, strengths: 'x' },
+          noTest,
+        ),
+      ).toEqual({
+        testCorrectCount: null,
+        testComment: null,
+        strengths: null,
+        improvements: null,
+        homeworkQuality: null,
+        homeworkComment: null,
+      });
+    });
+
+    it('requires homework quality for present, with student name', () => {
+      expect(() =>
+        service.resolveAttendanceReview(
           {
-            status: AttendanceStatus.excused,
-            notes: '<p></p>',
+            status: AttendanceStatus.present,
             studentFullName: 'Nguyễn Văn A',
+            ...filled,
+            homeworkQuality: null,
           },
-        ],
-        { required: false },
-      ),
-    ).toThrow(
-      new BadRequestException('Nhận xét học sinh Nguyễn Văn A là bắt buộc.'),
-    );
+          noTest,
+        ),
+      ).toThrow(
+        new BadRequestException(
+          'Chất lượng BTVN của học sinh Nguyễn Văn A là bắt buộc.',
+        ),
+      );
+    });
+
+    it('drops homework fields for trial students', () => {
+      const result = service.resolveAttendanceReview(
+        { status: AttendanceStatus.trial, ...filled },
+        noTest,
+      );
+      expect(result.homeworkQuality).toBeNull();
+      expect(result.homeworkComment).toBeNull();
+      expect(result.strengths).toBe('Tập trung');
+    });
+
+    it('bounds correct count by test total', () => {
+      expect(() =>
+        service.resolveAttendanceReview(
+          {
+            status: AttendanceStatus.present,
+            ...filled,
+            testCorrectCount: 11,
+            testComment: 'ok',
+          },
+          { hasInClassTest: true, inClassTestTotal: 10 },
+        ),
+      ).toThrow(new BadRequestException('Số câu đúng phải trong khoảng 0–10.'));
+    });
+  });
+
+  describe('skipRequired (admin/trợ lí/kế toán sửa buổi)', () => {
+    const skip = { skipRequired: true };
+
+    it('saves an empty session review as nulls', () => {
+      expect(
+        service.resolveSessionReviewFields({ hasRetest: true }, skip),
+      ).toMatchObject({
+        progressStatus: null,
+        progressDone: null,
+        progressRemaining: null,
+        nextSessionPlan: null,
+        hasRetest: true,
+        retestContent: null,
+      });
+    });
+
+    it('still rejects an invalid test total or homework due date', () => {
+      expect(() =>
+        service.resolveSessionReviewFields(
+          { hasInClassTest: true, inClassTestTotal: 0 },
+          skip,
+        ),
+      ).toThrow(new BadRequestException('Tổng số câu kiểm tra phải ≥ 1.'));
+      expect(() =>
+        service.resolveSessionReviewFields(
+          { homeworkDueAt: 'not-a-date' },
+          skip,
+        ),
+      ).toThrow(new BadRequestException('Hạn BTVN không hợp lệ.'));
+    });
+
+    it('saves an empty student review as nulls', () => {
+      expect(
+        service.resolveAttendanceReview(
+          { status: AttendanceStatus.present },
+          { hasInClassTest: true, inClassTestTotal: 10 },
+          skip,
+        ),
+      ).toEqual({
+        testCorrectCount: null,
+        testComment: null,
+        strengths: null,
+        improvements: null,
+        homeworkQuality: null,
+        homeworkComment: null,
+      });
+    });
+
+    it('still rejects a correct count above the test total', () => {
+      expect(() =>
+        service.resolveAttendanceReview(
+          { status: AttendanceStatus.present, testCorrectCount: 11 },
+          { hasInClassTest: true, inClassTestTotal: 10 },
+          skip,
+        ),
+      ).toThrow(BadRequestException);
+    });
+
+    it('allows an excused student without a reason', () => {
+      expect(() =>
+        service.validateAttendanceItems(
+          [{ studentId: 's1', status: AttendanceStatus.excused }],
+          { required: false, ...skip },
+        ),
+      ).not.toThrow();
+      expect(() =>
+        service.validateAttendanceItems(
+          [{ studentId: 's1', status: AttendanceStatus.excused }],
+          { required: false },
+        ),
+      ).toThrow(BadRequestException);
+    });
+  });
+
+  describe('instance IT (không có Kiểm tra trong buổi)', () => {
+    const itService = () =>
+      new SessionValidationService({
+        config: lmsProfileConfig('it'),
+      } as LmsProfileService);
+
+    it('drops in-class test fields even when ticked', () => {
+      const result = itService().resolveSessionReviewFields({
+        progressStatus: SessionProgressStatus.completed,
+        nextSessionPlan: 'Ôn tập',
+        hasInClassTest: true,
+        inClassTestContent: 'Đề 1',
+        inClassTestTotal: 10,
+      });
+      expect(result).toMatchObject({
+        hasInClassTest: false,
+        inClassTestContent: null,
+        inClassTestTotal: null,
+      });
+    });
+
+    it('skips per-student test score on stored test sessions', () => {
+      const result = itService().resolveAttendanceReview(
+        {
+          status: AttendanceStatus.present,
+          strengths: 'Tốt',
+          improvements: 'Chữ',
+          homeworkQuality: HomeworkQuality.passed,
+          homeworkComment: 'Đủ',
+        },
+        { hasInClassTest: true, inClassTestTotal: 10 },
+      );
+      expect(result).toMatchObject({
+        testCorrectCount: null,
+        testComment: null,
+      });
+    });
   });
 
   it('requires startTime and endTime', () => {

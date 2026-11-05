@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ContentImageInterceptor } from './question/content-image.interceptor';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
@@ -18,6 +19,7 @@ import { CodeforcesModule } from './codeforces/codeforces.module';
 import { CfProblemTutorialModule } from './cf-problem-tutorial/cf-problem-tutorial.module';
 import { SessionModule } from './session/session.module';
 import { UniojModule } from './unioj/unioj.module';
+import { ProtectedVideoModule } from './protected-video/protected-video.module';
 import { CustomerCareModule } from './customer-care/customer-care.module';
 import { AssistantCommissionModule } from './assistant-commission/assistant-commission.module';
 import { TrainingManagerModule } from './training-manager/training-manager.module';
@@ -37,8 +39,10 @@ import { StudentGalleryModule } from './student-gallery/student-gallery.module';
 import { DeviceModule } from './device/device.module';
 import { QuestionModule } from './question/question.module';
 import { AttemptModule } from './attempt/attempt.module';
+import { ExamPrintModule } from './exam-print/exam-print.module';
 import { ClassTimelineModule } from './class-timeline/class-timeline.module';
 import { CourseContentModule } from './course-content/course-content.module';
+import { LmsProfileModule } from './lms-profile/lms-profile.module';
 
 function parsePositiveIntegerEnv(
   value: string | undefined,
@@ -84,6 +88,7 @@ function parsePositiveIntegerEnv(
     CfProblemTutorialModule,
     SessionModule,
     UniojModule,
+    ProtectedVideoModule,
     CustomerCareModule,
     AssistantCommissionModule,
     TrainingManagerModule,
@@ -103,7 +108,9 @@ function parsePositiveIntegerEnv(
     DeviceModule,
     QuestionModule,
     CourseContentModule,
+    LmsProfileModule,
     AttemptModule,
+    ExamPrintModule,
     ClassTimelineModule,
   ],
   controllers: [AppController],
@@ -113,6 +120,7 @@ function parsePositiveIntegerEnv(
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_INTERCEPTOR, useClass: ContentImageInterceptor },
   ],
 })
 export class AppModule {}

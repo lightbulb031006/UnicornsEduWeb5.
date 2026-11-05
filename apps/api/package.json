@@ -71,6 +71,7 @@
     "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.3",
+    "katex": "^0.16.38",
     "nodemailer": "^8.0.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
@@ -149,6 +150,9 @@
     "testEnvironment": "node",
     "transformIgnorePatterns": [
       "node_modules/(?!.*@nestjs[+/]schedule)"
+    ],
+    "setupFiles": [
+      "<rootDir>/../test/jest-env.setup.ts"
     ]
   },
   "prisma": {

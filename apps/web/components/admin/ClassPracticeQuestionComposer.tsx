@@ -1,10 +1,12 @@
 "use client";
 
+import { questionTypeLabel } from "@/dtos/question.dto";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useDebounce } from "use-debounce";
 import * as questionApi from "@/lib/apis/question.api";
+import { useAppConfig } from "@/lib/hooks/useAppConfig";
 import { useCourseModules } from "@/lib/hooks/useCourseModules";
 import { useCourseDifficultyLevels } from "@/lib/hooks/useCourseDifficultyLevels";
 import { questionKeys } from "@/lib/query-keys";
@@ -15,9 +17,12 @@ import QuestionFormFields, {
   emptyQuestionFormValue,
   type QuestionFormValue,
 } from "@/components/admin/question/QuestionFormFields";
+import {
+  questionFormToPayload,
+  type QuestionFormPayload,
+} from "@/components/admin/question/question-form-payload";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Question } from "@/dtos/question.dto";
-import { QuestionTypeDto } from "@/dtos/question.dto";
 import {
   CLASS_QUESTION_SOURCE_LABEL,
   type ClassQuestionDraft,
@@ -68,29 +73,19 @@ export default function ClassPracticeQuestionComposer({
         source: "bank",
         questionId: q.id,
         content: q.content,
-        typeLabel: q.type === "single_choice" ? "Trắc nghiệm" : "Tự luận",
+        typeLabel: questionTypeLabel(q.type),
       },
     ]);
   };
 
-  const addAuthored = (payload: {
-    moduleId: string;
-    difficultyLevelId: string;
-    type: QuestionTypeDto;
-    content: string;
-    options?: string[];
-    correctIndex?: number;
-    explanation?: string;
-    answerGuide?: string;
-  }) => {
+  const addAuthored = (payload: QuestionFormPayload) => {
     onChange([
       ...drafts,
       {
         key: `authored-${crypto.randomUUID()}`,
         source: "authored",
         content: payload.content,
-        typeLabel:
-          payload.type === "single_choice" ? "Trắc nghiệm" : "Tự luận",
+        typeLabel: questionTypeLabel(payload.type),
         createPayload: {
           courseId,
           moduleId: payload.moduleId,
@@ -99,6 +94,7 @@ export default function ClassPracticeQuestionComposer({
           content: payload.content,
           options: payload.options,
           correctIndex: payload.correctIndex,
+          tfAnswerKey: payload.tfAnswerKey,
           explanation: payload.explanation,
           answerGuide: payload.answerGuide,
         },
@@ -119,7 +115,7 @@ export default function ClassPracticeQuestionComposer({
         source: "ai",
         questionId: q.id,
         content: q.content,
-        typeLabel: q.type === "single_choice" ? "Trắc nghiệm" : "Tự luận",
+        typeLabel: questionTypeLabel(q.type),
       });
     }
     onChange(next);
@@ -324,60 +320,23 @@ function AuthorForm({
   onAdd,
 }: {
   courseId: string;
-  onAdd: (payload: {
-    moduleId: string;
-    difficultyLevelId: string;
-    type: QuestionTypeDto;
-    content: string;
-    options?: string[];
-    correctIndex?: number;
-    explanation?: string;
-    answerGuide?: string;
-  }) => void;
+  onAdd: (payload: QuestionFormPayload) => void;
 }) {
+  const { data: appConfig } = useAppConfig();
   const [form, setForm] = useState<QuestionFormValue>(emptyQuestionFormValue);
   const patchForm = (patch: Partial<QuestionFormValue>) =>
     setForm((prev) => ({ ...prev, ...patch }));
 
   const submit = () => {
-    if (!form.moduleId || !form.difficultyLevelId || !form.content.trim()) {
-      toast.error("Điền chuyên đề, mức khó và nội dung câu hỏi");
-      return;
-    }
-    if (form.type === QuestionTypeDto.single_choice) {
-      const options = form.options.map((o) => o.trim()).filter(Boolean);
-      if (options.length < 2 || options.length > 6) {
-        toast.error("Trắc nghiệm cần 2–6 phương án");
-        return;
-      }
-      if (
-        form.correctIndex < 0 ||
-        form.correctIndex >= options.length ||
-        !form.options[form.correctIndex]?.trim()
-      ) {
-        toast.error("Đáp án đúng không hợp lệ");
-        return;
-      }
-      onAdd({
-        moduleId: form.moduleId,
-        difficultyLevelId: form.difficultyLevelId,
-        type: form.type,
-        content: form.content.trim(),
-        options,
-        correctIndex: form.correctIndex,
-        explanation: form.explanation.trim() || undefined,
-        answerGuide: undefined,
-      });
-      return;
-    }
-    onAdd({
-      moduleId: form.moduleId,
-      difficultyLevelId: form.difficultyLevelId,
-      type: form.type,
-      content: form.content.trim(),
-      explanation: form.explanation.trim() || undefined,
-      answerGuide: form.answerGuide.trim() || undefined,
+    const result = questionFormToPayload(form, {
+      requireSkills: appConfig?.questionSkills,
+      essayInputSizes: appConfig?.essayInputSizes,
     });
+    if ("error" in result) {
+      toast.error(result.error);
+      return;
+    }
+    onAdd(result.payload);
   };
 
   return (

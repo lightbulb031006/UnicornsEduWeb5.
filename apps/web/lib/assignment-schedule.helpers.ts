@@ -1,6 +1,7 @@
 import { currentTimePrefillValue } from "@/components/ui/time-input.helpers";
+import type { AssignmentCloseAtDraft } from "@/dtos/class-content.dto";
 
-/** Matches BE `PRACTICE_DURATION_*` on class content lần giao. */
+/** Matches BE `PRACTICE_DURATION_*` on practice lesson duration. */
 export const ASSIGNMENT_DURATION_MIN_MINUTES = 1;
 export const ASSIGNMENT_DURATION_MAX_MINUTES = 720;
 
@@ -26,7 +27,6 @@ export function defaultAssignmentSchedule() {
   return {
     openDate: todayDateValue(),
     openTime: currentTimePrefillValue(),
-    durationMinutes: "60",
   };
 }
 
@@ -70,4 +70,26 @@ export function isOpenAtPairPartial(date: string, time: string): boolean {
   const hasDate = Boolean(date.trim());
   const hasTime = Boolean(time.trim());
   return hasDate !== hasTime;
+}
+
+/** Draft hạn làm bài từ `closeAt` đã lưu (dialog sửa lần giao). */
+export function closeAtDraftFromIso(
+  iso: string | null,
+): AssignmentCloseAtDraft {
+  if (!iso) return { mode: "none", date: "", time: "" };
+  const { date, time } = fromOpenAtIso(iso);
+  return { mode: "custom", date, time };
+}
+
+/**
+ * Giá trị `closeAt` gửi API: `undefined` = để server lấy hạn lớp,
+ * `null` = không có hạn, ISO = hạn tự chọn. Tự chọn mà thiếu ngày/giờ → `false` (chưa hợp lệ).
+ */
+export function closeAtPayload(
+  draft: AssignmentCloseAtDraft,
+): string | null | undefined | false {
+  if (draft.mode === "class") return undefined;
+  if (draft.mode === "none") return null;
+  if (!isOpenAtPairComplete(draft.date, draft.time)) return false;
+  return toOpenAtIso(draft.date, draft.time);
 }

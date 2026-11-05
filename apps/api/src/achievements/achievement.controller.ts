@@ -165,6 +165,29 @@ export class StaffAchievementController {
     return this.achievementService.reorderStaffAchievements(staffId, body);
   }
 
+  @Put(':achievementId/highlight')
+  @ApiOperation({
+    summary: 'Set staff highlight achievement (thành tích nổi bật)',
+    description:
+      'Đánh dấu sao một thành tích: bỏ sao cũ, đưa thành tích này lên đầu danh sách.',
+  })
+  @ApiParam({ name: 'staffId', description: 'Staff id (UNISTAFF-…)' })
+  @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách thành tích sau khi đổi, thành tích nổi bật đứng đầu.',
+  })
+  @ApiResponse({ status: 404, description: 'Achievement not found.' })
+  setHighlight(
+    @Param('staffId', new ParseStaffIdPipe()) staffId: string,
+    @Param('achievementId', ParseUUIDPipe) achievementId: string,
+  ) {
+    return this.achievementService.setStaffHighlightAchievement(
+      staffId,
+      achievementId,
+    );
+  }
+
   @Post(':achievementId/image')
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(imageUploadInterceptor)
@@ -466,6 +489,29 @@ export class MyAchievementController {
   ) {
     const staffId = await this.staffIdFor(user);
     return this.achievementService.reorderStaffAchievements(staffId, body);
+  }
+
+  @Put(':achievementId/highlight')
+  @ApiOperation({
+    summary: 'Set my highlight achievement (thành tích nổi bật)',
+    description:
+      'Đánh dấu sao một thành tích: bỏ sao cũ, đưa thành tích này lên đầu danh sách.',
+  })
+  @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách thành tích sau khi đổi, thành tích nổi bật đứng đầu.',
+  })
+  @ApiResponse({ status: 404, description: 'Achievement not found.' })
+  async setHighlight(
+    @CurrentUser() user: JwtPayload,
+    @Param('achievementId', ParseUUIDPipe) achievementId: string,
+  ) {
+    const staffId = await this.staffIdFor(user);
+    return this.achievementService.setStaffHighlightAchievement(
+      staffId,
+      achievementId,
+    );
   }
 
   @Post(':achievementId/image')

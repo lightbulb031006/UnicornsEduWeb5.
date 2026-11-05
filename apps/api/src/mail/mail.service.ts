@@ -26,6 +26,10 @@ import {
   type EmailVerificationEmailProps,
 } from './templates/email-verification.email';
 import {
+  LoginVerificationEmail,
+  type LoginVerificationEmailProps,
+} from './templates/login-verification.email';
+import {
   PasswordResetEmail,
   type PasswordResetEmailProps,
 } from './templates/password-reset.email';
@@ -38,6 +42,8 @@ import {
 /** Khớp `AuthService.verifyTokenExpiresIn` (giây) / 3600 */
 const EMAIL_VERIFICATION_EXPIRES_HOURS = 24;
 const FORGOT_PASSWORD_EXPIRES_HOURS = 24 * 7;
+/** Khớp `LOGIN_REQUEST_EXPIRY_MS` trong `auth/user-device.service.ts`. */
+const LOGIN_VERIFICATION_EXPIRES_MINUTES = 10;
 
 interface SmtpError {
   code?: string;
@@ -91,7 +97,7 @@ const RECEIPT_INLINE_IMAGES = [
     cid: 'receipt-logo-math@unicorns-edu',
   },
 ] as const;
-const AUTH_BRAND_LOGO_CID = 'auth-brand-logo@unicorns-edu';
+const BRAND_LOGO_CID = 'brand-logo@unicorns-edu';
 
 type ReceiptImageSourceProps = Pick<TuitionReceiptEmailProps, 'logoMathSrc'>;
 
@@ -138,12 +144,13 @@ export class MailService {
     }
     const frontendUrl = this.getEmailFrontendUrl(requestOrigin);
     const verificationLink = `${frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
-    const inlineLogo = this.buildAuthBrandLogoInlineImage();
+    const inlineLogo = this.buildBrandLogoInlineImage();
     const props: EmailVerificationEmailProps = {
       recipientEmail: email,
       verificationLink,
       expiresInHours: EMAIL_VERIFICATION_EXPIRES_HOURS,
       logoSrc: inlineLogo.logoSrc,
+      siteUrl: frontendUrl,
     };
 
     const html = await render(
@@ -153,7 +160,7 @@ export class MailService {
       ),
     );
     const text = [
-      'Xác thực email tài khoản Unicorns Edu',
+      'Xác thực email tài khoản UniEdu',
       `Email: ${props.recipientEmail}`,
       `Liên kết xác thực (hiệu lực ${props.expiresInHours} giờ):`,
       props.verificationLink,
@@ -164,7 +171,7 @@ export class MailService {
     await this.sendMailOrThrow({
       from: this.mailFrom,
       to: email,
-      subject: '[Unicorns Edu] Xác thực email tài khoản',
+      subject: '[UniEdu] Xác thực email tài khoản',
       text,
       html,
       ...(inlineLogo.attachments.length
@@ -185,12 +192,13 @@ export class MailService {
     }
     const frontendUrl = this.getEmailFrontendUrl(requestOrigin);
     const forgotPasswordLink = `${frontendUrl}/auth/reset-password?token=${encodeURIComponent(token)}`;
-    const inlineLogo = this.buildAuthBrandLogoInlineImage();
+    const inlineLogo = this.buildBrandLogoInlineImage();
     const props: PasswordResetEmailProps = {
       recipientEmail: email,
       resetLink: forgotPasswordLink,
       expiresInHours: FORGOT_PASSWORD_EXPIRES_HOURS,
       logoSrc: inlineLogo.logoSrc,
+      siteUrl: frontendUrl,
     };
 
     const html = await render(
@@ -200,7 +208,7 @@ export class MailService {
       ),
     );
     const text = [
-      'Đổi mật khẩu tài khoản Unicorns Edu',
+      'Đổi mật khẩu tài khoản UniEdu',
       `Email: ${props.recipientEmail}`,
       `Liên kết đổi mật khẩu (hiệu lực ${props.expiresInHours} giờ):`,
       props.resetLink,
@@ -211,7 +219,7 @@ export class MailService {
     await this.sendMailOrThrow({
       from: this.mailFrom,
       to: email,
-      subject: '[Unicorns Edu] Đổi mật khẩu tài khoản',
+      subject: '[UniEdu] Đổi mật khẩu tài khoản',
       text,
       html,
       ...(inlineLogo.attachments.length
@@ -229,25 +237,26 @@ export class MailService {
         'Chưa cấu hình gửi email (SMTP). Vui lòng cấu hình SMTP trong .env hoặc liên hệ quản trị viên.',
       );
     }
-    const inlineLogo = this.buildAuthBrandLogoInlineImage();
-    const html = [
-      '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">',
-      inlineLogo.logoSrc
-        ? `<img src="${inlineLogo.logoSrc}" alt="Unicorns Edu" style="height: 40px; margin-bottom: 20px;" />`
-        : '',
-      '<h2 style="color: #1a1a2e;">Xác minh đăng nhập</h2>',
-      '<p>Bạn đã yêu cầu đăng nhập vào tài khoản Unicorns Edu.</p>',
-      '<p>Bấm nút bên dưới để xác minh đăng nhập:</p>',
-      `<a href="${verifyUrl}" style="display: inline-block; padding: 12px 24px; background-color: #6c63ff; color: white; text-decoration: none; border-radius: 6px; margin: 16px 0;">Xác minh đăng nhập</a>`,
-      '<p style="color: #666; font-size: 14px;">Liên kết hết hạn sau 10 phút.</p>',
-      '<p style="color: #666; font-size: 14px;">Nếu bạn không yêu cầu đăng nhập, hãy bỏ qua email này.</p>',
-      '</div>',
-    ].join('\n');
+    const inlineLogo = this.buildBrandLogoInlineImage();
+    const props: LoginVerificationEmailProps = {
+      recipientEmail: email,
+      verifyUrl,
+      expiresInMinutes: LOGIN_VERIFICATION_EXPIRES_MINUTES,
+      requestedAt: this.formatNowVNDateTime(),
+      logoSrc: inlineLogo.logoSrc,
+      siteUrl: this.getOriginOf(verifyUrl),
+    };
+    const html = await render(
+      React.createElement(
+        LoginVerificationEmail as React.FC<LoginVerificationEmailProps>,
+        props,
+      ),
+    );
     const text = [
-      'Xác minh đăng nhập Unicorns Edu',
+      'Xác minh đăng nhập UniEdu',
       '',
-      'Bạn đã yêu cầu đăng nhập vào tài khoản Unicorns Edu.',
-      `Liên kết xác minh (hiệu lực 10 phút):`,
+      'Bạn đã yêu cầu đăng nhập vào tài khoản UniEdu.',
+      `Liên kết xác minh (hiệu lực ${LOGIN_VERIFICATION_EXPIRES_MINUTES} phút):`,
       verifyUrl,
       '',
       'Nếu bạn không yêu cầu đăng nhập, hãy bỏ qua email này.',
@@ -256,7 +265,7 @@ export class MailService {
     await this.sendMailOrThrow({
       from: this.mailFrom,
       to: email,
-      subject: '[Unicorns Edu] Xác minh đăng nhập',
+      subject: '[UniEdu] Xác minh đăng nhập',
       text,
       html,
       ...(inlineLogo.attachments.length
@@ -278,6 +287,7 @@ export class MailService {
       hour: '2-digit',
       minute: '2-digit',
     });
+    const inlineLogo = this.buildBrandLogoInlineImage();
     const props: DirectTopUpApprovalEmailProps = {
       approvalUrl,
       studentName: this.normalizeReceiptText(params.studentName) || 'Học sinh',
@@ -287,6 +297,8 @@ export class MailService {
       requestedByEmail:
         this.normalizeReceiptText(params.requestedByEmail) || null,
       expiresAt,
+      logoSrc: inlineLogo.logoSrc,
+      siteUrl: frontendUrl,
     };
 
     const html = await render(
@@ -308,9 +320,12 @@ export class MailService {
     await this.sendMailOrThrow({
       from: this.mailFrom,
       to: params.to,
-      subject: `[Unicorns Edu] Xác nhận nạp thẳng — ${props.studentName} — ${this.formatVnd(props.amount)} VND`,
+      subject: `[UniEdu] Xác nhận nạp thẳng — ${props.studentName} — ${this.formatVnd(props.amount)} VND`,
       text,
       html,
+      ...(inlineLogo.attachments.length
+        ? { attachments: inlineLogo.attachments }
+        : {}),
     });
   }
 
@@ -369,15 +384,22 @@ export class MailService {
     const imageDataUris = this.receiptAssetsService.getReceiptImageDataUris();
     const pdfProps: TuitionReceiptEmailProps = {
       ...receiptProps,
+      variant: 'pdf',
       logoMathSrc: imageDataUris?.logoMath ?? null,
     };
 
     const pdfHtml = await this.renderReceiptHtml(pdfProps);
     const pdfBuffer = await this.receiptPdfService.renderToPdf(pdfHtml);
     const inlineImages = this.buildReceiptInlineImages(imageDataUris);
+    const brandLogo = this.buildBrandLogoInlineImage();
     const emailProps: TuitionReceiptEmailProps = {
       ...receiptProps,
       ...inlineImages.props,
+      variant: 'email',
+      brandLogoSrc: brandLogo.logoSrc,
+      parentName: parentName || null,
+      hasPdfAttachment: Boolean(pdfBuffer),
+      siteUrl: this.tryGetEmailFrontendUrl(),
     };
     const html = await this.renderReceiptHtml(emailProps);
 
@@ -389,6 +411,7 @@ export class MailService {
 
     const attachments: SendMailOptions['attachments'] = [
       ...inlineImages.attachments,
+      ...brandLogo.attachments,
     ];
     if (pdfBuffer) {
       attachments.push({
@@ -631,24 +654,26 @@ export class MailService {
     return { props, attachments };
   }
 
-  private buildAuthBrandLogoInlineImage(): {
+  /** Logo header email (CID inline); thiếu asset thì header chỉ hiện chữ. */
+  private buildBrandLogoInlineImage(): {
     logoSrc: string | null;
     attachments: NonNullable<SendMailOptions['attachments']>;
   } {
-    const images = this.receiptAssetsService.getReceiptImageDataUris();
-    const parsed = this.parseReceiptImageDataUri(images?.logoMain);
+    const parsed = this.parseReceiptImageDataUri(
+      this.receiptAssetsService.getBrandMarkDataUri(),
+    );
     if (!parsed) {
       return { logoSrc: null, attachments: [] };
     }
 
     return {
-      logoSrc: `cid:${AUTH_BRAND_LOGO_CID}`,
+      logoSrc: `cid:${BRAND_LOGO_CID}`,
       attachments: [
         {
           filename: 'unicorns-edu-logo.png',
           content: parsed.content,
           contentType: parsed.contentType,
-          cid: AUTH_BRAND_LOGO_CID,
+          cid: BRAND_LOGO_CID,
         },
       ],
     };
@@ -736,6 +761,23 @@ export class MailService {
       requestProtocol: requestOrigin?.protocol,
       nodeEnv: process.env.NODE_ENV,
     });
+  }
+
+  /** Biên lai không được chặn vì thiếu cấu hình URL: link footer là tuỳ chọn. */
+  private tryGetEmailFrontendUrl(): string | null {
+    try {
+      return this.getEmailFrontendUrl();
+    } catch {
+      return null;
+    }
+  }
+
+  private getOriginOf(url: string): string | null {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return null;
+    }
   }
 
   private normalizeReceiptText(value: string | null | undefined): string {

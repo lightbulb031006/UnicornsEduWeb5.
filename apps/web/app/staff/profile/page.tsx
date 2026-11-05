@@ -1,5 +1,6 @@
 "use client";
 
+import { useGiftedLessonPlanEnabled } from "@/lib/gifted-lesson-plan";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -22,6 +23,10 @@ import {
   hasAssistantAndCustomerCareRoles,
 } from "@/components/admin/staff/AssistantDualRoleIncomeHelper";
 import MonthNav from "@/components/admin/MonthNav";
+import {
+  pickAttendanceReviewFields,
+  pickSessionReviewFields,
+} from "@/lib/session-review-form";
 import SessionHistoryTable from "@/components/admin/session/SessionHistoryTable";
 import StaffSelfEditPopup from "@/components/staff/StaffSelfEditPopup";
 import { BonusListItem } from "@/dtos/bonus.dto";
@@ -275,6 +280,10 @@ function getOtherRoleDetailHref(role: string) {
     return "/staff/training-detail";
   }
 
+  if (role === "sale") {
+    return "/staff/sale-detail";
+  }
+
   if (role === "lesson_plan_head") {
     return "/staff/lesson_plan_detail";
   }
@@ -295,11 +304,14 @@ function toStaffUpdateSessionPayload(payload: SessionUpdatePayload) {
     homework: payload.homework,
     tutorial: payload.tutorial,
     recordingUrl: payload.recordingUrl ?? null,
+    notes: payload.notes ?? null,
+    ...pickSessionReviewFields(payload),
     coefficient: payload.coefficient,
     attendance: payload.attendance?.map((item) => ({
       studentId: item.studentId,
       status: item.status,
       notes: item.notes ?? null,
+      ...pickAttendanceReviewFields(item),
     })),
   };
 }
@@ -307,6 +319,7 @@ function toStaffUpdateSessionPayload(payload: SessionUpdatePayload) {
 export default function StaffSelfDetailPage() {
   const { back, push } = useRouter();
   const queryClient = useQueryClient();
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
   const { user: authUser } = useAuth();
   const [editPopupOpen, setEditPopupOpen] = useState(false);
   const [addBonusPopupOpen, setAddBonusPopupOpen] = useState(false);
@@ -818,7 +831,12 @@ export default function StaffSelfDetailPage() {
   const depositYearTotal = incomeSummary?.depositYearTotal ?? 0;
   const depositByClass = incomeSummary?.depositYearByClass ?? [];
   const bonusTotals = incomeSummary?.bonusMonthlyTotals ?? EMPTY_AMOUNT_SUMMARY;
-  const otherRoleSummaries = incomeSummary?.otherRoleSummaries ?? [];
+  // Giáo án học sinh giỏi chỉ có trên IT — JP/ENG không hiện thu nhập role giáo án.
+  const otherRoleSummaries = (incomeSummary?.otherRoleSummaries ?? []).filter(
+    (item) =>
+      giftedLessonPlanEnabled !== false ||
+      (item.role !== "lesson_plan" && item.role !== "lesson_plan_head"),
+  );
   const fixedSalaryPayables = incomeSummary?.fixedSalaryPayables ?? [];
   const showAssistantDualRoleHelper =
     hasAssistantAndCustomerCareRoles(staff?.roles) &&
@@ -1527,6 +1545,7 @@ export default function StaffSelfDetailPage() {
                 allowFinancialEdits={false}
                 allowPaymentStatusEdit={false}
                 allowDeleteSession={false}
+                allowTrialTeachingToggle
                 updateSessionFn={handleUpdateSessionFromStaffPage}
               />
             )}

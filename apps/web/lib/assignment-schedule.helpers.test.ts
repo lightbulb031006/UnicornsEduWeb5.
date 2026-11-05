@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  closeAtDraftFromIso,
+  closeAtPayload,
   fromOpenAtIso,
   parseAssignmentDurationMinutes,
   toOpenAtIso,
@@ -30,5 +32,31 @@ describe("assignment-schedule.helpers", () => {
     expect(parseAssignmentDurationMinutes("1")).toBe(1);
     expect(parseAssignmentDurationMinutes("60")).toBe(60);
     expect(parseAssignmentDurationMinutes("720")).toBe(720);
+  });
+
+  it("closeAtPayload: theo lớp = undefined, không hạn = null", () => {
+    expect(closeAtPayload({ mode: "class", date: "", time: "" })).toBe(
+      undefined,
+    );
+    expect(closeAtPayload({ mode: "none", date: "", time: "" })).toBeNull();
+  });
+
+  it("closeAtPayload: tự chọn thiếu giờ = false, đủ = ISO", () => {
+    expect(
+      closeAtPayload({ mode: "custom", date: "2026-11-01", time: "" }),
+    ).toBe(false);
+    expect(
+      closeAtPayload({ mode: "custom", date: "2026-11-01", time: "23:59" }),
+    ).toBe(toOpenAtIso("2026-11-01", "23:59"));
+  });
+
+  it("closeAtDraftFromIso: null = không hạn, có giá trị = tự chọn", () => {
+    expect(closeAtDraftFromIso(null).mode).toBe("none");
+    const iso = toOpenAtIso("2026-11-01", "23:59");
+    expect(closeAtDraftFromIso(iso)).toEqual({
+      mode: "custom",
+      date: "2026-11-01",
+      time: "23:59:00",
+    });
   });
 });

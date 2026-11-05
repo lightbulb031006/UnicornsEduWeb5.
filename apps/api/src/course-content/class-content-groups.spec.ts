@@ -8,6 +8,7 @@ function item(
   id: string,
   lessonKind: 'theory' | 'practice',
   moduleId?: string,
+  over: Partial<ClassContentItemResponseDto> = {},
 ): ClassContentItemResponseDto {
   return {
     id,
@@ -19,11 +20,16 @@ function item(
     kindLabel: lessonKind === 'theory' ? 'Tiết lý thuyết' : 'Tiết thực hành',
     source: 'course',
     moduleId,
+    moduleTitle: moduleId ? `Chuyên đề ${moduleId}` : undefined,
     openAt: null,
+    closeAt: null,
     durationMinutes: null,
+    shuffleQuestions: true,
     isOpen: true,
     hiddenAt: null,
     hiddenByStaffId: null,
+    hiddenReason: null,
+    ...over,
   };
 }
 
@@ -36,56 +42,56 @@ describe('groupClassContentByModule', () => {
         item('p1', 'practice', 'm1'),
         item('t3', 'theory', 'm2'),
       ],
-      [
-        { id: 'm2', title: 'Hai', sortOrder: 1, added: true },
-        { id: 'm1', title: 'Một', sortOrder: 0, added: true },
-      ],
+      new Map([
+        ['m2', 1],
+        ['m1', 0],
+      ]),
     );
 
     expect(groups.map((g) => g.moduleId)).toEqual(['m1', 'm2']);
-    expect(groups[0].title).toBe('Một');
+    expect(groups[0].title).toBe('Chuyên đề m1');
+    expect(groups[0].added).toBe(true);
     expect(groups[0].theoryItems.map((i) => i.id)).toEqual(['t1', 't2']);
     expect(groups[0].practiceItems.map((i) => i.id)).toEqual(['p1']);
     expect(groups[1].practiceItems).toEqual([]);
   });
 
-  it('keeps added modules without items as empty groups', () => {
-    const groups = groupClassContentByModule(
-      [],
-      [{ id: 'm1', title: 'Một', sortOrder: 0, added: true }],
-    );
-
-    expect(groups).toEqual([
-      {
-        moduleId: 'm1',
-        title: 'Một',
-        added: true,
-        theoryItems: [],
-        practiceItems: [],
-      },
-    ]);
+  it('nhóm chỉ hiện khi lớp có tiết của chuyên đề', () => {
+    expect(groupClassContentByModule([], new Map([['m1', 0]]))).toEqual([]);
   });
 
-  it('drops a removed module even while it still has items', () => {
+  it('item Ẩn tay vẫn thuộc nhóm', () => {
     const groups = groupClassContentByModule(
-      [item('p1', 'practice', 'm-removed'), item('t1', 'theory', 'm1')],
       [
-        { id: 'm-removed', title: 'Đã gỡ', sortOrder: 0, added: false },
-        { id: 'm1', title: 'Một', sortOrder: 1, added: true },
+        item('t1', 'theory', 'm1', {
+          hiddenAt: new Date(),
+          hiddenReason: 'manual',
+        }),
       ],
+      new Map([['m1', 0]]),
     );
 
-    expect(groups.map((g) => g.moduleId)).toEqual(['m1']);
+    expect(groups[0].theoryItems.map((i) => i.id)).toEqual(['t1']);
+  });
+
+  it('nhóm chưa có thứ tự lớp đứng đầu', () => {
+    const groups = groupClassContentByModule(
+      [item('t1', 'theory', 'm1'), item('t2', 'theory', 'm-new')],
+      new Map([['m1', 0]]),
+    );
+
+    expect(groups.map((g) => g.moduleId)).toEqual(['m-new', 'm1']);
   });
 
   it('puts items without a module in a trailing null group', () => {
     const groups = groupClassContentByModule(
       [item('p-lib', 'practice'), item('t1', 'theory', 'm1')],
-      [{ id: 'm1', title: 'Một', sortOrder: 0, added: true }],
+      new Map([['m1', 0]]),
     );
 
     expect(groups.map((g) => g.moduleId)).toEqual(['m1', null]);
     expect(groups[1].title).toBe(UNGROUPED_CONTENT_TITLE);
+    expect(groups[1].added).toBe(false);
     expect(groups[1].practiceItems.map((i) => i.id)).toEqual(['p-lib']);
   });
 });

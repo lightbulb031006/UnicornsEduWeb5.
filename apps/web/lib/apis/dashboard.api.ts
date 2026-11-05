@@ -1,11 +1,10 @@
 import {
-  AdminDashboardActionAlertGroup,
-  AdminDashboardActionAlertList,
   AdminDashboardDto,
   AdminDashboardFinancialDetail,
   AdminDashboardFinancialDetailRowKey,
   AdminDashboardFinancialExport,
   AdminDashboardMonthlyStatistics,
+  AdminMonthlyReport,
   AdminDashboardActiveClassBreakdown,
   AdminDashboardStudentBalanceItem,
   AdminDashboardStudentChurnItem,
@@ -30,26 +29,6 @@ export async function getAdminDashboard(params?: {
       ...(typeof params?.topClassLimit === "number" ? { topClassLimit: params.topClassLimit } : {}),
       ...(params?.dateFrom ? { dateFrom: params.dateFrom } : {}),
       ...(params?.dateTo ? { dateTo: params.dateTo } : {}),
-    },
-  });
-
-  return response.data;
-}
-
-export async function getAdminDashboardActionAlerts(params: {
-  group: AdminDashboardActionAlertGroup;
-  month?: string;
-  year?: string;
-  page?: number;
-  limit?: number;
-}): Promise<AdminDashboardActionAlertList> {
-  const response = await api.get<AdminDashboardActionAlertList>("/dashboard/action-alerts", {
-    params: {
-      group: params.group,
-      ...(params.month ? { month: params.month } : {}),
-      ...(params.year ? { year: params.year } : {}),
-      ...(typeof params.page === "number" ? { page: params.page } : {}),
-      ...(typeof params.limit === "number" ? { limit: params.limit } : {}),
     },
   });
 
@@ -138,6 +117,18 @@ export async function getAdminMonthlyStatistics(params: {
       toMonth: params.toMonth,
       toYear: params.toYear,
     },
+  });
+
+  return response.data;
+}
+
+/** Báo cáo tháng (admin + trợ lí). `month` dạng 01-12, `year` dạng YYYY. */
+export async function getAdminMonthlyReport(params: {
+  month: string;
+  year: string;
+}): Promise<AdminMonthlyReport> {
+  const response = await api.get<AdminMonthlyReport>("/dashboard/monthly-report", {
+    params: { month: params.month, year: params.year },
   });
 
   return response.data;

@@ -2,17 +2,33 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import type { SessionAttendanceStatus } from "@/dtos/session.dto";
+import type {
+  HomeworkQuality,
+  SessionAttendanceStatus,
+  SessionProgressStatus,
+} from "@/dtos/session.dto";
+import { CONTENT_LIMITS } from "@/dtos/content-limits";
 import { formatCurrency } from "@/lib/class.helpers";
 import { MoneyInput } from "@/components/ui/MoneyInput";
+import { DateInput } from "@/components/ui/DateInput";
+import { Switch } from "@/components/ui/switch";
+import { TimeInput } from "@/components/ui/TimeInput";
+import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import {
+  HOMEWORK_QUALITY_LABELS,
+  SESSION_PROGRESS_STATUS_LABELS,
+} from "@/lib/session-comment-zalo.helpers";
+import type {
+  SessionReviewFormValue,
+  StudentReviewFormValue,
+} from "@/lib/session-review-form";
 import {
   moneyInputInitialFromNumber,
   parseMoneyInput,
 } from "@/lib/money-input.helpers";
-import RichTextEditor from "@/components/ui/RichTextEditor";
-import { sessionStudentCommentPlaceholder } from "@/lib/session-comment-zalo.helpers";
 import type { SessionCommentDisplayContent } from "@/lib/session-comment-zalo.helpers";
 import { sanitizeRichTextContent } from "@/lib/sanitize";
+import { useInClassTestEnabled } from "@/lib/hooks/useInClassTestEnabled";
 
 /** Chuẩn hóa "HH:mm" hoặc "HH:mm:ss" để tính phút. */
 function parseTimeToMinutes(time: string): number | null {
@@ -51,6 +67,62 @@ export function formatVnSessionDuration(startTime: string, endTime: string): str
 
 export function RequiredMark() {
   return <span className="text-error">*</span>;
+}
+
+type TrialLessonToggleProps = {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  disabled?: boolean;
+  className?: string;
+};
+
+/** Dạy thử (coefficient = 0) — admin, trợ lí, gia sư bật; buổi không tính trợ cấp. */
+export function TrialLessonToggle({
+  checked,
+  onChange,
+  disabled = false,
+  className = "",
+}: TrialLessonToggleProps) {
+  return (
+    <label
+      className={cn(
+        "flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-colors",
+        checked
+          ? "border-primary/35 bg-primary/8"
+          : "border-border-default bg-bg-secondary/35",
+        disabled ? "cursor-not-allowed opacity-70" : "hover:border-primary/25",
+        className,
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="size-5 shrink-0 rounded border-border-default text-primary focus:ring-border-focus"
+      />
+      <span className="text-sm font-semibold text-text-primary">Dạy thử</span>
+      <span className="text-xs text-text-muted">
+        {checked
+          ? "Không tính trợ cấp buổi (hệ số = 0)"
+          : "Buổi học chính thức"}
+      </span>
+    </label>
+  );
+}
+
+/** Nhãn chỉ đọc cho buổi Dạy thử (dòng lịch sử, form read-only). */
+export function TrialLessonBadge({ className = "" }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary",
+        className,
+      )}
+    >
+      Dạy thử
+    </span>
+  );
 }
 
 type SessionTeacherAllowanceEstimateCardProps = {
@@ -522,16 +594,32 @@ export function SessionFormDialogHeader({
   );
 }
 
-const STATUS_ORDER: SessionAttendanceStatus[] = ["present", "excused", "absent"];
+const STATUS_ORDER: SessionAttendanceStatus[] = ["present", "excused", "absent", "trial"];
+
+const STATUS_TITLES: Record<SessionAttendanceStatus, string> = {
+  present: "Học",
+  excused: "Phép",
+  absent: "Vắng",
+  trial: "Học thử (không trừ ví; thu bù gấp đôi ở buổi học kế tiếp)",
+};
 
 type QuickPickProps = {
   value: SessionAttendanceStatus;
   onChange: (next: SessionAttendanceStatus) => void;
   namePrefix: string;
   disabled?: boolean;
+  /** `false` với lớp bán một lần — không có học thử. */
+  allowTrial?: boolean;
 };
 
-export function AttendanceStatusQuickPick({ value, onChange, namePrefix, disabled = false }: QuickPickProps) {
+export function AttendanceStatusQuickPick({
+  value,
+  onChange,
+  namePrefix,
+  disabled = false,
+  allowTrial = true,
+}: QuickPickProps) {
+  const statuses = allowTrial ? STATUS_ORDER : STATUS_ORDER.filter((status) => status !== "trial");
   return (
     <div
       className={`inline-flex shrink-0 gap-0.5 rounded-lg border border-border-default p-0.5 ${
@@ -540,7 +628,7 @@ export function AttendanceStatusQuickPick({ value, onChange, namePrefix, disable
       role="group"
       aria-label="Trạng thái điểm danh"
     >
-      {STATUS_ORDER.map((status) => {
+      {statuses.map((status) => {
         const active = value === status;
         return (
           <button
@@ -558,9 +646,7 @@ export function AttendanceStatusQuickPick({ value, onChange, namePrefix, disable
                 ? "text-text-muted cursor-not-allowed"
                 : "text-text-muted hover:bg-bg-tertiary/80"
             }`}
-            title={
-              status === "present" ? "Học" : status === "excused" ? "Phép" : "Vắng"
-            }
+            title={STATUS_TITLES[status]}
             aria-pressed={active}
           >
             {status === "present" ? (
@@ -570,6 +656,10 @@ export function AttendanceStatusQuickPick({ value, onChange, namePrefix, disable
             ) : status === "excused" ? (
               <span className={`text-xs font-bold ${disabled ? "text-warning/50" : "text-warning"}`} aria-hidden>
                 p
+              </span>
+            ) : status === "trial" ? (
+              <span className={`text-xs font-bold ${disabled ? "text-primary/50" : "text-primary"}`} aria-hidden>
+                T
               </span>
             ) : (
               <svg className={`size-4 ${disabled ? "text-error/50" : "text-error"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
@@ -587,9 +677,10 @@ type SummaryProps = {
   present: number;
   excused: number;
   absent: number;
+  trial?: number;
 };
 
-export function AttendanceInlineSummary({ present, excused, absent }: SummaryProps) {
+export function AttendanceInlineSummary({ present, excused, absent, trial = 0 }: SummaryProps) {
   return (
     <p className="text-sm text-text-secondary">
       <span className="font-medium text-success">Học: {present}</span>
@@ -597,7 +688,418 @@ export function AttendanceInlineSummary({ present, excused, absent }: SummaryPro
       <span className="font-medium text-warning">Phép: {excused}</span>
       <span className="mx-2 text-text-muted/70">·</span>
       <span className="font-medium text-error">Vắng: {absent}</span>
+      {trial > 0 ? (
+        <>
+          <span className="mx-2 text-text-muted/70">·</span>
+          <span className="font-medium text-primary">Học thử: {trial}</span>
+        </>
+      ) : null}
     </p>
+  );
+}
+
+/* ───────────── Nhận xét buổi học có cấu trúc ───────────── */
+
+const REVIEW_INPUT_CLASS =
+  "min-h-11 w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60";
+
+const PROGRESS_STATUS_OPTIONS = (
+  Object.keys(SESSION_PROGRESS_STATUS_LABELS) as SessionProgressStatus[]
+).map((value) => ({ value, label: SESSION_PROGRESS_STATUS_LABELS[value] }));
+
+const HOMEWORK_QUALITY_OPTIONS = (
+  Object.keys(HOMEWORK_QUALITY_LABELS) as HomeworkQuality[]
+).map((value) => ({ value, label: HOMEWORK_QUALITY_LABELS[value] }));
+
+type ReviewTextareaProps = {
+  label: ReactNode;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  disabled?: boolean;
+  placeholder?: string;
+  rows?: number;
+  hint?: string;
+  maxLength?: number;
+};
+
+/** Textarea plain text, mỗi dòng 1 ý. */
+export function ReviewTextarea({
+  label,
+  value,
+  onChange,
+  required = false,
+  disabled = false,
+  placeholder,
+  rows = 3,
+  hint,
+  maxLength = CONTENT_LIMITS.sessionReviewText,
+}: ReviewTextareaProps) {
+  return (
+    <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
+      <span>
+        {label} {required ? <RequiredMark /> : null}
+      </span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        rows={rows}
+        maxLength={maxLength}
+        placeholder={placeholder}
+        className={cn(REVIEW_INPUT_CLASS, "resize-y font-normal")}
+      />
+      {hint ? (
+        <span className="text-xs font-normal text-text-muted">{hint}</span>
+      ) : null}
+    </label>
+  );
+}
+
+type ReviewToggleProps = {
+  id: string;
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+};
+
+function ReviewToggle({
+  id,
+  label,
+  checked,
+  disabled = false,
+  onCheckedChange,
+}: ReviewToggleProps) {
+  return (
+    <div className="flex min-h-11 items-center justify-between gap-3">
+      <label htmlFor={id} className="text-sm font-medium text-text-primary">
+        {label}
+      </label>
+      <Switch
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onCheckedChange}
+      />
+    </div>
+  );
+}
+
+type SessionReviewFieldsProps = {
+  value: SessionReviewFormValue;
+  onChange: (patch: Partial<SessionReviewFormValue>) => void;
+  idPrefix: string;
+  disabled?: boolean;
+};
+
+/** 📊 Tiến độ + 🧪 Kiểm tra trong buổi (đặt sau Nội dung bài học). */
+export function SessionReviewProgressFields({
+  value,
+  onChange,
+  idPrefix,
+  disabled = false,
+}: SessionReviewFieldsProps) {
+  const inClassTestEnabled = useInClassTestEnabled();
+  const showProgressDetail =
+    value.progressStatus === "partial" || value.progressStatus === "not_completed";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
+        <span>
+          Tiến độ <RequiredMark />
+        </span>
+        <UpgradedSelect
+          name={`${idPrefix}-progress-status`}
+          value={value.progressStatus}
+          onValueChange={(next) =>
+            onChange({ progressStatus: next as SessionProgressStatus })
+          }
+          options={PROGRESS_STATUS_OPTIONS}
+          placeholder="Chọn tiến độ"
+          ariaLabel="Tiến độ buổi"
+          disabled={disabled}
+          buttonClassName={REVIEW_INPUT_CLASS}
+        />
+      </div>
+
+      {showProgressDetail ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <ReviewTextarea
+            label="Đã xong"
+            value={value.progressDone}
+            onChange={(progressDone) => onChange({ progressDone })}
+            required={value.progressStatus === "partial"}
+            disabled={disabled}
+            placeholder="Mỗi dòng một ý"
+          />
+          <ReviewTextarea
+            label="Chưa xong (kèm lý do)"
+            value={value.progressRemaining}
+            onChange={(progressRemaining) => onChange({ progressRemaining })}
+            required
+            disabled={disabled}
+            placeholder="Mỗi dòng một ý"
+          />
+        </div>
+      ) : null}
+
+      {inClassTestEnabled ? (
+      <div className="space-y-3 rounded-lg border border-border-default bg-bg-secondary/30 p-3">
+        <ReviewToggle
+          id={`${idPrefix}-has-test`}
+          label="Có kiểm tra trong buổi"
+          checked={value.hasInClassTest}
+          disabled={disabled}
+          onCheckedChange={(hasInClassTest) => onChange({ hasInClassTest })}
+        />
+        {value.hasInClassTest ? (
+          <>
+            <ReviewTextarea
+              label="Nội dung kiểm tra"
+              value={value.inClassTestContent}
+              onChange={(inClassTestContent) => onChange({ inClassTestContent })}
+              required
+              disabled={disabled}
+              rows={2}
+            />
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
+              <span>
+                Tổng số câu <RequiredMark />
+              </span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                value={value.inClassTestTotal}
+                onChange={(event) =>
+                  onChange({ inClassTestTotal: event.target.value })
+                }
+                disabled={disabled}
+                className={cn(REVIEW_INPUT_CLASS, "tabular-nums sm:max-w-40")}
+              />
+            </label>
+          </>
+        ) : null}
+      </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** ⏰ Hạn BTVN (đặt sau Bài tập về nhà). */
+export function SessionReviewHomeworkDueFields({
+  value,
+  onChange,
+  idPrefix,
+  disabled = false,
+}: SessionReviewFieldsProps) {
+  return (
+    <div>
+      <p className="mb-1.5 text-sm font-medium text-text-primary">
+        Hạn BTVN{" "}
+        <span className="text-xs font-normal text-text-muted">(Không bắt buộc)</span>
+      </p>
+      <div className="flex flex-wrap items-end gap-2 sm:gap-3">
+        <label className="flex min-w-[9rem] flex-1 flex-col gap-1 text-xs text-text-secondary">
+          <span>Ngày</span>
+          <DateInput
+            name={`${idPrefix}-homework-due-date`}
+            value={value.homeworkDueDate}
+            autoComplete="off"
+            disabled={disabled}
+            onChange={(event) => onChange({ homeworkDueDate: event.target.value })}
+            className={REVIEW_INPUT_CLASS}
+          />
+        </label>
+        <label className="flex min-w-[8rem] flex-1 flex-col gap-1 text-xs text-text-secondary">
+          <span>Giờ</span>
+          <TimeInput
+            name={`${idPrefix}-homework-due-time`}
+            value={value.homeworkDueTime}
+            autoComplete="off"
+            prefillEmpty={false}
+            disabled={disabled}
+            onChange={(event) => onChange({ homeworkDueTime: event.target.value })}
+            className={cn(REVIEW_INPUT_CLASS, "font-mono")}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/** 🔜 Buổi sau + 🔁 Kiểm tra lại. */
+export function SessionReviewNextSessionFields({
+  value,
+  onChange,
+  idPrefix,
+  disabled = false,
+}: SessionReviewFieldsProps) {
+  return (
+    <div className="space-y-4">
+      <ReviewTextarea
+        label="Buổi sau"
+        value={value.nextSessionPlan}
+        onChange={(nextSessionPlan) => onChange({ nextSessionPlan })}
+        required
+        disabled={disabled}
+        placeholder="Nội dung dự kiến buổi sau, mỗi dòng một ý"
+      />
+      <div className="space-y-3 rounded-lg border border-border-default bg-bg-secondary/30 p-3">
+        <ReviewToggle
+          id={`${idPrefix}-has-retest`}
+          label="Buổi sau có kiểm tra lại"
+          checked={value.hasRetest}
+          disabled={disabled}
+          onCheckedChange={(hasRetest) => onChange({ hasRetest })}
+        />
+        {value.hasRetest ? (
+          <ReviewTextarea
+            label="Nội dung kiểm tra lại"
+            value={value.retestContent}
+            onChange={(retestContent) => onChange({ retestContent })}
+            required
+            disabled={disabled}
+            rows={2}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+type SessionStudentReviewFieldsProps = {
+  fullName: string;
+  status: SessionAttendanceStatus;
+  value: StudentReviewFormValue;
+  onChange: (patch: Partial<StudentReviewFormValue>) => void;
+  namePrefix: string;
+  hasInClassTest: boolean;
+  inClassTestTotal: number | null;
+  disabled?: boolean;
+};
+
+/** Phần từng HS: nghỉ phép chỉ nhập lý do nghỉ; vắng không nhập gì; học thử bỏ mục BTVN. */
+export function SessionStudentReviewFields({
+  fullName,
+  status,
+  value,
+  onChange,
+  namePrefix,
+  hasInClassTest,
+  inClassTestTotal,
+  disabled = false,
+}: SessionStudentReviewFieldsProps) {
+  if (status === "excused") {
+    return (
+      <ReviewTextarea
+        label="Lý do nghỉ"
+        value={value.excusedReason}
+        onChange={(excusedReason) => onChange({ excusedReason })}
+        required
+        disabled={disabled}
+        placeholder="Ví dụ: ốm, đi du lịch cùng gia đình…"
+        rows={2}
+        maxLength={CONTENT_LIMITS.attendanceNotes}
+      />
+    );
+  }
+
+  if (status !== "present" && status !== "trial") {
+    return <p className="text-xs text-text-muted">Vắng — không cần nhận xét.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {hasInClassTest ? (
+        <div className="grid gap-3 rounded-lg border border-border-default bg-bg-secondary/30 p-3 sm:grid-cols-[auto_minmax(0,1fr)]">
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
+            <span>
+              Số câu đúng <RequiredMark />
+            </span>
+            <span className="flex items-center gap-2">
+              <input
+                name={`${namePrefix}-test-correct`}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={inClassTestTotal ?? undefined}
+                step={1}
+                value={value.testCorrectCount}
+                onChange={(event) =>
+                  onChange({ testCorrectCount: event.target.value })
+                }
+                disabled={disabled}
+                className={cn(REVIEW_INPUT_CLASS, "w-20 tabular-nums")}
+              />
+              <span className="whitespace-nowrap text-sm font-normal text-text-secondary tabular-nums">
+                / {inClassTestTotal ?? "?"} câu
+              </span>
+            </span>
+          </label>
+          <ReviewTextarea
+            label="Nhận xét kiểm tra"
+            value={value.testComment}
+            onChange={(testComment) => onChange({ testComment })}
+            required
+            disabled={disabled}
+            rows={2}
+          />
+        </div>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ReviewTextarea
+          label="Điểm tốt"
+          value={value.strengths}
+          onChange={(strengths) => onChange({ strengths })}
+          required
+          disabled={disabled}
+          placeholder="Mỗi dòng một ý"
+          rows={2}
+        />
+        <ReviewTextarea
+          label="Cần cải thiện"
+          value={value.improvements}
+          onChange={(improvements) => onChange({ improvements })}
+          required
+          disabled={disabled}
+          placeholder="Mỗi dòng một ý"
+          rows={2}
+        />
+      </div>
+      {status === "present" ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
+            <span>
+              Chất lượng BTVN buổi trước <RequiredMark />
+            </span>
+            <UpgradedSelect
+              name={`${namePrefix}-homework-quality`}
+              value={value.homeworkQuality}
+              onValueChange={(next) =>
+                onChange({ homeworkQuality: next as HomeworkQuality })
+              }
+              options={HOMEWORK_QUALITY_OPTIONS}
+              placeholder="Chọn mức"
+              ariaLabel={`Chất lượng BTVN của ${fullName}`}
+              disabled={disabled}
+              buttonClassName={REVIEW_INPUT_CLASS}
+            />
+          </div>
+          <ReviewTextarea
+            label="Nhận xét BTVN"
+            value={value.homeworkComment}
+            onChange={(homeworkComment) => onChange({ homeworkComment })}
+            required
+            disabled={disabled}
+            rows={2}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -605,7 +1107,7 @@ export type SessionAttendanceEditorItem = {
   studentId: string;
   fullName: string;
   status: SessionAttendanceStatus;
-  notes: string;
+  review: StudentReviewFormValue;
   tuitionFee: string;
   defaultTuitionFee: number | null;
 };
@@ -615,176 +1117,60 @@ type SessionAttendanceEditorProps = {
   namePrefix: string;
   disabled?: boolean;
   canEditTuition?: boolean;
+  /** `false` với lớp bán một lần — ẩn nút Học thử. */
+  allowTrial?: boolean;
+  hasInClassTest: boolean;
+  inClassTestTotal: number | null;
   onStatusChange: (studentId: string, status: SessionAttendanceStatus) => void;
-  onNotesChange: (studentId: string, html: string) => void;
+  onReviewChange: (
+    studentId: string,
+    patch: Partial<StudentReviewFormValue>,
+  ) => void;
   onTuitionChange?: (studentId: string, value: string) => void;
 };
 
-/** Điểm danh: mobile card; từ md+ bảng 3 cột (Học sinh | Nhận xét | Học phí). */
+/** Điểm danh + nhận xét từng HS: một card / học sinh ở mọi breakpoint (không scroll ngang). */
 export function SessionAttendanceEditor({
   items,
   namePrefix,
   disabled = false,
   canEditTuition = false,
+  allowTrial = true,
+  hasInClassTest,
+  inClassTestTotal,
   onStatusChange,
-  onNotesChange,
+  onReviewChange,
   onTuitionChange,
 }: SessionAttendanceEditorProps) {
   return (
-    <>
-      <div className="space-y-3 md:hidden">
-        {items.map((item) => (
-          <SessionStudentAttendanceCommentRow
-            key={item.studentId}
-            studentId={item.studentId}
-            fullName={item.fullName}
-            status={item.status}
-            notes={item.notes}
-            namePrefix={`${namePrefix}-${item.studentId}`}
-            disabled={disabled}
-            onStatusChange={(next) => onStatusChange(item.studentId, next)}
-            onNotesChange={(html) => onNotesChange(item.studentId, html)}
-            showTuitionField={canEditTuition}
-            tuitionFee={item.tuitionFee}
-            tuitionPlaceholder={
-              item.defaultTuitionFee != null
-                ? String(item.defaultTuitionFee)
-                : "Theo học sinh"
-            }
-            tuitionInputName={`${namePrefix}-tuition-${item.studentId}`}
-            defaultTuitionFee={item.defaultTuitionFee}
-            onTuitionChange={(value) => onTuitionChange?.(item.studentId, value)}
-          />
-        ))}
-      </div>
-
-      <div className="hidden overflow-x-auto rounded-xl border border-border-default bg-bg-surface md:block">
-        <table
-          className={`w-full border-collapse text-left text-sm ${canEditTuition ? "min-w-[720px]" : "min-w-[520px]"}`}
-        >
-          <caption className="sr-only">Nhận xét từng học sinh</caption>
-          <thead>
-            <tr className="border-b border-border-default bg-bg-secondary/80">
-              <th
-                scope="col"
-                className="w-40 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
-              >
-                Học sinh
-              </th>
-              <th
-                scope="col"
-                className="min-w-[18rem] px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
-              >
-                Nhận xét
-              </th>
-              {canEditTuition ? (
-                <th
-                  scope="col"
-                  className="w-44 px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-text-muted"
-                >
-                  Học phí buổi
-                </th>
-              ) : null}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr
-                key={item.studentId}
-                className="border-b border-border-default/80 bg-bg-surface last:border-0"
-              >
-                <td className="px-3 py-2.5 align-top">
-                  <div className="space-y-2">
-                    <p className="text-center text-sm font-semibold text-text-primary">
-                      {item.fullName}
-                    </p>
-                    <AttendanceStatusQuickPick
-                      namePrefix={`${namePrefix}-d-${item.studentId}`}
-                      value={item.status}
-                      disabled={disabled}
-                      onChange={(next) => onStatusChange(item.studentId, next)}
-                    />
-                  </div>
-                </td>
-                <td className="px-3 py-2.5 align-top">
-                  <RichTextEditor
-                    value={item.notes}
-                    onChange={(html) => onNotesChange(item.studentId, html)}
-                    disabled={disabled}
-                    minHeight="min-h-[96px]"
-                    placeholder={sessionStudentCommentPlaceholder(item.fullName)}
-                    ariaLabel={`Nhận xét học sinh ${item.fullName}`}
-                  />
-                </td>
-                {canEditTuition ? (
-                  <td className="px-3 py-2.5 align-top">
-                    <div className="space-y-1">
-                      <MoneyInput
-                        name={`${namePrefix}-tuition-desktop-${item.studentId}`}
-                        value={item.tuitionFee}
-                        autoComplete="off"
-                        disabled={disabled}
-                        onValueChange={(value) =>
-                          onTuitionChange?.(item.studentId, value)
-                        }
-                        className="w-full rounded-lg border border-border-default bg-bg-surface px-2.5 py-1.5 text-sm tabular-nums text-text-primary disabled:opacity-60"
-                        placeholder={
-                          item.defaultTuitionFee != null
-                            ? moneyInputInitialFromNumber(item.defaultTuitionFee)
-                            : "Theo học sinh"
-                        }
-                      />
-                      <p className="text-[11px] text-text-muted">
-                        Mặc định:{" "}
-                        {item.defaultTuitionFee != null
-                          ? formatCurrency(item.defaultTuitionFee)
-                          : "—"}
-                      </p>
-                    </div>
-                  </td>
-                ) : null}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
-type TrialLessonToggleProps = {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-  className?: string;
-};
-
-export function TrialLessonToggle({
-  checked,
-  onChange,
-  disabled = false,
-  className = "",
-}: TrialLessonToggleProps) {
-  return (
-    <label
-      className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
-        checked
-          ? "border-primary/35 bg-primary/8"
-          : "border-border-default bg-bg-secondary/35"
-      } ${disabled ? "cursor-not-allowed opacity-70" : "hover:border-primary/25"} ${className}`.trim()}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-        className="size-5 shrink-0 rounded border-border-default text-primary focus:ring-border-focus"
-      />
-      <span className="text-sm font-semibold text-text-primary">Dạy thử</span>
-      <span className="text-xs text-text-muted">
-        {checked ? "Không tính trợ cấp buổi (hệ số = 0)" : "Buổi học chính thức"}
-      </span>
-    </label>
+    <div className="space-y-3">
+      {items.map((item) => (
+        <SessionStudentAttendanceCommentRow
+          key={item.studentId}
+          studentId={item.studentId}
+          fullName={item.fullName}
+          status={item.status}
+          review={item.review}
+          namePrefix={`${namePrefix}-${item.studentId}`}
+          disabled={disabled}
+          allowTrial={allowTrial}
+          hasInClassTest={hasInClassTest}
+          inClassTestTotal={inClassTestTotal}
+          onStatusChange={(next) => onStatusChange(item.studentId, next)}
+          onReviewChange={(patch) => onReviewChange(item.studentId, patch)}
+          showTuitionField={canEditTuition}
+          tuitionFee={item.tuitionFee}
+          tuitionPlaceholder={
+            item.defaultTuitionFee != null
+              ? moneyInputInitialFromNumber(item.defaultTuitionFee)
+              : "Theo học sinh"
+          }
+          tuitionInputName={`${namePrefix}-tuition-${item.studentId}`}
+          defaultTuitionFee={item.defaultTuitionFee}
+          onTuitionChange={(value) => onTuitionChange?.(item.studentId, value)}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -792,11 +1178,14 @@ type SessionStudentAttendanceCommentRowProps = {
   studentId: string;
   fullName: string;
   status: SessionAttendanceStatus;
-  notes: string;
+  review: StudentReviewFormValue;
   namePrefix: string;
   disabled?: boolean;
+  allowTrial?: boolean;
+  hasInClassTest: boolean;
+  inClassTestTotal: number | null;
   onStatusChange: (next: SessionAttendanceStatus) => void;
-  onNotesChange: (html: string) => void;
+  onReviewChange: (patch: Partial<StudentReviewFormValue>) => void;
   showTuitionField?: boolean;
   tuitionFee?: string;
   tuitionPlaceholder?: string;
@@ -805,16 +1194,22 @@ type SessionStudentAttendanceCommentRowProps = {
   onTuitionChange?: (value: string) => void;
 };
 
-/** Card mobile: tên + quick-pick → nhận xét → học phí (tuỳ chọn). */
+/**
+ * Card một học sinh. Header: tên + quick-pick (+ học phí buổi khi có quyền) trên một hàng
+ * từ `sm`; thân: các ô nhận xét. Nghỉ phép chỉ còn ô lý do nghỉ; vắng chỉ còn một dòng ghi chú.
+ */
 export function SessionStudentAttendanceCommentRow({
   studentId,
   fullName,
   status,
-  notes,
+  review,
   namePrefix,
   disabled = false,
+  allowTrial = true,
+  hasInClassTest,
+  inClassTestTotal,
   onStatusChange,
-  onNotesChange,
+  onReviewChange,
   showTuitionField = false,
   tuitionFee = "",
   tuitionPlaceholder,
@@ -823,140 +1218,84 @@ export function SessionStudentAttendanceCommentRow({
   onTuitionChange,
 }: SessionStudentAttendanceCommentRowProps) {
   const panelId = `session-student-comment-${studentId}`;
+  const reviewed = status === "present" || status === "trial";
+  const tuitionHint =
+    defaultTuitionFee != null
+      ? `Để trống = mặc định ${formatCurrency(defaultTuitionFee)}`
+      : "Chưa cấu hình học phí mặc định";
 
   return (
-    <article className="overflow-hidden rounded-xl border border-border-default bg-bg-surface p-4">
-      <div className="space-y-2">
-        <p className="min-w-0 text-center text-sm font-semibold text-text-primary">{fullName}</p>
-        <AttendanceStatusQuickPick
-          namePrefix={namePrefix}
-          value={status}
-          disabled={disabled}
-          onChange={onStatusChange}
-        />
+    <article
+      aria-label={`Nhận xét ${fullName}`}
+      className={cn(
+        "rounded-xl border border-border-default bg-bg-surface p-3 sm:p-4",
+        !reviewed && "bg-bg-secondary/30",
+      )}
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+          <p className="min-w-0 break-words text-sm font-semibold text-text-primary" title={fullName}>
+            {fullName}
+          </p>
+          <AttendanceStatusQuickPick
+            namePrefix={namePrefix}
+            value={status}
+            disabled={disabled}
+            allowTrial={allowTrial}
+            onChange={onStatusChange}
+          />
+        </div>
+
+        {showTuitionField ? (
+          <label
+            className="flex items-center gap-2 sm:shrink-0"
+            title={tuitionHint}
+          >
+            <span className="shrink-0 text-xs font-medium text-text-secondary">
+              Học phí
+              <span className="sr-only"> buổi của {fullName}</span>
+            </span>
+            <span className="relative min-w-0 flex-1 sm:w-36 sm:flex-none">
+              <MoneyInput
+                name={tuitionInputName}
+                value={tuitionFee}
+                autoComplete="off"
+                disabled={disabled}
+                onValueChange={(value) => onTuitionChange?.(value)}
+                aria-describedby={`${panelId}-tuition-hint`}
+                className="h-10 w-full rounded-lg border border-border-default bg-bg-surface pl-3 pr-7 text-right text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
+                placeholder={tuitionPlaceholder ?? "Theo học sinh"}
+              />
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-text-muted"
+              >
+                ₫
+              </span>
+            </span>
+            <span id={`${panelId}-tuition-hint`} className="sr-only">
+              {tuitionHint}
+            </span>
+          </label>
+        ) : null}
       </div>
 
       <div
         id={panelId}
-        className="mt-3 flex flex-col gap-1 text-xs text-text-secondary"
+        className={cn(reviewed ? "mt-3 border-t border-border-default/70 pt-3" : "mt-1.5")}
       >
-        <span>Nhận xét</span>
-        <RichTextEditor
-          value={notes}
-          onChange={onNotesChange}
+        <SessionStudentReviewFields
+          fullName={fullName}
+          status={status}
+          value={review}
+          onChange={onReviewChange}
+          namePrefix={namePrefix}
+          hasInClassTest={hasInClassTest}
+          inClassTestTotal={inClassTestTotal}
           disabled={disabled}
-          minHeight="min-h-[120px]"
-          placeholder={sessionStudentCommentPlaceholder(fullName)}
-          ariaLabel={`Nhận xét học sinh ${fullName}`}
         />
       </div>
-
-      {showTuitionField ? (
-        <label className="mt-3 flex flex-col gap-1 text-xs text-text-secondary">
-          <span>Học phí buổi</span>
-          <MoneyInput
-            name={tuitionInputName}
-            value={tuitionFee}
-            autoComplete="off"
-            disabled={disabled}
-            onValueChange={(value) => onTuitionChange?.(value)}
-            className="min-h-10 w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
-            placeholder={tuitionPlaceholder ?? "Theo học sinh"}
-          />
-          <span className="text-[11px] text-text-muted">
-            Mặc định:{" "}
-            {defaultTuitionFee != null
-              ? formatCurrency(defaultTuitionFee)
-              : "Chưa cấu hình"}
-          </span>
-        </label>
-      ) : null}
     </article>
-  );
-}
-
-/** @deprecated Dùng SessionStudentAttendanceCommentRow */
-type SessionAttendanceCompactRowProps = {
-  fullName: string;
-  status: SessionAttendanceStatus;
-  namePrefix: string;
-  disabled?: boolean;
-  onStatusChange: (next: SessionAttendanceStatus) => void;
-};
-
-export function SessionAttendanceCompactRow({
-  fullName,
-  status,
-  namePrefix,
-  disabled = false,
-  onStatusChange,
-}: SessionAttendanceCompactRowProps) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-border-default bg-bg-surface px-3 py-2.5">
-      <p className="min-w-0 truncate text-sm font-medium text-text-primary">{fullName}</p>
-      <AttendanceStatusQuickPick
-        namePrefix={namePrefix}
-        value={status}
-        disabled={disabled}
-        onChange={onStatusChange}
-      />
-    </div>
-  );
-}
-
-type SessionStudentCommentAccordionProps = {
-  studentId: string;
-  fullName: string;
-  notes: string;
-  disabled?: boolean;
-  defaultOpen?: boolean;
-  onNotesChange: (html: string) => void;
-};
-
-export function SessionStudentCommentAccordion({
-  studentId,
-  fullName,
-  notes,
-  disabled = false,
-  defaultOpen = false,
-  onNotesChange,
-}: SessionStudentCommentAccordionProps) {
-  const [open, setOpen] = useState(defaultOpen);
-  const panelId = `session-student-comment-${studentId}`;
-
-  return (
-    <div className="rounded-xl border border-border-default bg-bg-surface">
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus"
-        aria-expanded={open}
-        aria-controls={panelId}
-      >
-        <span className="text-sm font-semibold text-text-primary">{fullName}</span>
-        <svg
-          className={`size-4 shrink-0 text-text-muted transition-transform ${open ? "rotate-180" : ""}`}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          aria-hidden
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open ? (
-        <div id={panelId} className="border-t border-border-default/80 px-3 pb-3 pt-2">
-          <RichTextEditor
-            value={notes}
-            onChange={onNotesChange}
-            disabled={disabled}
-            minHeight="min-h-[120px]"
-            placeholder={sessionStudentCommentPlaceholder(fullName)}
-            ariaLabel={`Nhận xét học sinh ${fullName}`}
-          />
-        </div>
-      ) : null}
-    </div>
   );
 }
 

@@ -6,7 +6,9 @@ import {
   courseKeys,
   examLibraryKeys,
   notificationsKeys,
+  practiceLessonQuestionKeys,
   questionKeys,
+  sharedMaterialKeys,
   staffCalendarKeys,
 } from "@/lib/query-keys";
 
@@ -79,6 +81,15 @@ export async function invalidateQuestionScopedQueries(
       }),
       queryClient.invalidateQueries({
         queryKey: [...questionKeys.all, "list"],
+      }),
+      // Số câu / số tiết của mỗi Bộ câu hỏi đổi theo câu.
+      queryClient.invalidateQueries({ queryKey: sharedMaterialKeys.all }),
+      // Câu thêm / xoá trong bộ đi theo vào các tiết / bài ôn đang dùng bộ.
+      queryClient.invalidateQueries({
+        queryKey: practiceLessonQuestionKeys.all,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: [...courseKeys.all, "lesson-quizzes"],
       }),
     ]);
     return;

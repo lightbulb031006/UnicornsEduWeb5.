@@ -2,10 +2,16 @@ jest.mock('../prisma/prisma.service', () => ({
   PrismaService: class PrismaServiceMock {},
 }));
 
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AttendanceStatus,
   PaymentStatus,
+  StaffRole,
+  StaffStatus,
   UserRole,
 } from '../../generated/enums';
 import { TrainingManagerService } from './training-manager.service';
@@ -15,13 +21,16 @@ describe('TrainingManagerService', () => {
     staffInfo: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      update: jest.fn(),
     },
     class: {
       findUnique: jest.fn(),
+      update: jest.fn(),
     },
     session: {
       findMany: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
 
   let service: TrainingManagerService;
@@ -118,6 +127,94 @@ describe('TrainingManagerService', () => {
           monthKey,
         ),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('updateClassTrainingManager', () => {
+    const classId = 'class-1';
+    const adminActor = { userId: 'admin-user', roleType: UserRole.admin };
+    const updatedClass = { id: classId, trainingManagerStaffId: 'staff-1' };
+
+    beforeEach(() => {
+      mockPrisma.class.findUnique.mockResolvedValue({ id: classId });
+      mockPrisma.class.update.mockReturnValue(updatedClass);
+      mockPrisma.staffInfo.update.mockReturnValue({ id: 'staff-1' });
+      mockPrisma.$transaction.mockImplementation((ops: unknown[]) =>
+        Promise.all(ops),
+      );
+    });
+
+    it('assigns training staff without touching roles', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-1',
+        roles: [StaffRole.training],
+        status: StaffStatus.active,
+      });
+
+      await expect(
+        service.updateClassTrainingManager(
+          classId,
+          { trainingManagerStaffId: 'staff-1' },
+          adminActor,
+        ),
+      ).resolves.toEqual(updatedClass);
+      expect(mockPrisma.staffInfo.update).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('grants training role when a teacher becomes class manager', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-1',
+        roles: [StaffRole.teacher],
+        status: StaffStatus.active,
+      });
+
+      await expect(
+        service.updateClassTrainingManager(
+          classId,
+          { trainingManagerStaffId: 'staff-1', trainingManagerRatePercent: 5 },
+          adminActor,
+        ),
+      ).resolves.toEqual(updatedClass);
+      expect(mockPrisma.staffInfo.update).toHaveBeenCalledWith({
+        where: { id: 'staff-1' },
+        data: { roles: { push: StaffRole.training } },
+        select: { id: true },
+      });
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects staff that is neither training nor teacher', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-1',
+        roles: [StaffRole.customer_care],
+        status: StaffStatus.active,
+      });
+
+      await expect(
+        service.updateClassTrainingManager(
+          classId,
+          { trainingManagerStaffId: 'staff-1' },
+          adminActor,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockPrisma.class.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects inactive teacher', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-1',
+        roles: [StaffRole.teacher],
+        status: StaffStatus.inactive,
+      });
+
+      await expect(
+        service.updateClassTrainingManager(
+          classId,
+          { trainingManagerStaffId: 'staff-1' },
+          adminActor,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 });

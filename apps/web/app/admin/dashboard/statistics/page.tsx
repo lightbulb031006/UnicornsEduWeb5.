@@ -1,5 +1,6 @@
 "use client";
 
+import { useGiftedLessonPlanEnabled } from "@/lib/gifted-lesson-plan";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -148,7 +149,16 @@ const EXPENSE_BREAKDOWN_SERIES: Array<{
   { key: "operatingCost", name: "Vận hành", color: "var(--ue-viz-8)" },
 ];
 
+/** Giáo án học sinh giỏi chỉ có trên IT — JP/ENG bỏ series chi phí giáo án. */
+function useExpenseBreakdownSeries() {
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
+  return giftedLessonPlanEnabled === false
+    ? EXPENSE_BREAKDOWN_SERIES.filter((series) => series.key !== "lessonCost")
+    : EXPENSE_BREAKDOWN_SERIES;
+}
+
 function ExpenseBreakdownChart({ data }: { data: AdminDashboardMonthlyStatistic[] }) {
+  const expenseBreakdownSeries = useExpenseBreakdownSeries();
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -172,7 +182,7 @@ function ExpenseBreakdownChart({ data }: { data: AdminDashboardMonthlyStatistic[
             }}
           />
           <Legend wrapperStyle={{ fontSize: "12px" }} />
-          {EXPENSE_BREAKDOWN_SERIES.map((series) => (
+          {expenseBreakdownSeries.map((series) => (
             <Line
               key={series.key}
               dataKey={series.key}
@@ -245,6 +255,8 @@ export default function AdminDashboardStatisticsPage() {
   const isRangeTooLong = !isRangeInvalid && monthSpan > MAX_MONTH_RANGE;
   const canQuery = !isRangeInvalid && !isRangeTooLong;
 
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
+  const expenseBreakdownSeries = useExpenseBreakdownSeries();
   const statisticsQuery = useQuery({
     queryKey: ["dashboard", "admin", "monthly-statistics", fromMonth, fromYear, toMonth, toYear],
     queryFn: () => getAdminMonthlyStatistics({ fromMonth, fromYear, toMonth, toYear }),
@@ -302,11 +314,23 @@ export default function AdminDashboardStatisticsPage() {
 
   return (
     <div className="min-h-full bg-bg-primary p-4 sm:p-6">
+      <div className="mx-auto mb-3 w-full max-w-[1320px]">
+        <Link
+          href={buildAdminLikePath(routeBase, "dashboard")}
+          aria-label="Quay lại Dashboard"
+          className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 py-2.5 text-sm font-medium text-primary hover:text-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary sm:min-h-0 sm:px-0 sm:py-0"
+        >
+          <svg className="size-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+          Quay lại Dashboard
+        </Link>
+      </div>
       <div className="mx-auto w-full max-w-[1320px] space-y-4 rounded-xl border border-border-default bg-bg-surface p-4 sm:p-5">
         <section className="flex flex-col gap-3 border-b border-border-default pb-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h1 className="text-lg font-semibold text-text-primary">Thống kê theo tháng</h1>
+              <h1 className="text-lg font-semibold text-text-primary">Thống kê năm</h1>
               <p className="mt-1 text-sm text-text-secondary">
                 Học sinh, lớp học, gia sư, doanh thu, lợi nhuận và chi phí theo từng tháng trong khoảng thời gian đã chọn.
               </p>
@@ -323,12 +347,6 @@ export default function AdminDashboardStatisticsPage() {
               >
                 {exportPdfMutation.isPending ? "Đang xuất…" : "Xuất PDF"}
               </button>
-              <Link
-                href={buildAdminLikePath(routeBase, "dashboard")}
-                className="whitespace-nowrap rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-secondary hover:text-text-primary"
-              >
-                ← Quay lại Dashboard
-              </Link>
             </div>
           </div>
 
@@ -465,7 +483,7 @@ export default function AdminDashboardStatisticsPage() {
                   <TableHeader>
                     <TableRow className="border-border-default hover:bg-transparent">
                       <TableHead className="min-w-[100px]">Tháng</TableHead>
-                      {EXPENSE_BREAKDOWN_SERIES.map((series) => (
+                      {expenseBreakdownSeries.map((series) => (
                         <TableHead key={series.key} className="min-w-[110px] text-right">
                           {series.name}
                         </TableHead>
@@ -477,7 +495,7 @@ export default function AdminDashboardStatisticsPage() {
                     {months.map((row) => (
                       <TableRow key={`expense-${row.monthKey}`} className="border-border-default/80">
                         <TableCell className="font-medium text-text-primary">{row.monthKey}</TableCell>
-                        {EXPENSE_BREAKDOWN_SERIES.map((series) => (
+                        {expenseBreakdownSeries.map((series) => (
                           <TableCell
                             key={series.key}
                             className="text-right tabular-nums text-text-primary"
@@ -500,7 +518,15 @@ export default function AdminDashboardStatisticsPage() {
                   </TableBody>
                 </Table>
               </div>
-              <MetricGlossary items={EXPENSE_METRIC_GLOSSARY} />
+              <MetricGlossary
+                items={
+                  giftedLessonPlanEnabled === false
+                    ? EXPENSE_METRIC_GLOSSARY.filter(
+                        (item) => item.term !== LESSON_PLAN_LABEL,
+                      )
+                    : EXPENSE_METRIC_GLOSSARY
+                }
+              />
             </section>
 
             <section className="space-y-3">

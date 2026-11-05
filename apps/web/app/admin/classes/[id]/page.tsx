@@ -20,7 +20,7 @@ import { getFullProfile } from "@/lib/apis/auth.api";
 import * as classApi from "@/lib/apis/class.api";
 import * as sessionApi from "@/lib/apis/session.api";
 import * as surveysApi from "@/lib/apis/surveys.api";
-import { formatCurrency } from "@/lib/class.helpers";
+import { buildEndClassConfirmMessage, formatCurrency } from "@/lib/class.helpers";
 import {
   ClassCard,
   ClassStudentCaretakerCell,
@@ -69,6 +69,7 @@ import {
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
 import { resolveClassStudentCaretakerHref } from "@/lib/class-student-caretaker";
 import { standardBlockCountFromClassSchedule } from "@/lib/class-pricing-mode";
+import { toastWarnings } from "@/lib/mutation-feedback";
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import { classKeys } from "@/lib/query-keys";
 import {
@@ -236,6 +237,8 @@ export default function AdminClassDetailPage() {
   const canEditSessionPaymentStatus =
     isAdmin || isAssistant || adminAccess.isAccountantExpense || adminAccess.isAccountantIncome;
   const canEditSessions = isAdmin || isAssistant;
+  // Khớp quyền `PUT /sessions/:id`: được lưu khi Nhận xét buổi học còn trống field bắt buộc.
+  const canSkipRequiredSessionReview = isAdmin || isAssistant || isAccountant;
   const canManageClassStatus = isAdmin || isAssistant;
 
   const [selectedYear, selectedMonthValue] = selectedMonth.split("-");
@@ -251,10 +254,6 @@ export default function AdminClassDetailPage() {
     queryFn: () => classApi.getClassById(id),
     enabled: !!id,
   });
-  const canEndClass = classDetail?.endClassEligibility?.canEnd ?? false;
-  const endClassBlockReason =
-    classDetail?.endClassEligibility?.blockReason ??
-    "Thanh toán hết trợ cấp gia sư cho mọi buổi để kết thúc lớp.";
 
   const queryClient = useQueryClient();
   const missedAlertsQueryKey = useMemo(
@@ -300,13 +299,14 @@ export default function AdminClassDetailPage() {
     placeholderData: keepPreviousData,
   });
 
-  const { data: availableSurveysResponse } = useQuery({
-    queryKey: ["surveys", "picker"],
-    queryFn: () => surveysApi.getSurveys({ limit: 100 }),
+  // `/survey-warnings/open-surveys` mở cho mọi staff; `/surveys` chỉ cho admin/đội giáo án
+  // nên trợ lí/kế toán (cũng dùng trang này) sẽ bị 403.
+  const { data: availableSurveys = [], status: availableSurveysStatus } = useQuery({
+    queryKey: ["surveys", "open-picker"],
+    queryFn: () => surveysApi.getOpenSurveys(),
     enabled: !!id && isSessionsTab,
     staleTime: 60_000,
   });
-  const availableSurveys = availableSurveysResponse?.data ?? [];
 
   const handleSessionUpdated = useCallback(
     (createdSession?: SessionItem) => {
@@ -349,15 +349,19 @@ export default function AdminClassDetailPage() {
     [id, queryClient],
   );
 
+  // Refresh cả khi lỗi: request có thể fail sau khi DB đã đổi trạng thái.
+  const invalidateClassStatusQueries = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: classDetailQueryKey }),
+      queryClient.invalidateQueries({ queryKey: ["class", "list"] }),
+      invalidateCalendarScopedQueries(queryClient),
+    ]);
+
   const endClassMutation = useMutation({
     mutationFn: (reason?: string) => classApi.endClass(id, { reason }),
-    onSuccess: async () => {
+    onSuccess: (result) => {
       toast.success("Đã kết thúc lớp.");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: classDetailQueryKey }),
-        queryClient.invalidateQueries({ queryKey: ["class", "list"] }),
-        invalidateCalendarScopedQueries(queryClient),
-      ]);
+      toastWarnings(result.calendarSyncWarnings);
     },
     onError: (err: unknown) => {
       const msg =
@@ -366,6 +370,7 @@ export default function AdminClassDetailPage() {
         "Không thể kết thúc lớp.";
       toast.error(msg);
     },
+    onSettled: invalidateClassStatusQueries,
   });
 
   const stopTeachingMutation = useMutation({
@@ -375,13 +380,9 @@ export default function AdminClassDetailPage() {
         reason: payload.reason,
       });
     },
-    onSuccess: async () => {
+    onSuccess: (result) => {
       toast.success("Đã chuyển gia sư sang nghỉ dạy lớp này.");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: classDetailQueryKey }),
-        queryClient.invalidateQueries({ queryKey: ["class", "list"] }),
-        invalidateCalendarScopedQueries(queryClient),
-      ]);
+      toastWarnings(result.calendarSyncWarnings);
     },
     onError: (err: unknown) => {
       const msg =
@@ -390,7 +391,10 @@ export default function AdminClassDetailPage() {
         "Không thể chuyển gia sư sang nghỉ dạy.";
       toast.error(msg);
     },
-    onSettled: () => setStopTeachingPendingTeacherId(null),
+    onSettled: async () => {
+      setStopTeachingPendingTeacherId(null);
+      await invalidateClassStatusQueries();
+    },
   });
 
   const handleUpdateSurvey = useCallback(
@@ -600,11 +604,6 @@ export default function AdminClassDetailPage() {
   }
 
   const handleEndClass = () => {
-    if (!canEndClass) {
-      toast.error(endClassBlockReason);
-      return;
-    }
-
     setEndClassReason("");
     setEndClassOpen(true);
   };
@@ -642,15 +641,11 @@ export default function AdminClassDetailPage() {
         open={endClassOpen}
         onOpenChange={setEndClassOpen}
         title="Kết thúc lớp?"
-        description="Mọi buổi phải đã thanh toán trợ cấp gia sư. Hệ thống sẽ gỡ gia sư khỏi lớp, đóng roster học sinh, xoá lịch cố định và lịch bù tương lai."
+        description={buildEndClassConfirmMessage(classDetail?.endClassEligibility?.unpaidSessionCount)}
         confirmLabel="Kết thúc lớp"
         variant="destructive"
         confirmPending={endClassMutation.isPending}
         onConfirm={() => {
-          if (!canEndClass) {
-            toast.error(endClassBlockReason);
-            return;
-          }
           endClassMutation.mutate(endClassReason.trim() || undefined);
         }}
       >
@@ -747,8 +742,7 @@ export default function AdminClassDetailPage() {
                 <button
                   type="button"
                   onClick={handleEndClass}
-                  disabled={endClassMutation.isPending || !canEndClass}
-                  title={!canEndClass ? endClassBlockReason : undefined}
+                  disabled={endClassMutation.isPending}
                   className="inline-flex min-h-8 shrink-0 items-center rounded-full border border-border-default bg-bg-surface px-3 text-xs font-semibold text-text-secondary transition hover:bg-bg-tertiary hover:text-primary disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
                 >
                   {endClassMutation.isPending ? "Đang lưu..." : "Kết thúc lớp"}
@@ -811,6 +805,7 @@ export default function AdminClassDetailPage() {
       {addSessionPopupOpen ? (
         <AddSessionPopup
           open={addSessionPopupOpen}
+          allowTrialTeachingToggle={canEditSessions}
           classId={id}
           className={classDetail.name}
           defaultTeacherId={currentClassTeacherId}
@@ -1400,6 +1395,7 @@ export default function AdminClassDetailPage() {
                   className={classDetail.name}
                   surveys={surveysInMonth}
                   availableSurveys={availableSurveys}
+                  availableSurveysStatus={availableSurveysStatus}
                   teachers={popupTeachers}
                   students={activeSurveyStudents}
                   error={isSurveysError}
@@ -1436,7 +1432,9 @@ export default function AdminClassDetailPage() {
                           editorLayout="wide"
                           enableBulkPaymentStatusEdit={canEditSessionPaymentStatus}
                           allowTeacherSelection={canEditSessions}
+                          allowTrialTeachingToggle={canEditSessions}
                           allowFinancialEdits={canEditSessions}
+                          skipRequiredReviewValidation={canSkipRequiredSessionReview}
                           allowAllowanceEdit={canEditSessions}
                           allowAttendanceTuitionEdits={canEditSessions}
                           allowPaymentStatusEdit={canEditSessionPaymentStatus}
@@ -1459,7 +1457,11 @@ export default function AdminClassDetailPage() {
                 ) : null}
               </>
             ) : (
-              <ClassModulesTab classId={id} canManageContent={canCreateSession} />
+              <ClassModulesTab
+                classId={id}
+                canManageContent={canCreateSession}
+                practiceActionsBasePath={`/admin/classes/${id}`}
+              />
             )}
           </section>
         </ClassCard>

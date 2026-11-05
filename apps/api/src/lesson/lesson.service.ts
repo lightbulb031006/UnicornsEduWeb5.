@@ -15,7 +15,10 @@ import {
   StaffStatus,
   UserRole,
 } from 'generated/enums';
-import { computeLessonOutputCost } from './lesson-output-pricing';
+import {
+  computeLessonOutputCost,
+  getLessonOutputPricingError,
+} from './lesson-output-pricing';
 import {
   ActionHistoryActor,
   ActionHistoryService,
@@ -89,6 +92,8 @@ type LessonOutputRecord = {
   includesTest?: boolean;
   includesSolution?: boolean;
   includesLectureVideo?: boolean;
+  includesTheoryLecture?: boolean;
+  theoryLectureLinks?: string[];
   tags: unknown;
   cost: number;
   paymentStatus: PaymentStatus;
@@ -163,6 +168,21 @@ function toDateOnlyOrNull(value: string | null | undefined) {
 }
 
 function normalizeTags(value: string[] | null | undefined) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => String(item).trim())
+        .filter((item) => item.length > 0),
+    ),
+  );
+}
+
+/** Trim, bỏ trống, gộp trùng — giữ thứ tự nhập. */
+function normalizeTheoryLectureLinks(value: string[] | null | undefined) {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -979,12 +999,24 @@ export class LessonService {
     const includesTest = data.includesTest === true;
     const includesSolution = data.includesSolution === true;
     const includesLectureVideo = data.includesLectureVideo === true;
+    const includesTheoryLecture = data.includesTheoryLecture === true;
+    const theoryLectureLinks = includesTheoryLecture
+      ? normalizeTheoryLectureLinks(data.theoryLectureLinks)
+      : [];
+    const pricingItems = {
+      includesTest,
+      includesSolution,
+      includesLectureVideo,
+      includesTheoryLecture,
+    };
+    this.assertLessonOutputPricing(
+      difficultyBand,
+      level,
+      pricingItems,
+      theoryLectureLinks,
+    );
     const cost =
-      computeLessonOutputCost(difficultyBand, {
-        includesTest,
-        includesSolution,
-        includesLectureVideo,
-      }) ?? 0;
+      computeLessonOutputCost(difficultyBand, pricingItems, level) ?? 0;
     const paymentStatus =
       access?.canParticipate && !access.canManage
         ? PaymentStatus.pending
@@ -1028,6 +1060,8 @@ export class LessonService {
           includesTest,
           includesSolution,
           includesLectureVideo,
+          includesTheoryLecture,
+          theoryLectureLinks,
           tags,
           cost,
           paymentStatus,
@@ -1095,6 +1129,8 @@ export class LessonService {
         'includesTest',
         'includesSolution',
         'includesLectureVideo',
+        'includesTheoryLecture',
+        'theoryLectureLinks',
         'tags',
         'cost',
         'date',
@@ -1194,11 +1230,47 @@ export class LessonService {
       data.includesLectureVideo !== undefined
         ? data.includesLectureVideo === true
         : Boolean(existingOutput.includesLectureVideo);
-    const computedCost = computeLessonOutputCost(nextDifficultyBand, {
+    const nextIncludesTheoryLecture =
+      data.includesTheoryLecture !== undefined
+        ? data.includesTheoryLecture === true
+        : Boolean(existingOutput.includesTheoryLecture);
+    const nextLevel =
+      data.level !== undefined
+        ? toTrimmedString(data.level)
+        : existingOutput.level;
+    const nextTheoryLectureLinks = nextIncludesTheoryLecture
+      ? normalizeTheoryLectureLinks(
+          data.theoryLectureLinks !== undefined
+            ? data.theoryLectureLinks
+            : existingOutput.theoryLectureLinks,
+        )
+      : [];
+    const nextPricingItems = {
       includesTest: nextIncludesTest,
       includesSolution: nextIncludesSolution,
       includesLectureVideo: nextIncludesLectureVideo,
-    });
+      includesTheoryLecture: nextIncludesTheoryLecture,
+    };
+    if (!accountantPaymentOnlyEditing) {
+      this.assertLessonOutputPricing(
+        nextDifficultyBand,
+        nextLevel,
+        nextPricingItems,
+        nextTheoryLectureLinks,
+      );
+      if (
+        data.includesTheoryLecture !== undefined ||
+        data.theoryLectureLinks !== undefined
+      ) {
+        updateData.includesTheoryLecture = nextIncludesTheoryLecture;
+        updateData.theoryLectureLinks = nextTheoryLectureLinks;
+      }
+    }
+    const computedCost = computeLessonOutputCost(
+      nextDifficultyBand,
+      nextPricingItems,
+      nextLevel,
+    );
     if (computedCost != null) {
       updateData.cost = computedCost;
     }
@@ -2141,6 +2213,8 @@ export class LessonService {
       includesTest: Boolean(output.includesTest),
       includesSolution: Boolean(output.includesSolution),
       includesLectureVideo: Boolean(output.includesLectureVideo),
+      includesTheoryLecture: Boolean(output.includesTheoryLecture),
+      theoryLectureLinks: output.theoryLectureLinks ?? [],
       tags: parseJsonStringArray(output.tags),
       cost: output.cost,
       paymentStatus: output.paymentStatus,
@@ -2841,6 +2915,23 @@ export class LessonService {
       where: { id },
       include: this.lessonOutputInclude,
     });
+  }
+
+  private assertLessonOutputPricing(
+    band: LessonOutputDifficultyBand | null,
+    level: string | null,
+    items: Parameters<typeof getLessonOutputPricingError>[2],
+    theoryLectureLinks: string[],
+  ) {
+    const pricingError = getLessonOutputPricingError(band, level, items);
+    if (pricingError) {
+      throw new BadRequestException(pricingError);
+    }
+    if (items.includesTheoryLecture && theoryLectureLinks.length === 0) {
+      throw new BadRequestException(
+        'Bài giảng lý thuyết cần ít nhất 1 link video.',
+      );
+    }
   }
 
   private getOutputSnapshotForActor(

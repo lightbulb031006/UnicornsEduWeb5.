@@ -4,11 +4,14 @@
 
 ## Multi-instance VPS deploy
 
-Nhiều bản UnicornsEduWeb5 trên **cùng một VPS** — mỗi môn học / domain riêng, database riêng, cổng Nginx loopback riêng.
+Nhiều bản UnicornsEduWeb5 trên **cùng một VPS** — mỗi môn học / domain riêng, database riêng (chung một Postgres self-host), cổng Nginx loopback riêng.
 
 | Tài liệu | Nội dung |
 |----------|----------|
+| [upstream-sync-math-2026-11-05.md](upstream-sync-math-2026-11-05.md) | Đồng bộ tháng 11 cho Toán, hồ sơ môn và chốt migration |
 | [vps-single-instance-runbook.md](vps-single-instance-runbook.md) | **Runbook triển khai** — instance `math`, Cloudflare Tunnel, secrets GitHub, xử lý sự cố deploy |
+| [vps-multi-instance-runbook.md](vps-multi-instance-runbook.md) | **Tham khảo upstream Tin/Anh/Nhật** — bootstrap IT/ENG/JP, Cloudflare Tunnel, secrets GitHub |
+| [vps-local-supabase.md](vps-local-supabase.md) | **Data stack upstream Tin/Anh/Nhật** — Postgres (3 database) + Supabase Storage self-host trên VPS, sync từ cloud, cutover, backup |
 | [`deploy/instances.json`](../../deploy/instances.json) | Registry instance (`it`, `eng`, `jp`, …) |
 | [`.env.production.eng.example`](../../.env.production.eng.example) | Mẫu `.env` cho instance ENG |
 | [`.env.production.jp.example`](../../.env.production.jp.example) | Mẫu `.env` cho instance JP (`/root/UnicornsEduJP`) |

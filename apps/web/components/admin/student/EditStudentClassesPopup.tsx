@@ -31,20 +31,40 @@ const CLASS_STATUS_LABELS: Record<ClassStatus, string> = {
 const EMPTY_CLASS_OPTIONS: ClassListItem[] = [];
 const SEARCH_RESULT_LIMIT = 3;
 
-function normalizeStudentClasses(student: StudentDetail): SelectedClassItem[] {
+/**
+ * Tách membership hiện tại của học sinh:
+ * - `current`: lớp đang chạy, membership còn active → hiển thị "Đang có", được thêm/gỡ.
+ * - `endedClassIds`: lớp đã kết thúc nhưng học sinh vẫn là thành viên → ẩn khỏi studio,
+ *   nhưng vẫn gửi kèm khi lưu để backend không tự gỡ (backend inactive mọi lớp vắng mặt trong payload).
+ * Membership đã gỡ mềm (`status = inactive`) bị bỏ qua hoàn toàn.
+ */
+function normalizeStudentClasses(student: StudentDetail): {
+  current: SelectedClassItem[];
+  endedClassIds: string[];
+} {
   const classes = new Map<string, SelectedClassItem>();
+  const endedClassIds = new Set<string>();
 
   for (const item of student.studentClasses ?? []) {
+    if (item.status === "inactive") continue;
     const classId = item.class?.id;
     const className = item.class?.name?.trim();
-    if (!classId || !className || classes.has(classId)) continue;
+    if (!classId || !className || classes.has(classId) || endedClassIds.has(classId)) continue;
+    if (item.class.status === "ended") {
+      endedClassIds.add(classId);
+      continue;
+    }
     classes.set(classId, {
       id: classId,
       name: className,
+      status: item.class.status ?? undefined,
     });
   }
 
-  return Array.from(classes.values()).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  return {
+    current: Array.from(classes.values()).sort((a, b) => a.name.localeCompare(b.name, "vi")),
+    endedClassIds: Array.from(endedClassIds),
+  };
 }
 
 function classStatusBadgeClass(status?: ClassStatus): string {
@@ -79,7 +99,10 @@ export default function EditStudentClassesPopup({
   onSuccess,
 }: Props) {
   const queryClient = useQueryClient();
-  const currentClasses = useMemo(() => normalizeStudentClasses(student), [student]);
+  const { current: currentClasses, endedClassIds } = useMemo(
+    () => normalizeStudentClasses(student),
+    [student],
+  );
 
   const [selectedClasses, setSelectedClasses] = useState<SelectedClassItem[]>(currentClasses);
   const [searchInput, setSearchInput] = useState("");
@@ -117,9 +140,9 @@ export default function EditStudentClassesPopup({
   const searchableClasses = useMemo(
     () =>
       classOptions
-        .filter((item) => !selectedClassIds.has(item.id))
+        .filter((item) => !selectedClassIds.has(item.id) && !endedClassIds.includes(item.id))
         .sort((a, b) => a.name.localeCompare(b.name, "vi")),
-    [classOptions, selectedClassIds],
+    [classOptions, selectedClassIds, endedClassIds],
   );
   const visibleSearchableClasses = useMemo(
     () => searchableClasses.slice(0, SEARCH_RESULT_LIMIT),
@@ -194,7 +217,8 @@ export default function EditStudentClassesPopup({
       errorMessage: "Không thể cập nhật danh sách lớp học cho học sinh.",
       action: async () => {
         await studentApi.updateStudentClasses(student.id, {
-          class_ids: nextClassIds,
+          // Giữ nguyên membership ở lớp đã kết thúc (ẩn khỏi studio, không được gỡ ngầm).
+          class_ids: Array.from(new Set([...nextClassIds, ...endedClassIds])),
         });
         return changedClassIds;
       },

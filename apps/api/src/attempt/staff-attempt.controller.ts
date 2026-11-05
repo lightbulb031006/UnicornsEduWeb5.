@@ -21,7 +21,10 @@ import {
   type JwtPayload,
 } from 'src/auth/decorators/current-user.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
-import { ParseClassIdPipe } from 'src/common/pipes/parse-entity-id.pipe';
+import {
+  ParseClassIdPipe,
+  ParseStudentIdPipe,
+} from 'src/common/pipes/parse-entity-id.pipe';
 import { GradeEssayAnswerDto } from 'src/dtos/attempt.dto';
 import { StaffOperationsAccessService } from 'src/staff-ops/staff-operations-access.service';
 import { AttemptService } from './attempt.service';
@@ -56,26 +59,6 @@ export class StaffAttemptGradingController {
         'Chỉ gia sư phụ trách lớp hoặc admin mới được chấm tự luận.',
       );
     }
-  }
-
-  @Get()
-  @ApiOperation({
-    summary: 'Hàng đợi chấm tự luận của một lần giao',
-    description:
-      'Chỉ câu tự luận chưa chấm của lượt làm mới nhất mỗi học sinh. Lượt cũ không nằm trong hàng đợi. Bài tập ôn nhẹ không xuất hiện.',
-  })
-  @ApiParam({ name: 'classId', description: 'Class ID' })
-  @ApiParam({ name: 'assignmentId', description: 'class_content_items.id' })
-  @ApiResponse({ status: 200, description: 'Essay grading queue.' })
-  @ApiResponse({ status: 403, description: 'Không có quyền chấm lớp này.' })
-  @ApiResponse({ status: 404, description: 'Không tìm thấy lần giao.' })
-  async getQueue(
-    @CurrentUser() user: JwtPayload,
-    @Param('classId', new ParseClassIdPipe()) classId: string,
-    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
-  ) {
-    await this.assertGraderAccess(user, classId);
-    return this.attemptService.getGradingQueue(classId, assignmentId);
   }
 
   @Patch(':attemptAnswerId')
@@ -137,16 +120,16 @@ export class StaffAttemptStatsController {
     );
     if (mode !== 'admin' && mode !== 'teacher') {
       throw new ForbiddenException(
-        'Chỉ gia sư phụ trách lớp hoặc admin mới xem thống kê lần giao.',
+        'Chỉ gia sư phụ trách lớp hoặc admin mới xem kết quả lần giao.',
       );
     }
   }
 
   @Get('stats')
   @ApiOperation({
-    summary: 'Thống kê một lần giao luyện tập',
+    summary: 'Kết quả một lần giao luyện tập',
     description:
-      'Bảng độc lập theo classContentItemId + classId. Điểm trên thang 100 (chia đều N câu lúc start). Lượt cao nhất đã chấm xong (MCQ autoGradedScore + tổng pointsAwarded essay). Lượt còn hasUngradedEssay không vào điểm / trung bình / tỉ lệ đúng. Essay “đúng” khi pointsAwarded === pointsPossible.',
+      'Bảng độc lập theo classContentItemId + classId. Điểm mỗi học sinh = lượt đã chấm xong gần nhất theo giờ nộp (MCQ autoGradedScore + tổng pointsAwarded essay). Lượt còn hasUngradedEssay bị bỏ qua, dùng lượt đã chấm trước đó — áp cho điểm, trung bình, tỉ lệ đúng. Essay “đúng” khi pointsAwarded === pointsPossible. Trạng thái dòng: in_progress (đang làm lượt mới) > pending_essay > graded > not_started.',
   })
   @ApiParam({ name: 'classId', description: 'Class ID' })
   @ApiParam({ name: 'assignmentId', description: 'class_content_items.id' })
@@ -160,5 +143,63 @@ export class StaffAttemptStatsController {
   ) {
     await this.assertViewerAccess(user, classId);
     return this.attemptService.getPracticeStats(classId, assignmentId);
+  }
+
+  @Get('students/:studentId/attempts')
+  @ApiOperation({
+    summary: 'Các lượt đã nộp của một học sinh',
+    description:
+      'Bộ chọn lượt của màn Bài làm, mới nhất trước. Không gồm lượt đang làm. Mỗi lượt kèm isScored (lượt đang tính điểm) và gradable (lượt mới nhất có câu tự luận — bật được chế độ Chấm điểm).',
+  })
+  @ApiParam({ name: 'classId', description: 'Class ID' })
+  @ApiParam({ name: 'assignmentId', description: 'class_content_items.id' })
+  @ApiParam({ name: 'studentId', description: 'Student ID (UNIST-…)' })
+  @ApiResponse({ status: 200, description: 'Student attempts.' })
+  @ApiResponse({ status: 403, description: 'Không có quyền xem lớp này.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Không tìm thấy lần giao hoặc học sinh.',
+  })
+  async listStudentAttempts(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Param('studentId', new ParseStudentIdPipe()) studentId: string,
+  ) {
+    await this.assertViewerAccess(user, classId);
+    return this.attemptService.listStudentAttemptsForStaff(
+      classId,
+      assignmentId,
+      studentId,
+    );
+  }
+
+  @Get('attempts/:attemptId')
+  @ApiOperation({
+    summary: 'Bài làm một lượt đã nộp (phía dạy)',
+    description:
+      'Câu hỏi + câu trả lời của học sinh kèm đáp án, điểm, nhận xét và attemptAnswerId để chấm tự luận. Lượt đang làm trả 404.',
+  })
+  @ApiParam({ name: 'classId', description: 'Class ID' })
+  @ApiParam({ name: 'assignmentId', description: 'class_content_items.id' })
+  @ApiParam({ name: 'attemptId', description: 'Attempt ID' })
+  @ApiResponse({ status: 200, description: 'Attempt detail for staff.' })
+  @ApiResponse({ status: 403, description: 'Không có quyền xem lớp này.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Không tìm thấy lượt đã nộp.',
+  })
+  async getAttempt(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Param('attemptId', ParseUUIDPipe) attemptId: string,
+  ) {
+    await this.assertViewerAccess(user, classId);
+    return this.attemptService.getAttemptForStaff(
+      classId,
+      assignmentId,
+      attemptId,
+    );
   }
 }

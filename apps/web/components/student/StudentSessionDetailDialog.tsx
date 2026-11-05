@@ -5,10 +5,11 @@ import {
   ResponsiveDialog,
   ResponsiveDialogBody,
 } from "@/components/ui/ResponsiveDialog";
-import YouTubeEmbed from "@/components/ui/YouTubeEmbed";
+import ProtectedVideoPlayer from "@/components/ui/ProtectedVideoPlayer";
 import { Badge } from "@/components/ui/badge";
 import MathContent from "@/components/ui/MathContent";
 import { attendanceStatusLabel } from "./StudentTimelineCards";
+import { StudentSessionReviewSummary } from "./StudentSessionReviewSummary";
 import { formatVnWeekdayDate } from "@/lib/formatters";
 
 function formatDateTime(date: Date, startTime?: string | null, endTime?: string | null): string {
@@ -31,6 +32,9 @@ export default function StudentSessionDetailDialog({
   onClose: () => void;
 }) {
   const myAttendance = session.attendance?.[0];
+  const isStructuredReview = Boolean(session.progressStatus);
+  // Buổi có cấu trúc dựng nhận xét từ field; notes chỉ còn ý nghĩa ở buổi legacy.
+  const myNotes = isStructuredReview ? null : myAttendance?.notes;
   const teacherName =
     [session.teacher?.user?.first_name, session.teacher?.user?.last_name]
       .filter(Boolean)
@@ -73,7 +77,7 @@ export default function StudentSessionDetailDialog({
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
             {/* Left Column: Large Video Recording (Sticky on desktop) */}
             <div className="lg:col-span-7 xl:col-span-8 space-y-3 lg:sticky lg:top-0">
-              {session.recordingUrl ? (
+              {session.hasRecording ? (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
@@ -85,10 +89,13 @@ export default function StudentSessionDetailDialog({
                     </span>
                     <span className="text-[11px] text-text-muted">Bảo mật nội dung</span>
                   </div>
-                  <YouTubeEmbed
-                    url={session.recordingUrl}
-                    protected
-                    className="w-full aspect-video min-h-[280px] sm:min-h-[380px] md:min-h-[440px] lg:min-h-[480px] xl:min-h-[560px] 2xl:min-h-[620px] rounded-2xl shadow-xl"
+                  <ProtectedVideoPlayer
+                    source={{
+                      kind: "session",
+                      classId: session.classId,
+                      sessionId: session.id,
+                    }}
+                    className="rounded-2xl shadow-xl"
                   />
                 </div>
               ) : (
@@ -104,7 +111,7 @@ export default function StudentSessionDetailDialog({
             {/* Right Column: Detailed Text Cards (Scrollable independently when content is long) */}
             <div className="lg:col-span-5 xl:col-span-4 space-y-4 lg:max-h-[calc(88vh-120px)] lg:overflow-y-auto lg:pr-2 lg:overscroll-contain [scrollbar-width:thin]">
               {/* 1. Nhận xét dành riêng cho bạn */}
-              {myAttendance?.notes && (
+              {(myNotes || isStructuredReview) && (
                 <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 sm:p-5 shadow-xs break-words">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary mb-2 flex items-center gap-1.5">
                     <svg className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -112,7 +119,14 @@ export default function StudentSessionDetailDialog({
                     </svg>
                     Nhận xét dành riêng cho bạn
                   </h3>
-                  <MathContent content={myAttendance.notes} />
+                  {isStructuredReview ? (
+                    <StudentSessionReviewSummary
+                      session={session}
+                      myReview={myAttendance}
+                    />
+                  ) : (
+                    <MathContent content={myNotes ?? ""} />
+                  )}
                 </div>
               )}
 
@@ -155,7 +169,7 @@ export default function StudentSessionDetailDialog({
                 </div>
               )}
 
-              {!session.lessonContent && !myAttendance?.notes && !session.homework && !session.tutorial && (
+              {!session.lessonContent && !myNotes && !isStructuredReview && !session.homework && !session.tutorial && (
                 <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary/20 p-6 text-center text-xs text-text-muted">
                   Chưa có ghi chú hoặc bài tập cho buổi học này.
                 </div>

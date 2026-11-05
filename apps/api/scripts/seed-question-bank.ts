@@ -27,6 +27,7 @@ import { PrismaClient } from '../generated/client';
 import { algorithmsPack } from './seed-data/algorithms';
 import { mathThptPack } from './seed-data/math-thpt';
 import type { SeedExam, SeedPack, SeedQuestion } from './seed-data/types';
+import { loadLmsProfile } from '../src/lms-profile/lms-profile';
 
 const PACKS: SeedPack[] = [algorithmsPack, mathThptPack];
 
@@ -359,9 +360,17 @@ async function resetPackInCourse(pack: SeedPack, course: { id: string; name: str
 async function main() {
   const options = parseArgs(process.argv.slice(2));
 
-  const selectedPacks = options.packs.length
-    ? PACKS.filter((p) => options.packs.includes(p.key))
-    : PACKS;
+  // Hồ sơ môn của instance quyết định loại câu được seed (IT không có tự luận).
+  const profile = loadLmsProfile(process.env);
+  const allowedTypes = new Set<string>(profile.questionTypes);
+  const selectedPacks = (
+    options.packs.length
+      ? PACKS.filter((p) => options.packs.includes(p.key))
+      : PACKS
+  ).map((pack) => ({
+    ...pack,
+    questions: pack.questions.filter((q) => allowedTypes.has(q.type)),
+  }));
   if (selectedPacks.length === 0) {
     throw new Error(
       `Không có pack nào khớp. Pack hợp lệ: ${PACKS.map((p) => p.key).join(', ')}`,
@@ -377,6 +386,7 @@ async function main() {
       ? '▶ Chế độ GHI DỮ LIỆU (--apply)'
       : '▶ Chế độ DRY-RUN — không ghi gì. Thêm --apply để ghi vào DB.',
   );
+  console.log(`  Hồ sơ môn: ${profile.profile} (${profile.questionTypes.join(', ')})`);
   console.log(`  DB: ${databaseUrl.replace(/:\/\/([^:]+):[^@]*@/, '://$1:***@')}\n`);
 
   const total: SeedStats = {

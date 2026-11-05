@@ -316,7 +316,8 @@ describe('session-allowance.util', () => {
     expect(allowanceAfterConfig).toBe(320_000);
     expect(allowanceAfterConfig).not.toBe(
       Math.round(
-        allowanceBeforeConfig * (1 - configuredFixedSalaryOperatingPercent / 100),
+        allowanceBeforeConfig *
+          (1 - configuredFixedSalaryOperatingPercent / 100),
       ),
     );
 

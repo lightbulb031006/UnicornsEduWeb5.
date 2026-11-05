@@ -730,7 +730,7 @@ export function LessonTaskDetailPage({
                             {assignee.fullName.split(" ").pop()?.substring(0, 2).toUpperCase() || "?"}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-semibold text-text-primary leading-tight">
+                            <p className="break-words text-sm font-semibold text-text-primary leading-tight">
                               {assignee.fullName}
                             </p>
                             <p className="mt-1 truncate text-xs text-text-secondary">

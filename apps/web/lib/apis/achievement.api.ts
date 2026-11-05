@@ -124,6 +124,17 @@ export async function reorderAchievements(
   return Array.isArray(response.data) ? response.data : [];
 }
 
+/** Đặt thành tích nổi bật (chỉ thành tích nhân sự); trả danh sách mới, nổi bật đứng đầu. */
+export async function setHighlightAchievement(
+  owner: AchievementOwnerRef,
+  achievementId: string,
+): Promise<AchievementDto[]> {
+  const response = await api.put<AchievementDto[]>(
+    `${ownerBasePath(owner)}/${encodeURIComponent(achievementId)}/highlight`,
+  );
+  return Array.isArray(response.data) ? response.data : [];
+}
+
 export async function uploadAchievementImage(
   owner: AchievementOwnerRef,
   achievementId: string,

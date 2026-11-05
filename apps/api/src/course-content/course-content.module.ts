@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ProtectedVideoModule } from 'src/protected-video/protected-video.module';
 import { PrismaModule } from 'src/prisma/prisma.module';
 import { ActionHistoryModule } from 'src/action-history/action-history.module';
 import { ClassModule } from 'src/class/class.module';
@@ -21,7 +22,12 @@ import { CourseContentSupportService } from './course-content-support.service';
 import { CourseContentService } from './course-content.service';
 
 @Module({
-  imports: [PrismaModule, ActionHistoryModule, ClassModule],
+  imports: [
+    PrismaModule,
+    ActionHistoryModule,
+    ClassModule,
+    ProtectedVideoModule,
+  ],
   controllers: [
     CourseModuleController,
     CourseLessonController,

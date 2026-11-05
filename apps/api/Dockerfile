@@ -36,7 +36,8 @@ FROM node:24-alpine AS production
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Chromium for Puppeteer PDF receipts (MailService + ReceiptPdfService)
+# Chromium for Puppeteer PDF (biên nhận ReceiptPdfService + Đề in ExamPdfRendererService).
+# font-liberation: Liberation Serif thay Times New Roman cho Đề in (cùng số đo chữ).
 RUN apk add --no-cache \
     chromium \
     nss \
@@ -44,6 +45,7 @@ RUN apk add --no-cache \
     harfbuzz \
     ca-certificates \
     ttf-freefont \
+    font-liberation \
   && rm -rf /var/cache/apk/*
 ENV CHROMIUM_PATH=/usr/bin/chromium
 

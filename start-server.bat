@@ -5,7 +5,7 @@ REM Chay tu thu muc goc repo: start-server.bat
 
 echo(
 echo ========================================
-echo    UNICORNS EDU 5.0 - START SERVER
+echo    UNIEDU 5.0 - START SERVER
 echo ========================================
 echo(
 

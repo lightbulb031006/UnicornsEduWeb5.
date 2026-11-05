@@ -326,7 +326,7 @@ function LessonTaskFormPopupContent({
                         className="flex items-start justify-between gap-3 rounded-2xl border border-border-default bg-bg-surface p-3"
                       >
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-text-primary">
+                          <p className="break-words text-sm font-semibold text-text-primary">
                             {assignee.fullName}
                           </p>
                           <p className="mt-1 text-xs text-text-secondary">
@@ -407,7 +407,7 @@ function LessonTaskFormPopupContent({
                     >
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-text-primary">
+                          <p className="break-words text-sm font-semibold text-text-primary">
                             {staff.fullName}
                           </p>
                           <p className="mt-1 text-xs text-text-secondary">

@@ -161,6 +161,9 @@ export class TrainingManagerService {
         ? undefined
         : normalizeTrainingManagerRatePercent(dto.trainingManagerRatePercent);
 
+    // Gia sư kiêm quản lý lớp: staff `teacher` chưa có `training` được cấp
+    // thêm role này để quyền staff-ops / trợ cấp quản lý chạy như nhân sự Đào Tạo.
+    let grantTrainingRoleToStaffId: string | null = null;
     if (nextStaffId) {
       const manager = await this.prisma.staffInfo.findUnique({
         where: { id: nextStaffId },
@@ -169,13 +172,17 @@ export class TrainingManagerService {
       if (!manager) {
         throw new NotFoundException('Training manager staff not found');
       }
+      const hasTrainingRole = manager.roles.includes(StaffRole.training);
       if (
         manager.status !== StaffStatus.active ||
-        !manager.roles.includes(StaffRole.training)
+        (!hasTrainingRole && !manager.roles.includes(StaffRole.teacher))
       ) {
         throw new BadRequestException(
-          'Quản lý lớp phải là nhân sự Đào Tạo đang hoạt động.',
+          'Quản lý lớp phải là nhân sự Đào Tạo hoặc gia sư đang hoạt động.',
         );
+      }
+      if (!hasTrainingRole) {
+        grantTrainingRoleToStaffId = manager.id;
       }
     }
 
@@ -185,7 +192,7 @@ export class TrainingManagerService {
       );
     }
 
-    return this.prisma.class.update({
+    const updateClass = this.prisma.class.update({
       where: { id: classId },
       data: {
         ...(nextStaffId !== undefined
@@ -212,6 +219,20 @@ export class TrainingManagerService {
         },
       },
     });
+
+    if (!grantTrainingRoleToStaffId) {
+      return updateClass;
+    }
+
+    const [updatedClass] = await this.prisma.$transaction([
+      updateClass,
+      this.prisma.staffInfo.update({
+        where: { id: grantTrainingRoleToStaffId },
+        data: { roles: { push: StaffRole.training } },
+        select: { id: true },
+      }),
+    ]);
+    return updatedClass;
   }
 
   private async resolveAccessibleStaffId(

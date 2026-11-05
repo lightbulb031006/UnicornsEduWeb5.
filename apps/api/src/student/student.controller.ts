@@ -486,7 +486,7 @@ export class StudentController {
     required: false,
     type: Boolean,
     description:
-      'When true, ignores sourceIds/publish gate and returns achievements for ALL students (level-list surface). Keep false/omit for publish-gated surfaces (e.g. "Tự Hào Unicorns").',
+      'When true, ignores sourceIds/publish gate and returns achievements for ALL students (level-list surface). Keep false/omit for publish-gated surfaces (e.g. "Tự Hào Uni").',
   })
   @ApiQuery({
     name: 'level',

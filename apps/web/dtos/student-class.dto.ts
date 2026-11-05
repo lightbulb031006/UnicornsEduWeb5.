@@ -1,4 +1,8 @@
 import type { ClassStatus } from "@/dtos/class.dto";
+import type {
+  AttendanceReviewFields,
+  SessionReviewFields,
+} from "@/dtos/session.dto";
 
 /** Thẻ lớp đang học trên trang chủ học sinh (`GET /users/me/student-classes`). */
 export interface StudentClassCardItem {
@@ -20,7 +24,7 @@ export interface StudentClassDetail {
   teacherNames: string[];
 }
 
-export interface StudentSessionItem {
+export interface StudentSessionItem extends SessionReviewFields {
   id: string;
   teacherId: string;
   classId: string;
@@ -30,14 +34,20 @@ export interface StudentSessionItem {
   lessonContent: string | null;
   homework: string | null;
   tutorial: string | null;
+  /** Luôn null (link YouTube bị giấu) — dùng `hasRecording`. */
   recordingUrl: string | null;
+  hasRecording: boolean;
   coefficient: number;
-  attendance: Array<{
-    id: string;
-    studentId: string;
-    status: string;
-    notes: string | null;
-  }>;
+  /** Số thứ tự buổi trong lớp (suy ra, không lưu). */
+  ordinal?: number | null;
+  attendance: Array<
+    AttendanceReviewFields & {
+      id: string;
+      studentId: string;
+      status: string;
+      notes: string | null;
+    }
+  >;
   teacher: {
     id: string;
     user: {

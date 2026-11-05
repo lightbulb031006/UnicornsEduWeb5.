@@ -49,7 +49,9 @@ import type {
   SurveyReportedClass,
   UpdateSurveyPayload,
 } from "@/dtos/survey.dto";
+import { ROW_LINK_INTERACTION_CLASS } from "@/lib/row-link";
 import { cn } from "@/lib/utils";
+import { useRowLink } from "@/hooks/use-row-link";
 
 const PAGE_SIZE = 20;
 const SURVEYS_QUERY_KEY = ["surveys", "list"] as const;
@@ -1241,6 +1243,7 @@ function SurveyClassesDialog({
   const [search, setSearch] = useState("");
   const pathname = usePathname();
   const routeBase = resolveAdminLikeRouteBase(pathname);
+  const rowLink = useRowLink();
 
   const reportedQuery = useQuery({
     queryKey: ["surveys", survey?.id, "reported-classes"],
@@ -1362,7 +1365,11 @@ function SurveyClassesDialog({
             {filteredItems.map((item) => {
               const reportedItem = tab === "reported" ? (item as SurveyReportedClass) : null;
               return (
-                <article key={item.classId} className="p-3.5 transition-colors hover:bg-bg-secondary/40">
+                <article
+                  key={item.classId}
+                  {...rowLink(buildAdminLikePath(routeBase, `classes/${item.classId}`), `Xem lớp ${item.name}`)}
+                  className={`p-3.5 ${ROW_LINK_INTERACTION_CLASS}`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <Link

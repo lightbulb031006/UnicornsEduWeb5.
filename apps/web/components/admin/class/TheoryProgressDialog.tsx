@@ -203,7 +203,7 @@ function TheoryProgressStudentRow({
     <div className="rounded-xl border border-border-default bg-bg-surface p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-text-primary">
+          <p className="break-words text-sm font-semibold text-text-primary">
             {student.studentName}
           </p>
           <p className="mt-0.5 text-xs text-text-muted">

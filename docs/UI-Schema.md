@@ -1,8 +1,8 @@
-# Unicorns Edu 5.0 – UI Schema
+# UniEdu 5.0 – UI Schema
 
 ## 1. Design Philosophy
 
-Unicorns Edu 5.0 uses a tokenized color system built for product clarity, operational trust, and long-term maintainability.
+UniEdu 5.0 uses a tokenized color system built for product clarity, operational trust, and long-term maintainability.
 
 - Modern and clean through neutral-first surfaces and restrained accent usage.
 - Trustworthy through stable blue brand anchors across all themes.
@@ -21,7 +21,8 @@ Unicorns Edu 5.0 uses a tokenized color system built for product clarity, operat
 - Người dùng chọn **Sáng** (`light`), **Tối** (`dark`), **Hoa anh đào** (`pink`) qua popup icon palette. Protected shell dùng picker trong sidebar; public/home navbar và các trang auth/verify/wallet approval dùng compact picker để mọi entry point đều đổi theme được. Popup được **portal** ra `document.body` để không bị cắt bởi `overflow` / `transform` của sidebar. Giá trị lưu `localStorage` key `ue-app-theme` (đồng bộ với `apps/web/dtos/theme.dto.ts` → `THEME_STORAGE_KEY`).
 - `ThemeProvider` (`apps/web/context/ThemeContext.tsx`) dùng `useSyncExternalStore`, áp `data-theme` trong `useLayoutEffect`, và đồng bộ giữa tab qua `storage` event. Khi storage bị clear hoặc chứa giá trị không hợp lệ, theme fallback về `light`.
 - `[data-theme]` cũng đặt `color-scheme` (`light`/`dark`) trong `apps/web/app/globals.css` để scrollbar, form controls, và native UI theo đúng theme.
-- `BrandLogo` / `BrandLogoLockup` dùng lần lượt `logo_light.png`, `logo_dark.png`, `logo_hana.png` theo theme.
+- `BrandLogo` chỉ còn **logo trơn** chữ **UNI** (`image/logo/logo.png`, ngang ~1,34:1), màu gốc nền trong suốt, dùng chung mọi theme và mọi instance (IT/JP/ENG); bỏ prop `kind` và biến thể `full` (`logo_full.png` không còn hiển thị trên web, chỉ còn là nguồn của watermark ảnh public). Favicon không đổi.
+- `BrandLogoLockup` không render chữ «UniEdu» nữa: `showWordmark` (mặc định) hiện logo trơn cỡ lớn (navbar/sidebar cao 48px, 52px từ `sm`; auth 96px, 112px từ `sm`); `showWordmark={false}` (sidebar thu gọn) hiện cùng logo cỡ nhỏ vừa rail. Prop `wordmarkClassName` đã bỏ. Sidebar admin / staff / học sinh căn logo **giữa sidebar**: vùng logo có `pl` bằng nút thu gọn + gap (`pl-[3.25rem] md:pl-11`) để đối xứng với nút bên phải.
 - Token CSS cho `[data-theme="pink"]` trong `apps/web/app/globals.css` dùng tông **hoa anh đào / rose** (primary rose ~`#DB2777`), khác bảng primitive “Pink-Purple” bên dưới (tài liệu tham chiếu scale); khi đổi scale primitive cần rà lại semantic pink trong `globals.css`.
 
 ### Why semantic naming

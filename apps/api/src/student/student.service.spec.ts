@@ -221,6 +221,27 @@ describe('StudentService', () => {
     });
   });
 
+  it('filters student list class filter to current studying classes only', async () => {
+    mockPrisma.studentInfo.count.mockResolvedValue(0);
+    mockPrisma.studentInfo.findMany.mockResolvedValue([]);
+
+    await service.getStudents({ page: 1, limit: 20, className: 'BASIC 22' });
+
+    expect(mockPrisma.studentInfo.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        studentClasses: {
+          some: {
+            status: 'active',
+            class: {
+              status: 'running',
+              name: { contains: 'BASIC 22', mode: 'insensitive' },
+            },
+          },
+        },
+      }),
+    });
+  });
+
   it('records action history after creating a student', async () => {
     mockPrisma.user.findUnique.mockResolvedValue({
       id: 'user-1',
@@ -1692,8 +1713,7 @@ describe('StudentService', () => {
         id: 'student-1',
         status,
         userId: 'user-1',
-        customerSource: null,
-        customerSourceNote: null,
+        customerSource: 'acquaintance',
       });
       mockPrisma.studentInfo.findUnique.mockResolvedValue(
         buildStudentDetail(status),

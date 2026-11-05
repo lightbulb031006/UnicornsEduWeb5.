@@ -1,10 +1,14 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ProtectedVideoService } from 'src/protected-video/protected-video.service';
 import { Prisma } from '../../generated/client';
 import {
+  AttendanceStatus,
   PaymentStatus,
   SessionPaymentStatus,
   StaffRole,
@@ -26,7 +30,16 @@ import { SessionLedgerService } from './session-ledger.service';
 import { SessionRosterService } from './session-roster.service';
 import { SessionSnapshotService } from './session-snapshot.service';
 import { SessionStudentBalanceService } from './session-student-balance.service';
-import { SessionValidationService } from './session-validation.service';
+import { SessionTrialCatchUpService } from './session-trial-catch-up.service';
+import {
+  AttendanceReviewData,
+  AttendanceReviewInput,
+  pickAttendanceReviewInput,
+  pickSessionReviewInput,
+  ReviewValidationOptions,
+  SessionReviewInput,
+  SessionValidationService,
+} from './session-validation.service';
 import {
   createMemoizedTaxDeductionResolver,
   normalizePercent,
@@ -164,6 +177,11 @@ function liveAllowanceFromClassTeacher(
 
 @Injectable()
 export class SessionUpdateService {
+  /** Đồng bộ video sau khi lưu link recording (Optional: spec dựng service bằng `new`). */
+  @Optional()
+  @Inject(ProtectedVideoService)
+  private readonly protectedVideos?: ProtectedVideoService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly staffOperationsAccess: StaffOperationsAccessService,
@@ -173,6 +191,7 @@ export class SessionUpdateService {
     private readonly sessionLedgerService: SessionLedgerService,
     private readonly sessionSnapshotService: SessionSnapshotService,
     private readonly actionHistoryService: ActionHistoryService,
+    private readonly sessionTrialCatchUpService: SessionTrialCatchUpService,
   ) {}
 
   private async resolveTeacherPaymentRateSnapshot(
@@ -414,24 +433,24 @@ export class SessionUpdateService {
     );
   }
 
-  async updateSession(data: SessionUpdateDto, actor?: ActionHistoryActor) {
+  async updateSession(
+    data: SessionUpdateDto,
+    actor?: ActionHistoryActor,
+    reviewOptions: ReviewValidationOptions = {},
+  ) {
     if (!data.id) {
       throw new BadRequestException('Session id is required');
     }
 
     this.sessionValidationService.validateAttendanceItems(data.attendance, {
       required: false,
+      ...reviewOptions,
     });
-    if (data.attendance !== undefined) {
-      this.sessionValidationService.validateAttendanceNotes(data.attendance, {
-        required: false,
-      });
-    }
-    if (
+    const hasSessionContentPayload =
       data.lessonContent !== undefined ||
       data.homework !== undefined ||
-      data.tutorial !== undefined
-    ) {
+      data.tutorial !== undefined;
+    if (hasSessionContentPayload && !reviewOptions.skipRequired) {
       this.sessionValidationService.validateSessionCommentFields(
         {
           lessonContent: data.lessonContent,
@@ -441,6 +460,16 @@ export class SessionUpdateService {
         { required: true },
       );
     }
+
+    // Sửa nội dung buổi (kể cả buổi legacy) ⇒ bắt buộc nhập đủ Nhận xét buổi học có cấu trúc.
+    const sessionReview =
+      hasSessionContentPayload ||
+      this.sessionValidationService.hasAnySessionReviewField(data)
+        ? this.sessionValidationService.resolveSessionReviewFields(
+            data,
+            reviewOptions,
+          )
+        : undefined;
 
     const sessionId = data.id;
 
@@ -467,6 +496,9 @@ export class SessionUpdateService {
             snapshotScaleAmount: true,
             snapshotNoAttendance: true,
             snapshotBlockCount: true,
+            progressStatus: true,
+            hasInClassTest: true,
+            inClassTestTotal: true,
             class: {
               select: {
                 name: true,
@@ -479,7 +511,14 @@ export class SessionUpdateService {
                 studentId: true,
                 status: true,
                 notes: true,
+                testCorrectCount: true,
+                testComment: true,
+                strengths: true,
+                improvements: true,
+                homeworkQuality: true,
+                homeworkComment: true,
                 tuitionFee: true,
+                trialCatchUpFee: true,
                 customerCareCoef: true,
                 customerCareStaffId: true,
                 customerCarePaymentStatus: true,
@@ -510,6 +549,35 @@ export class SessionUpdateService {
           data,
           existingSession.snapshotNoAttendance,
         );
+
+        // Phần từng HS chỉ áp dụng cho buổi có cấu trúc + lớp có điểm danh.
+        // Đổi phần chung mà không gửi attendance ⇒ kiểm lại review đang lưu theo mốc kiểm tra mới.
+        const attendanceReviewByStudentId = new Map<
+          string,
+          AttendanceReviewData
+        >();
+        const isStructuredReview =
+          sessionReview !== undefined ||
+          existingSession.progressStatus !== null;
+        if (isStructuredReview && !existingSession.snapshotNoAttendance) {
+          const testContext = sessionReview ?? {
+            hasInClassTest: existingSession.hasInClassTest,
+            inClassTestTotal: existingSession.inClassTestTotal,
+          };
+          const reviewSource =
+            data.attendance ??
+            (sessionReview !== undefined ? existingSession.attendance : []);
+          for (const attendanceItem of reviewSource) {
+            attendanceReviewByStudentId.set(
+              attendanceItem.studentId,
+              this.sessionValidationService.resolveAttendanceReview(
+                attendanceItem,
+                testContext,
+                reviewOptions,
+              ),
+            );
+          }
+        }
 
         const nextClassId = data.classId ?? existingSession.classId;
         const nextTeacherId = data.teacherId ?? existingSession.teacherId;
@@ -806,6 +874,31 @@ export class SessionUpdateService {
             notes: attendanceItem.notes ?? null,
             tuitionFee: attendanceItem.tuitionFee ?? null,
           }));
+        const existingTrialFoldByStudentId = new Map(
+          existingSession.attendance
+            .filter((attendanceItem) => attendanceItem.trialCatchUpFee != null)
+            .map((attendanceItem) => [
+              attendanceItem.studentId,
+              {
+                foldedFee: attendanceItem.tuitionFee ?? 0,
+                baseFee: Math.max(
+                  0,
+                  (attendanceItem.tuitionFee ?? 0) -
+                    (attendanceItem.trialCatchUpFee ?? 0),
+                ),
+              },
+            ]),
+        );
+        // Học phí trên form là số đã gộp thu bù học thử; đưa về học phí gốc của buổi.
+        const toBaseTuitionFee = <T extends string | number | null | undefined>(
+          studentId: string,
+          value: T,
+        ): T | number => {
+          const fold = existingTrialFoldByStudentId.get(studentId);
+          return fold && value != null && Number(value) === fold.foldedFee
+            ? fold.baseFee
+            : value;
+        };
 
         const nextAttendanceStudentIds = attendanceSource.map(
           (attendanceItem) => attendanceItem.studentId,
@@ -917,6 +1010,36 @@ export class SessionUpdateService {
               live.snapshotPerStudentAllowance;
             snapshotScaleAmountUpdate = live.snapshotScaleAmount;
           }
+        }
+
+        if (shouldRebuildAttendanceState) {
+          const nextPricingMode =
+            nextClassId === existingSession.classId
+              ? existingSession.class.pricingMode
+              : (
+                  await tx.class.findUnique({
+                    where: { id: nextClassId },
+                    select: { pricingMode: true },
+                  })
+                )?.pricingMode;
+          await this.sessionTrialCatchUpService.assertTrialAttendanceAllowed(
+            tx,
+            {
+              classId: nextClassId,
+              isOneTimeClass: nextPricingMode
+                ? isOneTimePricingMode(nextPricingMode)
+                : false,
+              sessionId: existingSession.id,
+              sessionDate: effectiveSessionDate,
+              sessionStartTime:
+                sessionStartTime === undefined
+                  ? existingSession.startTime
+                  : sessionStartTime,
+              trialStudentIds: attendanceSource
+                .filter((item) => item.status === AttendanceStatus.trial)
+                .map((item) => item.studentId),
+            },
+          );
         }
 
         const oneTimeAlreadyChargedStudentIds = new Set<string>();
@@ -1078,7 +1201,10 @@ export class SessionUpdateService {
                 : data.attendance !== undefined
                   ? this.sessionValidationService.resolveChargeableAttendanceTuitionFee(
                       attendanceItem.status,
-                      attendanceItem.tuitionFee,
+                      toBaseTuitionFee(
+                        attendanceItem.studentId,
+                        attendanceItem.tuitionFee,
+                      ),
                       defaultTuitionFee,
                     )
                   : nextClassId !== existingSession.classId
@@ -1089,7 +1215,10 @@ export class SessionUpdateService {
                       )
                     : this.sessionValidationService.resolveChargeableAttendanceTuitionFee(
                         attendanceItem.status,
-                        existingAttendance?.tuitionFee ?? null,
+                        toBaseTuitionFee(
+                          attendanceItem.studentId,
+                          existingAttendance?.tuitionFee ?? null,
+                        ),
                         null,
                       );
 
@@ -1340,6 +1469,7 @@ export class SessionUpdateService {
             ...(data.tutorial !== undefined && {
               tutorial: data.tutorial ?? null,
             }),
+            ...sessionReview,
             ...(data.recordingUrl !== undefined && {
               recordingUrl: data.recordingUrl ? data.recordingUrl.trim() : null,
             }),
@@ -1429,6 +1559,10 @@ export class SessionUpdateService {
         }
 
         if (attendanceIdsToDelete.length > 0) {
+          await this.sessionTrialCatchUpService.releaseBeforeDelete(
+            tx,
+            attendanceIdsToDelete,
+          );
           await tx.attendance.deleteMany({
             where: {
               id: {
@@ -1496,6 +1630,7 @@ export class SessionUpdateService {
                       attendanceItem.customerCareStaffId,
                     ),
                   tuitionFee: attendanceItem.tuitionFee,
+                  trialCatchUpFee: null,
                   transactionId,
                   assistantManagerStaffId:
                     attendanceItem.assistantManagerStaffId,
@@ -1527,6 +1662,7 @@ export class SessionUpdateService {
                       attendanceItem.customerCareStaffId,
                     ),
                   tuitionFee: attendanceItem.tuitionFee,
+                  trialCatchUpFee: null,
                   transactionId,
                   assistantManagerStaffId: shouldRefreshAttendanceAssignments
                     ? attendanceItem.assistantManagerStaffId
@@ -1546,6 +1682,15 @@ export class SessionUpdateService {
             }),
           );
         }
+
+        await Promise.all(
+          [...attendanceReviewByStudentId].map(([studentId, review]) =>
+            tx.attendance.updateMany({
+              where: { sessionId, studentId },
+              data: review,
+            }),
+          ),
+        );
 
         if (sessionDate !== undefined || sessionStartTime !== undefined) {
           await syncClassTimelineSortByTime(tx, nextClassId);
@@ -1568,6 +1713,17 @@ export class SessionUpdateService {
         if (!updatedSession) {
           throw new NotFoundException('Session not found');
         }
+
+        await this.sessionTrialCatchUpService.reconcile(tx, [
+          ...existingSession.attendance.map((attendanceItem) => ({
+            studentId: attendanceItem.studentId,
+            classId: existingSession.classId,
+          })),
+          ...updatedSession.attendance.map((attendanceItem) => ({
+            studentId: attendanceItem.studentId,
+            classId: nextClassId,
+          })),
+        ]);
 
         if (actor) {
           const afterValue =
@@ -1594,6 +1750,9 @@ export class SessionUpdateService {
       },
     );
 
+    if (data.recordingUrl !== undefined) {
+      this.protectedVideos?.track(data.recordingUrl);
+    }
     return updatedSession;
   }
 
@@ -1611,12 +1770,14 @@ export class SessionUpdateService {
       tutorial?: string;
       recordingUrl?: string | null;
       coefficient?: number;
-      attendance?: Array<{
-        studentId: string;
-        status: NonNullable<SessionUpdateDto['attendance']>[number]['status'];
-        notes?: string | null;
-      }>;
-    },
+      attendance?: Array<
+        AttendanceReviewInput & {
+          studentId: string;
+          status: NonNullable<SessionUpdateDto['attendance']>[number]['status'];
+          notes?: string | null;
+        }
+      >;
+    } & SessionReviewInput,
     auditActor?: ActionHistoryActor,
   ) {
     const existingSession = await this.prisma.session.findUnique({
@@ -1626,6 +1787,8 @@ export class SessionUpdateService {
         classId: true,
         snapshotNoAttendance: true,
         snapshotBlockCount: true,
+        coefficient: true,
+        teacherPaymentStatus: true,
         attendance: {
           select: {
             studentId: true,
@@ -1637,6 +1800,23 @@ export class SessionUpdateService {
 
     if (!existingSession) {
       throw new NotFoundException('Session not found');
+    }
+
+    // Trợ cấp = allowance_amount × coefficient: đổi Dạy thử sau khi đã chốt
+    // thanh toán/cọc sẽ làm lệch số đã chi, nên staff-ops không cho đổi.
+    const nextCoefficient = this.sessionValidationService.normalizeCoefficient(
+      data.coefficient,
+    );
+    if (
+      nextCoefficient !== undefined &&
+      nextCoefficient !== Number(existingSession.coefficient ?? 1) &&
+      this.sessionValidationService.isSessionTimeEditLocked(
+        existingSession.teacherPaymentStatus,
+      )
+    ) {
+      throw new BadRequestException(
+        'Không thể đổi Dạy thử của buổi đã thanh toán hoặc ghi cọc.',
+      );
     }
 
     data = stripAttendanceForNoAttendanceSession(
@@ -1674,6 +1854,7 @@ export class SessionUpdateService {
         studentId: attendanceItem.studentId,
         status: attendanceItem.status,
         notes: attendanceItem.notes ?? null,
+        ...pickAttendanceReviewInput(attendanceItem),
         tuitionFee:
           this.sessionValidationService.resolveChargeableAttendanceTuitionFee(
             attendanceItem.status,
@@ -1693,7 +1874,9 @@ export class SessionUpdateService {
         lessonContent: data.lessonContent,
         homework: data.homework,
         tutorial: data.tutorial,
+        ...pickSessionReviewInput(data),
         recordingUrl: data.recordingUrl,
+        // Dạy thử: mọi role staff-ops đều đổi được; FE chỉ gửi khi đổi toggle.
         coefficient: data.coefficient,
         attendance: enrichedAttendance,
       },

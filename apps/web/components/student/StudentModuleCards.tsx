@@ -17,6 +17,7 @@ import {
   moduleCardItems,
   moduleCardKey,
   moduleItemHref,
+  moduleTocId,
 } from "@/lib/student-module-cards";
 import { cn } from "@/lib/utils";
 
@@ -46,13 +47,20 @@ export default function StudentModuleCards({
     <div className="space-y-3">
       {groups.map((group) => {
         const key = moduleCardKey(group);
+        const tocId = moduleTocId(key);
         const items = moduleCardItems(group);
         return (
           <Collapsible
             key={key}
+            ref={(el: HTMLDivElement | null) => registerRow(tocId, el)}
             open={openKeys.has(key)}
             onOpenChange={() => onToggle(key)}
-            className="rounded-xl border border-border-default bg-bg-surface shadow-sm"
+            className={cn(
+              "scroll-mt-24 rounded-xl border bg-bg-surface shadow-sm",
+              selectedId === tocId
+                ? "border-primary ring-2 ring-primary ring-offset-2 ring-offset-bg-primary"
+                : "border-border-default",
+            )}
           >
             <CollapsibleTrigger className="group flex min-h-14 w-full cursor-pointer items-center gap-3 rounded-xl p-4 text-left hover:bg-bg-secondary/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus">
               <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

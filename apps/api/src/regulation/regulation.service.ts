@@ -30,6 +30,7 @@ const STAFF_ROLE_AUDIENCE_MAP: Record<StaffRole, RegulationAudience> = {
   technical: RegulationAudience.staff_technical,
   customer_care: RegulationAudience.staff_customer_care,
   training: RegulationAudience.staff_training,
+  sale: RegulationAudience.staff_sale,
 };
 const REGULATION_AUTHOR_SELECT = {
   id: true,

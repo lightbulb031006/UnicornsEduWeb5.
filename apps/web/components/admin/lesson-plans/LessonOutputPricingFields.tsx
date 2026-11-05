@@ -5,9 +5,13 @@ import { MoneyInput } from "@/components/ui/MoneyInput";
 import type { LessonOutputDifficultyBand } from "@/dtos/lesson.dto";
 import {
   LESSON_OUTPUT_DIFFICULTY_BANDS,
+  LESSON_OUTPUT_THEORY_LECTURE_MAX_LINKS,
+  LESSON_OUTPUT_THEORY_LECTURE_PRICES,
   computeLessonOutputCost,
   formatLessonOutputDifficultyOption,
+  parseLessonOutputLevel,
 } from "@/lib/lesson-output-pricing";
+import LessonOutputLinkListField from "./LessonOutputLinkListField";
 import { moneyInputInitialFromNumber } from "@/lib/money-input.helpers";
 import { formatVnNumber } from "@/lib/formatters";
 
@@ -29,13 +33,20 @@ type Props = {
   includesTest: boolean;
   includesSolution: boolean;
   includesLectureVideo: boolean;
+  includesTheoryLecture: boolean;
+  theoryLectureLinks: string[];
+  /** `level` của output — nguồn giá Bài giảng lý thuyết. */
+  level: string;
   storedCost: number;
   selectButtonClassName: string;
   selectMenuClassName: string;
+  linkInputClassName: string;
   onDifficultyBandChange: (value: LessonOutputDifficultyBand | "") => void;
   onIncludesTestChange: (value: boolean) => void;
   onIncludesSolutionChange: (value: boolean) => void;
   onIncludesLectureVideoChange: (value: boolean) => void;
+  onIncludesTheoryLectureChange: (value: boolean) => void;
+  onTheoryLectureLinksChange: (links: string[]) => void;
 };
 
 export default function LessonOutputPricingFields({
@@ -44,19 +55,35 @@ export default function LessonOutputPricingFields({
   includesTest,
   includesSolution,
   includesLectureVideo,
+  includesTheoryLecture,
+  theoryLectureLinks,
+  level,
   storedCost,
   selectButtonClassName,
   selectMenuClassName,
+  linkInputClassName,
   onDifficultyBandChange,
   onIncludesTestChange,
   onIncludesSolutionChange,
   onIncludesLectureVideoChange,
+  onIncludesTheoryLectureChange,
+  onTheoryLectureLinksChange,
 }: Props) {
-  const computedCost = computeLessonOutputCost(difficultyBand || null, {
-    includesTest,
-    includesSolution,
-    includesLectureVideo,
-  });
+  const computedCost = computeLessonOutputCost(
+    difficultyBand || null,
+    {
+      includesTest,
+      includesSolution,
+      includesLectureVideo,
+      includesTheoryLecture,
+    },
+    level,
+  );
+  const parsedLevel = parseLessonOutputLevel(level);
+  const theoryLectureHint =
+    parsedLevel == null
+      ? "giá theo level — chọn Level 0–5"
+      : `${formatCurrency(LESSON_OUTPUT_THEORY_LECTURE_PRICES[parsedLevel])} đ theo Level ${parsedLevel}`;
   const isLegacyRate = computedCost == null;
   const displayCost = isLegacyRate ? storedCost : computedCost;
   const labelClass = compact
@@ -118,8 +145,36 @@ export default function LessonOutputPricingFields({
             />
             Bài giảng video
           </label>
+          <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              checked={includesTheoryLecture}
+              onChange={(event) =>
+                onIncludesTheoryLectureChange(event.target.checked)
+              }
+              className={checkboxClass}
+            />
+            <span>
+              Bài giảng lý thuyết
+              <span className="ml-1 text-xs text-text-muted">
+                ({theoryLectureHint})
+              </span>
+            </span>
+          </label>
         </div>
       </fieldset>
+
+      {includesTheoryLecture ? (
+        <div className="sm:col-span-2">
+          <LessonOutputLinkListField
+            label="Link bài giảng lý thuyết"
+            links={theoryLectureLinks}
+            maxLinks={LESSON_OUTPUT_THEORY_LECTURE_MAX_LINKS}
+            inputClassName={linkInputClassName}
+            onChange={onTheoryLectureLinksChange}
+          />
+        </div>
+      ) : null}
 
       <label className={`flex flex-col gap-1.5 sm:col-span-2 ${labelClass}`}>
         <span>Chi phí</span>
@@ -138,7 +193,7 @@ export default function LessonOutputPricingFields({
         <span className="text-xs text-text-muted">
           {isLegacyRate
             ? "Mức cũ — output chưa có bậc độ khó, số tiền đã lưu được giữ nguyên."
-            : "Chi phí do hệ thống tính từ bậc và hạng mục đã tick; không sửa tay được."}
+            : "Chi phí do hệ thống tính từ bậc, level và hạng mục đã tick; không sửa tay được."}
         </span>
       </label>
     </div>

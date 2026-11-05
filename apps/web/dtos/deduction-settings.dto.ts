@@ -9,7 +9,8 @@ export type StaffRoleType =
   | "lesson_plan_head"
   | "communication"
   | "technical"
-  | "training";
+  | "training"
+  | "sale";
 
 export interface TaxDeductionSettingsQuery {
   asOfDate?: string;

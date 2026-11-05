@@ -7,10 +7,7 @@ export const STUDENT_CUSTOMER_SOURCES = [
   "tiktok",
   "fanpage_hoc_tin",
   "fanpage_luyen_tin",
-  "referral",
-  "personal",
-  "returning_customer",
-  "other",
+  "acquaintance",
 ] as const;
 
 export type StudentCustomerSource = (typeof STUDENT_CUSTOMER_SOURCES)[number];
@@ -19,10 +16,7 @@ export const STUDENT_CUSTOMER_SOURCE_LABELS: Record<StudentCustomerSource, strin
   tiktok: "Tiktok",
   fanpage_hoc_tin: "Fanpage Học Toán Cùng Chuyên Toán",
   fanpage_luyen_tin: "Fanpage Luyện Toán THPT",
-  referral: "Giới thiệu từ người quen của khách",
-  personal: "Nguồn riêng của bản thân",
-  returning_customer: "Khách cũ",
-  other: "Khác",
+  acquaintance: "Người quen",
 };
 
 export const STUDENT_DROP_OUT_REASON_MAX_LENGTH = 500;
@@ -97,8 +91,7 @@ export interface StudentDetail extends StudentListItem {
   dropOutDate?: string | null;
   /** Lý do nghỉ học; giữ lại khi học sinh học lại. */
   dropOutReason?: string | null;
-  customerSource?: StudentCustomerSource | null;
-  customerSourceNote?: string | null;
+  customerSource?: StudentCustomerSource;
   customerCare?: {
     staff: {
       id: string;
@@ -256,7 +249,6 @@ export interface UpdateStudentPayload {
   customer_care_staff_id?: string | null;
   customer_care_profit_percent?: number | null;
   customer_source?: StudentCustomerSource;
-  customer_source_note?: string | null;
 }
 
 export interface CreateStudentPayload {
@@ -275,7 +267,6 @@ export interface CreateStudentPayload {
   drop_out_date?: string;
   user_id: string;
   customer_source: StudentCustomerSource;
-  customer_source_note?: string;
 }
 
 export interface UpdateStudentAccountBalancePayload {

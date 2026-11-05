@@ -28,7 +28,7 @@ export default function TutorIdentity({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p
-            className={`truncate font-semibold text-text-primary ${size === "lg" ? "text-lg" : "text-sm"}`}
+            className={`break-words font-semibold text-text-primary ${size === "lg" ? "text-lg" : "text-sm"}`}
           >
             {name}
           </p>

@@ -685,7 +685,7 @@ export default function AssistantCommissionTabPanel({
                 className={`grid w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-inset ${STUDENT_ROW_GRID_CLASS}`}
               >
                 <span
-                  className="min-w-0 truncate font-medium text-text-primary"
+                  className="min-w-0 break-words font-medium text-text-primary"
                   title={student.fullName}
                 >
                   {student.fullName}
@@ -874,7 +874,7 @@ export default function AssistantCommissionTabPanel({
                   className={`grid w-full min-w-[42rem] items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-inset ${CUSTOMER_CARE_ROW_GRID_CLASS}`}
                 >
                   <span
-                    className="min-w-0 truncate font-medium text-text-primary"
+                    className="min-w-0 break-words font-medium text-text-primary"
                     title={item.fullName}
                   >
                     {item.fullName}

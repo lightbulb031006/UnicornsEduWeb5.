@@ -11,24 +11,19 @@ const fieldClassName =
 
 export function CustomerSourceFields({
   source,
-  note,
   onSourceChange,
-  onNoteChange,
   disabled = false,
   idPrefix,
   emptyLabel = "Chọn nguồn khách",
 }: {
   source: StudentCustomerSource | "";
-  note: string;
   onSourceChange: (value: StudentCustomerSource) => void;
-  onNoteChange: (value: string) => void;
   disabled?: boolean;
   idPrefix: string;
   emptyLabel?: string;
 }) {
   return (
-    <>
-      <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+    <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
         <span className="mb-0.5">Nguồn khách</span>
         <UpgradedSelect
           name={`${idPrefix}-customer-source`}
@@ -40,21 +35,6 @@ export function CustomerSourceFields({
           buttonClassName={fieldClassName}
           menuClassName="rounded-2xl border border-border-default bg-bg-surface p-1.5 shadow-2xl"
         />
-      </label>
-      {source === "other" ? (
-        <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-          <span>Chú thích nguồn</span>
-          <input
-            value={note}
-            onChange={(event) => onNoteChange(event.target.value)}
-            disabled={disabled}
-            maxLength={200}
-            required
-            placeholder="Ghi nguồn thực tế"
-            className={fieldClassName}
-          />
-        </label>
-      ) : null}
-    </>
+    </label>
   );
 }

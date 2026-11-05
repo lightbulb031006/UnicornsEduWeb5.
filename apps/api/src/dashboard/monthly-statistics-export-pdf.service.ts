@@ -537,7 +537,7 @@ export class MonthlyStatisticsExportPdfService {
   </style>
 </head>
 <body>
-  <h1>Thống kê theo tháng — Unicorns Edu</h1>
+  <h1>Thống kê theo tháng — UniEdu</h1>
   <p class="meta">Kỳ: <strong>${escapeHtml(rangeLabel)}</strong> · Xuất lúc ${escapeHtml(generatedAt)}</p>
 
   <h2>1. Doanh thu · Chi phí · Lợi nhuận</h2>

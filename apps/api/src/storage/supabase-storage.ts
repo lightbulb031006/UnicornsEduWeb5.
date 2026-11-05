@@ -58,18 +58,67 @@ type SupabaseAdminClientLike = {
   };
 };
 
+/**
+ * Đổi URL request từ origin public (`SUPABASE_URL`) sang origin nội bộ
+ * (`SUPABASE_INTERNAL_URL`). URL không bắt đầu bằng origin public giữ nguyên.
+ */
+export function toInternalStorageRequestUrl(
+  url: string,
+  publicUrl: string,
+  internalUrl: string,
+): string {
+  const publicBase = publicUrl.replace(/\/$/, '');
+  if (url !== publicBase && !url.startsWith(`${publicBase}/`)) {
+    return url;
+  }
+  return internalUrl.replace(/\/$/, '') + url.slice(publicBase.length);
+}
+
+/**
+ * Supabase self-host cùng VPS: client vẫn dựng bằng URL public để signed URL
+ * trả cho browser đúng domain, còn request server→storage đi mạng Docker nội
+ * bộ (không vòng qua Cloudflare).
+ */
+function buildInternalFetch(
+  publicUrl: string,
+  internalUrl: string,
+): typeof fetch {
+  return (input: string | URL | Request, init?: RequestInit) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    const target = toInternalStorageRequestUrl(url, publicUrl, internalUrl);
+    if (target === url) {
+      return fetch(input, init);
+    }
+    return input instanceof Request
+      ? fetch(new Request(target, input), init)
+      : fetch(target, init);
+  };
+}
+
 export function tryGetSupabaseAdminClient(): SupabaseAdminClientLike | null {
   const supabaseUrl = process.env.SUPABASE_URL?.trim();
   const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const supabaseInternalUrl = process.env.SUPABASE_INTERNAL_URL?.trim();
 
   if (!supabaseUrl || !supabaseServiceRoleKey) {
     return null;
   }
 
-  return createClient(
-    supabaseUrl,
-    supabaseServiceRoleKey,
-  ) as unknown as SupabaseAdminClientLike;
+  return createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    ...(supabaseInternalUrl
+      ? {
+          global: {
+            fetch: buildInternalFetch(supabaseUrl, supabaseInternalUrl),
+          },
+        }
+      : {}),
+  }) as unknown as SupabaseAdminClientLike;
 }
 
 export function getSupabaseAdminClient() {

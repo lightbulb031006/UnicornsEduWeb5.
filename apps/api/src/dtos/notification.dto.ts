@@ -215,6 +215,10 @@ export interface NotificationAdminItemDto {
   createdAt: string;
   updatedAt: string;
   createdBy: NotificationAuthorDto | null;
+  /** Người xem là người tạo: được sửa nháp / đẩy / đẩy lại. */
+  canEdit: boolean;
+  /** Người tạo, hoặc quyền kiểm duyệt của admin/trợ lí trên bài đã đẩy. */
+  canDelete: boolean;
 }
 
 export type NotificationFeedReadStatusDto = 'read' | 'unread';

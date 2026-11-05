@@ -247,6 +247,8 @@ export default function AdminStudentDetailPage() {
                             classId,
                             className,
                             classStatus: item.class.status ?? null,
+                            // Học sinh đã nghỉ ở lớp này (membership inactive) — chỉ để xem lịch sử.
+                            isInactive: item.status === "inactive",
                             packageTotal: item.effectiveTuitionPackageTotal ?? null,
                             packageSession: item.effectiveTuitionPackageSession ?? null,
                             tuitionPackageLabel: formatTuitionPackageLabel({
@@ -260,14 +262,19 @@ export default function AdminStudentDetailPage() {
                         },
                     ];
                 })
-                .sort((a, b) => a.className.localeCompare(b.className, "vi")),
+                .sort(
+                    (a, b) =>
+                        Number(a.isInactive) - Number(b.isInactive) ||
+                        a.className.localeCompare(b.className, "vi"),
+                ),
         [student],
     );
 
     const removeClassMutation = useMutation({
         mutationFn: async (classId: string) => {
+            // Chỉ gửi lớp đang học: gửi kèm lớp đã nghỉ sẽ khiến API kích hoạt lại lớp đó.
             const nextClassIds = classItemsWithTuition
-                .filter((item) => item.classId !== classId)
+                .filter((item) => !item.isInactive && item.classId !== classId)
                 .map((item) => item.classId);
 
             await studentApi.updateStudentClasses(id, {
@@ -692,10 +699,8 @@ export default function AdminStudentDetailPage() {
                                         label="Nguồn khách"
                                         value={
                                             student.customerSource
-                                                ? student.customerSource === "other" && student.customerSourceNote?.trim()
-                                                    ? `${STUDENT_CUSTOMER_SOURCE_LABELS.other} · ${student.customerSourceNote.trim()}`
-                                                    : STUDENT_CUSTOMER_SOURCE_LABELS[student.customerSource]
-                                                : "Chưa gán"
+                                                ? STUDENT_CUSTOMER_SOURCE_LABELS[student.customerSource]
+                                                : "—"
                                         }
                                     />
                                     <StudentDetailRow label="Tỉnh / Thành phố" value={student.province?.trim() || "—"} />
@@ -850,7 +855,7 @@ export default function AdminStudentDetailPage() {
                                                 }}
                                                 className="group relative cursor-pointer rounded-[1.1rem] border border-border-default bg-bg-surface px-3.5 py-3 shadow-sm transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                                             >
-                                                {canManageStudent ? (
+                                                {canManageStudent && !item.isInactive ? (
                                                     <button
                                                         type="button"
                                                         onClick={(e) => {
@@ -872,7 +877,9 @@ export default function AdminStudentDetailPage() {
                                                         <div className="flex items-center gap-2">
                                                             <span
                                                                 className={`inline-block size-2 shrink-0 rounded-full ${
-                                                                    item.classStatus === "running"
+                                                                    item.isInactive
+                                                                        ? "bg-error"
+                                                                        : item.classStatus === "running"
                                                                         ? "bg-success"
                                                                         : item.classStatus === "ended"
                                                                             ? "bg-error"
@@ -883,7 +890,7 @@ export default function AdminStudentDetailPage() {
                                                             <p className="font-medium text-text-primary">{item.className}</p>
                                                         </div>
                                                         <div className="mt-2 flex flex-col gap-1.5 text-sm text-text-secondary">
-                                                            {canEditStudentClassTuition ? (
+                                                            {canEditStudentClassTuition && !item.isInactive ? (
                                                                 <button
                                                                     type="button"
                                                                     onClick={(e) => {
@@ -992,7 +999,9 @@ export default function AdminStudentDetailPage() {
                                                             <div className="flex items-center gap-2">
                                                                 <span
                                                                     className={`inline-block size-2 shrink-0 rounded-full ${
-                                                                        item.classStatus === "running"
+                                                                        item.isInactive
+                                                                            ? "bg-error"
+                                                                            : item.classStatus === "running"
                                                                             ? "bg-success"
                                                                             : item.classStatus === "ended"
                                                                                 ? "bg-error"
@@ -1004,7 +1013,7 @@ export default function AdminStudentDetailPage() {
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-3 text-text-secondary">
-                                                            {canEditStudentClassTuition ? (
+                                                            {canEditStudentClassTuition && !item.isInactive ? (
                                                                 <button
                                                                     type="button"
                                                                     onClick={(e) => {
@@ -1048,21 +1057,23 @@ export default function AdminStudentDetailPage() {
                                                         </td>
                                                         {canManageStudent ? (
                                                             <td className="px-2 py-3 text-right">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        void removeClassMutation.mutateAsync(item.classId);
-                                                                    }}
-                                                                    disabled={removeClassMutation.isPending}
-                                                                    className="rounded p-1.5 text-text-muted opacity-0 transition-opacity duration-200 group-hover:opacity-100 hover:bg-error/10 hover:text-error focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
-                                                                    aria-label={`Gỡ lớp ${item.className}`}
-                                                                    title="Gỡ lớp"
-                                                                >
-                                                                    <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
-                                                                    </svg>
-                                                                </button>
+                                                                {item.isInactive ? null : (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            void removeClassMutation.mutateAsync(item.classId);
+                                                                        }}
+                                                                        disabled={removeClassMutation.isPending}
+                                                                        className="rounded p-1.5 text-text-muted opacity-0 transition-opacity duration-200 group-hover:opacity-100 hover:bg-error/10 hover:text-error focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
+                                                                        aria-label={`Gỡ lớp ${item.className}`}
+                                                                        title="Gỡ lớp"
+                                                                    >
+                                                                        <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v3M4 7h16" />
+                                                                        </svg>
+                                                                    </button>
+                                                                )}
                                                             </td>
                                                         ) : null}
                                                     </tr>

@@ -45,6 +45,12 @@ const NOTIFICATION_RECORD_INCLUDE = {
       accountHandle: true,
       first_name: true,
       last_name: true,
+      roleType: true,
+      staffInfo: {
+        select: {
+          roles: true,
+        },
+      },
     },
   },
 } satisfies Prisma.NotificationInclude;
@@ -79,6 +85,16 @@ interface NotificationAudienceContext {
   staffRoles: StaffRole[];
 }
 
+/**
+ * Người đang thao tác trên màn quản lý (CONTEXT.md "Người tạo thông báo").
+ * `isAdmin` / `isAssistant` mở quyền kiểm duyệt thông báo đã đẩy của người khác.
+ */
+interface NotificationManagerContext {
+  userId: string;
+  isAdmin: boolean;
+  isAssistant: boolean;
+}
+
 interface NotificationTargetingState {
   targetAll: boolean;
   targetRoleTypes: NotificationTargetRoleTypeDto[];
@@ -96,14 +112,26 @@ export class NotificationService {
 
   async getAdminNotifications(
     query: GetAdminNotificationsQueryDto,
+    viewer: JwtPayload,
   ): Promise<NotificationAdminItemDto[]> {
     const limit =
       typeof query.limit === 'number'
         ? Math.min(Math.max(query.limit, 1), 300)
         : 200;
+    const manager = await this.resolveManagerContext(viewer);
+    // Nháp chỉ người tạo thấy; admin/trợ lí thấy thêm mọi thông báo đã đẩy.
+    const visibilityWhere: Prisma.NotificationWhereInput =
+      manager.isAdmin || manager.isAssistant
+        ? {
+            OR: [
+              { createdByUserId: manager.userId },
+              { status: NotificationStatus.published },
+            ],
+          }
+        : { createdByUserId: manager.userId };
     const where: Prisma.NotificationWhereInput = query.status
-      ? { status: query.status }
-      : {};
+      ? { AND: [{ status: query.status }, visibilityWhere] }
+      : visibilityWhere;
 
     const notifications = await this.prisma.notification.findMany({
       where,
@@ -112,7 +140,7 @@ export class NotificationService {
       include: NOTIFICATION_RECORD_INCLUDE,
     });
 
-    return this.mapNotificationAdminItems(notifications);
+    return this.mapNotificationAdminItems(notifications, manager);
   }
 
   async searchNotificationRecipientOptions(
@@ -184,6 +212,7 @@ export class NotificationService {
     id: string,
     data: UpdateNotificationDto,
     actor: ActionHistoryActor,
+    authorizeAs?: JwtPayload,
   ): Promise<NotificationAdminItemDto> {
     const existingNotification = await this.getNotificationRecord(
       this.prisma,
@@ -192,6 +221,13 @@ export class NotificationService {
 
     if (!existingNotification) {
       throw new NotFoundException('Notification not found');
+    }
+
+    if (authorizeAs) {
+      this.assertCanEdit(
+        existingNotification,
+        await this.resolveManagerContext(authorizeAs),
+      );
     }
 
     if (existingNotification.status !== NotificationStatus.draft) {
@@ -232,6 +268,7 @@ export class NotificationService {
     id: string,
     data: PushNotificationDto,
     actor: ActionHistoryActor,
+    authorizeAs?: JwtPayload,
   ): Promise<NotificationAdminItemDto> {
     const existingNotification = await this.getNotificationRecord(
       this.prisma,
@@ -240,6 +277,13 @@ export class NotificationService {
 
     if (!existingNotification) {
       throw new NotFoundException('Notification not found');
+    }
+
+    if (authorizeAs) {
+      this.assertCanEdit(
+        existingNotification,
+        await this.resolveManagerContext(authorizeAs),
+      );
     }
 
     const updateData = await this.buildUpdateData(existingNotification, data);
@@ -285,6 +329,7 @@ export class NotificationService {
   async deleteNotification(
     id: string,
     actor: ActionHistoryActor,
+    authorizeAs?: JwtPayload,
   ): Promise<DeleteNotificationResponseDto> {
     const existingNotification = await this.getNotificationRecord(
       this.prisma,
@@ -293,6 +338,16 @@ export class NotificationService {
 
     if (!existingNotification) {
       throw new NotFoundException('Notification not found');
+    }
+
+    if (
+      authorizeAs &&
+      !this.canDelete(
+        existingNotification,
+        await this.resolveManagerContext(authorizeAs),
+      )
+    ) {
+      throw new ForbiddenException('Bạn không có quyền xoá thông báo này.');
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -377,6 +432,76 @@ export class NotificationService {
     `;
 
     return { id: notificationId, readStatus: 'read' };
+  }
+
+  private async resolveManagerContext(
+    actor: JwtPayload,
+  ): Promise<NotificationManagerContext> {
+    if (actor.roleType === UserRole.admin) {
+      return { userId: actor.id, isAdmin: true, isAssistant: false };
+    }
+
+    const staff = await this.prisma.staffInfo.findUnique({
+      where: { userId: actor.id },
+      select: { roles: true },
+    });
+    const roles = staff?.roles ?? [];
+
+    return {
+      userId: actor.id,
+      isAdmin: roles.includes(StaffRole.admin),
+      isAssistant: roles.includes(StaffRole.assistant),
+    };
+  }
+
+  private isAuthor(
+    notification: NotificationRecord,
+    manager: NotificationManagerContext,
+  ) {
+    return notification.createdByUserId === manager.userId;
+  }
+
+  /** Sửa nháp / đẩy / đẩy lại: chỉ người tạo, kể cả admin không sửa bài người khác. */
+  private assertCanEdit(
+    notification: NotificationRecord,
+    manager: NotificationManagerContext,
+  ) {
+    if (!this.isAuthor(notification, manager)) {
+      throw new ForbiddenException(
+        'Chỉ người tạo được sửa hoặc đẩy thông báo này.',
+      );
+    }
+  }
+
+  /**
+   * Người tạo xoá được bài của mình. Kiểm duyệt chỉ áp cho bài đã đẩy:
+   * admin xoá bất kỳ; trợ lí xoá được trừ bài mà người tạo *hiện* là admin
+   * (người tạo không còn tài khoản thì coi như staff).
+   */
+  private canDelete(
+    notification: NotificationRecord,
+    manager: NotificationManagerContext,
+  ) {
+    if (this.isAuthor(notification, manager)) {
+      return true;
+    }
+    if (notification.status !== NotificationStatus.published) {
+      return false;
+    }
+    if (manager.isAdmin) {
+      return true;
+    }
+    return manager.isAssistant && !this.isAdminAuthor(notification.createdBy);
+  }
+
+  private isAdminAuthor(author: NotificationRecord['createdBy']) {
+    if (!author) {
+      return false;
+    }
+    return (
+      author.roleType === UserRole.admin ||
+      (author.staffInfo?.roles ?? []).includes(StaffRole.admin)
+    );
   }
 
   private buildEligibleRecipientWhere(): Prisma.UserWhereInput {
@@ -636,6 +761,7 @@ export class NotificationService {
 
   private async mapNotificationAdminItems(
     notifications: NotificationRecord[],
+    manager: NotificationManagerContext,
   ): Promise<NotificationAdminItemDto[]> {
     const recipientMap = await this.loadRecipientOptionsByIds(
       notifications.flatMap((notification) => notification.targetUserIds),
@@ -643,7 +769,7 @@ export class NotificationService {
     );
 
     return notifications.map((notification) =>
-      this.mapNotificationAdminItemFromMap(notification, recipientMap),
+      this.mapNotificationAdminItemFromMap(notification, recipientMap, manager),
     );
   }
 
@@ -660,6 +786,8 @@ export class NotificationService {
   private mapNotificationAdminItemFromMap(
     notification: NotificationRecord,
     recipientMap: Map<string, NotificationRecipientOptionDto>,
+    // Không truyền = người gọi chính là người tạo (create/update/push trả về).
+    manager?: NotificationManagerContext,
   ): NotificationAdminItemDto {
     return {
       id: notification.id,
@@ -684,6 +812,8 @@ export class NotificationService {
       createdAt: notification.createdAt.toISOString(),
       updatedAt: notification.updatedAt.toISOString(),
       createdBy: this.mapNotificationAuthor(notification.createdBy),
+      canEdit: manager ? this.isAuthor(notification, manager) : true,
+      canDelete: manager ? this.canDelete(notification, manager) : true,
     };
   }
 

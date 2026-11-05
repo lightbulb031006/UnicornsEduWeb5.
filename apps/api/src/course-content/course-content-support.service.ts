@@ -2,24 +2,37 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ProtectedVideoService } from 'src/protected-video/protected-video.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ActionHistoryService } from 'src/action-history/action-history.service';
 import { CourseAccessService } from 'src/class/course-access.service';
-import { LessonCreateDto } from 'src/dtos/course-content.dto';
-import { LessonKind, StaffRole, UserRole } from 'generated/enums';
+import type { Prisma } from '../../generated/client';
+import {
+  ClassContentRemovalImpactDto,
+  LessonCreateDto,
+} from 'src/dtos/course-content.dto';
+import {
+  AttemptStatus,
+  LessonKind,
+  QuestionType,
+  StaffRole,
+  UserRole,
+} from 'generated/enums';
 
 export const CLASS_OWNED_LESSON_DISABLED_MESSAGE =
-  'Lớp không tạo tiết riêng nữa. Hãy thêm chuyên đề của khoá hoặc giao tiết thực hành có sẵn.';
+  'Lớp không tạo tiết riêng nữa. Hãy thêm tiết có sẵn của khoá.';
 
 export const ARCHIVED_LESSON_READ_ONLY_MESSAGE =
   'Tiết học đã lưu trữ, không sửa hay xoá được.';
 
-export const PRACTICE_MODULE_NOT_ADDED_MESSAGE =
-  'Lớp chưa thêm chuyên đề chứa tiết thực hành này. Hãy thêm chuyên đề trước khi giao.';
+export const LESSON_NOT_IN_CLASS_COURSE_MESSAGE =
+  'Tiết học không thuộc khoá của lớp.';
 
 export interface ActionHistoryActor {
   userId: string;
@@ -30,6 +43,11 @@ export interface ActionHistoryActor {
 @Injectable()
 export class CourseContentSupportService {
   protected readonly logger = new Logger(CourseContentSupportService.name);
+
+  /** Video bảo vệ: đồng bộ khi lưu link, ký link phát cho học sinh (Optional: spec dựng service bằng `new`). */
+  @Optional()
+  @Inject(ProtectedVideoService)
+  protected readonly protectedVideos?: ProtectedVideoService;
 
   constructor(
     protected readonly prisma: PrismaService,
@@ -209,6 +227,50 @@ export class CourseContentSupportService {
       select: { id: true },
     });
     return staff?.id ?? null;
+  }
+
+  /**
+   * Ảnh hưởng nếu gỡ khỏi lớp các lần giao khớp `assignmentWhere`, tính trên lượt làm mới
+   * nhất mỗi học sinh mỗi lần giao (giống hàng đợi chấm). Chỉ để cảnh báo; gỡ không bị chặn.
+   */
+  protected async computeRemovalImpact(
+    assignmentWhere: Prisma.ClassContentItemWhereInput,
+  ): Promise<ClassContentRemovalImpactDto> {
+    const latestAttempts = await this.prisma.attempt.findMany({
+      where: { assignment: { ...assignmentWhere, removedAt: null } },
+      orderBy: [
+        { assignmentId: 'asc' },
+        { studentId: 'asc' },
+        { startedAt: 'desc' },
+      ],
+      distinct: ['assignmentId', 'studentId'],
+      select: {
+        studentId: true,
+        status: true,
+        hasUngradedEssay: true,
+        _count: {
+          select: {
+            answers: {
+              where: { type: QuestionType.essay, pointsAwarded: null },
+            },
+          },
+        },
+      },
+    });
+
+    let ungradedEssayCount = 0;
+    const inProgressStudentIds = new Set<string>();
+    for (const attempt of latestAttempts) {
+      if (attempt.status === AttemptStatus.in_progress) {
+        inProgressStudentIds.add(attempt.studentId);
+      } else if (attempt.hasUngradedEssay) {
+        ungradedEssayCount += attempt._count.answers;
+      }
+    }
+    return {
+      ungradedEssayCount,
+      inProgressStudentCount: inProgressStudentIds.size,
+    };
   }
 
   /**

@@ -9,7 +9,7 @@ Cho phép user yêu cầu link reset password qua email, phản hồi bằng Son
 - Form nhập email.
 - Submit gọi `authApi.forgotPassword({ email })`.
 - Thành công hiển thị thông báo generic (tránh lộ email tồn tại/không tồn tại).
-- Card hiển thị đầy đủ logo mark + tên **Unicorns Edu** trước tiêu đề.
+- Card hiển thị đầy đủ logo mark + tên **UniEdu** trước tiêu đề.
 - Backend gửi email đổi mật khẩu bằng React Email, dùng cùng baseline nhận diện với email xác thực và có CTA + fallback link.
 
 ## Feedback UI

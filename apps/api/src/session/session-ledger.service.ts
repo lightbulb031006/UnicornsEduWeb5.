@@ -48,4 +48,25 @@ export class SessionLedgerService {
     const balanceAfter = params.balanceBefore + params.amount;
     return `Hoàn trả số dư lớp ${params.className} buổi học ${params.dateLabel}. | Số dư: ${this.formatVND(params.balanceBefore)} + ${this.formatVND(params.amount)} = ${this.formatVND(balanceAfter)}`;
   }
+
+  buildTrialCatchUpChargeNote(params: {
+    className: string;
+    dateLabel: string;
+    trialDateLabel: string;
+    balanceBefore: number;
+    amount: number;
+  }) {
+    const balanceAfter = params.balanceBefore - params.amount;
+    return `Thu bù học thử lớp ${params.className} (buổi học thử ${params.trialDateLabel}), thu tại buổi học ${params.dateLabel}. | Số dư: ${this.formatVND(params.balanceBefore)} - ${this.formatVND(params.amount)} = ${this.formatVND(balanceAfter)}`;
+  }
+
+  buildTrialCatchUpRefundNote(params: {
+    className: string;
+    dateLabel: string;
+    balanceBefore: number;
+    amount: number;
+  }) {
+    const balanceAfter = params.balanceBefore + params.amount;
+    return `Hoàn thu bù học thử lớp ${params.className} buổi học ${params.dateLabel}. | Số dư: ${this.formatVND(params.balanceBefore)} + ${this.formatVND(params.amount)} = ${this.formatVND(balanceAfter)}`;
+  }
 }

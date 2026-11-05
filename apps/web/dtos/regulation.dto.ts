@@ -12,7 +12,8 @@ export type RegulationAudience =
   | "staff_communication"
   | "staff_technical"
   | "staff_customer_care"
-  | "staff_training";
+  | "staff_training"
+  | "staff_sale";
 
 export interface RegulationAuthor {
   userId: string | null;

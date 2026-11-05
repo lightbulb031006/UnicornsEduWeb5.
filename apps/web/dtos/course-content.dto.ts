@@ -1,4 +1,14 @@
-import type { QuestionTypeDto } from "@/dtos/question.dto";
+import type { AudioRef } from "./audio-asset.dto";
+import type {
+  QuestionTypeDto,
+  QuestionTypeValue,
+  TrueFalseLabelStyleDto,
+} from "@/dtos/question.dto";
+import type {
+  BlankAnswers,
+  QuestionSlotDto,
+  TrueFalseChoices,
+} from "@/dtos/attempt.dto";
 
 export type LessonKind = "theory" | "practice";
 
@@ -21,9 +31,17 @@ export interface CourseLesson {
   moduleId: string | null;
   classId: string | null;
   title: string;
+  /** Null ở payload học sinh (link YouTube bị giấu) — dùng `hasVideo`. */
   videoUrl: string | null;
+  /** Chỉ có ở payload học sinh: tiết có video bảo vệ. */
+  hasVideo?: boolean;
   content: string | null;
   order: number;
+  /** Tên nhóm tự chọn (tiết thực hành IT). */
+  elective1Name?: string | null;
+  elective2Name?: string | null;
+  /** Thời lượng làm bài (phút/lượt) — chỉ tiết thực hành. */
+  durationMinutes?: number | null;
   createdBy: string | null;
   updatedBy: string | null;
   createdAt?: string;
@@ -54,12 +72,18 @@ export interface CreateCourseLessonPayload {
   title: string;
   videoUrl?: string | null;
   content?: string | null;
+  /** Bắt buộc với tiết thực hành. Integer 1–720. */
+  durationMinutes?: number;
 }
 
 export interface UpdateCourseLessonPayload {
   title?: string;
   videoUrl?: string | null;
   content?: string | null;
+  elective1Name?: string | null;
+  elective2Name?: string | null;
+  /** Chỉ tiết thực hành. Integer 1–720. */
+  durationMinutes?: number;
 }
 
 export interface QuestionLinkQuestion {
@@ -71,8 +95,20 @@ export interface QuestionLinkQuestion {
   content: string;
   options: string[] | null;
   correctIndex: number | null;
+  tfAnswerKey: boolean[];
   explanation: string | null;
   answerGuide: string | null;
+  essayInputSize?: "short" | "long" | null;
+  tfLabelStyle?: TrueFalseLabelStyleDto | null;
+  blankAnswerKey?: string[][] | null;
+  /** Tư liệu dùng chung (JP); null = câu đứng riêng. */
+  sharedMaterialId?: string | null;
+  /** Vị trí trong bộ — trong tiết, câu của bộ theo thứ tự này. */
+  setPosition?: number | null;
+  sharedMaterial?: { id: string; title: string } | null;
+  /** Audio nhúng (JP) — giữ khi sửa câu từ màn xếp đề. */
+  audioId?: string | null;
+  audio?: AudioRef | null;
 }
 
 export interface QuestionLink {
@@ -81,23 +117,30 @@ export interface QuestionLink {
   questionId: string;
   order: number | null;
   points: number | null;
+  slot: QuestionSlotDto;
   question: QuestionLinkQuestion;
 }
 
 export interface QuestionLinkSummary {
   totalQuestions: number;
   totalPoints: number;
+  /** Tổng trọng số (null tính là 1) — hồ sơ JP. */
+  totalWeight: number;
+  /** Lý do đề sai form nhóm tự chọn (IT); null khi hợp lệ. */
+  formWarning: string | null;
 }
 
 export interface CreateQuestionLinkPayload {
   questionId: string;
   order?: number | null;
   points?: number | null;
+  slot?: QuestionSlotDto;
 }
 
 export interface UpdateQuestionLinkPayload {
   order?: number | null;
   points?: number | null;
+  slot?: QuestionSlotDto;
 }
 
 export interface LessonQuizQuestion {
@@ -107,12 +150,29 @@ export interface LessonQuizQuestion {
   order: number;
   question: {
     id: string;
-    type: string;
+    type: QuestionTypeValue;
     content: string;
     options: string[] | null;
     correctIndex: number | null;
+    tfAnswerKey?: boolean[];
     explanation: string | null;
     answerGuide: string | null;
+    /** Kiểu ô tự luận (JP): short = một dòng, long/null = nhiều dòng. */
+    essayInputSize?: "short" | "long" | null;
+    /** Kiểu nhãn Câu Đúng/Sai (JP); null = ○/×. */
+    tfLabelStyle?: TrueFalseLabelStyleDto | null;
+    /** Đáp án hợp lệ từng ô — học sinh làm bài nhận null. */
+    blankAnswerKey?: string[][] | null;
+    /** Số ô trống (câu điền vào ô trống). */
+    blankCount?: number | null;
+    /** Audio nhúng (JP): signed URL ngắn hạn. */
+    audioUrl?: string | null;
+    /** Tư liệu dùng chung (JP); câu cùng tư liệu đứng liền nhau. */
+    sharedMaterial?: {
+      id: string;
+      content: string;
+      audioUrl?: string | null;
+    } | null;
   };
 }
 
@@ -123,16 +183,36 @@ export interface LessonQuizAnswer {
   studentId: string;
   choiceIndex: number | null;
   essayAnswer: string | null;
+  tfChoices?: TrueFalseChoices | null;
+  blankAnswers?: BlankAnswers | null;
+  orderAnswer?: string[] | null;
   createdAt: string;
   updatedAt: string;
   question: {
     id: string;
-    type: string;
+    type: QuestionTypeValue;
     content: string;
     options: string[] | null;
     correctIndex: number | null;
+    tfAnswerKey?: boolean[];
     explanation: string | null;
     answerGuide: string | null;
+    /** Kiểu ô tự luận (JP): short = một dòng, long/null = nhiều dòng. */
+    essayInputSize?: "short" | "long" | null;
+    /** Kiểu nhãn Câu Đúng/Sai (JP); null = ○/×. */
+    tfLabelStyle?: TrueFalseLabelStyleDto | null;
+    /** Đáp án hợp lệ từng ô — học sinh làm bài nhận null. */
+    blankAnswerKey?: string[][] | null;
+    /** Số ô trống (câu điền vào ô trống). */
+    blankCount?: number | null;
+    /** Audio nhúng (JP): signed URL ngắn hạn. */
+    audioUrl?: string | null;
+    /** Tư liệu dùng chung (JP); câu cùng tư liệu đứng liền nhau. */
+    sharedMaterial?: {
+      id: string;
+      content: string;
+      audioUrl?: string | null;
+    } | null;
   };
 }
 
@@ -140,6 +220,9 @@ export interface SubmitQuizAnswerPayload {
   questionId: string;
   choiceIndex?: number | null;
   essayAnswer?: string | null;
+  tfChoices?: TrueFalseChoices | null;
+  blankAnswers?: BlankAnswers | null;
+  orderAnswer?: string[] | null;
 }
 
 /** Tiết học từ khoá — dùng cho panel chọn nội dung lớp. */
@@ -162,15 +245,28 @@ export interface ClassModuleDto {
   classSortOrder: number | null;
   theoryLessonCount: number;
   practiceLessonCount: number;
+  /** Số tiết của chuyên đề lớp đang có (không tính tiết đã gỡ). */
+  inClassLessonCount: number;
   added: boolean;
   addedAt: string | null;
 }
 
-/** Ảnh hưởng nếu gỡ chuyên đề — dialog xác nhận báo trước, không chặn gỡ. */
-export interface ClassModuleRemovalImpactDto {
-  moduleId: string;
+/** Ảnh hưởng nếu gỡ khỏi lớp — dialog xác nhận báo trước, không chặn gỡ. */
+export interface ClassContentRemovalImpactDto {
   ungradedEssayCount: number;
   inProgressStudentCount: number;
+}
+
+/** Ảnh hưởng nếu gỡ cả chuyên đề. */
+export interface ClassModuleRemovalImpactDto
+  extends ClassContentRemovalImpactDto {
+  moduleId: string;
+}
+
+/** Ảnh hưởng nếu gỡ một tiết khỏi lớp. */
+export interface ClassContentItemRemovalImpactDto
+  extends ClassContentRemovalImpactDto {
+  itemId: string;
 }
 
 export interface ExamLibraryItem extends CourseLesson {

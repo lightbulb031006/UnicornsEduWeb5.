@@ -8,7 +8,7 @@
 
 - Đọc `token` từ query string.
 - Nếu thiếu token: hiển thị state no-token hiện có (không đổi), gợi ý quay về forgot-password.
-- Cả state thiếu token và form reset hiển thị đầy đủ logo mark + tên **Unicorns Edu**.
+- Cả state thiếu token và form reset hiển thị đầy đủ logo mark + tên **UniEdu**.
 - Validation client-side:
   - Password và confirmPassword phải khớp.
   - Password tối thiểu 6 ký tự.

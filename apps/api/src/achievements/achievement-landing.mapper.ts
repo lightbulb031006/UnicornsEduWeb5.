@@ -11,6 +11,7 @@ type StaffAchievementLandingRow = {
   title: string;
   imageWatermarkedPath: string | null;
   sortOrder: number;
+  isHighlight: boolean;
 };
 
 type StudentAchievementLandingRow = {
@@ -41,6 +42,7 @@ export function mapLandingAchievements(
       path: row.imageWatermarkedPath,
     }),
     sortOrder: row.sortOrder,
+    isHighlight: row.isHighlight,
   }));
 }
 

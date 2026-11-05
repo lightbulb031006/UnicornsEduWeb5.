@@ -39,11 +39,13 @@ import { getFullProfile } from "@/lib/apis/auth.api";
 import * as studentApi from "@/lib/apis/student.api";
 import { formatCurrency } from "@/lib/class.helpers";
 import { copyStudentWalletQrWithToast } from "@/lib/clipboard-qr";
+import { ROW_LINK_INTERACTION_CLASS } from "@/lib/row-link";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import SelectionCheckbox from "@/components/ui/SelectionCheckbox";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { MonthInput } from "@/components/ui/MonthInput";
+import { useRowLink } from "@/hooks/use-row-link";
 import {
   formatVnDate,
   formatVnDateTime,
@@ -298,6 +300,7 @@ export default function CustomerCareDetailPanels({
   allowStaffClassNavigation?: boolean;
 }) {
   const pathname = usePathname();
+  const rowLink = useRowLink();
   const routeBase = resolveAdminLikeRouteBase(pathname);
   const queryClient = useQueryClient();
   const prefersReducedMotion = useReducedMotion();
@@ -892,8 +895,11 @@ export default function CustomerCareDetailPanels({
 
   const handleCopyQr = async (student: CustomerCareStudentItem) => {
     try {
-      const qr = await studentApi.getStudentSePayStaticQr(student.id);
-      await copyStudentWalletQrWithToast(qr.qrCodeUrl, {
+      // Không await API trước: clipboard.write phải chạy trong user gesture (Safari).
+      const qrCodeUrl = studentApi
+        .getStudentSePayStaticQr(student.id)
+        .then((qr) => qr.qrCodeUrl);
+      await copyStudentWalletQrWithToast(qrCodeUrl, {
         id: student.id,
         fullName: student.fullName,
         studentClasses: student.classes?.map((c) => ({
@@ -1031,7 +1037,7 @@ export default function CustomerCareDetailPanels({
                 >
                   Lịch sử tiền vào
                 </h3>
-                <p className="mt-1 truncate text-sm text-text-secondary">
+                <p className="mt-1 break-words text-sm text-text-secondary">
                   {paymentHistoryStudent.fullName || "Học sinh"} · Số dư{" "}
                   {formatCurrency(paymentHistoryStudent.accountBalance)}
                 </p>
@@ -1263,7 +1269,8 @@ export default function CustomerCareDetailPanels({
                 {students.map((row: CustomerCareStudentItem) => (
                   <article
                     key={`mobile-${row.id}`}
-                    className="rounded-[1.5rem] border border-border-default bg-bg-surface p-4 shadow-sm"
+                    {...rowLink(buildStudentHref(row), `Xem học sinh ${row.fullName || ""}`.trim())}
+                    className={`rounded-[1.5rem] border border-border-default bg-bg-surface p-4 shadow-sm ${ROW_LINK_INTERACTION_CLASS}`}
                   >
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0 flex-1">
@@ -1290,7 +1297,7 @@ export default function CustomerCareDetailPanels({
                           href={buildStudentHref(row)}
                           className="mt-3 inline-flex max-w-full text-base font-semibold text-primary underline-offset-4 transition-colors hover:text-primary-hover hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                         >
-                          <span className="truncate">{row.fullName || "—"}</span>
+                          <span className="min-w-0 break-words">{row.fullName || "—"}</span>
                         </Link>
                       </div>
 
@@ -1437,7 +1444,8 @@ export default function CustomerCareDetailPanels({
                   {students.map((row: CustomerCareStudentItem) => (
                       <tr
                         key={`desktop-${row.id}`}
-                        className="border-b border-border-subtle bg-bg-surface last:border-b-0"
+                        {...rowLink(buildStudentHref(row), `Xem học sinh ${row.fullName || ""}`.trim())}
+                        className={`border-b border-border-subtle bg-bg-surface last:border-b-0 ${ROW_LINK_INTERACTION_CLASS}`}
                       >
                         {canEditProfitPercent ? (
                           <td className="px-3 py-3">
@@ -1606,7 +1614,8 @@ export default function CustomerCareDetailPanels({
                 {topUpHistory.map((item: CustomerCareTopUpHistoryItem) => (
                   <article
                     key={`mobile-${item.id}`}
-                    className="rounded-[1.5rem] border border-border-default bg-bg-surface p-4 shadow-sm"
+                    {...rowLink(buildTopUpStudentHref(item), `Xem học sinh ${item.studentName || ""}`.trim())}
+                    className={`rounded-[1.5rem] border border-border-default bg-bg-surface p-4 shadow-sm ${ROW_LINK_INTERACTION_CLASS}`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -1617,7 +1626,7 @@ export default function CustomerCareDetailPanels({
                           href={buildTopUpStudentHref(item)}
                           className="mt-2 inline-flex max-w-full text-base font-semibold text-primary underline-offset-4 transition-colors hover:text-primary-hover hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                         >
-                          <span className="truncate">{item.studentName || "—"}</span>
+                          <span className="min-w-0 break-words">{item.studentName || "—"}</span>
                         </Link>
                       </div>
                       <span className="shrink-0 text-right text-base font-semibold tabular-nums text-success">
@@ -1656,7 +1665,8 @@ export default function CustomerCareDetailPanels({
                     {topUpHistory.map((item: CustomerCareTopUpHistoryItem) => (
                       <tr
                         key={`desktop-${item.id}`}
-                        className="border-b border-border-subtle bg-bg-surface last:border-b-0"
+                        {...rowLink(buildTopUpStudentHref(item), `Xem học sinh ${item.studentName || ""}`.trim())}
+                        className={`border-b border-border-subtle bg-bg-surface last:border-b-0 ${ROW_LINK_INTERACTION_CLASS}`}
                       >
                         <td className="whitespace-nowrap px-3 py-3 font-medium text-text-primary">
                           {formatDateTime(item.createdAt ?? item.date)}
@@ -1839,7 +1849,7 @@ export default function CustomerCareDetailPanels({
                     aria-expanded={isExpanded}
                     className={`grid w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-inset ${COMMISSION_ROW_GRID_CLASS}`}
                   >
-                    <span className="min-w-0 truncate font-medium text-text-primary" title={item.fullName}>
+                    <span className="min-w-0 break-words font-medium text-text-primary" title={item.fullName}>
                       {item.fullName}
                     </span>
                     <span className="text-right tabular-nums font-semibold text-warning">

@@ -13,6 +13,7 @@ import {
 } from '../action-history/action-history.service';
 import { AuthIdentityCacheService } from 'src/auth/auth-identity-cache.service';
 import {
+  ClassStatus,
   PaymentStatus,
   StaffRole,
   StaffStatus,
@@ -25,6 +26,7 @@ import { AVATAR_PUBLIC_BUCKET } from 'src/storage/media-buckets';
 import {
   createPublicStorageUrl,
   createSignedStorageUrl,
+  removeStorageObjects,
 } from 'src/storage/supabase-storage';
 import {
   CreateStaffDto,
@@ -166,6 +168,7 @@ const STAFF_ROLE_LABELS: Record<string, string> = {
   technical: 'Kỹ thuật',
   customer_care: 'CSKH',
   training: 'Đào Tạo',
+  sale: 'Sale',
 };
 
 const EXTRA_ALLOWANCE_BACKED_OTHER_ROLES = new Set<StaffRole>([
@@ -176,6 +179,7 @@ const EXTRA_ALLOWANCE_BACKED_OTHER_ROLES = new Set<StaffRole>([
   StaffRole.communication,
   StaffRole.technical,
   StaffRole.training,
+  StaffRole.sale,
 ]);
 
 const DEPOSIT_PAYMENT_STATUSES = ['deposit', 'deposite', 'coc', 'cọc'] as const;
@@ -192,6 +196,12 @@ function isActiveClassTeacherStatus(
 ): boolean {
   return status == null || status === 'active';
 }
+
+/** Lớp đang dạy: phân công hiện tại trên lớp chưa kết thúc (cột/bộ lọc Lớp của danh sách nhân sự). */
+const CURRENT_TEACHING_CLASS_TEACHER_WHERE = {
+  OR: [{ status: null }, { status: 'active' }],
+  class: { status: ClassStatus.running },
+} satisfies Prisma.ClassTeacherWhereInput;
 
 function isDepositPaymentStatus(status: string | null | undefined) {
   const normalized = String(status ?? '')
@@ -447,11 +457,6 @@ type ExtraAllowanceRoleTaxBucketRow = SourcePaymentTaxBucketRow & {
 type StaffUnpaidTotalRow = {
   staffId: string;
   totalUnpaid: number | string | null;
-};
-
-type TeacherListVisibleClassRow = {
-  teacherId: string;
-  classId: string;
 };
 
 type DepositSessionRow = {
@@ -1332,6 +1337,7 @@ export class StaffService {
         ? {
             classTeachers: {
               some: {
+                ...CURRENT_TEACHING_CLASS_TEACHER_WHERE,
                 classId: trimmedClassId,
               },
             },
@@ -1341,7 +1347,9 @@ export class StaffService {
         ? {
             classTeachers: {
               some: {
+                ...CURRENT_TEACHING_CLASS_TEACHER_WHERE,
                 class: {
+                  ...CURRENT_TEACHING_CLASS_TEACHER_WHERE.class,
                   name: {
                     contains: trimmedClassName,
                     mode: 'insensitive' as const,
@@ -1399,8 +1407,8 @@ export class StaffService {
           },
         },
         classTeachers: {
+          where: CURRENT_TEACHING_CLASS_TEACHER_WHERE,
           select: {
-            status: true,
             class: { select: { id: true, name: true } },
           },
         },
@@ -1408,31 +1416,13 @@ export class StaffService {
       },
     });
     const staffIds = data.map((staff) => staff.id);
-    const [unpaidTotalsByStaffId, listVisibleClassIdsByTeacherId] =
-      await Promise.all([
-        this.getUnpaidTotalsByStaffIds(staffIds),
-        this.getListVisibleClassIdsByTeacherIds(staffIds),
-      ]);
+    const unpaidTotalsByStaffId =
+      await this.getUnpaidTotalsByStaffIds(staffIds);
 
     const rows = await Promise.all(
       data.map(async ({ _count, ...staff }) => {
-        const visibleClassIds =
-          listVisibleClassIdsByTeacherId.get(staff.id) ?? new Set<string>();
-        const classTeachers = (staff.classTeachers ?? [])
-          .filter(
-            (assignment) =>
-              isActiveClassTeacherStatus(assignment.status) ||
-              visibleClassIds.has(assignment.class.id),
-          )
-          .map((assignment) => ({
-            class: assignment.class,
-          }));
-
         return {
-          ...(await this.attachStaffUserDisplayFields({
-            ...staff,
-            classTeachers,
-          })),
+          ...(await this.attachStaffUserDisplayFields(staff)),
           achievementCount: _count.achievements,
           unpaidAmountTotal: unpaidTotalsByStaffId.get(staff.id) ?? 0,
         };
@@ -1484,12 +1474,18 @@ export class StaffService {
           specialization: true,
           status: true,
           achievements: {
-            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+            // Thành tích nổi bật luôn đứng đầu (landing chỉ hiện thành tích này).
+            orderBy: [
+              { isHighlight: 'desc' },
+              { sortOrder: 'asc' },
+              { createdAt: 'asc' },
+            ],
             select: {
               id: true,
               title: true,
               imageWatermarkedPath: true,
               sortOrder: true,
+              isHighlight: true,
             },
           },
           user: {
@@ -2901,6 +2897,7 @@ export class StaffService {
       StaffRole.communication,
       StaffRole.technical,
       StaffRole.training,
+      StaffRole.sale,
     ];
 
     for (const role of priority) {
@@ -4427,67 +4424,6 @@ export class StaffService {
     return liveNetTotal + frozenNetTotal;
   }
 
-  /**
-   * Class IDs that should still appear on staff list for inactive assignments:
-   * unpaid/pending sessions (any month) or non-deposit sessions in the current month.
-   * Aligns with card "Lớp phụ trách" visibility for nghỉ dạy.
-   */
-  private async getListVisibleClassIdsByTeacherIds(
-    teacherIds: string[],
-  ): Promise<Map<string, Set<string>>> {
-    const normalizedTeacherIds = Array.from(
-      new Set(
-        teacherIds
-          .map((teacherId) => teacherId.trim())
-          .filter((teacherId) => teacherId.length > 0),
-      ),
-    );
-
-    if (normalizedTeacherIds.length === 0) {
-      return new Map();
-    }
-
-    const now = new Date();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year = String(now.getFullYear());
-    const range = buildMonthRange(month, year);
-
-    const rows = await this.prisma.$queryRaw<TeacherListVisibleClassRow[]>(
-      Prisma.sql`
-        SELECT DISTINCT
-          sessions.teacher_id AS "teacherId",
-          sessions.class_id AS "classId"
-        FROM sessions
-        WHERE sessions.teacher_id IN (${Prisma.join(normalizedTeacherIds)})
-          AND (
-            LOWER(COALESCE(sessions.teacher_payment_status, '')) IN (${Prisma.join(
-              Array.from(RECENT_UNPAID_SESSION_STATUSES),
-            )})
-            OR (
-              sessions.date >= ${range.start}
-              AND sessions.date < ${range.end}
-              AND LOWER(COALESCE(sessions.teacher_payment_status, '')) NOT IN (${Prisma.join(
-                NORMALIZED_DEPOSIT_PAYMENT_STATUSES,
-              )})
-            )
-          )
-      `,
-    );
-
-    const byTeacherId = new Map<string, Set<string>>();
-    rows.forEach((row) => {
-      const teacherId = row.teacherId?.trim();
-      const classId = row.classId?.trim();
-      if (!teacherId || !classId) return;
-
-      const current = byTeacherId.get(teacherId) ?? new Set<string>();
-      current.add(classId);
-      byTeacherId.set(teacherId, current);
-    });
-
-    return byTeacherId;
-  }
-
   private async getUnpaidTotalsByStaffIds(staffIds: string[]) {
     const normalizedStaffIds = Array.from(
       new Set(
@@ -5738,6 +5674,70 @@ export class StaffService {
     }
 
     this.invalidateStaffAuthIdentities(existingStaff.userId);
+    return this.getStaffById(id);
+  }
+
+  /** Admin xoá ảnh đại diện (bản gốc + bản watermark) của user gắn với nhân sự. */
+  async deleteStaffAvatar(id: string, auditActor?: ActionHistoryActor) {
+    const staff = await this.prisma.staffInfo.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        userId: true,
+        user: {
+          select: { avatarPath: true, avatarWatermarkedPath: true },
+        },
+      },
+    });
+
+    if (!staff) {
+      throw new NotFoundException('Staff not found');
+    }
+    if (!staff.userId || !staff.user) {
+      throw new BadRequestException(
+        'Nhân sự chưa gắn tài khoản user nên không có ảnh đại diện để xoá.',
+      );
+    }
+
+    const userId = staff.userId;
+    const existingPath = staff.user.avatarPath ?? null;
+    const existingWatermarked = staff.user.avatarWatermarkedPath ?? null;
+
+    if (!existingPath && !existingWatermarked) {
+      return this.getStaffById(id);
+    }
+
+    await removeStorageObjects({
+      bucket: AVATAR_STORAGE_BUCKET,
+      paths: [existingPath],
+    });
+    await removeStorageObjects({
+      bucket: AVATAR_PUBLIC_BUCKET,
+      paths: [existingWatermarked],
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { avatarPath: null, avatarWatermarkedPath: null },
+      });
+
+      if (auditActor) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'staff',
+          entityId: id,
+          description: 'Xoá ảnh đại diện nhân sự',
+          beforeValue: {
+            avatarPath: existingPath,
+            avatarWatermarkedPath: existingWatermarked,
+          },
+          afterValue: { avatarPath: null, avatarWatermarkedPath: null },
+        });
+      }
+    });
+
+    this.invalidateStaffAuthIdentities(userId);
     return this.getStaffById(id);
   }
 

@@ -10,14 +10,18 @@ import { Role } from "@/dtos/Auth.dto";
 import { resolveCanonicalUserName } from "@/dtos/user-name.dto";
 import { useAuth } from "@/context/AuthContext";
 import * as authApi from "@/lib/apis/auth.api";
+import * as staffOpsApi from "@/lib/apis/staff-ops.api";
 import { canPublishNotifications } from "@/lib/notification-publisher-access";
 import { resolveStaffLessonWorkspace } from "@/lib/staff-lesson-workspace";
 import { clearLogoutScopedQueries } from "@/lib/query-invalidation";
 import { SidebarNotificationTray, SidebarThemePicker } from "@/components/shell";
 import UserAvatar from "@/components/ui/UserAvatar";
-import { UserProfileDialogTrigger } from "@/components/user-profile/UserProfileDialog";
 import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
+import {
+  isGiftedLessonPlanRoute,
+  useGiftedLessonPlanEnabled,
+} from "@/lib/gifted-lesson-plan";
 
 type MenuVisibility = {
   hasStaffProfile: boolean;
@@ -28,11 +32,14 @@ type MenuVisibility = {
   canAccessSurveys: boolean;
   canComposeNotifications: boolean;
   isTraining: boolean;
+  /** Ban Đào Tạo đang là quản lý của ít nhất một lớp. */
+  hasManagedClasses: boolean;
   isAccountant: boolean;
   isAccountantIncome: boolean;
   isAccountantExpense: boolean;
   isCommunication: boolean;
   isTechnical: boolean;
+  isSale: boolean;
 };
 
 type MenuItem = {
@@ -106,7 +113,8 @@ const DEFAULT_MENU_ITEMS: MenuItem[] = [
       icon: <IconClasses />,
       isActive: (pathname) =>
         pathname === "/staff/classes" || pathname.startsWith("/staff/classes/"),
-      isVisible: ({ isAccountant, isTraining }) => isAccountant || isTraining,
+      isVisible: ({ isAccountant, isTraining, hasManagedClasses }) =>
+        isAccountant || (isTraining && hasManagedClasses),
     },
     {
       href: "/staff/students",
@@ -200,6 +208,13 @@ const DEFAULT_MENU_ITEMS: MenuItem[] = [
       isVisible: ({ isTraining }) => isTraining,
     },
     {
+      href: "/staff/sale-detail",
+      label: "Sale",
+      icon: <IconCosts />,
+      isActive: (pathname) => pathname.startsWith("/staff/sale-detail"),
+      isVisible: ({ isSale }) => isSale,
+    },
+    {
       href: "/staff/notes-subject",
       label: "Quy định",
       icon: <IconNotesSubject />,
@@ -219,6 +234,13 @@ function buildAssistantMenuItems(ownStaffId: string): MenuItem[] {
       label: "Dashboard",
       icon: <IconHome />,
       isActive: (pathname) => pathname === "/staff",
+      isVisible: () => true,
+    },
+    {
+      href: "/staff/monthly-report",
+      label: "Báo cáo tháng",
+      icon: <IconMonthlyReport />,
+      isActive: (pathname) => pathname.startsWith("/staff/monthly-report"),
       isVisible: () => true,
     },
     {
@@ -488,6 +510,13 @@ function IconCommunication() {
   );
 }
 
+function IconMonthlyReport() {
+  return (
+    <svg className="size-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+}
 function IconHistory() {
   return (
     <svg className="size-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -550,6 +579,15 @@ export default function StaffSidebar() {
     staffRoles.includes("accountant_income") || staffRoles.includes("accountant");
   const isAccountantExpense = staffRoles.includes("accountant_expense");
   const isAccountant = isAccountantIncome || isAccountantExpense;
+  // `scope=managed`: chỉ đếm lớp mình quản lý, kể cả khi kiêm gia sư; chỉ cần biết có hay không.
+  const { data: managedClassPage } = useQuery({
+    queryKey: ["staff-sidebar", "training-managed-classes"],
+    queryFn: () =>
+      staffOpsApi.getClasses({ page: 1, limit: 1, scope: "managed" }),
+    enabled: isTraining && !isAccountant && !isFullAdmin && !isAssistant,
+    staleTime: 5 * 60_000,
+  });
+  const hasManagedClasses = (managedClassPage?.meta.total ?? 0) > 0;
   const canAccessLessonPlanWorkspace =
     lessonWorkspace.canAccessWorkspace || isAccountantExpense;
   const canAccessCourseWorkspace =
@@ -561,6 +599,7 @@ export default function StaffSidebar() {
     lessonWorkspace.isLessonPlanHead;
   const isCommunication = staffRoles.includes("communication");
   const isTechnical = staffRoles.includes("technical");
+  const isSale = staffRoles.includes("sale");
   const canComposeNotifications = canPublishNotifications(
     staffRoles,
     isFullAdmin,
@@ -571,22 +610,28 @@ export default function StaffSidebar() {
         ...DEFAULT_MENU_ITEMS.filter((item) => item.href !== "/staff/profile"),
       ]
     : DEFAULT_MENU_ITEMS;
+  const menuVisibility: MenuVisibility = {
+    hasStaffProfile,
+    canAccessClassWorkspace,
+    canAccessCustomerCareSelf,
+    canAccessLessonPlanWorkspace,
+    canAccessCourseWorkspace,
+    canAccessSurveys,
+    canComposeNotifications,
+    isTraining,
+    hasManagedClasses,
+    isAccountant,
+    isAccountantIncome,
+    isAccountantExpense,
+    isCommunication,
+    isTechnical,
+    isSale,
+  };
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
   const menuItems = dedupeMenuItems(baseMenuItems).filter((item) =>
-    item.isVisible({
-      hasStaffProfile,
-      canAccessClassWorkspace,
-      canAccessCustomerCareSelf,
-      canAccessLessonPlanWorkspace,
-      canAccessCourseWorkspace,
-      canAccessSurveys,
-      canComposeNotifications,
-      isTraining,
-      isAccountant,
-      isAccountantIncome,
-      isAccountantExpense,
-      isCommunication,
-      isTechnical,
-    }),
+    // Giáo án học sinh giỏi chỉ có trên IT.
+    !(giftedLessonPlanEnabled === false && isGiftedLessonPlanRoute(item.href)) &&
+    item.isVisible(menuVisibility),
   );
   const activeMenuHref = resolveActiveMenuHref(pathname, menuItems);
   const resolvedActiveMenuHref = activeHrefState || activeMenuHref;
@@ -701,14 +746,13 @@ export default function StaffSidebar() {
       >
         <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-border-default px-2.5 py-1.5 sm:px-3">
           <div
-            className={`flex min-w-0 flex-1 items-center overflow-hidden transition-[justify-content] duration-300 ease-out ${compact ? "justify-center" : "justify-start"}`}
+            className={`flex min-w-0 flex-1 items-center overflow-hidden transition-[justify-content] duration-300 ease-out justify-center ${compact ? "" : "pl-[3.25rem] md:pl-11"}`}
           >
             <BrandLogoLockup
               variant="navbar"
               showWordmark={!compact}
               dense={compact}
-              className="w-full min-w-0 transition-[width,opacity] duration-300 ease-out"
-              wordmarkClassName="truncate"
+              className="w-full min-w-0 justify-center transition-[width,opacity] duration-300 ease-out"
             />
           </div>
           <button
@@ -755,21 +799,7 @@ export default function StaffSidebar() {
               const isActive = item.href === resolvedActiveMenuHref;
               const itemLabel =
                 typeof item.label === "function"
-                  ? item.label({
-                      hasStaffProfile,
-                      canAccessClassWorkspace,
-                      canAccessCustomerCareSelf,
-                      canAccessLessonPlanWorkspace,
-                      canAccessCourseWorkspace,
-                      canAccessSurveys,
-                      canComposeNotifications,
-                      isTraining,
-                      isAccountant,
-                      isAccountantIncome,
-                      isAccountantExpense,
-                      isCommunication,
-                      isTechnical,
-                    })
+                  ? item.label(menuVisibility)
                   : item.label;
 
               return (
@@ -837,9 +867,12 @@ export default function StaffSidebar() {
           <div
             className={`mt-2 flex items-center gap-2 ${compact ? "flex-wrap justify-center" : ""}`}
           >
-            <UserProfileDialogTrigger
+            <Link
+              href={`/user-profile?from=${encodeURIComponent(pathname)}`}
+              prefetch={false}
+              onClick={handleMobileClose}
               className="sidebar-item flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-tertiary text-text-primary ring-2 ring-border-default transition-colors duration-200 hover:bg-primary hover:text-text-inverse focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-secondary"
-              ariaLabel="Thông tin cá nhân"
+              aria-label="Thông tin cá nhân"
               title="Thông tin cá nhân"
             >
               <UserAvatar
@@ -849,7 +882,7 @@ export default function StaffSidebar() {
                 className="size-full"
                 fallbackClassName="text-sm font-semibold"
               />
-            </UserProfileDialogTrigger>
+            </Link>
 
             <SidebarThemePicker compact={compact} onMobileClose={handleMobileClose} />
 

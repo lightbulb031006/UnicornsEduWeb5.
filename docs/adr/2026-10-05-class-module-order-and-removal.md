@@ -30,3 +30,4 @@ Thứ tự nhóm chuyên đề lúc đó lấy từ `modules.sort_order`, là th
 - Sau khi gỡ, trang **Chấm bài** của lần giao thuộc chuyên đề đó không còn đường vào từ trang lớp cho tới khi thêm lại.
 - Lớp đã gỡ chuyên đề trước ADR này: migration ẩn luôn lần giao của chuyên đề không còn trong `class_modules` (lý do `module_removed`), để dữ liệu cũ khớp quy tắc mới.
 - Rollback: drop `class_modules.sort_order` và cột lý do ẩn; lần giao bị migration ẩn phải bỏ cờ ẩn bằng tay. Cột `timeline_custom_order` thêm lại với mặc định `false`.
+- Cập nhật #233: gỡ (tiết hoặc chuyên đề) ghi `class_content_items.removed_at`, tách khỏi Ẩn — item đang Ẩn tay cũng biến mất, thêm lại thì trở lại và vẫn ẩn. `hidden_reason = module_removed` chỉ còn đánh dấu item bị ẩn kèm lần gỡ.

@@ -31,6 +31,7 @@ const STAFF_ROLE_OPTIONS: { value: StaffRoleType; label: string }[] = [
   { value: "communication", label: ROLE_LABELS.communication },
   { value: "technical", label: ROLE_LABELS.technical },
   { value: "training", label: ROLE_LABELS.training },
+  { value: "sale", label: ROLE_LABELS.sale },
 ];
 
 function formatDateTime(value: string): string {

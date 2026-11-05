@@ -3,23 +3,18 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { useAuth } from "@/context/AuthContext";
-import type { UserInfoDto } from "@/dtos/Auth.dto";
 import type { FullProfileDto } from "@/dtos/profile.dto";
-import * as authApi from "@/lib/apis/auth.api";
 import { formatVnDateTime } from "@/lib/formatters";
 
 const CONSENT_MARKDOWN = `# ĐIỀU KHOẢN ĐỒNG Ý TẠO TÀI KHOẢN, THU THẬP VÀ XỬ LÝ DỮ LIỆU CÁ NHÂN
 
-_Áp dụng đối với nền tảng quản lý gia sư thuộc hệ thống UNICORNS EDU_
+_Áp dụng đối với nền tảng quản lý gia sư thuộc hệ thống UNIEDU_
 
 ---
 
 ## LỜI MỞ ĐẦU
 
-UNICORNS EDU cam kết bảo vệ dữ liệu cá nhân của người dùng theo quy định pháp luật Việt Nam hiện hành. Điều khoản này quy định cụ thể về phạm vi thu thập, mục đích sử dụng, lưu trữ, xử lý và bảo mật dữ liệu cá nhân đối với người dùng đăng ký tài khoản trên nền tảng quản lý gia sư của UNICORNS EDU.
+UNIEDU cam kết bảo vệ dữ liệu cá nhân của người dùng theo quy định pháp luật Việt Nam hiện hành. Điều khoản này quy định cụ thể về phạm vi thu thập, mục đích sử dụng, lưu trữ, xử lý và bảo mật dữ liệu cá nhân đối với người dùng đăng ký tài khoản trên nền tảng quản lý gia sư của UNIEDU.
 
 Người dùng khi tạo tài khoản đồng nghĩa với việc đã đọc, hiểu và đồng ý toàn bộ nội dung điều khoản này.
 
@@ -29,7 +24,7 @@ Người dùng khi tạo tài khoản đồng nghĩa với việc đã đọc, h
 
 ## Điều 1. Giải thích thuật ngữ
 
-1. **“UNICORNS EDU”** là đơn vị quản lý, sở hữu và vận hành hệ thống nền tảng quản lý gia sư.
+1. **“UNIEDU”** là đơn vị quản lý, sở hữu và vận hành hệ thống nền tảng quản lý gia sư.
 
 2. **“Người dùng”** bao gồm gia sư, ứng viên gia sư, cộng tác viên hoặc cá nhân đăng ký tài khoản trên hệ thống.
 
@@ -39,7 +34,7 @@ Người dùng khi tạo tài khoản đồng nghĩa với việc đã đọc, h
 
 ## Điều 2. Phạm vi áp dụng
 
-Điều khoản này áp dụng đối với toàn bộ cá nhân sử dụng nền tảng thuộc hệ thống UNICORNS EDU.
+Điều khoản này áp dụng đối với toàn bộ cá nhân sử dụng nền tảng thuộc hệ thống UNIEDU.
 
 ---
 
@@ -47,7 +42,7 @@ Người dùng khi tạo tài khoản đồng nghĩa với việc đã đọc, h
 
 ## Điều 3. Mục đích thu thập dữ liệu
 
-UNICORNS EDU thu thập dữ liệu cá nhân nhằm:
+UNIEDU thu thập dữ liệu cá nhân nhằm:
 
 - Tạo và quản lý tài khoản người dùng;
 - Xác minh danh tính gia sư;
@@ -90,7 +85,7 @@ Dữ liệu được thu thập trực tiếp từ người dùng thông qua:
 
 ## Điều 6. Cam kết bảo mật
 
-UNICORNS EDU cam kết:
+UNIEDU cam kết:
 
 - Không tiết lộ dữ liệu cá nhân trái phép;
 - Không bán hoặc trao đổi dữ liệu cá nhân vì mục đích thương mại;
@@ -107,11 +102,11 @@ Dữ liệu cá nhân được lưu trữ:
 
 ## Điều 8. Chia sẻ dữ liệu
 
-UNICORNS EDU chỉ chia sẻ dữ liệu trong các trường hợp:
+UNIEDU chỉ chia sẻ dữ liệu trong các trường hợp:
 
 - Có sự đồng ý của người dùng;
 - Theo yêu cầu của cơ quan nhà nước có thẩm quyền;
-- Để bảo vệ quyền và lợi ích hợp pháp của UNICORNS EDU.
+- Để bảo vệ quyền và lợi ích hợp pháp của UNIEDU.
 
 ---
 
@@ -140,9 +135,9 @@ Người dùng cam kết:
 
 # CHƯƠNG V - ĐIỀU KHOẢN CUỐI CÙNG
 
-## Điều 11. Quyền của UNICORNS EDU
+## Điều 11. Quyền của UNIEDU
 
-UNICORNS EDU có quyền:
+UNIEDU có quyền:
 
 - Xác minh thông tin người dùng;
 - Từ chối xét duyệt hồ sơ;
@@ -151,23 +146,33 @@ UNICORNS EDU có quyền:
 
 ## Điều 12. Sửa đổi điều khoản
 
-UNICORNS EDU có quyền sửa đổi điều khoản này nhằm phù hợp với quy định pháp luật và nhu cầu vận hành hệ thống.
+UNIEDU có quyền sửa đổi điều khoản này nhằm phù hợp với quy định pháp luật và nhu cầu vận hành hệ thống.
 
 ---
 
 # XÁC NHẬN ĐỒNG Ý
 
-- [ ] Tôi xác nhận đã đọc, hiểu và đồng ý với toàn bộ điều khoản thu thập và xử lý dữ liệu cá nhân của UNICORNS EDU.
+- [ ] Tôi xác nhận đã đọc, hiểu và đồng ý với toàn bộ điều khoản thu thập và xử lý dữ liệu cá nhân của UNIEDU.
 
 - [ ] Tôi cam kết toàn bộ thông tin cung cấp là chính xác, trung thực và hợp pháp.
 `;
 
+export type DataConsentTicks = {
+  readTerms: boolean;
+  accuracy: boolean;
+};
+
+export const EMPTY_DATA_CONSENT_TICKS: DataConsentTicks = {
+  readTerms: false,
+  accuracy: false,
+};
+
 type DataConsentSectionProps = {
   profile: FullProfileDto;
-  onAccepted?: (payload: {
-    dataConsentAcceptedAt: string | null;
-    dataConsentVersion: string | null;
-  }) => void;
+  /** Tick hiện tại; được ghi nhận khi bấm nút "Lưu" chung của hồ sơ. */
+  ticks: DataConsentTicks;
+  onTicksChange: (ticks: DataConsentTicks) => void;
+  disabled?: boolean;
 };
 
 function formatConsentDate(value?: string | null) {
@@ -181,52 +186,16 @@ function formatConsentDate(value?: string | null) {
 
 export default function DataConsentSection({
   profile,
-  onAccepted,
+  ticks,
+  onTicksChange,
+  disabled = false,
 }: DataConsentSectionProps) {
-  const [hasReadTerms, setHasReadTerms] = useState(false);
-  const [hasConfirmedAccuracy, setHasConfirmedAccuracy] = useState(false);
   const [showFullTerms, setShowFullTerms] = useState(false);
-  const { user, setUser } = useAuth();
-  const queryClient = useQueryClient();
   const consentAccepted = Boolean(
     profile.dataConsentAcceptedAt && profile.requiresStaffDataConsent !== true,
   );
-  const checkedReadTerms = consentAccepted || hasReadTerms;
-  const checkedAccuracy = consentAccepted || hasConfirmedAccuracy;
-  const canSubmit = checkedReadTerms && checkedAccuracy && !consentAccepted;
-
-  const acceptMutation = useMutation({
-    mutationFn: authApi.acceptDataConsent,
-    onSuccess: async (payload) => {
-      let nextUser: UserInfoDto = {
-        ...user,
-        dataConsentAcceptedAt: payload.dataConsentAcceptedAt,
-        dataConsentVersion: payload.dataConsentVersion,
-        requiresStaffDataConsent: false,
-      };
-
-      try {
-        nextUser = await authApi.getSession();
-      } catch {
-        // Keep the local optimistic session if the refresh read fails.
-      }
-
-      setUser(nextUser);
-      queryClient.setQueryData(["auth", "session"], nextUser);
-      onAccepted?.({
-        dataConsentAcceptedAt: payload.dataConsentAcceptedAt,
-        dataConsentVersion: payload.dataConsentVersion,
-      });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["profile", "full"] }),
-        queryClient.invalidateQueries({ queryKey: ["auth", "full-profile"] }),
-      ]);
-      toast.success("Đã ghi nhận đồng ý điều khoản.");
-    },
-    onError: () => {
-      toast.error("Không ghi nhận được xác nhận. Vui lòng thử lại.");
-    },
-  });
+  const checkedReadTerms = consentAccepted || ticks.readTerms;
+  const checkedAccuracy = consentAccepted || ticks.accuracy;
 
   return (
     <div className="space-y-5">
@@ -239,7 +208,7 @@ export default function DataConsentSection({
         <p className="mt-1 text-xs leading-5 text-text-muted">
           {consentAccepted
             ? `Phiên bản ${profile.dataConsentVersion ?? "hiện hành"} · ${formatConsentDate(profile.dataConsentAcceptedAt)}`
-            : "Bạn có thể mở toàn bộ điều khoản để đọc kỹ, hoặc tick nhanh 2 xác nhận nếu đã nắm nội dung."}
+            : 'Đọc điều khoản đầy đủ hoặc tick nhanh 2 xác nhận, rồi bấm "Lưu" ở cuối hồ sơ để ghi nhận.'}
         </p>
       </div>
 
@@ -261,34 +230,30 @@ export default function DataConsentSection({
         </div>
       ) : null}
 
-      <form
-        className="space-y-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (canSubmit) {
-            acceptMutation.mutate();
-          }
-        }}
-      >
+      <div className="space-y-4">
         <label className="flex items-start gap-3 text-sm leading-6 text-text-primary">
           <input
             type="checkbox"
             checked={checkedReadTerms}
-            disabled={consentAccepted || acceptMutation.isPending}
-            onChange={(event) => setHasReadTerms(event.target.checked)}
+            disabled={consentAccepted || disabled}
+            onChange={(event) =>
+              onTicksChange({ ...ticks, readTerms: event.target.checked })
+            }
             className="mt-1 size-4 rounded border-border-default text-primary focus:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
           />
           <span>
             Tôi xác nhận đã đọc, hiểu và đồng ý với toàn bộ điều khoản thu thập
-            và xử lý dữ liệu cá nhân của UNICORNS EDU.
+            và xử lý dữ liệu cá nhân của UNIEDU.
           </span>
         </label>
         <label className="flex items-start gap-3 text-sm leading-6 text-text-primary">
           <input
             type="checkbox"
             checked={checkedAccuracy}
-            disabled={consentAccepted || acceptMutation.isPending}
-            onChange={(event) => setHasConfirmedAccuracy(event.target.checked)}
+            disabled={consentAccepted || disabled}
+            onChange={(event) =>
+              onTicksChange({ ...ticks, accuracy: event.target.checked })
+            }
             className="mt-1 size-4 rounded border-border-default text-primary focus:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
           />
           <span>
@@ -296,24 +261,7 @@ export default function DataConsentSection({
             hợp pháp.
           </span>
         </label>
-
-        <div className="flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs leading-5 text-text-muted">
-            Phiên bản điều khoản hiện hành sẽ được lưu cùng thời điểm xác nhận.
-          </p>
-          <button
-            type="submit"
-            disabled={!canSubmit || acceptMutation.isPending}
-            className="inline-flex min-h-10 items-center justify-center rounded-full bg-primary px-5 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {consentAccepted
-              ? "Đã xác nhận"
-              : acceptMutation.isPending
-                ? "Đang ghi nhận..."
-                : "Xác nhận điều khoản"}
-          </button>
-        </div>
-      </form>
+      </div>
     </div>
   );
 }

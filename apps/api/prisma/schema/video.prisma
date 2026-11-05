@@ -1,0 +1,29 @@
+/// Video bảo vệ: một dòng mỗi `youtube_id` xuất hiện ở `lessons.video_url` hoặc
+/// `sessions.recording_url`. LMS gửi link sang UNIOJ `video-sync`, cron poll tới khi
+/// `ready`/`failed`; khi `ready` LMS tự ký Playback Token UniVideo theo `video_id`
+/// (ADR 2026-10-18-protected-video-via-unioj-sync). Không FK tới tiết/buổi: nhiều nơi
+/// có thể dùng chung một video.
+model ProtectedVideo {
+  youtubeId     String               @id @map("youtube_id")
+  /// ULID Video trong kho UniVideo; null tới khi kho nhận job.
+  videoId       String?              @map("video_id")
+  status        ProtectedVideoStatus @default(pending)
+  /// 0–100, tiến độ của trạng thái hiện tại (UNIOJ `progress`).
+  progress      Int                  @default(0)
+  /// Mã lỗi UNIOJ khi `failed` (YT_UNAVAILABLE, TOO_LONG, DOWNLOAD_FAILED, …).
+  errorCode     String?              @map("error_code")
+  /// Lỗi phía LMS khi gọi UNIOJ (mạng, 4xx/5xx) — để staff thấy vì sao còn `pending`.
+  lastSyncError String?              @map("last_sync_error")
+  queuePosition Int?                 @map("queue_position")
+  queueTotal    Int?                 @map("queue_total")
+  /// Thứ tự gửi: mới lưu/đổi link gần nhất được gửi trước (backfill: mới nhất trước).
+  requestedAt   DateTime             @default(now()) @map("requested_at") @db.Timestamptz(6)
+  /// Lần cuối gọi UNIOJ (POST hoặc GET) cho dòng này.
+  syncedAt      DateTime?            @map("synced_at") @db.Timestamptz(6)
+  createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, requestedAt])
+  @@index([status, syncedAt])
+  @@map("protected_videos")
+}

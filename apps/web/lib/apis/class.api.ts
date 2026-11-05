@@ -8,6 +8,7 @@ import {
   ClassListResponse,
   ClassStatus,
   ClassStatusActionPayload,
+  ClassStatusActionResponse,
   ClassTeacher,
   ClassTeacherPayload,
   CreateCourseDifficultyLevelPayload,
@@ -54,6 +55,7 @@ import type {
 } from "@/dtos/class-timeline.dto";
 import type {
   ClassModuleDto,
+  ClassContentItemRemovalImpactDto,
   ClassModuleRemovalImpactDto,
   CourseLessonForClassDto,
 } from "@/dtos/course-content.dto";
@@ -134,16 +136,6 @@ function normalizeClassEndEligibility(
     unpaidSessionCount: Number(
       eligibility.unpaidSessionCount ?? eligibility.unpaid_session_count ?? 0,
     ),
-    blockReason:
-      typeof eligibility.blockReason === "string"
-        ? eligibility.blockReason
-        : typeof eligibility.block_reason === "string"
-          ? eligibility.block_reason
-          : null,
-    canEndClass:
-      eligibility.canEndClass == null && eligibility.can_end_class == null
-        ? undefined
-        : Boolean(eligibility.canEndClass ?? eligibility.can_end_class),
   };
 }
 
@@ -490,6 +482,32 @@ export async function restoreClassContentItem(
   return response.data;
 }
 
+/** Gỡ tiết khỏi lớp (khác Ẩn): tiết biến mất ở mọi phía, bài làm/điểm giữ nguyên. */
+export async function removeClassContentItem(
+  classId: string,
+  itemId: string,
+): Promise<ClassContentItemDto[]> {
+  const safeClassId = encodeURIComponent(classId);
+  const safeItemId = encodeURIComponent(itemId);
+  const response = await api.post<ClassContentItemDto[]>(
+    `/class/${safeClassId}/content/${safeItemId}/remove`,
+  );
+  return response.data;
+}
+
+/** Số bài tự luận chưa chấm + học sinh đang làm dở nếu gỡ một tiết. */
+export async function getClassContentItemRemovalImpact(
+  classId: string,
+  itemId: string,
+): Promise<ClassContentItemRemovalImpactDto> {
+  const safeClassId = encodeURIComponent(classId);
+  const safeItemId = encodeURIComponent(itemId);
+  const response = await api.get<ClassContentItemRemovalImpactDto>(
+    `/class/${safeClassId}/content/${safeItemId}/removal-impact`,
+  );
+  return response.data;
+}
+
 export async function getStudentClassContentGroups(
   classId: string,
 ): Promise<ClassContentModuleGroupDto[]> {
@@ -548,7 +566,7 @@ export async function addClassModule(
   return response.data;
 }
 
-/** Gỡ chuyên đề (coi như chưa từng thêm): ẩn mềm tiết lý thuyết và lần giao của chuyên đề. */
+/** Gỡ chuyên đề: mọi tiết của chuyên đề (kể cả đang Ẩn) biến mất khỏi lớp. */
 export async function removeClassModule(
   classId: string,
   moduleId: string,
@@ -683,24 +701,24 @@ export async function deleteClassById(id: string) {
 export async function endClass(
   id: string,
   data: ClassStatusActionPayload = {},
-): Promise<ClassDetail> {
+): Promise<ClassStatusActionResponse> {
   const safeId = encodeURIComponent(id);
   const response = await api.post(`/class/${safeId}/end`, data);
-  return normalizeClassRecord(response.data as ClassDetail);
+  return normalizeClassRecord(response.data as ClassStatusActionResponse);
 }
 
 export async function stopClassTeacher(
   classId: string,
   teacherId: string,
   data: ClassStatusActionPayload = {},
-): Promise<ClassDetail> {
+): Promise<ClassStatusActionResponse> {
   const safeClassId = encodeURIComponent(classId);
   const safeTeacherId = encodeURIComponent(teacherId);
   const response = await api.post(
     `/class/${safeClassId}/teachers/${safeTeacherId}/stop-teaching`,
     data,
   );
-  return normalizeClassRecord(response.data as ClassDetail);
+  return normalizeClassRecord(response.data as ClassStatusActionResponse);
 }
 
 export async function updateClass(data: UpdateClassPayload): Promise<ClassDetail> {
@@ -1030,6 +1048,26 @@ export async function removePracticeLessonQuestion(
   await api.delete(contentApiPaths.lessonQuestion(lessonId, linkId));
 }
 
+/** Thêm cả Bộ câu hỏi vào tiết — tiết lấy nguyên bộ. */
+export async function addPracticeLessonQuestionSet(
+  lessonId: string,
+  sharedMaterialId: string,
+): Promise<void> {
+  await api.post(contentApiPaths.lessonQuestionSets(lessonId), {
+    sharedMaterialId,
+  });
+}
+
+/** Gỡ cả Bộ câu hỏi khỏi tiết. */
+export async function removePracticeLessonQuestionSet(
+  lessonId: string,
+  sharedMaterialId: string,
+): Promise<void> {
+  await api.delete(
+    contentApiPaths.lessonQuestionSet(lessonId, sharedMaterialId),
+  );
+}
+
 export async function reorderPracticeLessonQuestions(
   lessonId: string,
   linkIds: string[],
@@ -1078,6 +1116,23 @@ export async function unlinkQuizQuestion(
   questionId: string,
 ): Promise<void> {
   await api.delete(contentApiPaths.lessonQuiz(lessonId, questionId));
+}
+
+/** Thêm nguyên Bộ câu hỏi vào bài ôn nhẹ. */
+export async function addLessonQuizSet(
+  lessonId: string,
+  sharedMaterialId: string,
+): Promise<void> {
+  await api.post(contentApiPaths.lessonQuizSets(lessonId), {
+    sharedMaterialId,
+  });
+}
+
+export async function removeLessonQuizSet(
+  lessonId: string,
+  sharedMaterialId: string,
+): Promise<void> {
+  await api.delete(contentApiPaths.lessonQuizSet(lessonId, sharedMaterialId));
 }
 
 export async function getExamLibrary(

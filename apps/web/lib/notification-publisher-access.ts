@@ -6,11 +6,13 @@ export const NOTIFICATION_PUBLISHER_STAFF_ROLES = [
   "assistant",
   "lesson_plan",
   "lesson_plan_head",
+  "accountant",
   "accountant_income",
   "accountant_expense",
   "communication",
   "technical",
   "training",
+  "sale",
 ] as const;
 
 export function canPublishNotifications(

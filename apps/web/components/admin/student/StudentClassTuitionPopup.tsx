@@ -51,12 +51,17 @@ function StudentClassTuitionPopupContent({
     e.preventDefault();
     const totalNum = toNum(packageTotal.trim());
     const sessionNum = toNum(packageSession.trim());
-    if (totalNum != null && (sessionNum == null || sessionNum < 1)) {
+    // Gói 0đ = học sinh miễn phí: số buổi được để trống hoặc 0.
+    if (totalNum != null && totalNum > 0 && (sessionNum == null || sessionNum < 1)) {
       toast.error("Số buổi trong gói phải là số nguyên dương.");
       return;
     }
-    if (sessionNum != null && (totalNum == null || totalNum < 0)) {
+    if (sessionNum != null && (sessionNum < 0 || totalNum == null || totalNum < 0)) {
       toast.error("Tổng gói học phí không hợp lệ.");
+      return;
+    }
+    if (sessionNum === 0 && totalNum !== 0) {
+      toast.error("Số buổi chỉ được bằng 0 khi tổng gói bằng 0.");
       return;
     }
     onClose();
@@ -70,8 +75,8 @@ function StudentClassTuitionPopupContent({
 
         await classApi.updateClassStudentTuition(classId, {
           student_id: studentId,
-          custom_tuition_package_total: totalNum ?? 0,
-          custom_tuition_package_session: sessionNum ?? 0,
+          custom_tuition_package_total: totalNum,
+          custom_tuition_package_session: sessionNum,
         });
       },
       onSuccess: async () => {
@@ -136,13 +141,14 @@ function StudentClassTuitionPopupContent({
                 <span className="mb-1 block text-sm font-medium text-text-secondary">Số buổi trong gói</span>
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   value={packageSession}
                   onChange={(e) => setPackageSession(e.target.value)}
                   placeholder="Để trống = theo lớp"
                   className="w-full rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
+              <p className="text-xs text-text-muted">Nhập tổng gói 0 (số buổi 0 hoặc trống) để miễn học phí cho học sinh.</p>
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"

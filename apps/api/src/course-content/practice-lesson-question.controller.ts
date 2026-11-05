@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
 } from '@nestjs/common';
@@ -25,6 +26,7 @@ import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
   QuestionLinkCreateDto,
   QuestionLinkUpdateDto,
+  QuestionSetLinkCreateDto,
   ReorderQuestionLinksDto,
 } from 'src/dtos/course-content.dto';
 import { PracticeQuestionLinkService } from './practice-question-link.service';
@@ -81,6 +83,65 @@ export class PracticeLessonQuestionController {
     @Body() dto: QuestionLinkCreateDto,
   ) {
     return this.topicService.addQuestionToLesson(lessonId, dto, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Post('sets')
+  @Roles(UserRole.admin)
+  @AllowStaffRolesOnAdminRoutes(
+    StaffRole.assistant,
+    StaffRole.lesson_plan,
+    StaffRole.lesson_plan_head,
+    StaffRole.teacher,
+  )
+  @ApiOperation({
+    summary: 'Thêm cả Bộ câu hỏi vào tiết thực hành',
+    description:
+      'Mọi câu (chưa xoá) của bộ nối cuối đề theo thứ tự bộ, trọng số mặc định. Tiết lấy nguyên bộ — không thêm lẻ câu của bộ.',
+  })
+  @ApiParam({ name: 'lessonId', description: 'ID tiết thực hành' })
+  @ApiBody({ type: QuestionSetLinkCreateDto })
+  @ApiResponse({ status: 201, description: 'Đã thêm bộ.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bộ khác khoá, bộ chưa có câu hoặc bộ đã có trong tiết.',
+  })
+  @ApiResponse({ status: 403, description: COURSE_CONTENT_FORBIDDEN })
+  async addSet(
+    @CurrentUser() user: JwtPayload,
+    @Param('lessonId') lessonId: string,
+    @Body() dto: QuestionSetLinkCreateDto,
+  ) {
+    return this.topicService.addSetToLesson(lessonId, dto.sharedMaterialId, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Delete('sets/:sharedMaterialId')
+  @Roles(UserRole.admin)
+  @AllowStaffRolesOnAdminRoutes(
+    StaffRole.assistant,
+    StaffRole.lesson_plan,
+    StaffRole.lesson_plan_head,
+    StaffRole.teacher,
+  )
+  @ApiOperation({ summary: 'Gỡ cả Bộ câu hỏi khỏi tiết thực hành' })
+  @ApiParam({ name: 'lessonId', description: 'ID tiết thực hành' })
+  @ApiParam({ name: 'sharedMaterialId', description: 'ID Bộ câu hỏi' })
+  @ApiResponse({ status: 200, description: 'Đã gỡ bộ.' })
+  @ApiResponse({ status: 404, description: 'Bộ không có trong tiết.' })
+  @ApiResponse({ status: 403, description: COURSE_CONTENT_FORBIDDEN })
+  async removeSet(
+    @CurrentUser() user: JwtPayload,
+    @Param('lessonId') lessonId: string,
+    @Param('sharedMaterialId', ParseUUIDPipe) sharedMaterialId: string,
+  ) {
+    return this.topicService.removeSetFromLesson(lessonId, sharedMaterialId, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,
@@ -174,7 +235,7 @@ export class PracticeLessonQuestionController {
   )
   @ApiOperation({ summary: 'Tổng quan câu hỏi và điểm' })
   @ApiParam({ name: 'lessonId', description: 'ID tiết thực hành' })
-  @ApiResponse({ status: 200, description: 'Tổng số câu hỏi và tổng điểm.' })
+  @ApiResponse({ status: 200, description: 'Tổng số câu hỏi, tổng điểm, tổng trọng số (JP).' })
   async getSummary(@Param('lessonId') lessonId: string) {
     return this.topicService.getQuestionLinkSummary(lessonId);
   }

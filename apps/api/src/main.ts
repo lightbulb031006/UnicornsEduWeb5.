@@ -10,6 +10,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import cookieParser from 'cookie-parser';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { loadLmsProfile } from './lms-profile/lms-profile';
 
 function parseTrustProxy(
   value: string | undefined,
@@ -42,6 +43,9 @@ function normalizeCorsOrigin(value: string | undefined): string | undefined {
 }
 
 async function bootstrap() {
+  // Fail-fast: thiếu / sai LMS_PROFILE thì không khởi động (ADR 2026-10-07-instance-subject-profile).
+  loadLmsProfile(process.env);
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     cors: {
       origin: normalizeCorsOrigin(process.env.FRONTEND_URL),
@@ -65,8 +69,8 @@ async function bootstrap() {
   );
 
   const config = new DocumentBuilder()
-    .setTitle('Unicorns Edu API')
-    .setDescription('API backend cho Unicorns Edu 5.0')
+    .setTitle('UniEdu API')
+    .setDescription('API backend cho UniEdu 5.0')
     .setVersion('1.0')
     .addCookieAuth('access_token', {
       description: 'Access token for authentication',

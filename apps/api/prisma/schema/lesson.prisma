@@ -1,5 +1,5 @@
 model StaffLessonTask {
-  id                 String        @id @default(dbgenerated("CONCAT('UNISLT-', encode(gen_random_bytes(5), 'hex'))"))
+  id                 String        @id @default(dbgenerated("concat('UNISLT-', encode(gen_random_bytes(5), 'hex'::text))"))
   staffId            String        @map("staff_id")
   lessonTaskId       String        @map("lesson_task_id")
   allowance          Int           @default(0) @map("allowance")
@@ -16,7 +16,7 @@ model StaffLessonTask {
 }
 
 model LessonTask {
-  id               String             @id @default(dbgenerated("CONCAT('UNILTK-', encode(gen_random_bytes(5), 'hex'))"))
+  id               String             @id @default(dbgenerated("concat('UNILTK-', encode(gen_random_bytes(5), 'hex'::text))"))
   title            String?
   description      String?
   status           LessonTaskStatus
@@ -36,7 +36,7 @@ model LessonTask {
 }
 
 model LessonResource {
-  id           String      @id @default(dbgenerated("CONCAT('UNILRS-', encode(gen_random_bytes(5), 'hex'))"))
+  id           String      @id @default(dbgenerated("concat('UNILRS-', encode(gen_random_bytes(5), 'hex'::text))"))
   resourceLink String      @map("resource_link")
   title        String?
   description  String?
@@ -53,31 +53,33 @@ model LessonResource {
 }
 
 model LessonOutput {
-  id                      String                         @id @default(dbgenerated("CONCAT('UNILOT-', encode(gen_random_bytes(5), 'hex'))"))
+  id                      String                      @id @default(dbgenerated("concat('UNILOT-', encode(gen_random_bytes(5), 'hex'::text))"))
   level                   String?
-  difficultyBand          LessonOutputDifficultyBand?    @map("difficulty_band")
-  includesTest            Boolean                        @default(false) @map("includes_test")
-  includesSolution        Boolean                        @default(false) @map("includes_solution")
-  includesLectureVideo    Boolean                        @default(false) @map("includes_lecture_video")
-  lessonName              String                         @map("lesson_name")
-  originalTitle           String?                        @map("original_title")
+  difficultyBand          LessonOutputDifficultyBand? @map("difficulty_band")
+  includesTest            Boolean                     @default(false) @map("includes_test")
+  includesSolution        Boolean                     @default(false) @map("includes_solution")
+  includesLectureVideo    Boolean                     @default(false) @map("includes_lecture_video")
+  includesTheoryLecture   Boolean                     @default(false) @map("includes_theory_lecture")
+  theoryLectureLinks      String[]                    @default([]) @map("theory_lecture_links")
+  lessonName              String                      @map("lesson_name")
+  originalTitle           String?                     @map("original_title")
   source                  String?
-  originalLink            String?                        @map("original_link")
-  cost                    Int                            @default(0)
-  date                    DateTime                       @db.Date
-  contestUploaded         String?            @map("contest_uploaded")
+  originalLink            String?                     @map("original_link")
+  cost                    Int                         @default(0)
+  date                    DateTime                    @db.Date
+  contestUploaded         String?                     @map("contest_uploaded")
   link                    String?
-  staffId                 String?            @map("staff_id")
-  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt               DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  tags                    Json?              @default("[]")
-  status                  LessonOutputStatus @default(pending) @map("status")
-  lessonTaskId            String?            @map("lesson_task_id")
-  paymentStatus           PaymentStatus      @default(pending) @map("payment_status")
-  roleType                StaffRole?         @map("role_type")
-  taxDeductionRatePercent Decimal            @default(0) @map("tax_deduction_rate_percent") @db.Decimal(5, 2)
-  lessonTask              LessonTask?        @relation(fields: [lessonTaskId], references: [id])
-  staff                   StaffInfo?         @relation(fields: [staffId], references: [id])
+  staffId                 String?                     @map("staff_id")
+  createdAt               DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tags                    Json?                       @default("[]")
+  status                  LessonOutputStatus          @default(pending) @map("status")
+  lessonTaskId            String?                     @map("lesson_task_id")
+  paymentStatus           PaymentStatus               @default(pending) @map("payment_status")
+  roleType                StaffRole?                  @map("role_type")
+  taxDeductionRatePercent Decimal                     @default(0) @map("tax_deduction_rate_percent") @db.Decimal(5, 2)
+  lessonTask              LessonTask?                 @relation(fields: [lessonTaskId], references: [id])
+  staff                   StaffInfo?                  @relation(fields: [staffId], references: [id])
 
   @@index([date])
   @@index([lessonTaskId])

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,11 +26,25 @@ import {
 } from "@/lib/apis/student-class.api";
 import { getStudentClassContent } from "@/lib/apis/class.api";
 import { Skeleton } from "@/components/ui/skeleton";
-import YouTubeEmbed from "@/components/ui/YouTubeEmbed";
+import ProtectedVideoPlayer from "@/components/ui/ProtectedVideoPlayer";
 import { Card, CardContent } from "@/components/ui/card";
 import MathContent from "@/components/ui/MathContent";
+import QuestionAudio from "@/components/student/QuestionAudio";
 import { cn } from "@/lib/utils";
 import type { LessonQuizQuestion, LessonQuizAnswer } from "@/dtos/course-content.dto";
+import type { BlankAnswers, TrueFalseChoices } from "@/dtos/attempt.dto";
+import FillBlankInputs from "@/components/student/FillBlankInputs";
+import OrderingCards from "@/components/student/OrderingCards";
+import { numberBlanks } from "@/lib/fill-blank";
+import { isLightQuizAnswerCorrect } from "@/lib/light-quiz";
+import { assertNever } from "@/lib/assert-never";
+import TrueFalseStatements from "@/components/student/TrueFalseStatements";
+import TrueFalseChoice from "@/components/student/TrueFalseChoice";
+import EssayAnswerInput from "@/components/student/EssayAnswerInput";
+import SharedMaterialPanel from "@/components/student/SharedMaterialPanel";
+import MaterialBlock from "@/components/student/MaterialBlock";
+import { openAudio } from "@/lib/attempt-audio";
+import { materialHeaders, materialSegments } from "@/lib/exam-layout";
 import { CONTENT_LIMITS, overLimitMessage } from "@/dtos/content-limits";
 import { formatVnDate } from "@/lib/formatters";
 import { studentClassLessonsHref } from "@/lib/course-content-routes";
@@ -154,7 +168,7 @@ export default function StudentTopicDetailPage() {
       <PracticeLessonRedirect classId={classId} lessonId={lessonId} title={topic.title} />
     );
   }
-  const hasVideo = Boolean(topic.videoUrl);
+  const hasVideo = Boolean(topic.hasVideo);
   const hasContent = Boolean(topic.content);
 
   return (
@@ -217,11 +231,9 @@ export default function StudentTopicDetailPage() {
             <span className="text-[11px] text-text-muted">Bảo mật nội dung</span>
           </div>
           <div className="overflow-hidden rounded-2xl shadow-xl border border-border-default bg-black">
-            <YouTubeEmbed
-              url={topic.videoUrl!}
-              protected
+            <ProtectedVideoPlayer
+              source={{ kind: "lesson", classId, lessonId }}
               title={topic.title}
-              className="w-full aspect-video min-h-[260px] sm:min-h-[380px] md:min-h-[460px] lg:min-h-[500px]"
             />
           </div>
         </section>
@@ -239,7 +251,7 @@ export default function StudentTopicDetailPage() {
                 </h2>
               </div>
               <div className="text-text-primary text-sm sm:text-base leading-relaxed">
-                <MathContent content={topic.content!} />
+                <MathContent content={topic.content!} markdown />
               </div>
             </CardContent>
           </Card>
@@ -299,6 +311,14 @@ function PracticeLessonRedirect({
 
 // ─── Lecture Quiz Section ─────────────────────────────────────
 
+type QuizDraftAnswer = {
+  choiceIndex?: number | null;
+  essayAnswer?: string | null;
+  tfChoices?: TrueFalseChoices | null;
+  blankAnswers?: BlankAnswers | null;
+  orderAnswer?: string[] | null;
+};
+
 function LessonQuizSection({
   classId,
   lessonId,
@@ -308,7 +328,7 @@ function LessonQuizSection({
 }) {
   const queryClient = useQueryClient();
   const [draftAnswers, setDraftAnswers] = useState<
-    Record<string, { choiceIndex?: number | null; essayAnswer?: string | null }>
+    Record<string, QuizDraftAnswer>
   >({});
 
   const { data: quizzes = [], isLoading: quizzesLoading } = useQuery({
@@ -322,6 +342,13 @@ function LessonQuizSection({
     queryFn: () => getMyQuizAnswers(classId, lessonId),
     staleTime: 60_000,
   });
+  const quizMaterials = materialHeaders(
+    quizzes,
+    (q) => withOpenAudio(q.question.sharedMaterial),
+  );
+  const quizGapNumbers = new Map(
+    quizzes.map((q, i) => [q.questionId, i + 1]),
+  );
 
   const submitMutation = useMutation({
     mutationFn: () => {
@@ -329,6 +356,9 @@ function LessonQuizSection({
         questionId: q.questionId,
         choiceIndex: draftAnswers[q.questionId]?.choiceIndex ?? null,
         essayAnswer: draftAnswers[q.questionId]?.essayAnswer ?? null,
+        tfChoices: draftAnswers[q.questionId]?.tfChoices ?? null,
+        blankAnswers: draftAnswers[q.questionId]?.blankAnswers ?? null,
+        orderAnswer: draftAnswers[q.questionId]?.orderAnswer ?? null,
       }));
       if (
         answers.some(
@@ -387,20 +417,40 @@ function LessonQuizSection({
             <QuizReview answers={savedAnswers} />
           ) : (
             <div className="space-y-4">
-              {quizzes.map((quiz, idx) => (
-                <QuizQuestionInput
-                  key={quiz.questionId}
-                  quiz={quiz}
-                  index={idx}
-                  value={draftAnswers[quiz.questionId]}
-                  onChange={(val) =>
-                    setDraftAnswers((prev) => ({
-                      ...prev,
-                      [quiz.questionId]: val,
-                    }))
-                  }
-                />
-              ))}
+              {materialSegments(quizMaterials).map(({ header, indices }) => {
+                const inputs = indices.map((idx) => {
+                  const quiz = quizzes[idx];
+                  return (
+                    <QuizQuestionInput
+                      key={quiz.questionId}
+                      quiz={quiz}
+                      index={idx}
+                      value={draftAnswers[quiz.questionId]}
+                      onChange={(val) =>
+                        setDraftAnswers((prev) => ({
+                          ...prev,
+                          [quiz.questionId]: val,
+                        }))
+                      }
+                    />
+                  );
+                });
+                const key = quizzes[indices[0]].questionId;
+                // -1rem: dính sát dưới navbar (xem ghi chú ở student layout).
+                return header ? (
+                  <MaterialBlock
+                    key={key}
+                    header={header}
+                    gapNumbers={quizGapNumbers}
+                    stickyTop="-1rem"
+                    className="space-y-4"
+                  >
+                    {inputs}
+                  </MaterialBlock>
+                ) : (
+                  <Fragment key={key}>{inputs}</Fragment>
+                );
+              })}
               <div className="flex justify-end pt-2">
                 <button
                   type="button"
@@ -430,20 +480,97 @@ function QuizQuestionInput({
 }: {
   quiz: LessonQuizQuestion;
   index: number;
-  value?: { choiceIndex?: number | null; essayAnswer?: string | null };
-  onChange: (val: { choiceIndex?: number | null; essayAnswer?: string | null }) => void;
+  value?: QuizDraftAnswer;
+  onChange: (val: QuizDraftAnswer) => void;
 }) {
   const isSingleChoice = quiz.question.type === "single_choice";
-  const options: string[] = quiz.question.options ?? [];
 
   return (
     <div className="rounded-xl border border-border-default p-4">
       <div className="text-sm font-medium text-text-primary mb-3">
         <span className="text-primary mr-1">Câu {index + 1}.</span>
-        <MathContent content={quiz.question.content} className="inline [&>p:first-child]:inline" />
+        <MathContent
+          content={
+            quiz.question.type === "fill_blank"
+              ? numberBlanks(quiz.question.content)
+              : quiz.question.content
+          }
+          className="inline [&>p:first-child]:inline"
+        />
       </div>
+      {quiz.question.audioUrl ? (
+        <div className="mb-3">
+          <QuestionAudio url={quiz.question.audioUrl} />
+        </div>
+      ) : null}
 
-      {isSingleChoice ? (
+      <QuizAnswerField quiz={quiz} value={value} onChange={onChange} />
+      {!isSingleChoice &&
+        (value?.essayAnswer?.length ?? 0) > CONTENT_LIMITS.essayAnswer && (
+          <p className="mt-1 text-xs text-error">
+            {overLimitMessage("Câu trả lời", CONTENT_LIMITS.essayAnswer)}
+          </p>
+        )}
+    </div>
+  );
+}
+
+/** Ô trả lời ôn nhẹ theo loại câu. */
+function QuizAnswerField({
+  quiz,
+  value,
+  onChange,
+}: {
+  quiz: LessonQuizQuestion;
+  value?: QuizDraftAnswer;
+  onChange: (val: QuizDraftAnswer) => void;
+}) {
+  const options: string[] = quiz.question.options ?? [];
+  switch (quiz.question.type) {
+    case "ordering":
+      return (
+        <OrderingCards
+          cards={options}
+          orderAnswer={value?.orderAnswer}
+          disabled={false}
+          reveal={false}
+          onChange={(orderAnswer) => onChange({ orderAnswer })}
+        />
+      );
+    case "fill_blank":
+      return (
+        <FillBlankInputs
+          name={`quiz-${quiz.questionId}`}
+          count={quiz.question.blankCount ?? 0}
+          answers={value?.blankAnswers}
+          disabled={false}
+          reveal={false}
+          onChange={(blankAnswers) => onChange({ blankAnswers })}
+        />
+      );
+    case "true_false":
+      return (
+        <TrueFalseChoice
+          choices={value?.tfChoices}
+          labelStyle={quiz.question.tfLabelStyle}
+          disabled={false}
+          reveal={false}
+          onChange={(tfChoices) => onChange({ tfChoices })}
+        />
+      );
+    case "true_false_group":
+      return (
+        <TrueFalseStatements
+          name={`quiz-${quiz.questionId}`}
+          statements={options}
+          choices={value?.tfChoices ?? null}
+          disabled={false}
+          reveal={false}
+          onChange={(tfChoices) => onChange({ tfChoices })}
+        />
+      );
+    case "single_choice":
+      return (
         <div className="space-y-2">
           {options.map((opt, i) => (
             <label
@@ -469,46 +596,66 @@ function QuizQuestionInput({
             </label>
           ))}
         </div>
-      ) : (
-        <textarea
-          value={value?.essayAnswer ?? ""}
-          onChange={(e) => onChange({ essayAnswer: e.target.value })}
-          aria-label="Nhập câu trả lời"
-          placeholder="Nhập câu trả lời..."
+      );
+    case "essay":
+      return (
+        <EssayAnswerInput
+          value={value?.essayAnswer}
+          size={quiz.question.essayInputSize}
           rows={4}
-          aria-invalid={
-            (value?.essayAnswer?.length ?? 0) > CONTENT_LIMITS.essayAnswer
-          }
-          className="w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+          className="rounded-lg"
+          onChange={(essayAnswer) => onChange({ essayAnswer })}
         />
-      )}
-      {!isSingleChoice &&
-        (value?.essayAnswer?.length ?? 0) > CONTENT_LIMITS.essayAnswer && (
-          <p className="mt-1 text-xs text-error">
-            {overLimitMessage("Câu trả lời", CONTENT_LIMITS.essayAnswer)}
-          </p>
-        )}
-    </div>
-  );
+      );
+    default:
+      return assertNever(quiz.question.type, "question type");
+  }
 }
 
 // ─── Quiz Review (after submission) ──────────────────────────
 
+/** Ôn nhẹ: audio tư liệu không giới hạn lượt nghe. */
+function withOpenAudio(
+  material:
+    | { id: string; content: string; audioUrl?: string | null }
+    | null
+    | undefined,
+) {
+  return material
+    ? {
+        id: material.id,
+        content: material.content,
+        audio: openAudio(material.audioUrl),
+      }
+    : material;
+}
+
 function QuizReview({ answers }: { answers: LessonQuizAnswer[] }) {
+  const reviewMaterials = materialHeaders(
+    answers,
+    (a) => withOpenAudio(a.question.sharedMaterial),
+  );
+  const reviewGapNumbers = new Map(
+    answers.map((a, i) => [a.questionId, i + 1]),
+  );
   return (
     <div className="space-y-4">
       <p className="text-xs text-text-muted mb-2">
         Bạn đã nộp bài. Dưới đây là câu trả lời của bạn kèm đáp án đúng.
       </p>
       {answers.map((ans, idx) => {
-        const isCorrect =
-          ans.question.type === "single_choice" &&
-          ans.choiceIndex === ans.question.correctIndex;
+        const isCorrect = isLightQuizAnswerCorrect(ans);
         const isEssay = ans.question.type === "essay";
 
         return (
+          <Fragment key={ans.questionId}>
+          {reviewMaterials[idx] && (
+            <SharedMaterialPanel
+              header={reviewMaterials[idx]}
+              gapNumbers={reviewGapNumbers}
+            />
+          )}
           <div
-            key={ans.questionId}
             className={cn(
               "rounded-xl border p-4",
               isCorrect
@@ -520,29 +667,30 @@ function QuizReview({ answers }: { answers: LessonQuizAnswer[] }) {
           >
             <div className="text-sm font-medium text-text-primary mb-2">
               <span className="text-primary mr-1">Câu {idx + 1}.</span>
-              <MathContent content={ans.question.content} className="inline [&>p:first-child]:inline" />
+              <MathContent
+                content={
+                  ans.question.type === "fill_blank"
+                    ? numberBlanks(ans.question.content)
+                    : ans.question.content
+                }
+                className="inline [&>p:first-child]:inline"
+              />
             </div>
+            {ans.question.audioUrl ? (
+              <div className="mb-2">
+                <QuestionAudio url={ans.question.audioUrl} />
+              </div>
+            ) : null}
 
             {/* Student answer */}
             <div className="mb-2">
               <span className="text-xs font-semibold text-text-muted">Câu trả lời của bạn: </span>
-              {isEssay ? (
-                <p className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">
-                  {ans.essayAnswer || "(chưa trả lời)"}
-                </p>
-              ) : (
-                <span className="text-sm text-text-secondary">
-                  {ans.choiceIndex !== null
-                    ? `${String.fromCharCode(65 + ans.choiceIndex)}. ${
-                        (ans.question.options ?? [])[ans.choiceIndex] ?? ""
-                      }`
-                    : "(chưa chọn)"}
-                </span>
-              )}
+              <QuizReviewAnswer ans={ans} />
             </div>
 
             {/* Correct answer (for single_choice) */}
-            {!isEssay && ans.question.correctIndex !== null && (
+            {ans.question.type === "single_choice" &&
+              ans.question.correctIndex !== null && (
               <div className="mb-1">
                 <span className="text-xs font-semibold text-text-muted">Đáp án đúng: </span>
                 <span className="inline-flex flex-wrap items-baseline gap-1 text-sm font-medium text-success">
@@ -579,8 +727,87 @@ function QuizReview({ answers }: { answers: LessonQuizAnswer[] }) {
               </div>
             )}
           </div>
+          </Fragment>
         );
       })}
     </div>
   );
+}
+
+/** Câu trả lời của học sinh khi xem lại ôn nhẹ, theo loại câu. */
+function QuizReviewAnswer({ ans }: { ans: LessonQuizAnswer }) {
+  switch (ans.question.type) {
+    case "ordering":
+      return (
+        <div className="mt-2">
+          <OrderingCards
+            cards={ans.question.options ?? []}
+            orderAnswer={ans.orderAnswer}
+            orderingKey={ans.question.options ?? []}
+            disabled
+            reveal
+            onChange={() => {}}
+          />
+        </div>
+      );
+    case "fill_blank":
+      return (
+        <div className="mt-2">
+          <FillBlankInputs
+            name={`quiz-review-${ans.questionId}`}
+            count={ans.question.blankAnswerKey?.length ?? 0}
+            answers={ans.blankAnswers}
+            answerKey={ans.question.blankAnswerKey}
+            disabled
+            reveal
+            onChange={() => {}}
+          />
+        </div>
+      );
+    case "true_false":
+      return (
+        <div className="mt-2">
+          <TrueFalseChoice
+            choices={ans.tfChoices}
+            labelStyle={ans.question.tfLabelStyle}
+            answerKey={ans.question.tfAnswerKey}
+            disabled
+            reveal
+            onChange={() => {}}
+          />
+        </div>
+      );
+    case "true_false_group":
+      return (
+        <div className="mt-2">
+          <TrueFalseStatements
+            name={`quiz-review-${ans.questionId}`}
+            statements={ans.question.options ?? []}
+            choices={ans.tfChoices ?? null}
+            answerKey={ans.question.tfAnswerKey}
+            disabled
+            reveal
+            onChange={() => {}}
+          />
+        </div>
+      );
+    case "essay":
+      return (
+        <p className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">
+          {ans.essayAnswer || "(chưa trả lời)"}
+        </p>
+      );
+    case "single_choice":
+      return (
+        <span className="text-sm text-text-secondary">
+          {ans.choiceIndex !== null
+            ? `${String.fromCharCode(65 + ans.choiceIndex)}. ${
+                (ans.question.options ?? [])[ans.choiceIndex] ?? ""
+              }`
+            : "(chưa chọn)"}
+        </span>
+      );
+    default:
+      return assertNever(ans.question.type, "question type");
+  }
 }

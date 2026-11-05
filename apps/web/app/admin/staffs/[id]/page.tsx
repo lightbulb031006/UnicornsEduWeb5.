@@ -1,5 +1,6 @@
 "use client";
 
+import { useGiftedLessonPlanEnabled } from "@/lib/gifted-lesson-plan";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import {
   keepPreviousData,
@@ -62,6 +63,7 @@ import { MissedTeachingAlert, SessionItem } from "@/dtos/session.dto";
 import { resolveAdminShellAccess, resolveUserAdminCapabilities } from "@/lib/admin-shell-access";
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import PreviewableUserAvatar from "@/components/ui/PreviewableUserAvatar";
+import UserAvatar from "@/components/ui/UserAvatar";
 import { pickAvatarUrl } from "@/lib/avatar";
 import { useAuth } from "@/context/AuthContext";
 import { formatVnDate } from "@/lib/formatters";
@@ -365,6 +367,8 @@ export default function AdminStaffDetailPage({
   const canEditTaxSettings = isAdmin || isAssistant || isAccountantExpense;
   const canPayAll = isAdmin || isAssistant || isAccountantExpense || isAccountantIncome;
   const canEditSessionDetails = isAdmin || isAssistant;
+  // Khớp quyền `PUT /sessions/:id`: được lưu khi Nhận xét buổi học còn trống field bắt buộc.
+  const canSkipRequiredSessionReview = isAdmin || isAssistant || isAccountant;
   const canEditSessionPaymentStatus =
     isAdmin || isAssistant || isAccountantExpense || isAccountantIncome;
   const canManageMissedTeachingAlerts = isAdmin || isAssistant;
@@ -392,6 +396,7 @@ export default function AdminStaffDetailPage({
   const selectedMonthLabel = `Tháng ${Number.parseInt(selectedMonthValue, 10)}/${selectedYear}`;
 
   const queryClient = useQueryClient();
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
   const {
     data: sessionsInCurrentMonth = [],
     isLoading: isSessionsLoading,
@@ -773,7 +778,12 @@ export default function AdminStaffDetailPage({
   const depositYearTotal = incomeSummary?.depositYearTotal ?? 0;
   const depositByClass = incomeSummary?.depositYearByClass ?? [];
   const bonusTotals = incomeSummary?.bonusMonthlyTotals ?? EMPTY_AMOUNT_SUMMARY;
-  const otherRoleSummaries = incomeSummary?.otherRoleSummaries ?? [];
+  // Giáo án học sinh giỏi chỉ có trên IT — JP/ENG không hiện thu nhập role giáo án.
+  const otherRoleSummaries = (incomeSummary?.otherRoleSummaries ?? []).filter(
+    (item) =>
+      giftedLessonPlanEnabled !== false ||
+      (item.role !== "lesson_plan" && item.role !== "lesson_plan_head"),
+  );
   const fixedSalaryPayables = incomeSummary?.fixedSalaryPayables ?? [];
   const showAssistantDualRoleHelper =
     hasAssistantAndCustomerCareRoles(staff?.roles) &&
@@ -1738,13 +1748,30 @@ export default function AdminStaffDetailPage({
       <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-1 items-center gap-4">
           <div className="relative flex shrink-0">
-            <PreviewableUserAvatar
-              src={staffAvatarUrl}
-              fallback={staffAvatarFallback}
-              alt={`Avatar ${staffDisplayName}`}
-              displayName={staffDisplayName}
-              className="size-14 bg-bg-tertiary text-xl font-semibold text-text-primary ring-2 ring-border-default sm:size-16 sm:text-2xl"
-            />
+            {canEditStaffProfile ? (
+              <button
+                type="button"
+                onClick={() => setEditPopupOpen(true)}
+                className="inline-flex shrink-0 rounded-full transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
+                aria-label={`Mở thông tin nhân sự ${staffDisplayName}`}
+                title="Xem và chỉnh sửa thông tin nhân sự"
+              >
+                <UserAvatar
+                  src={staffAvatarUrl}
+                  fallback={staffAvatarFallback}
+                  alt={`Avatar ${staffDisplayName}`}
+                  className="size-14 bg-bg-tertiary text-xl font-semibold text-text-primary ring-2 ring-border-default sm:size-16 sm:text-2xl"
+                />
+              </button>
+            ) : (
+              <PreviewableUserAvatar
+                src={staffAvatarUrl}
+                fallback={staffAvatarFallback}
+                alt={`Avatar ${staffDisplayName}`}
+                displayName={staffDisplayName}
+                className="size-14 bg-bg-tertiary text-xl font-semibold text-text-primary ring-2 ring-border-default sm:size-16 sm:text-2xl"
+              />
+            )}
             <span
               className={`absolute bottom-0 right-0 block size-3 rounded-full border-2 border-bg-surface ${staff.status === "active" ? "bg-success" : "bg-error"}`}
               title={STATUS_LABELS[staff.status]}
@@ -1752,35 +1779,20 @@ export default function AdminStaffDetailPage({
             />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="min-w-0 truncate text-lg font-semibold text-text-primary sm:text-xl">
-                {staffDisplayName}
-              </h1>
+            <h1 className="min-w-0 truncate text-lg font-semibold text-text-primary sm:text-xl">
               {canEditStaffProfile ? (
                 <button
                   type="button"
                   onClick={() => setEditPopupOpen(true)}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-muted transition hover:bg-bg-tertiary hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary sm:size-8"
-                  aria-label="Chỉnh sửa thông tin nhân sự"
-                  title="Chỉnh sửa thông tin nhân sự"
+                  className="max-w-full truncate rounded-md text-left underline-offset-4 transition-colors hover:text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
+                  title="Xem và chỉnh sửa thông tin nhân sự"
                 >
-                  <svg
-                    className="size-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    aria-hidden
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
-                  </svg>
+                  {staffDisplayName}
                 </button>
-              ) : null}
-            </div>
+              ) : (
+                staffDisplayName
+              )}
+            </h1>
             <div className="flex flex-wrap gap-1.5">
               {(staff.roles ?? []).map((role) => (
                 <span
@@ -1832,6 +1844,8 @@ export default function AdminStaffDetailPage({
           open={editPopupOpen}
           onClose={() => setEditPopupOpen(false)}
           staff={staff}
+          avatarUrl={staffAvatarUrl}
+          canDeleteAvatar={isAdmin}
           onSuccess={handleStaffEditSuccess}
         />
       ) : null}
@@ -2717,7 +2731,9 @@ export default function AdminStaffDetailPage({
                 editorLayout="wide"
                 enableBulkPaymentStatusEdit={canPayAll}
                 allowTeacherSelection={canEditSessionDetails}
+                allowTrialTeachingToggle={canEditSessionDetails}
                 allowFinancialEdits={canEditSessionDetails}
+                skipRequiredReviewValidation={canSkipRequiredSessionReview}
                 allowAllowanceEdit={canEditSessionDetails}
                 allowAttendanceTuitionEdits={canEditSessionDetails}
                 allowPaymentStatusEdit={canEditSessionPaymentStatus}

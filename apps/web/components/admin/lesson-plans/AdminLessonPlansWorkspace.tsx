@@ -39,6 +39,8 @@ import {
   lessonTaskStatusChipClass,
 } from "./lessonTaskUi";
 import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
+import { ROW_LINK_INTERACTION_CLASS } from "@/lib/row-link";
+import { useRowLink } from "@/hooks/use-row-link";
 
 const TAB_LABELS: Record<LessonTabId, string> = {
   overview: "Tổng quan",
@@ -309,6 +311,7 @@ export default function AdminLessonPlansWorkspace({
 }) {
   const pathname = usePathname();
   const { push, replace } = useRouter();
+  const rowLink = useRowLink();
   const prefersReducedMotion = useReducedMotion();
   const searchParams = useSearchParams();
   const getSearchParam = searchParams.get.bind(searchParams);
@@ -1180,7 +1183,11 @@ export default function AdminLessonPlansWorkspace({
                             {tasks.map((task) => (
                               <article
                                 key={task.id}
-                                className="rounded-[1.35rem] border border-border-default bg-bg-surface p-4 shadow-sm"
+                                {...rowLink(
+                                  buildTaskDetailHref(task.id),
+                                  `Xem chi tiết công việc ${task.title?.trim() || ""}`.trim(),
+                                )}
+                                className={`rounded-[1.35rem] border border-border-default bg-bg-surface p-4 shadow-sm ${ROW_LINK_INTERACTION_CLASS}`}
                               >
                                 <div className="flex items-start gap-3">
                                   <Link

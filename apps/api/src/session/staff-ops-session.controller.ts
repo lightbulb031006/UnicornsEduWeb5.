@@ -35,6 +35,10 @@ import {
   UpdateStaffOpsSessionDto,
 } from 'src/dtos/session.dto';
 import { SessionService } from './session.service';
+import {
+  pickAttendanceReviewInput,
+  pickSessionReviewInput,
+} from './session-validation.service';
 import { GoogleCalendarService } from '../google-calendar/google-calendar.service';
 
 @Controller('staff-ops')
@@ -80,6 +84,30 @@ export class StaffOpsSessionController {
       classId,
       month,
       year,
+    );
+  }
+
+  @Get('classes/:classId/sessions/next-ordinal')
+  @ApiOperation({
+    summary: 'Số thứ tự buổi nếu tạo buổi mới tại ngày/giờ cho trước',
+  })
+  @ApiParam({ name: 'classId', description: 'Class id' })
+  @ApiQuery({ name: 'date', required: true, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'startTime', required: false, description: 'HH:mm' })
+  @ApiResponse({ status: 200, description: '{ ordinal: number }' })
+  @ApiResponse({ status: 400, description: 'date/startTime không hợp lệ.' })
+  async getNextSessionOrdinal(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Query('date') date: string,
+    @Query('startTime') startTime?: string,
+  ) {
+    return this.sessionService.getNextSessionOrdinalForStaff(
+      user.id,
+      user.roleType,
+      classId,
+      date,
+      startTime,
     );
   }
 
@@ -201,11 +229,13 @@ export class StaffOpsSessionController {
         lessonContent: dto.lessonContent,
         homework: dto.homework,
         tutorial: dto.tutorial,
+        ...pickSessionReviewInput(dto),
         coefficient: dto.coefficient,
         attendance: dto.attendance?.map((a) => ({
           studentId: a.studentId,
           status: a.status,
           notes: a.notes,
+          ...pickAttendanceReviewInput(a),
         })),
       },
       {

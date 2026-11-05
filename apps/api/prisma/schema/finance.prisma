@@ -78,21 +78,21 @@ model StaffFixedSalaryOverride {
 /// Khoản lương cứng phải trả, đóng băng tại lúc chốt tháng.
 /// Unique (staff_id, role_type, month): chạy lại không tạo thêm / không sửa khoản cũ.
 model StaffFixedSalaryPayable {
-  id                         String        @id @default(uuid())
-  staffId                    String        @map("staff_id")
-  roleType                   StaffRole     @map("role_type")
-  month                      String
-  status                     PaymentStatus @default(pending)
-  grossAmount                Int           @map("gross_amount")
-  operatingRatePercent       Decimal       @map("operating_rate_percent") @db.Decimal(5, 2)
-  taxRatePercent             Decimal       @map("tax_rate_percent") @db.Decimal(5, 2)
-  operatingDeductionAmount   Int           @map("operating_deduction_amount")
-  taxDeductionAmount         Int           @map("tax_deduction_amount")
-  netAmount                  Int           @map("net_amount")
-  note                       String?
-  createdAt                  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  staff                      StaffInfo     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  id                       String        @id @default(uuid())
+  staffId                  String        @map("staff_id")
+  roleType                 StaffRole     @map("role_type")
+  month                    String
+  status                   PaymentStatus @default(pending)
+  grossAmount              Int           @map("gross_amount")
+  operatingRatePercent     Decimal       @map("operating_rate_percent") @db.Decimal(5, 2)
+  taxRatePercent           Decimal       @map("tax_rate_percent") @db.Decimal(5, 2)
+  operatingDeductionAmount Int           @map("operating_deduction_amount")
+  taxDeductionAmount       Int           @map("tax_deduction_amount")
+  netAmount                Int           @map("net_amount")
+  note                     String?
+  createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  staff                    StaffInfo     @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
   @@unique([staffId, roleType, month])
   @@index([staffId])
@@ -142,7 +142,8 @@ model WalletTransactionsHistory {
   note                          String?
   date                          DateTime                         @default(now()) @db.Date
   createdAt                     DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
-  studentTransactionAttendances Attendance?
+  studentTransactionAttendances Attendance?                      @relation("AttendanceTransaction")
+  trialCatchUpAttendance        Attendance?                      @relation("AttendanceTrialCatchUpTransaction")
   student                       StudentInfo                      @relation(fields: [studentId], references: [id], onDelete: Cascade)
   sepayWalletOrder              StudentWalletSepayOrder?
   directTopUpRequest            StudentWalletDirectTopUpRequest?
@@ -297,11 +298,15 @@ model ExtraAllowance {
   updatedAt               DateTime      @updatedAt @map("updated_at") @db.Timestamp(6)
   roleType                StaffRole     @default(teacher) @map("role_type")
   taxDeductionRatePercent Decimal       @default(0) @map("tax_deduction_rate_percent") @db.Decimal(5, 2)
+  /// Học sinh (khách hàng) của Trợ cấp sale; chỉ có nghĩa khi `role_type = sale`. Bắt buộc lúc ghi ở service; null khi học sinh đã bị xoá (ADR 2026-10-23).
+  studentId               String?       @map("student_id")
   staff                   StaffInfo     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  student                 StudentInfo?  @relation(fields: [studentId], references: [id], onDelete: SetNull)
 
   @@index([staffId])
   @@index([month])
   @@index([roleType])
+  @@index([studentId])
   @@index([staffId, month, status])
   @@index([status, staffId, month, roleType, taxDeductionRatePercent], map: "extra_allowances_status_staff_month_role_tax_idx")
   @@map("extra_allowances")

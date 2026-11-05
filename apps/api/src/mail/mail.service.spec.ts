@@ -42,7 +42,7 @@ describe('MailService', () => {
         SMTP_USER: 'sender@gmail.com',
         SMTP_PASS: 'app-password',
         SMTP_SECURE: 'false',
-        MAIL_FROM: 'Unicorns Edu <sender@gmail.com>',
+        MAIL_FROM: 'UniEdu <sender@gmail.com>',
         FRONTEND_URL: 'http://localhost:3000',
       };
       return values[key];
@@ -55,6 +55,7 @@ describe('MailService', () => {
 
   const receiptAssetsService = {
     getReceiptImageDataUris: jest.fn().mockReturnValue(null),
+    getBrandMarkDataUri: jest.fn().mockReturnValue(null),
   };
 
   beforeEach(() => {
@@ -106,7 +107,7 @@ describe('MailService', () => {
       'http://localhost:3000/auth/reset-password?token=reset-token',
     );
     expect(sent.html).toContain('Đặt lại mật khẩu');
-    expect(sent.html).toContain('Unicorns Edu');
+    expect(sent.html).toContain('UniEdu');
     expect(sent.html).toContain('user@example.com');
     expect(sent.html).toContain(
       'http://localhost:3000/auth/reset-password?token=reset-token',
@@ -139,7 +140,7 @@ describe('MailService', () => {
         SMTP_USER: 'sender@gmail.com',
         SMTP_PASS: 'abcd efgh ijkl mnop',
         SMTP_SECURE: 'false',
-        MAIL_FROM: 'Unicorns Edu <sender@gmail.com>',
+        MAIL_FROM: 'UniEdu <sender@gmail.com>',
         FRONTEND_URL: 'http://localhost:3000',
       };
       return values[key];
@@ -171,7 +172,7 @@ describe('MailService', () => {
         SMTP_USER: 'sender@gmail.com',
         SMTP_PASS: 'app-password',
         SMTP_SECURE: 'false',
-        MAIL_FROM: 'Unicorns Edu <sender@gmail.com>',
+        MAIL_FROM: 'UniEdu <sender@gmail.com>',
         FRONTEND_URL: 'http://localhost:3000',
         BACKEND_URL: 'http://localhost:3001',
       };
@@ -213,7 +214,7 @@ describe('MailService', () => {
         SMTP_USER: 'sender@gmail.com',
         SMTP_PASS: 'app-password',
         SMTP_SECURE: 'false',
-        MAIL_FROM: 'Unicorns Edu <sender@gmail.com>',
+        MAIL_FROM: 'UniEdu <sender@gmail.com>',
         FRONTEND_URL: 'http://localhost:3000',
       };
       return values[key];
@@ -266,7 +267,7 @@ describe('MailService', () => {
 
     expect(sendMail).toHaveBeenCalledTimes(1);
     const sent = getLastSendMailOptions(sendMail);
-    expect(sent.from).toBe('Unicorns Edu <sender@gmail.com>');
+    expect(sent.from).toBe('UniEdu <sender@gmail.com>');
     expect(sent.to).toBe('parent@example.com');
     expect(sent.subject).toContain('UEDU-20260511-001');
     expect(sent.subject).toContain('Học Toán Cùng Chuyên Toán');

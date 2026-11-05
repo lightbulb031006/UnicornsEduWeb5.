@@ -4,6 +4,7 @@ import { GoogleCalendarModule } from 'src/google-calendar/google-calendar.module
 import { CalendarModule } from 'src/calendar/calendar.module';
 import { NotificationModule } from 'src/notification/notification.module';
 import { PrismaModule } from 'src/prisma/prisma.module';
+import { SessionModule } from 'src/session/session.module';
 import { StaffOperationsModule } from 'src/staff-ops/staff-operations.module';
 import { ClassController } from './class.controller';
 import { ClassCoverController } from './class-cover.controller';
@@ -27,6 +28,7 @@ import { SurveyService } from './survey.service';
     GoogleCalendarModule,
     CalendarModule,
     NotificationModule,
+    SessionModule,
   ],
   controllers: [
     ClassController,

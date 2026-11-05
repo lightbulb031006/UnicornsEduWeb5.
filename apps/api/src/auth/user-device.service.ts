@@ -61,6 +61,50 @@ export class UserDeviceService {
     });
   }
 
+  /**
+   * Luật một thiết bị, nguyên tử: khoá theo user trong transaction rồi mới
+   * kiểm tra thiết bị sống → xoá thiết bị cũ → tạo thiết bị mới. Không khoá
+   * thì hai lần đăng nhập đồng thời (bấm đúp, mạng lag) cùng thấy "chưa có
+   * thiết bị", cùng tạo row; row thừa chặn `DEVICE_ACTIVE` tới khi refresh hết
+   * hạn dù không ai dùng. Row mới mang sẵn `refreshExpiresAt` để nếu bước cấp
+   * JWT sau đó lỗi, row không bị coi là legacy (sống 60 ngày).
+   * @returns `null` khi `rejectIfLive` và user còn thiết bị sống.
+   */
+  async replaceDevicesForUser(params: {
+    userId: string;
+    token: string;
+    refreshExpiresAt: Date;
+    rejectIfLive: boolean;
+    deviceInfo?: DeviceInfo;
+    ipAddress?: string;
+  }) {
+    const tokenHash = this.hashToken(params.token);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`user_device:${params.userId}`}))`;
+
+      if (params.rejectIfLive) {
+        const liveCount = await tx.userDevice.count({
+          where: { userId: params.userId, ...this.liveDeviceWhere() },
+        });
+        if (liveCount > 0) {
+          return null;
+        }
+      }
+
+      await tx.userDevice.deleteMany({ where: { userId: params.userId } });
+      return tx.userDevice.create({
+        data: {
+          userId: params.userId,
+          tokenHash,
+          deviceInfo: (params.deviceInfo as Prisma.InputJsonValue) ?? undefined,
+          ipAddress: params.ipAddress ?? undefined,
+          refreshExpiresAt: params.refreshExpiresAt,
+          lastActiveAt: new Date(),
+        },
+      });
+    });
+  }
+
   async findActiveDeviceByTokenHash(tokenHash: string) {
     return this.prisma.userDevice.findUnique({
       where: { tokenHash },
@@ -77,12 +121,33 @@ export class UserDeviceService {
     return lastActiveAt < this.idleCutoff(now);
   }
 
+  /**
+   * Thiết bị "sống" = chưa idle 60 ngày **và** refresh token còn hạn. Refresh
+   * token hết hạn (1 ngày, 30 ngày khi «Ghi nhớ») thì máy đó không thể lấy
+   * access token nữa; nếu vẫn tính là sống, học sinh bị `DEVICE_ACTIVE` chặn
+   * bởi chính phiên đã chết của mình. `refreshExpiresAt = null` (row legacy)
+   * chỉ xét idle.
+   */
+  isLive(
+    device: { lastActiveAt: Date; refreshExpiresAt?: Date | null },
+    now = new Date(),
+  ): boolean {
+    if (this.isIdle(device.lastActiveAt, now)) {
+      return false;
+    }
+    return !device.refreshExpiresAt || device.refreshExpiresAt > now;
+  }
+
+  liveDeviceWhere(now = new Date()): Prisma.UserDeviceWhereInput {
+    return {
+      lastActiveAt: { gte: this.idleCutoff(now) },
+      OR: [{ refreshExpiresAt: null }, { refreshExpiresAt: { gt: now } }],
+    };
+  }
+
   async hasActiveDevice(userId: string): Promise<boolean> {
     const count = await this.prisma.userDevice.count({
-      where: {
-        userId,
-        lastActiveAt: { gte: this.idleCutoff() },
-      },
+      where: { userId, ...this.liveDeviceWhere() },
     });
     return count > 0;
   }
@@ -91,7 +156,7 @@ export class UserDeviceService {
     const device = await this.prisma.userDevice.findUnique({
       where: { id: deviceId },
     });
-    if (!device || this.isIdle(device.lastActiveAt)) {
+    if (!device || !this.isLive(device)) {
       return null;
     }
     return device;
@@ -104,26 +169,16 @@ export class UserDeviceService {
     });
   }
 
-  async findLatestLiveDeviceForUser(userId: string) {
-    return this.prisma.userDevice.findFirst({
-      where: {
-        userId,
-        lastActiveAt: { gte: this.idleCutoff() },
-      },
-      orderBy: { lastActiveAt: 'desc' },
-    });
-  }
-
   /**
    * Refresh cookie must match a live UserDevice row (hash + optional deviceId).
-   * Student tokens issued before refresh-hash binding may still have a live
-   * device with a random token_hash — allow that once so /refresh can rebind.
+   * Không fallback sang "thiết bị sống mới nhất" của user: cookie của thiết bị
+   * đã bị force-logout / token đã rotate sẽ chiếm phiên của máy khác và phá luật
+   * một thiết bị (refresh token cũ không có deviceId đã hết hạn từ 2026-10).
    */
   async assertLiveRefreshDevice(params: {
     refreshToken: string;
     userId: string;
     deviceId?: string;
-    roleType?: string;
   }) {
     const tokenHash = this.hashToken(params.refreshToken);
 
@@ -135,7 +190,7 @@ export class UserDeviceService {
         device &&
         device.userId === params.userId &&
         device.tokenHash === tokenHash &&
-        !this.isIdle(device.lastActiveAt)
+        this.isLive(device)
       ) {
         return device;
       }
@@ -143,31 +198,25 @@ export class UserDeviceService {
       const byHash = await this.prisma.userDevice.findUnique({
         where: { tokenHash },
       });
-      if (
-        byHash &&
-        byHash.userId === params.userId &&
-        !this.isIdle(byHash.lastActiveAt)
-      ) {
+      if (byHash && byHash.userId === params.userId && this.isLive(byHash)) {
         return byHash;
-      }
-    }
-
-    if (params.roleType === 'student') {
-      const legacyDevice = await this.findLatestLiveDeviceForUser(params.userId);
-      if (legacyDevice) {
-        return legacyDevice;
       }
     }
 
     return null;
   }
 
-  async bindRefreshToken(deviceId: string, refreshToken: string) {
+  async bindRefreshToken(
+    deviceId: string,
+    refreshToken: string,
+    refreshExpiresAt: Date,
+  ) {
     const tokenHash = this.hashToken(refreshToken);
     return this.prisma.userDevice.update({
       where: { id: deviceId },
       data: {
         tokenHash,
+        refreshExpiresAt,
         lastActiveAt: new Date(),
       },
     });
@@ -194,7 +243,7 @@ export class UserDeviceService {
 
   async touchActiveDeviceForUser(userId: string) {
     return this.prisma.userDevice.updateMany({
-      where: { userId, lastActiveAt: { gte: this.idleCutoff() } },
+      where: { userId, ...this.liveDeviceWhere() },
       data: { lastActiveAt: new Date() },
     });
   }
@@ -279,8 +328,14 @@ export class UserDeviceService {
   }
 
   async cleanupInactiveDevices() {
+    const now = new Date();
     const result = await this.prisma.userDevice.deleteMany({
-      where: { lastActiveAt: { lt: this.idleCutoff() } },
+      where: {
+        OR: [
+          { lastActiveAt: { lt: this.idleCutoff(now) } },
+          { refreshExpiresAt: { lte: now } },
+        ],
+      },
     });
     if (result.count > 0) {
       this.logger.log(`Cleaned up ${result.count} inactive devices`);

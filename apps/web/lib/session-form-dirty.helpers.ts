@@ -1,9 +1,13 @@
 import type { SessionAttendanceStatus } from "@/dtos/session.dto";
+import type {
+  SessionReviewFormValue,
+  StudentReviewFormValue,
+} from "@/lib/session-review-form";
 
 export type SessionFormAttendanceDirtyItem = {
   studentId: string;
   status: SessionAttendanceStatus;
-  notes: string;
+  review: StudentReviewFormValue;
   tuitionFee: string;
 };
 
@@ -15,7 +19,7 @@ export type SessionFormDirtySnapshot = {
   homework: string;
   tutorial: string;
   recordingUrl?: string;
-  isTrialLesson: boolean;
+  review: SessionReviewFormValue;
   skipAttendance?: boolean;
   teacherPaymentStatus: string;
   teacherId: string;
@@ -34,7 +38,7 @@ export function buildSessionFormDirtySnapshot(
     homework: input.homework,
     tutorial: input.tutorial,
     recordingUrl: (input.recordingUrl ?? "").trim(),
-    isTrialLesson: input.isTrialLesson,
+    review: input.review,
     skipAttendance: Boolean(input.skipAttendance),
     teacherPaymentStatus: input.teacherPaymentStatus.trim(),
     teacherId: input.teacherId.trim(),
@@ -42,7 +46,7 @@ export function buildSessionFormDirtySnapshot(
     attendance: input.attendance.map((item) => ({
       studentId: item.studentId,
       status: item.status,
-      notes: item.notes,
+      review: item.review,
       tuitionFee: item.tuitionFee.trim(),
     })),
   });

@@ -72,7 +72,6 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
   const [status, setStatus] = useState<StudentStatus>("active");
   const [goal, setGoal] = useState("");
   const [customerSource, setCustomerSource] = useState<StudentCustomerSource | "">("");
-  const [customerSourceNote, setCustomerSourceNote] = useState("");
 
   const {
     data: assignableUsers = [],
@@ -112,7 +111,6 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
     setStatus("active");
     setGoal("");
     setCustomerSource("");
-    setCustomerSourceNote("");
   };
 
   const handleEmailInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -141,7 +139,6 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
     setStatus("active");
     setGoal("");
     setCustomerSource("");
-    setCustomerSourceNote("");
   };
 
   const handleSubmit = (event: SyntheticEvent<HTMLFormElement>) => {
@@ -165,12 +162,6 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
 
     if (!customerSource) {
       toast.error("Nguồn khách là bắt buộc.");
-      return;
-    }
-
-    const trimmedSourceNote = customerSourceNote.trim();
-    if (customerSource === "other" && !trimmedSourceNote) {
-      toast.error("Chú thích nguồn là bắt buộc khi chọn Khác.");
       return;
     }
 
@@ -207,7 +198,6 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
           goal: goal.trim() || undefined,
           user_id: selectedUser.id,
           customer_source: customerSource,
-          ...(customerSource === "other" ? { customer_source_note: trimmedSourceNote } : {}),
         }),
       onSuccess: async (createdStudent) => {
         await queryClient.invalidateQueries({ queryKey: ["student", "list"] });
@@ -350,7 +340,7 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
                           >
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-text-primary">
+                                <p className="break-words text-sm font-semibold text-text-primary">
                                   {user.fullName?.trim() || user.email}
                                 </p>
                                 <p className="mt-1 truncate text-sm text-text-secondary">{user.email}</p>
@@ -473,13 +463,8 @@ export default function AddStudentPopup({ open, onClose, onCreated }: Props) {
                       <CustomerSourceFields
                         idPrefix="add-student"
                         source={customerSource}
-                        note={customerSourceNote}
                         disabled={formDisabled}
-                        onSourceChange={(nextSource) => {
-                          setCustomerSource(nextSource);
-                          if (nextSource !== "other") setCustomerSourceNote("");
-                        }}
-                        onNoteChange={setCustomerSourceNote}
+                        onSourceChange={setCustomerSource}
                       />
 
                       <label className="flex flex-col gap-1 text-sm text-text-secondary">

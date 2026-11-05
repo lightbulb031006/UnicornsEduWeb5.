@@ -14,7 +14,8 @@ export type StaffRole =
   | "communication"
   | "technical"
   | "customer_care"
-  | "training";
+  | "training"
+  | "sale";
 
 export interface CreateUserPayload {
   email: string;
@@ -72,6 +73,11 @@ export interface UpdateUserPayload {
   emailVerified?: boolean;
   phoneVerified?: boolean;
   staffRoles?: StaffRole[];
+}
+
+/** Body `PATCH /users/:id/password` (admin/trợ lí đặt mật khẩu mới). */
+export interface AdminSetUserPasswordPayload {
+  newPassword: string;
 }
 
 /** Một dòng user trong danh sách (admin). */

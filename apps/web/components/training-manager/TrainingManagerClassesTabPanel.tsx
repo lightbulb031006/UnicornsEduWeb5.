@@ -31,7 +31,9 @@ import {
 } from "@/lib/admin-shell-paths";
 import { formatCurrency } from "@/lib/class.helpers";
 import { formatMonthKeyLabel, getDefaultMonthKey } from "@/lib/month-format";
+import { ROW_LINK_INTERACTION_CLASS } from "@/lib/row-link";
 import { cn } from "@/lib/utils";
+import { useRowLink } from "@/hooks/use-row-link";
 import { formatVnDate } from "@/lib/formatters";
 
 type Props = {
@@ -265,12 +267,16 @@ function ManagedClassRow({
   sessions: TrainingManagerSessionAllowanceItem[];
   sessionsLoading: boolean;
 }) {
+  const rowLink = useRowLink();
+
   return (
     <div className="overflow-hidden border-b border-border-default/70 last:border-b-0">
       <div
+        {...rowLink(href, `Xem lớp ${item.className}`)}
         className={cn(
           "grid items-center gap-2 px-3 py-3 text-sm sm:gap-3 sm:px-4",
           ROW_GRID_CLASS,
+          ROW_LINK_INTERACTION_CLASS,
         )}
       >
         <div className="flex min-w-0 items-center gap-2">

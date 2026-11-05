@@ -1,13 +1,116 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AttendanceStatus } from '../../generated/enums';
-import { CONTENT_LIMITS } from '../dtos/content-limits';
+import {
+  AttendanceStatus,
+  HomeworkQuality,
+  SessionProgressStatus,
+} from '../../generated/enums';
 import {
   resolveEffectivePackageFields,
   resolveSessionChargeTuitionFee,
 } from 'src/common/student-class-tuition.util';
+import { CONTENT_LIMITS } from '../dtos/content-limits';
+import { LmsProfileService } from '../lms-profile/lms-profile.service';
+
+const SESSION_REVIEW_FIELD_KEYS = [
+  'progressStatus',
+  'progressDone',
+  'progressRemaining',
+  'hasInClassTest',
+  'inClassTestContent',
+  'inClassTestTotal',
+  'homeworkDueAt',
+  'nextSessionPlan',
+  'hasRetest',
+  'retestContent',
+] as const;
+
+export interface SessionReviewInput {
+  progressStatus?: SessionProgressStatus;
+  progressDone?: string | null;
+  progressRemaining?: string | null;
+  hasInClassTest?: boolean;
+  inClassTestContent?: string | null;
+  inClassTestTotal?: number | null;
+  homeworkDueAt?: string | null;
+  nextSessionPlan?: string | null;
+  hasRetest?: boolean;
+  retestContent?: string | null;
+}
+
+/**
+ * `skipRequired`: admin/trợ lí/kế toán sửa buổi qua `PUT /sessions/:id` được lưu khi
+ * còn trống field bắt buộc của Nhận xét buổi học. Kiểm tra định dạng/khoảng giá trị vẫn chạy.
+ */
+export interface ReviewValidationOptions {
+  skipRequired?: boolean;
+}
+
+export interface SessionReviewData {
+  progressStatus: SessionProgressStatus | null;
+  progressDone: string | null;
+  progressRemaining: string | null;
+  hasInClassTest: boolean;
+  inClassTestContent: string | null;
+  inClassTestTotal: number | null;
+  homeworkDueAt: Date | null;
+  nextSessionPlan: string | null;
+  hasRetest: boolean;
+  retestContent: string | null;
+}
+
+export interface AttendanceReviewInput {
+  testCorrectCount?: number | null;
+  testComment?: string | null;
+  strengths?: string | null;
+  improvements?: string | null;
+  homeworkQuality?: HomeworkQuality | null;
+  homeworkComment?: string | null;
+}
+
+export type AttendanceReviewData = {
+  [K in keyof AttendanceReviewInput]-?: Exclude<
+    AttendanceReviewInput[K],
+    undefined
+  >;
+};
+
+const ATTENDANCE_REVIEW_FIELD_KEYS = [
+  'testCorrectCount',
+  'testComment',
+  'strengths',
+  'improvements',
+  'homeworkQuality',
+  'homeworkComment',
+] as const;
+
+/** Lấy đúng các field review phần chung (bỏ key undefined) để chuyển tiếp payload. */
+export function pickSessionReviewInput(
+  data: SessionReviewInput,
+): SessionReviewInput {
+  return Object.fromEntries(
+    SESSION_REVIEW_FIELD_KEYS.filter((key) => data[key] !== undefined).map(
+      (key) => [key, data[key]],
+    ),
+  ) as SessionReviewInput;
+}
+
+/** Lấy đúng các field review từng học sinh (bỏ key undefined). */
+export function pickAttendanceReviewInput(
+  data: AttendanceReviewInput,
+): AttendanceReviewInput {
+  return Object.fromEntries(
+    ATTENDANCE_REVIEW_FIELD_KEYS.filter((key) => data[key] !== undefined).map(
+      (key) => [key, data[key]],
+    ),
+  ) as AttendanceReviewInput;
+}
 
 @Injectable()
 export class SessionValidationService {
+  constructor(
+    private readonly lmsProfile: LmsProfileService = new LmsProfileService(),
+  ) {}
+
   parseSessionDate(date: string) {
     const normalized = String(date ?? '').trim();
     const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
@@ -170,9 +273,10 @@ export class SessionValidationService {
           studentId: string;
           status?: AttendanceStatus;
           tuitionFee?: number | null;
+          notes?: string | null;
         }>
       | undefined,
-    options: { required: boolean },
+    options: { required: boolean } & ReviewValidationOptions,
   ) {
     if (attendance === undefined) {
       if (options.required) {
@@ -211,6 +315,30 @@ export class SessionValidationService {
 
     if (hasInvalidTuitionFee) {
       throw new BadRequestException('attendance.tuitionFee không hợp lệ.');
+    }
+
+    if (
+      attendance.some(
+        (item) =>
+          this.stripRichTextToPlainText(item.notes).length >
+          CONTENT_LIMITS.attendanceNotes,
+      )
+    ) {
+      throw new BadRequestException('Ghi chú điểm danh tối đa 500 ký tự.');
+    }
+
+    // Nghỉ phép phải ghi lý do vào `notes`.
+    const hasExcusedWithoutReason =
+      !options.skipRequired &&
+      attendance.some(
+        (item) =>
+          item?.status === AttendanceStatus.excused &&
+          !this.stripRichTextToPlainText(item.notes),
+      );
+    if (hasExcusedWithoutReason) {
+      throw new BadRequestException(
+        'Học sinh nghỉ phép phải có lý do nghỉ (attendance.notes).',
+      );
     }
   }
 
@@ -371,50 +499,176 @@ export class SessionValidationService {
     }
   }
 
-  validateAttendanceNotes(
-    attendance:
-      | Array<{
-          status?: AttendanceStatus;
-          notes?: string | null;
-          studentFullName?: string | null;
-        }>
-      | undefined,
-    options: { required: boolean },
-  ) {
-    if (attendance === undefined) {
-      if (options.required) {
-        throw new BadRequestException('attendance là bắt buộc.');
-      }
-      return;
+  /**
+   * Validate + chuẩn hoá phần chung của Nhận xét buổi học có cấu trúc.
+   * Trả về object ghi thẳng vào `sessions` (field không áp dụng bị xoá về null).
+   */
+  resolveSessionReviewFields(
+    data: SessionReviewInput,
+    options: ReviewValidationOptions = {},
+  ): SessionReviewData {
+    const requireFilled = !options.skipRequired;
+    const progressStatus = data.progressStatus ?? null;
+    if (!progressStatus && requireFilled) {
+      throw new BadRequestException('Tiến độ buổi là bắt buộc.');
     }
 
-    if (!Array.isArray(attendance)) {
-      throw new BadRequestException('attendance phải là mảng hợp lệ.');
+    let progressDone = this.normalizeReviewText(data.progressDone);
+    let progressRemaining = this.normalizeReviewText(data.progressRemaining);
+    if (progressStatus === SessionProgressStatus.completed) {
+      progressDone = null;
+      progressRemaining = null;
+    } else if (requireFilled) {
+      if (progressStatus === SessionProgressStatus.partial && !progressDone) {
+        throw new BadRequestException('Tiến độ «Đã xong» là bắt buộc.');
+      }
+      if (!progressRemaining) {
+        throw new BadRequestException('Tiến độ «Chưa xong» là bắt buộc.');
+      }
     }
 
-    for (const item of attendance) {
-      const plainNotes = this.stripRichTextToPlainText(item?.notes);
-      if (plainNotes.length > CONTENT_LIMITS.attendanceNotes) {
-        throw new BadRequestException('Ghi chú điểm danh tối đa 500 ký tự.');
+    // Instance không có Kiểm tra trong buổi (IT): bỏ qua cờ client gửi.
+    const hasInClassTest =
+      this.lmsProfile.config.inClassTest && data.hasInClassTest === true;
+    const inClassTestContent = hasInClassTest
+      ? this.normalizeReviewText(data.inClassTestContent)
+      : null;
+    const inClassTestTotal = hasInClassTest
+      ? (data.inClassTestTotal ?? null)
+      : null;
+    if (hasInClassTest) {
+      if (!inClassTestContent && requireFilled) {
+        throw new BadRequestException('Nội dung kiểm tra là bắt buộc.');
       }
-      const status = item?.status;
       if (
-        status !== AttendanceStatus.present &&
-        status !== AttendanceStatus.excused
+        (inClassTestTotal === null && requireFilled) ||
+        (inClassTestTotal !== null &&
+          (!Number.isInteger(inClassTestTotal) || inClassTestTotal < 1))
       ) {
-        continue;
+        throw new BadRequestException('Tổng số câu kiểm tra phải ≥ 1.');
       }
+    }
 
-      if (plainNotes) {
-        continue;
+    let homeworkDueAt: Date | null = null;
+    if (data.homeworkDueAt) {
+      homeworkDueAt = new Date(data.homeworkDueAt);
+      if (Number.isNaN(homeworkDueAt.getTime())) {
+        throw new BadRequestException('Hạn BTVN không hợp lệ.');
       }
+    }
 
-      const studentName = String(item?.studentFullName ?? '').trim();
+    const nextSessionPlan = this.normalizeReviewText(data.nextSessionPlan);
+    if (!nextSessionPlan && requireFilled) {
+      throw new BadRequestException('Nội dung buổi sau là bắt buộc.');
+    }
+
+    const hasRetest = data.hasRetest === true;
+    const retestContent = hasRetest
+      ? this.normalizeReviewText(data.retestContent)
+      : null;
+    if (hasRetest && !retestContent && requireFilled) {
+      throw new BadRequestException('Nội dung kiểm tra lại là bắt buộc.');
+    }
+
+    return {
+      progressStatus,
+      progressDone,
+      progressRemaining,
+      hasInClassTest,
+      inClassTestContent,
+      inClassTestTotal,
+      homeworkDueAt,
+      nextSessionPlan,
+      hasRetest,
+      retestContent,
+    };
+  }
+
+  hasAnySessionReviewField(data: SessionReviewInput): boolean {
+    return SESSION_REVIEW_FIELD_KEYS.some((key) => data[key] !== undefined);
+  }
+
+  /**
+   * Validate + chuẩn hoá phần từng học sinh. excused/absent xoá hết field;
+   * trial bỏ mục BTVN; mục kiểm tra chỉ giữ khi buổi có kiểm tra.
+   */
+  resolveAttendanceReview(
+    item: AttendanceReviewInput & {
+      status: AttendanceStatus;
+      studentFullName?: string | null;
+    },
+    test: { hasInClassTest: boolean; inClassTestTotal: number | null },
+    options: ReviewValidationOptions = {},
+  ): AttendanceReviewData {
+    const empty: AttendanceReviewData = {
+      testCorrectCount: null,
+      testComment: null,
+      strengths: null,
+      improvements: null,
+      homeworkQuality: null,
+      homeworkComment: null,
+    };
+    if (
+      item.status !== AttendanceStatus.present &&
+      item.status !== AttendanceStatus.trial
+    ) {
+      return empty;
+    }
+
+    const studentName = String(item.studentFullName ?? '').trim();
+    // skipRequired: field trống lưu null thay vì báo lỗi.
+    const fail = (field: string): null => {
+      if (options.skipRequired) return null;
       throw new BadRequestException(
         studentName
-          ? `Nhận xét học sinh ${studentName} là bắt buộc.`
-          : 'Nhận xét học sinh có mặt/nghỉ phép là bắt buộc.',
+          ? `${field} của học sinh ${studentName} là bắt buộc.`
+          : `${field} của học sinh có mặt/học thử là bắt buộc.`,
       );
+    };
+
+    const result: AttendanceReviewData = { ...empty };
+    if (test.hasInClassTest && this.lmsProfile.config.inClassTest) {
+      const total = test.inClassTestTotal ?? 0;
+      // skipRequired + chưa nhập tổng câu: không có trần để so.
+      const maxCorrect =
+        test.inClassTestTotal === null && options.skipRequired
+          ? Number.POSITIVE_INFINITY
+          : total;
+      const correct = item.testCorrectCount;
+      if (correct === undefined || correct === null) {
+        fail('Số câu đúng');
+      } else if (
+        !Number.isInteger(correct) ||
+        correct < 0 ||
+        correct > maxCorrect
+      ) {
+        throw new BadRequestException(
+          `Số câu đúng${studentName ? ` của học sinh ${studentName}` : ''} phải trong khoảng 0–${total}.`,
+        );
+      }
+      result.testCorrectCount = correct ?? null;
+      result.testComment =
+        this.normalizeReviewText(item.testComment) ?? fail('Nhận xét kiểm tra');
     }
+
+    result.strengths =
+      this.normalizeReviewText(item.strengths) ?? fail('Điểm tốt');
+    result.improvements =
+      this.normalizeReviewText(item.improvements) ?? fail('Cần cải thiện');
+
+    if (item.status === AttendanceStatus.present) {
+      result.homeworkQuality = item.homeworkQuality ?? fail('Chất lượng BTVN');
+      result.homeworkComment =
+        this.normalizeReviewText(item.homeworkComment) ?? fail('Nhận xét BTVN');
+    }
+
+    return result;
+  }
+
+  private normalizeReviewText(value: string | null | undefined): string | null {
+    const normalized = String(value ?? '')
+      .replace(/\r\n/g, '\n')
+      .trim();
+    return normalized ? normalized : null;
   }
 }

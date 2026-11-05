@@ -1,5 +1,12 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 import { getClientApiBaseUrl } from "@/lib/api-base-url";
+import {
+    localizeErrorMessage,
+    markGenericLocalizedError,
+    NETWORK_ERROR_MESSAGE,
+    SESSION_EXPIRED_MESSAGE,
+    TIMEOUT_ERROR_MESSAGE,
+} from "@/lib/api-error-message";
 
 export const ACTION_HISTORY_INVALIDATION_EVENT = "ue:action-history:invalidate";
 export const RATE_LIMIT_TOAST_EVENT = "ue:rate-limit:toast";
@@ -122,7 +129,7 @@ const buildRateLimitToastDetail = (error: AxiosError): RateLimitToastDetail => {
     );
 
     return {
-        title: "Too many requests",
+        title: "Thao tác quá nhanh",
         description: retryAfterSeconds
             ? `Bạn thao tác quá nhanh. Vui lòng thử lại sau ${formatRetryDelay(retryAfterSeconds)}.`
             : "Bạn thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại.",
@@ -131,7 +138,7 @@ const buildRateLimitToastDetail = (error: AxiosError): RateLimitToastDetail => {
 
 const normalizeRateLimitError = (error: AxiosError): RateLimitToastDetail => {
     const detail = buildRateLimitToastDetail(error);
-    const normalizedMessage = `${detail.title}. ${detail.description}`;
+    const normalizedMessage = detail.description;
 
     error.message = normalizedMessage;
 
@@ -186,7 +193,42 @@ const refresh = async (): Promise<void> => {
     try {
         await api.post("/auth/refresh");
     } catch {
-        throw new Error("Token refresh failed");
+        throw new Error(SESSION_EXPIRED_MESSAGE);
+    }
+};
+
+/**
+ * Thay message tiếng Anh (NestJS, class-validator, axios) bằng câu tiếng Việt dễ hiểu
+ * để mọi chỗ đọc `response.data.message` hoặc `error.message` đều hiển thị được ngay.
+ */
+const localizeAxiosError = (error: AxiosError) => {
+    if (error.code === AxiosError.ERR_CANCELED) {
+        return;
+    }
+
+    if (!error.response) {
+        error.message =
+            error.code === AxiosError.ECONNABORTED || error.code === AxiosError.ETIMEDOUT
+                ? TIMEOUT_ERROR_MESSAGE
+                : NETWORK_ERROR_MESSAGE;
+        return;
+    }
+
+    const data = error.response.data;
+    // Chỉ body JSON thuần; body Blob (responseType: "blob") để caller tự parse rồi dịch lại.
+    const hasObjectBody = Object.prototype.toString.call(data) === "[object Object]";
+    const rawMessage = hasObjectBody ? (data as { message?: unknown }).message : undefined;
+    const localized = localizeErrorMessage(rawMessage ?? error.message, error.response.status);
+    if (!localized) {
+        return;
+    }
+
+    if (localized.isGeneric && hasObjectBody) {
+        markGenericLocalizedError(error);
+    }
+    error.message = localized.message;
+    if (hasObjectBody) {
+        (data as { message?: unknown }).message = localized.message;
     }
 };
 
@@ -210,6 +252,8 @@ api.interceptors.response.use(
                 notifyRateLimitToast(detail);
             }
         }
+
+        localizeAxiosError(error);
 
         if (
             (status === 401) &&

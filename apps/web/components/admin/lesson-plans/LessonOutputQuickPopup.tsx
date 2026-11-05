@@ -276,6 +276,27 @@ export default function LessonOutputQuickPopup({
                       <p className="mt-1 text-sm text-text-muted">Chưa có link</p>
                     )}
                   </div>
+                  {outputDetail.includesTheoryLecture ? (
+                    <div className="sm:col-span-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                        Bài giảng lý thuyết · {outputDetail.theoryLectureLinks.length} video
+                      </p>
+                      <ul className="mt-1 space-y-1">
+                        {outputDetail.theoryLectureLinks.map((videoLink) => (
+                          <li key={videoLink} className="min-w-0">
+                            <a
+                              href={videoLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex min-w-0 max-w-full text-sm font-medium text-primary underline-offset-4 hover:underline"
+                            >
+                              <span className="truncate">{videoLink}</span>
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">

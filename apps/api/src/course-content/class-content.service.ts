@@ -5,15 +5,16 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { redactLessonVideo } from 'src/protected-video/redact-video-url';
+import type { ProtectedVideoPlaybackDto } from 'src/dtos/protected-video.dto';
 import {
   LessonResponseDto,
   ClassContentCreateDto,
   ClassContentScheduleUpdateDto,
+  ClassContentItemRemovalImpactDto,
   ClassContentItemResponseDto,
   ClassContentModuleGroupDto,
   ClassTheoryProgressDto,
-  PRACTICE_DURATION_MIN_MINUTES,
-  PRACTICE_DURATION_MAX_MINUTES,
   CourseLessonForClassDto,
   TheoryLessonViewResponseDto,
 } from 'src/dtos/course-content.dto';
@@ -21,6 +22,7 @@ import {
   ClassContentHiddenReason,
   LessonKind,
   ClassTimelineItemKind,
+  QuestionType,
   StudentClassStatus,
 } from 'generated/enums';
 import {
@@ -30,11 +32,18 @@ import {
 import {
   ActionHistoryActor,
   CLASS_OWNED_LESSON_DISABLED_MESSAGE,
-  PRACTICE_MODULE_NOT_ADDED_MESSAGE,
+  LESSON_NOT_IN_CLASS_COURSE_MESSAGE,
   CourseContentSupportService,
 } from './course-content-support.service';
-import { NOT_ARCHIVED_CONTENT_ITEM } from './archived-lesson-filter';
+import { isAnswered } from '../attempt/grading';
+import { assignmentDurationMinutes } from '../attempt/assignment-window';
+import { PRESENT_CONTENT_ITEM } from './archived-lesson-filter';
 import { groupClassContentByModule } from './class-content-groups';
+import {
+  ensureClassModuleGroupOnTop,
+  removeClassContentItems,
+  restoreRemovedClassContentItems,
+} from './class-course-module-sync';
 
 const CLASS_CONTENT_CREATE_TRANSACTION_TIMEOUT_MS = 15_000;
 
@@ -99,18 +108,46 @@ export class ClassContentService extends CourseContentSupportService {
       await this.validateStudentClassAccess(topic.classId, studentId);
     }
 
-    return topic;
+    return redactLessonVideo(topic);
   }
 
   /**
    * Student may open a lesson only through a lần giao on this class.
-   * Practice assignments stay closed until `openAt`.
+   * Practice assignments stay closed until `openAt`. Link video bị thay bằng `hasVideo`.
    */
   async getAssignedLessonForStudent(
     classId: string,
     lessonId: string,
     studentId: string,
   ): Promise<LessonResponseDto> {
+    return redactLessonVideo(
+      await this.loadAssignedLessonForStudent(classId, lessonId, studentId),
+    );
+  }
+
+  /**
+   * Link phát video tiết lý thuyết (Video bảo vệ). Cùng điều kiện mở tiết với
+   * `getAssignedLessonForStudent`; không bao giờ trả link YouTube.
+   */
+  async getLessonVideoPlaybackForStudent(
+    classId: string,
+    lessonId: string,
+    studentId: string,
+  ): Promise<ProtectedVideoPlaybackDto> {
+    const lesson = await this.loadAssignedLessonForStudent(
+      classId,
+      lessonId,
+      studentId,
+    );
+    if (!this.protectedVideos) return { state: 'unavailable' };
+    return this.protectedVideos.issuePlayback(lesson.videoUrl);
+  }
+
+  private async loadAssignedLessonForStudent(
+    classId: string,
+    lessonId: string,
+    studentId: string,
+  ) {
     await this.validateStudentClassAccess(classId, studentId);
 
     const item = await this.prisma.classContentItem.findUnique({
@@ -201,7 +238,8 @@ export class ClassContentService extends CourseContentSupportService {
       );
     }
     this.assertPracticeAssignmentOpen(item.lesson.kind, item.openAt);
-    if (item.durationMinutes == null || item.durationMinutes < 1) {
+    const durationMinutes = assignmentDurationMinutes(item);
+    if (durationMinutes == null || durationMinutes < 1) {
       throw new BadRequestException('Assignment has no duration');
     }
     return item;
@@ -225,8 +263,8 @@ export class ClassContentService extends CourseContentSupportService {
   // serve different purposes. Lesson.classId marks a legacy class-owned lesson —
   // no longer created and archived by the 2026-10-02 migration (`lessons.archived_at`).
   // class_content_items is the ordered list of course lessons shown in the class:
-  // theory items are materialized from the class's added modules (`class_modules`,
-  // see class-course-module-sync.ts); practice items are assigned one lesson at a time.
+  // the class content is the set of course lessons the class added (ADR
+  // 2026-10-18-class-content-as-lesson-set); `class_modules` only orders the groups.
 
   /**
    * Map a raw Prisma ClassContentItem (with included lesson/module) to the
@@ -239,13 +277,17 @@ export class ClassContentService extends CourseContentSupportService {
     sortOrder: number;
     classId: string;
     openAt?: Date | null;
+    closeAt?: Date | null;
     durationMinutes?: number | null;
+    shuffleQuestions?: boolean;
     hiddenAt?: Date | null;
     hiddenByStaffId?: string | null;
+    hiddenReason?: 'manual' | 'module_removed' | null;
     lesson?: {
       title: string;
       kind: string;
       classId: string | null;
+      durationMinutes?: number | null;
       module?: { id: string; title: string } | null;
     } | null;
   }): ClassContentItemResponseDto {
@@ -259,7 +301,8 @@ export class ClassContentService extends CourseContentSupportService {
         ? 'class'
         : 'course';
     const openAt = item.openAt ?? null;
-    const durationMinutes = item.durationMinutes ?? null;
+    const durationMinutes =
+      item.durationMinutes ?? lesson?.durationMinutes ?? null;
     return {
       id: item.id,
       lessonId: item.lessonId ?? '',
@@ -272,10 +315,13 @@ export class ClassContentService extends CourseContentSupportService {
       moduleId: lesson?.module?.id,
       moduleTitle: lesson?.module?.title,
       openAt,
+      closeAt: item.closeAt ?? null,
       durationMinutes,
+      shuffleQuestions: item.shuffleQuestions ?? true,
       isOpen: this.isPracticeAssignmentOpen(lessonKind, openAt),
       hiddenAt: item.hiddenAt ?? null,
       hiddenByStaffId: item.hiddenByStaffId ?? null,
+      hiddenReason: item.hiddenReason ?? null,
     };
   }
 
@@ -297,55 +343,51 @@ export class ClassContentService extends CourseContentSupportService {
     }
   }
 
-  private parsePracticeSchedule(
+  private parsePracticeOpenAt(
     lessonKind: string,
-    dto: { openAt?: string; durationMinutes?: number },
+    dto: { openAt?: string },
     required: boolean,
-  ):
-    | { openAt: Date; durationMinutes: number }
-    | { openAt: null; durationMinutes: null } {
-    if (lessonKind !== 'practice') {
-      return { openAt: null, durationMinutes: null };
-    }
-
-    const durationMinutes = dto.durationMinutes;
-    if (
-      durationMinutes == null ||
-      !Number.isInteger(durationMinutes) ||
-      durationMinutes < PRACTICE_DURATION_MIN_MINUTES ||
-      durationMinutes > PRACTICE_DURATION_MAX_MINUTES
-    ) {
-      throw new BadRequestException(
-        durationMinutes == null
-          ? 'Practice assignments require durationMinutes'
-          : `durationMinutes must be an integer from ${PRACTICE_DURATION_MIN_MINUTES} to ${PRACTICE_DURATION_MAX_MINUTES}`,
-      );
-    }
+  ): Date | null {
+    if (lessonKind !== 'practice') return null;
 
     const rawOpenAt = dto.openAt?.trim() ? dto.openAt.trim() : undefined;
-    let openAt: Date;
     if (rawOpenAt == null) {
       if (required) {
-        throw new BadRequestException(
-          'Practice assignments require openAt and durationMinutes',
-        );
+        throw new BadRequestException('Practice assignments require openAt');
       }
-      openAt = new Date();
+      return new Date();
+    }
+    const openAt = new Date(rawOpenAt);
+    if (Number.isNaN(openAt.getTime())) {
+      throw new BadRequestException('openAt is not a valid date');
+    }
+    return openAt;
+  }
+
+  /**
+   * Hạn làm bài: `undefined` → `fallback`; `null`/rỗng → không hạn. Hạn phải sau
+   * thời điểm mở bài.
+   */
+  private parseAssignmentCloseAt(
+    raw: string | null | undefined,
+    openAt: Date | null,
+    fallback: Date | null,
+  ): Date | null {
+    let closeAt: Date | null;
+    if (raw === undefined) {
+      closeAt = fallback;
+    } else if (raw === null || !raw.trim()) {
+      closeAt = null;
     } else {
-      openAt = new Date(rawOpenAt);
-      if (Number.isNaN(openAt.getTime())) {
-        throw new BadRequestException('openAt is not a valid date');
+      closeAt = new Date(raw.trim());
+      if (Number.isNaN(closeAt.getTime())) {
+        throw new BadRequestException('closeAt is not a valid date');
       }
     }
-
-    const closeAtMs = openAt.getTime() + durationMinutes * 60_000;
-    if (openAt.getTime() >= closeAtMs) {
-      throw new BadRequestException(
-        'openAt must not be later than assignment close time',
-      );
+    if (closeAt && openAt && closeAt.getTime() <= openAt.getTime()) {
+      throw new BadRequestException('Hạn làm bài phải sau thời điểm mở bài.');
     }
-
-    return { openAt, durationMinutes };
+    return closeAt;
   }
 
   async createClassContentItem(
@@ -355,7 +397,7 @@ export class ClassContentService extends CourseContentSupportService {
   ): Promise<ClassContentItemResponseDto> {
     await this.validateStaffClassAccess(classId, actor);
 
-    // Lớp không tạo tiết riêng nữa (ADR 2026-10-02): chỉ giao tiết thực hành có sẵn của khoá.
+    // Lớp không tạo tiết riêng nữa (ADR 2026-10-02): chỉ thêm tiết có sẵn của khoá.
     if (!dto.lessonId) {
       throw new BadRequestException(CLASS_OWNED_LESSON_DISABLED_MESSAGE);
     }
@@ -365,33 +407,54 @@ export class ClassContentService extends CourseContentSupportService {
     if (!topic || topic.archivedAt) {
       throw new NotFoundException(`Lesson ${dto.lessonId} not found`);
     }
-    if (topic.kind === LessonKind.theory) {
-      throw new BadRequestException(
-        'Tiết lý thuyết vào lớp theo chuyên đề. Hãy thêm chuyên đề chứa tiết này.',
-      );
-    }
     const lessonId = dto.lessonId;
     const lessonKind: string = topic.kind;
     const moduleId = topic.moduleId;
 
-    const schedule = this.parsePracticeSchedule(lessonKind, dto, false);
+    const classInfo = await this.prisma.class.findUnique({
+      where: { id: classId },
+      select: { courseId: true, contentAccessExpiresAt: true },
+    });
+    // Nội dung lớp là tập tiết của khoá (ADR 2026-10-18): tiết khoá khác / tiết riêng lớp khác → chặn.
+    if (topic.classId || !classInfo || topic.courseId !== classInfo.courseId) {
+      throw new BadRequestException(LESSON_NOT_IN_CLASS_COURSE_MESSAGE);
+    }
+
+    // Tiết lý thuyết không có lịch; tiết thực hành thành lần giao.
+    const isPractice = lessonKind === LessonKind.practice;
+    const openAt = this.parsePracticeOpenAt(lessonKind, dto, false);
+    // Mặc định hạn làm bài = hạn xem nội dung của lớp (khoá vô hạn → không hạn).
+    const closeAt = isPractice
+      ? this.parseAssignmentCloseAt(
+          dto.closeAt,
+          openAt,
+          classInfo.contentAccessExpiresAt ?? null,
+        )
+      : null;
 
     const item = await this.prisma.$transaction(
       async (tx) => {
-        // Chỉ giao tiết thực hành thuộc chuyên đề lớp đã thêm (cũng chặn tiết khoá khác).
-        const classModule = moduleId
-          ? await tx.classModule.findUnique({
-              where: { classId_moduleId: { classId, moduleId } },
-              select: { id: true },
-            })
-          : null;
-        if (!classModule) {
-          throw new BadRequestException(PRACTICE_MODULE_NOT_ADDED_MESSAGE);
+        // Tiết đầu của chuyên đề mới → nhóm chuyên đề hiện ở đầu danh sách nhóm.
+        if (moduleId) {
+          await ensureClassModuleGroupOnTop(tx, classId, moduleId);
         }
 
         const existing = await tx.classContentItem.findUnique({
           where: { classId_lessonId: { classId, lessonId } },
         });
+        if (existing?.removedAt) {
+          // Tiết từng gỡ khỏi lớp → thêm lại = đưa về item cũ (giữ attempt/điểm/lượt xem),
+          // tiết từng Ẩn tay vẫn ẩn; lần giao lấy lịch theo lần thêm này.
+          await restoreRemovedClassContentItems(tx, {
+            classId,
+            where: { id: existing.id },
+          });
+          return tx.classContentItem.update({
+            where: { id: existing.id },
+            data: isPractice ? { openAt, closeAt } : {},
+            include: { lesson: { include: { module: true } } },
+          });
+        }
         if (existing) {
           if (existing.hiddenAt) {
             throw new BadRequestException(
@@ -415,8 +478,12 @@ export class ClassContentService extends CourseContentSupportService {
             lessonId,
             kind: 'lesson',
             sortOrder: nextSort,
-            openAt: schedule.openAt,
-            durationMinutes: schedule.durationMinutes,
+            openAt,
+            closeAt,
+            // Lần giao mới không chốt thời lượng — lượt làm đọc từ tiết thực hành.
+            ...(isPractice
+              ? { shuffleQuestions: dto.shuffleQuestions ?? true }
+              : {}),
           },
           include: {
             lesson: { include: { module: true } },
@@ -447,7 +514,7 @@ export class ClassContentService extends CourseContentSupportService {
   ): Promise<ClassContentItemResponseDto[]> {
     await this.validateStaffClassAccess(classId, actor);
     const items = await this.prisma.classContentItem.findMany({
-      where: { classId, ...NOT_ARCHIVED_CONTENT_ITEM },
+      where: { classId, ...PRESENT_CONTENT_ITEM },
       orderBy: { sortOrder: 'asc' },
       include: {
         lesson: { include: { module: true } },
@@ -482,23 +549,14 @@ export class ClassContentService extends CourseContentSupportService {
     classId: string,
     items: ClassContentItemResponseDto[],
   ): Promise<ClassContentModuleGroupDto[]> {
-    // Chỉ chuyên đề lớp đang có, theo thứ tự của lớp. Item chuyên đề đã gỡ đều đã ẩn
-    // (coi như chưa từng thêm) nên không có nhóm.
+    // Nhóm lấy từ tập tiết của lớp; `class_modules` chỉ giữ thứ tự nhóm của lớp.
     const classModules = await this.prisma.classModule.findMany({
       where: { classId },
-      select: {
-        sortOrder: true,
-        module: { select: { id: true, title: true } },
-      },
+      select: { moduleId: true, sortOrder: true },
     });
     return groupClassContentByModule(
       items,
-      classModules.map((classModule) => ({
-        id: classModule.module.id,
-        title: classModule.module.title,
-        sortOrder: classModule.sortOrder,
-        added: true,
-      })),
+      new Map(classModules.map((row) => [row.moduleId, row.sortOrder])),
     );
   }
 
@@ -563,6 +621,14 @@ export class ClassContentService extends CourseContentSupportService {
         questionId: string;
         choiceIndex: number | null;
         essayAnswer: string | null;
+        tfChoices: unknown;
+        blankAnswers: unknown;
+        orderAnswer: string[];
+        question: {
+          type: QuestionType;
+          blankAnswerKey: unknown;
+          options: unknown;
+        };
       }[]
     > =
       studentIds.length === 0 || quizQuestionCount === 0
@@ -578,6 +644,12 @@ export class ClassContentService extends CourseContentSupportService {
               questionId: true,
               choiceIndex: true,
               essayAnswer: true,
+              tfChoices: true,
+              blankAnswers: true,
+              orderAnswer: true,
+              question: {
+                select: { type: true, blankAnswerKey: true, options: true },
+              },
             },
           });
 
@@ -588,9 +660,16 @@ export class ClassContentService extends CourseContentSupportService {
     );
     const answersByStudent = new Map<string, Set<string>>();
     for (const answer of answers) {
-      const hasAnswer =
-        answer.choiceIndex != null || Boolean(answer.essayAnswer?.trim());
-      if (!hasAnswer) continue;
+      if (
+        !isAnswered({
+          ...answer,
+          type: answer.question.type,
+          blankAnswerKey: answer.question.blankAnswerKey,
+          options: answer.question.options,
+        })
+      ) {
+        continue;
+      }
       const pairKey = `${answer.lessonId}:${answer.questionId}`;
       if (!requiredQuizPairs.has(pairKey)) continue;
       const studentAnswers =
@@ -639,7 +718,7 @@ export class ClassContentService extends CourseContentSupportService {
 
     // Finding #4: verify ALL IDs belong to this class before updating
     const owned = await this.prisma.classContentItem.findMany({
-      where: { id: { in: orderedIds }, classId, ...NOT_ARCHIVED_CONTENT_ITEM },
+      where: { id: { in: orderedIds }, classId, ...PRESENT_CONTENT_ITEM },
       select: { id: true },
     });
     if (owned.length !== orderedIds.length) {
@@ -668,7 +747,7 @@ export class ClassContentService extends CourseContentSupportService {
     const item = await this.prisma.classContentItem.findUnique({
       where: { id: itemId },
     });
-    if (!item || item.classId !== classId) {
+    if (!item || item.classId !== classId || item.removedAt) {
       throw new NotFoundException('Class content item not found');
     }
     const hiddenAt = item.hiddenAt ?? new Date();
@@ -699,13 +778,22 @@ export class ClassContentService extends CourseContentSupportService {
     const item = await this.prisma.classContentItem.findUnique({
       where: { id: itemId },
       include: {
-        lesson: { select: { kind: true, moduleId: true, archivedAt: true } },
+        lesson: { select: { archivedAt: true } },
       },
     });
     if (!item || item.classId !== classId) {
       throw new NotFoundException('Class content item not found');
     }
-    await this.assertClassContentRestorable(classId, item.lesson);
+    if (item.removedAt) {
+      throw new BadRequestException(
+        'Tiết đã gỡ khỏi lớp. Hãy thêm lại tiết thay vì khôi phục.',
+      );
+    }
+    if (item.lesson?.archivedAt) {
+      throw new BadRequestException(
+        'Tiết học đã được lưu trữ, không khôi phục vào lớp được.',
+      );
+    }
     await this.prisma.$transaction([
       this.prisma.classContentItem.update({
         where: { id: itemId },
@@ -723,34 +811,67 @@ export class ClassContentService extends CourseContentSupportService {
   }
 
   /**
-   * Tiết đã lưu trữ không khôi phục được. Item thuộc chuyên đề (lý thuyết lẫn lần giao)
-   * chỉ hiện lại khi lớp còn chuyên đề đó — muốn hiện lại cả chuyên đề thì thêm lại chuyên đề.
+   * Gỡ một tiết khỏi lớp (khác Ẩn): tiết và lần giao biến mất ở mọi phía, kể cả gia sư.
+   * Bài làm, điểm, lượt xem giữ nguyên; thêm lại tiết thì hiện lại (tiết từng Ẩn vẫn ẩn).
+   * Gỡ tiết cuối của chuyên đề → nhóm chuyên đề biến mất (xoá dòng thứ tự nhóm).
    */
-  private async assertClassContentRestorable(
+  async removeClassContentItem(
     classId: string,
-    lesson: {
-      kind: string;
-      moduleId: string | null;
-      archivedAt: Date | null;
-    } | null,
-  ): Promise<void> {
-    if (lesson?.archivedAt) {
-      throw new BadRequestException(
-        'Tiết học đã được lưu trữ, không khôi phục vào lớp được.',
-      );
-    }
-    if (!lesson?.moduleId) return;
-    const classModule = await this.prisma.classModule.findUnique({
-      where: {
-        classId_moduleId: { classId, moduleId: lesson.moduleId },
-      },
-      select: { id: true },
+    itemId: string,
+    actor: ActionHistoryActor,
+  ): Promise<ClassContentItemResponseDto[]> {
+    await this.validateStaffClassAccess(classId, actor);
+    const hiddenByStaffId = await this.resolveHiddenByStaffId(actor);
+    const removedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      const item = await tx.classContentItem.findUnique({
+        where: { id: itemId },
+        select: {
+          classId: true,
+          removedAt: true,
+          lesson: { select: { moduleId: true } },
+        },
+      });
+      if (!item || item.classId !== classId || item.removedAt) {
+        throw new NotFoundException('Class content item not found');
+      }
+      await removeClassContentItems(tx, {
+        classId,
+        where: { id: itemId },
+        removedAt,
+        hiddenByStaffId,
+      });
+      const moduleId = item.lesson?.moduleId;
+      if (!moduleId) return;
+      const remaining = await tx.classContentItem.count({
+        where: { classId, removedAt: null, lesson: { is: { moduleId } } },
+      });
+      if (remaining === 0) {
+        await tx.classModule.deleteMany({ where: { classId, moduleId } });
+      }
     });
-    if (!classModule) {
-      throw new BadRequestException(
-        'Lớp chưa thêm chuyên đề chứa tiết này. Hãy thêm chuyên đề trước.',
-      );
+    this.logger.log(
+      `Class content item removed: ${itemId} from class ${classId} by ${actor.userEmail}`,
+    );
+    return this.listClassContentItems(classId, actor);
+  }
+
+  /** Ảnh hưởng nếu gỡ một tiết (chỉ lần giao thực hành có bài làm). */
+  async getClassContentItemRemovalImpact(
+    classId: string,
+    itemId: string,
+    actor: ActionHistoryActor,
+  ): Promise<ClassContentItemRemovalImpactDto> {
+    await this.validateStaffClassAccess(classId, actor);
+    const item = await this.prisma.classContentItem.findUnique({
+      where: { id: itemId },
+      select: { classId: true, removedAt: true },
+    });
+    if (!item || item.classId !== classId || item.removedAt) {
+      throw new NotFoundException('Class content item not found');
     }
+    const impact = await this.computeRemovalImpact({ id: itemId, classId });
+    return { itemId, ...impact };
   }
 
   async updateClassContentSchedule(
@@ -769,17 +890,23 @@ export class ClassContentService extends CourseContentSupportService {
     }
     const lessonKind = item.lesson?.kind ?? 'theory';
     if (lessonKind !== 'practice') {
-      throw new BadRequestException(
-        'Only practice assignments have openAt and durationMinutes',
-      );
+      throw new BadRequestException('Only practice assignments have openAt');
     }
-    const schedule = this.parsePracticeSchedule(lessonKind, dto, true);
+    const openAt = this.parsePracticeOpenAt(lessonKind, dto, true);
+    const closeAt = this.parseAssignmentCloseAt(
+      dto.closeAt,
+      openAt,
+      item.closeAt,
+    );
     const updated = await this.prisma.$transaction(async (tx) => {
       const next = await tx.classContentItem.update({
         where: { id: itemId },
         data: {
-          openAt: schedule.openAt,
-          durationMinutes: schedule.durationMinutes,
+          openAt,
+          closeAt,
+          ...(dto.shuffleQuestions !== undefined
+            ? { shuffleQuestions: dto.shuffleQuestions }
+            : {}),
         },
         include: {
           lesson: { include: { module: true } },
@@ -817,7 +944,7 @@ export class ClassContentService extends CourseContentSupportService {
       throw new ForbiddenException('Content access period has expired');
     }
     const items = await this.prisma.classContentItem.findMany({
-      where: { classId, hiddenAt: null, ...NOT_ARCHIVED_CONTENT_ITEM },
+      where: { classId, hiddenAt: null, ...PRESENT_CONTENT_ITEM },
       orderBy: { sortOrder: 'asc' },
       include: {
         lesson: { include: { module: true } },
@@ -842,13 +969,11 @@ export class ClassContentService extends CourseContentSupportService {
 
     const [courseTopics, existingItemTopicIds] = await Promise.all([
       this.prisma.lesson.findMany({
-        // Tiết lý thuyết vào lớp theo chuyên đề; chỉ tiết thực hành của chuyên đề lớp đã thêm được giao từng tiết.
+        // Mọi tiết (lý thuyết + thực hành) chưa lưu trữ của khoá; picker nhóm theo chuyên đề.
         where: {
           courseId: cls.courseId,
           classId: null,
-          kind: LessonKind.practice,
           archivedAt: null,
-          module: { classModules: { some: { classId } } },
         },
         include: {
           module: { select: { id: true, title: true } },
@@ -856,8 +981,9 @@ export class ClassContentService extends CourseContentSupportService {
         },
         orderBy: [{ module: { sortOrder: 'asc' } }, { order: 'asc' }],
       }),
+      // Tiết đã gỡ khỏi lớp không tính là đã thêm.
       this.prisma.classContentItem.findMany({
-        where: { classId },
+        where: { classId, removedAt: null },
         select: { lessonId: true },
       }),
     ]);

@@ -50,6 +50,10 @@ export function buildStaffRoleDetailHref(
       return `/staff/training-detail?staffId=${normalizedStaffId}`;
     }
 
+    if (role === "sale") {
+      return `/staff/sale-detail?staffId=${normalizedStaffId}`;
+    }
+
     if (role === "lesson_plan" || role === "lesson_plan_head") {
       return `/staff/lesson-plan-detail/${normalizedStaffId}`;
     }
@@ -83,6 +87,10 @@ export function buildStaffRoleDetailHref(
 
   if (role === "training") {
     return `/admin/training_detail?staffId=${normalizedStaffId}`;
+  }
+
+  if (role === "sale") {
+    return `/admin/sale_detail?staffId=${normalizedStaffId}`;
   }
 
   if (role === "lesson_plan" || role === "lesson_plan_head") {

@@ -15,8 +15,10 @@ export interface AdminDashboardSummary {
   activeStudents: number;
   /** Toàn hệ thống (không lọc theo CSKH), createdAt rơi trong kỳ đang chọn. */
   newStudentsThisMonth: number;
-  /** Toàn hệ thống (không lọc theo CSKH), dropOutDate rơi trong kỳ đang chọn. */
+  /** Học sinh cũ nghỉ: dropOutDate rơi trong kỳ, đã nạp ví thành công và học ≥2 buổi (cộng mọi lớp). */
   droppedStudentsThisMonth: number;
+  /** Học sinh thử nghỉ: dropOutDate rơi trong kỳ, không đủ điều kiện cũ nghỉ. */
+  trialDroppedStudentsThisMonth: number;
   monthlyTopupTotal: number;
   totalLearnedTuition: number;
   monthlyRevenue: number;
@@ -159,13 +161,15 @@ export interface AdminDashboardStudentBalanceItem {
   balance: number;
 }
 
-export type AdminDashboardStudentChurnType = "new" | "dropped" | "active";
+export type AdminDashboardStudentChurnType = "new" | "dropped" | "trial_dropped" | "active";
 
 export interface AdminDashboardStudentChurnItem {
   studentId: string;
   studentName: string;
   className: string;
   eventDate: string;
+  /** Chỉ có ở `dropped` / `trial_dropped`: lý do nghỉ trên hồ sơ, `null` khi chưa điền. */
+  dropOutReason?: string | null;
 }
 
 export interface AdminDashboardActiveClassBreakdownItem {
@@ -194,8 +198,8 @@ export type AdminDashboardFinancialDetailRowKey =
   | "total-in"
   | "customer-source";
 
-/** Mọi Nguồn khách cộng nhóm Chưa gán. */
-export type AdminDashboardCustomerSourceKey = StudentCustomerSource | "unassigned";
+/** Bốn Nguồn khách (tập đóng). */
+export type AdminDashboardCustomerSourceKey = StudentCustomerSource;
 
 export interface AdminDashboardCustomerSourceRow {
   key: AdminDashboardCustomerSourceKey;
@@ -219,7 +223,6 @@ export interface AdminDashboardFinancialDetailItem {
   secondaryLabel: string | null;
   amount: number;
   note: string | null;
-  sourceNote?: string | null;
   /** Số tiền theo `sources[].key` (có dấu, phạt âm). Có trên Chi phí nhân sự và Trợ cấp chờ thanh toán. */
   sourceAmounts?: Record<string, number>;
 }
@@ -515,4 +518,95 @@ export interface StaffDashboardDto {
   accountant?: StaffDashboardAccountantSection;
   accountantExpense?: StaffDashboardExpenseSection;
   training?: StaffDashboardTrainingSection;
+}
+
+/** `old` = Học sinh cũ nghỉ, `trial` = Học sinh thử nghỉ. */
+export type MonthlyReportEarlyDropKind = "old" | "trial";
+
+export interface MonthlyReportKpi {
+  /** Tổng nạp ví hợp lệ trong tháng (QR hoàn tất + nạp thẳng đã duyệt). */
+  totalTopUpInMonth: number;
+  topUpTransactionCount: number;
+  activeStudents: number;
+  newStudents: number;
+  /** Học sinh cũ nghỉ trong tháng. */
+  droppedStudents: number;
+  /** Học sinh thử nghỉ trong tháng (không trừ vào tăng ròng). */
+  trialDroppedStudents: number;
+  netChange: number;
+  earlyDropOldCount: number;
+  newStillActive: number;
+}
+
+export interface MonthlyReportCourse {
+  courseId: string;
+  courseName: string;
+}
+
+export interface MonthlyReportMatrixCell {
+  customerSource: StudentCustomerSource;
+  /** `null` = Chưa xếp lớp. */
+  courseId: string | null;
+  newCount: number;
+  /** Tổng nghỉ sớm (cũ nghỉ + thử nghỉ). */
+  earlyDropCount: number;
+  earlyDropOldCount: number;
+  /** Số học sinh mới có doanh thu > 0 ở khoá của ô trong tháng. */
+  earningCount: number;
+  /**
+   * Doanh thu mới: Học phí đã học trong tháng của học sinh mới cùng nguồn, theo
+   * khoá của lớp có buổi (đổi lớp sang khoá khác → ô khoá mới, có thể `newCount = 0`).
+   */
+  revenue: number;
+}
+
+export interface MonthlyReportCustomerCareRow {
+  staffId: string | null;
+  staffName: string;
+  activeStudents: number;
+  newStudents: number;
+  droppedStudents: number;
+  netChange: number;
+  earlyDropCount: number;
+  earlyDropOldCount: number;
+  totalTopUpInMonth: number;
+  topUpTransactionCount: number;
+}
+
+export interface MonthlyReportNewStudent {
+  studentId: string;
+  fullName: string;
+  customerCareStaffName: string | null;
+  className: string | null;
+  courseId: string | null;
+  courseName: string | null;
+  customerSource: StudentCustomerSource;
+  firstTopUpAt: string;
+  totalTopUp: number;
+  /** Doanh thu mới của học sinh trong tháng (Học phí đã học, mọi khoá). */
+  revenueInMonth: number;
+  isEarlyDrop: boolean;
+  earlyDropKind: MonthlyReportEarlyDropKind | null;
+  dropOutDate: string | null;
+}
+
+export interface MonthlyReportDroppedStudent {
+  studentId: string;
+  fullName: string;
+  customerCareStaffName: string | null;
+  className: string | null;
+  dropOutDate: string;
+  dropOutReason: string | null;
+}
+
+export interface AdminMonthlyReport {
+  month: string;
+  year: string;
+  generatedAt: string;
+  kpi: MonthlyReportKpi;
+  courses: MonthlyReportCourse[];
+  matrix: MonthlyReportMatrixCell[];
+  customerCare: MonthlyReportCustomerCareRow[];
+  newStudents: MonthlyReportNewStudent[];
+  droppedStudents: MonthlyReportDroppedStudent[];
 }

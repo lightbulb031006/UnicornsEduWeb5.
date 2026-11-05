@@ -1,6 +1,6 @@
 # ADR: Achievement không còn nằm trong gate `staffProfileComplete`; cột cũ giữ deprecated chờ drop sau
 
-- **Status:** Accepted
+- **Status:** Accepted — quyết định 1 bị thay thế một phần cho role `teacher` bởi `docs/adr/2026-10-20-teacher-achievement-required.md`
 - **Date:** 2026-08-11
 
 ## Context

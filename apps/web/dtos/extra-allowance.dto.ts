@@ -18,6 +18,12 @@ export interface ExtraAllowanceStaffSummary {
   roles: string[];
 }
 
+/** Học sinh (khách hàng) của Trợ cấp sale; null khi học sinh đã bị xoá. */
+export interface ExtraAllowanceStudentSummary {
+  id: string;
+  fullName: string;
+}
+
 export interface ExtraAllowanceBaseFields {
   staffId?: string;
   month?: string | null;
@@ -27,6 +33,8 @@ export interface ExtraAllowanceBaseFields {
   roleType?: ExtraAllowanceRoleType | null;
   staffRoles?: ExtraAllowanceRoleType[] | null;
   staff?: ExtraAllowanceStaffSummary | null;
+  studentId?: string | null;
+  student?: ExtraAllowanceStudentSummary | null;
 }
 
 export interface ExtraAllowanceListItem extends ExtraAllowanceBaseFields {
@@ -39,24 +47,37 @@ export type ExtraAllowanceDetailResponse = ExtraAllowanceListItem;
 
 export type SelfManagedExtraAllowanceRoleType = Extract<
   ExtraAllowanceRoleType,
-  "communication" | "technical" | "training"
+  "communication" | "technical" | "training" | "sale"
 >;
 
-/** POST /users/me/staff-extra-allowances — self-service for communication/technical/training */
+/** POST /users/me/staff-extra-allowances — self-service for communication/technical/training/sale */
 export interface CreateMyStaffExtraAllowancePayload {
   roleType: SelfManagedExtraAllowanceRoleType;
   month: string;
   amount?: number;
   note?: string;
+  /** Bắt buộc với sale. */
+  studentId?: string;
 }
 
-/** PATCH /users/me/staff-extra-allowances — self-service for communication/technical/training */
+/** PATCH /users/me/staff-extra-allowances — self-service, chỉ khoản chưa thanh toán */
 export interface UpdateMyStaffExtraAllowancePayload {
   id: string;
   roleType: SelfManagedExtraAllowanceRoleType;
   month?: string;
   amount?: number;
   note?: string;
+  studentId?: string;
+}
+
+/** GET /users/me/sale-student-options, GET /extra-allowance/student-options */
+export interface SaleStudentOption {
+  id: string;
+  fullName: string;
+  birthYear: number | null;
+  school: string | null;
+  /** `inactive` = học sinh nghỉ học. */
+  status: string;
 }
 
 export interface CreateExtraAllowancePayload {
@@ -66,6 +87,8 @@ export interface CreateExtraAllowancePayload {
   status?: ExtraAllowanceStatus;
   note?: string;
   roleType: ExtraAllowanceRoleType;
+  /** Bắt buộc với sale. */
+  studentId?: string;
 }
 
 export interface UpdateExtraAllowancePayload {
@@ -76,6 +99,7 @@ export interface UpdateExtraAllowancePayload {
   status?: ExtraAllowanceStatus;
   note?: string | null;
   roleType?: ExtraAllowanceRoleType;
+  studentId?: string;
 }
 
 export interface BulkUpdateExtraAllowanceStatusPayload {

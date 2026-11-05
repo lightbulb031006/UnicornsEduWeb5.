@@ -1,10 +1,10 @@
-// Unicorns Edu - Database Schema
+// UniEdu - Database Schema
 // Import vào dbdiagram.io để tạo sơ đồ
 // https://dbdiagram.io
 
 Project UnicornsEdu {
   database_type: 'PostgreSQL'
-  Note: 'Unicorns Edu - Cơ sở dữ liệu giáo dục'
+  Note: 'UniEdu - Cơ sở dữ liệu giáo dục'
 }
 
 // ============================================

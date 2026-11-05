@@ -43,7 +43,8 @@ import { NotificationService } from './notification.service';
 
 const MANAGEMENT_FORBIDDEN_RESPONSE = {
   status: 403,
-  description: 'Gia sư và CSKH chỉ nhận thông báo, không được quản lý.',
+  description:
+    'Gia sư và CSKH chỉ nhận thông báo, không được quản lý; hoặc không phải người tạo / không có quyền kiểm duyệt thông báo này.',
 };
 
 @Controller('notifications')
@@ -60,7 +61,7 @@ export class NotificationController {
   @ApiOperation({
     summary: 'List notifications for admin management',
     description:
-      'Return draft and published notifications so admins and publisher staff roles can create, edit, push, and delete them.',
+      "Return the caller's own drafts and published notifications. Admin and assistant additionally see every published notification (moderation). Each item carries `canEdit` / `canDelete` for the caller.",
   })
   @ApiQuery({
     name: 'status',
@@ -81,9 +82,10 @@ export class NotificationController {
     description: 'Notification management list.',
   })
   async getAdminNotifications(
+    @CurrentUser() user: JwtPayload,
     @Query() query: GetAdminNotificationsQueryDto,
   ): Promise<NotificationAdminItemDto[]> {
-    return this.notificationService.getAdminNotifications(query);
+    return this.notificationService.getAdminNotifications(query, user);
   }
 
   @Post()
@@ -176,7 +178,7 @@ export class NotificationController {
   @ApiOperation({
     summary: 'Update a notification draft',
     description:
-      'Update a draft notification. Published notifications must use push to apply adjustments.',
+      'Update a draft notification. Only the author may edit. Published notifications must use push to apply adjustments.',
   })
   @ApiParam({
     name: 'id',
@@ -195,11 +197,16 @@ export class NotificationController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() data: UpdateNotificationDto,
   ): Promise<NotificationAdminItemDto> {
-    return this.notificationService.updateNotificationDraft(id, data ?? {}, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    return this.notificationService.updateNotificationDraft(
+      id,
+      data ?? {},
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+      user,
+    );
   }
 
   @Post(':id/push')
@@ -208,7 +215,7 @@ export class NotificationController {
   @ApiOperation({
     summary: 'Push a notification to its configured audience',
     description:
-      'Publish a draft or apply an adjusted re-push for an already published notification, then broadcast it via websocket to the matched audience.',
+      'Publish a draft or apply an adjusted re-push for an already published notification, then broadcast it via websocket to the matched audience. Only the author may push.',
   })
   @ApiParam({
     name: 'id',
@@ -229,11 +236,16 @@ export class NotificationController {
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() data: PushNotificationDto,
   ): Promise<NotificationAdminItemDto> {
-    return this.notificationService.pushNotification(id, data ?? {}, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    return this.notificationService.pushNotification(
+      id,
+      data ?? {},
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+      user,
+    );
   }
 
   @Delete(':id')
@@ -242,7 +254,7 @@ export class NotificationController {
   @ApiOperation({
     summary: 'Delete a notification',
     description:
-      'Delete a draft or published notification. Deletion does not emit a realtime retract event.',
+      'Delete a notification. The author may delete their own; admin may delete any published notification; assistant may delete published notifications whose author is not currently admin. Deletion does not emit a realtime retract event.',
   })
   @ApiParam({
     name: 'id',
@@ -256,11 +268,15 @@ export class NotificationController {
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseUUIDPipe()) id: string,
   ): Promise<DeleteNotificationResponseDto> {
-    return this.notificationService.deleteNotification(id, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    return this.notificationService.deleteNotification(
+      id,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+      user,
+    );
   }
 
   @Get('feed')

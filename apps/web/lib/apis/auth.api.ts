@@ -29,6 +29,7 @@ import type {
   ExtraAllowanceListResponse,
   ExtraAllowanceRoleType,
   ExtraAllowanceStatus,
+  SaleStudentOption,
   UpdateMyStaffExtraAllowancePayload,
 } from "@/dtos/extra-allowance.dto";
 import type { LessonOutputStaffStatsResponse } from "@/dtos/lesson.dto";
@@ -405,6 +406,25 @@ export async function updateMyStaffExtraAllowance(
 ): Promise<unknown> {
   const response = await api.patch("/users/me/staff-extra-allowances", dto);
   return response.data;
+}
+
+/** Self-service: xoá khoản trợ cấp tự quản của chính mình khi chưa thanh toán. */
+export async function deleteMyStaffExtraAllowance(id: string): Promise<unknown> {
+  const response = await api.delete(
+    `/users/me/staff-extra-allowances/${encodeURIComponent(id)}`,
+  );
+  return response.data;
+}
+
+/** Sale: tìm học sinh để gắn vào Trợ cấp sale (mọi học sinh, kể cả nghỉ học). */
+export async function getMySaleStudentOptions(
+  search?: string,
+): Promise<SaleStudentOption[]> {
+  const response = await api.get<SaleStudentOption[]>(
+    "/users/me/sale-student-options",
+    { params: search ? { search } : undefined },
+  );
+  return Array.isArray(response.data) ? response.data : [];
 }
 
 /** Current linked staff lesson output stats for self-service lesson-plan detail page. */

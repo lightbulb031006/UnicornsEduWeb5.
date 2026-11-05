@@ -157,3 +157,11 @@ export function compactTuitionPerSessionLine(totalInput: string, sessionsInput: 
   if (per == null) return null;
   return `${formatCurrency(per)}/buổi`;
 }
+
+/** Nội dung confirm kết thúc lớp; nhắc buổi chưa thanh toán trợ cấp (vẫn thanh toán được sau). */
+export function buildEndClassConfirmMessage(unpaidSessionCount = 0): string {
+  const base =
+    "Kết thúc lớp? Hệ thống sẽ gỡ gia sư khỏi lớp, đóng roster học sinh, xóa lịch cố định và lịch bù tương lai.";
+  if (unpaidSessionCount <= 0) return base;
+  return `${base}\n\nCòn ${unpaidSessionCount} buổi chưa thanh toán trợ cấp gia sư — vẫn thanh toán được sau khi kết thúc lớp.`;
+}

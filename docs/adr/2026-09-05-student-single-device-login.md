@@ -1,6 +1,6 @@
 # ADR: Học sinh chỉ giữ một thiết bị đăng nhập, xác minh bằng magic link gắn với thiết bị khởi tạo
 
-- **Status:** Accepted
+- **Status:** Accepted — mục 3 (magic link mỗi lần đăng nhập) bị thay bởi `2026-10-18-student-login-skip-login-magic-link.md`
 - **Date:** 2026-09-05
 
 ## Context

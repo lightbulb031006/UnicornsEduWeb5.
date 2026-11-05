@@ -1,5 +1,7 @@
 import type {
+  CloseFixedSalaryMonthPayload,
   CloseFixedSalaryMonthResponse,
+  FixedSalaryCloseCandidatesResponse,
   RoleFixedSalaryDefaultsResponse,
   RoleFixedSalaryOperatingRatesResponse,
   StaffFixedSalaryOverridesQuery,
@@ -86,9 +88,19 @@ export async function getStaffFixedSalaryPayables(
   return response.data;
 }
 
-export async function closeFixedSalaryMonth(): Promise<CloseFixedSalaryMonthResponse> {
+export async function getFixedSalaryCloseCandidates(): Promise<FixedSalaryCloseCandidatesResponse> {
+  const response = await api.get<FixedSalaryCloseCandidatesResponse>(
+    "/fixed-salary-settings/close-candidates",
+  );
+  return response.data;
+}
+
+export async function closeFixedSalaryMonth(
+  payload: CloseFixedSalaryMonthPayload = {},
+): Promise<CloseFixedSalaryMonthResponse> {
   const response = await api.post<CloseFixedSalaryMonthResponse>(
     "/fixed-salary-settings/close-month",
+    payload,
   );
   return response.data;
 }

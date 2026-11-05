@@ -23,6 +23,12 @@ describe("contentApiPaths (Axios endpoints)", () => {
     expect(contentApiPaths.lessonQuestion("l1", "q1")).toBe(
       "/lessons/l1/questions/q1",
     );
+    expect(contentApiPaths.lessonQuestionSets("l1")).toBe(
+      "/lessons/l1/questions/sets",
+    );
+    expect(contentApiPaths.lessonQuestionSet("l1", "s1")).toBe(
+      "/lessons/l1/questions/sets/s1",
+    );
     expect(contentApiPaths.lessonQuestionsReorder("l1")).toBe(
       "/lessons/l1/questions/reorder",
     );
@@ -35,6 +41,12 @@ describe("contentApiPaths (Axios endpoints)", () => {
     expect(contentApiPaths.lessonQuizzes("l1")).toBe("/lessons/l1/quizzes");
     expect(contentApiPaths.lessonQuiz("l1", "q1")).toBe(
       "/lessons/l1/quizzes/q1",
+    );
+    expect(contentApiPaths.lessonQuizSets("l1")).toBe(
+      "/lessons/l1/quizzes/sets",
+    );
+    expect(contentApiPaths.lessonQuizSet("l1", "s1")).toBe(
+      "/lessons/l1/quizzes/sets/s1",
     );
     expect(contentApiPaths.studentClassLesson("cl1", "l1")).toBe(
       "/users/me/student-classes/cl1/lessons/l1",

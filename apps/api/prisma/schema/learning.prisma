@@ -40,29 +40,39 @@ model ClassTimelineItem {
 }
 
 model ClassContentItem {
-  id               String               @id @default(uuid())
-  classId          String               @map("class_id")
-  kind             ClassContentItemKind @default(lesson) @map("kind")
-  lessonId         String?              @map("lesson_id")
-  sortOrder        Int                  @default(0) @map("sort_order")
+  id               String                    @id @default(dbgenerated("uuid_generate_v4()"))
+  classId          String                    @map("class_id")
+  kind             ClassContentItemKind      @default(lesson) @map("kind")
+  lessonId         String?                   @map("lesson_id")
+  sortOrder        Int                       @default(0) @map("sort_order")
   /// Thời điểm mở bài của lần giao (riêng lớp). Null với tiết lý thuyết.
-  openAt           DateTime?            @map("open_at") @db.Timestamptz(6)
-  /// Thời lượng làm bài (phút) của lần giao. Null với tiết lý thuyết.
-  durationMinutes  Int?                 @map("duration_minutes")
+  openAt           DateTime?                 @map("open_at") @db.Timestamptz(6)
+  /// Hạn làm bài của lần giao: từ mốc này không bắt đầu lượt mới (lượt dở vẫn chạy hết giờ).
+  /// Mặc định = hạn xem nội dung của lớp lúc giao; null = không hạn. Null với tiết lý thuyết.
+  closeAt          DateTime?                 @map("close_at") @db.Timestamptz(6)
+  /// Thời lượng đã chốt của lần giao tạo trước khi thời lượng chuyển lên tiết (legacy).
+  /// Lần giao mới để null → đọc `lessons.duration_minutes`.
+  durationMinutes  Int?                      @map("duration_minutes")
+  /// Đảo câu: mỗi lượt làm xáo thứ tự câu (đề IT xáo trong từng nhóm) và thứ tự phương án/nhận định.
+  shuffleQuestions Boolean                   @default(true) @map("shuffle_questions")
   /// Null = hiện với học sinh. Có giá trị = ẩn mềm; không xoá Attempt.
-  hiddenAt         DateTime?            @map("hidden_at") @db.Timestamptz(6)
-  hiddenByStaffId  String?              @map("hidden_by_staff_id")
-  /// Null khi đang hiện. `manual` = gia sư tự ẩn; `module_removed` = ẩn do gỡ chuyên đề.
+  hiddenAt         DateTime?                 @map("hidden_at") @db.Timestamptz(6)
+  hiddenByStaffId  String?                   @map("hidden_by_staff_id")
+  /// Null khi đang hiện. `manual` = gia sư tự ẩn; `module_removed` = ẩn do gỡ khỏi lớp (tiết/chuyên đề).
   hiddenReason     ClassContentHiddenReason? @map("hidden_reason")
-  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  /// Có giá trị = tiết đã **gỡ khỏi lớp** (không thuộc tập tiết của lớp): biến mất ở mọi phía.
+  /// Khác Ẩn: item đang hiện thì gỡ kèm ẩn (`module_removed`); item đang Ẩn tay giữ `manual`.
+  /// Thêm lại tiết/chuyên đề xoá cột này. Attempt/điểm/lượt xem giữ nguyên.
+  removedAt        DateTime?                 @map("removed_at") @db.Timestamptz(6)
+  createdAt        DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  class Class @relation(fields: [classId], references: [id], onDelete: Cascade)
-  lesson Lesson? @relation(fields: [lessonId], references: [id], onDelete: Restrict)
-  hiddenByStaff StaffInfo? @relation("ClassContentHiddenBy", fields: [hiddenByStaffId], references: [id], onDelete: SetNull)
-  attempts Attempt[]
+  class             Class                   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  lesson            Lesson?                 @relation(fields: [lessonId], references: [id], onDelete: Restrict)
+  hiddenByStaff     StaffInfo?              @relation("ClassContentHiddenBy", fields: [hiddenByStaffId], references: [id], onDelete: SetNull)
+  attempts          Attempt[]
   theoryLessonViews ClassTheoryLessonView[]
-  timelineItem ClassTimelineItem?
+  timelineItem      ClassTimelineItem?
 
   @@unique([classId, lessonId])
   @@index([classId])
@@ -73,12 +83,12 @@ model ClassContentItem {
 
 /// Lượt mở trang Tiết lý thuyết của học sinh trong phạm vi một lớp.
 model ClassTheoryLessonView {
-  id                 String           @id @default(uuid())
-  classContentItemId String           @map("class_content_item_id")
-  studentId          String           @map("student_id")
-  lastViewedAt       DateTime         @default(now()) @map("last_viewed_at") @db.Timestamptz(6)
-  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                 String   @id @default(uuid())
+  classContentItemId String   @map("class_content_item_id")
+  studentId          String   @map("student_id")
+  lastViewedAt       DateTime @default(now()) @map("last_viewed_at") @db.Timestamptz(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   classContentItem ClassContentItem @relation(fields: [classContentItemId], references: [id], onDelete: Cascade)
   student          StudentInfo      @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -112,7 +122,7 @@ model ClassModule {
 model Class {
   id                            String                      @id
   name                          String
-  courseId                       String                      @map("course_id")
+  courseId                      String                      @map("course_id")
   status                        ClassStatus                 @default(running)
   maxStudents                   Int                         @default(15) @map("max_students")
   allowancePerSessionPerStudent Int                         @default(0) @map("allowance_per_session_per_student")
@@ -151,7 +161,7 @@ model Class {
   scheduleEntries               ClassScheduleEntry[]
   sessions                      Session[]
   students                      StudentClass[]
-  contentItems ClassContentItem[]
+  contentItems                  ClassContentItem[]
   modules                       ClassModule[]
   lessons                       Lesson[]
   timelineItems                 ClassTimelineItem[]
@@ -166,35 +176,37 @@ model Class {
 
 /// Khoá học — chương trình học độc lập có nội dung học thuật riêng, ngân hàng câu hỏi riêng và thời hạn mặc định.
 model Course {
-  id                  String                @id @default(uuid())
+  id                  String                   @id @default(uuid())
   name                String
-  defaultDurationDays Int?                  @map("default_duration_days")
-  sortOrder           Int                   @default(0) @map("sort_order")
-  isActive            Boolean               @default(true) @map("is_active")
+  defaultDurationDays Int?                     @map("default_duration_days")
+  sortOrder           Int                      @default(0) @map("sort_order")
+  isActive            Boolean                  @default(true) @map("is_active")
   /// Khoá bán một lần: mọi lớp của khoá có `pricing_mode = one_time`.
-  isOneTime           Boolean               @default(false) @map("is_one_time")
-  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isOneTime           Boolean                  @default(false) @map("is_one_time")
+  createdAt           DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
   classes             Class[]
   modules             Module[]
   lessons             Lesson[]
   difficultyLevels    CourseDifficultyLevel[]
   lessonPlanMembers   CourseLessonPlanMember[]
-  questions           Question[]           // <‑‑ back‑relation for question bank
+  questions           Question[] // <‑‑ back‑relation for question bank
+  sharedMaterials     SharedMaterial[]
+  audioAssets         AudioAsset[]
 
   @@map("courses")
 }
 
 /// Thang độ khó riêng của mỗi Khoá học.
 model CourseDifficultyLevel {
-  id        String   @id @default(uuid())
-  courseId   String   @map("course_id")
+  id        String     @id @default(dbgenerated("gen_random_uuid()"))
+  courseId  String     @map("course_id")
   name      String
-  sortOrder Int      @default(0) @map("sort_order")
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  sortOrder Int        @default(0) @map("sort_order")
+  isActive  Boolean    @default(true) @map("is_active")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  course    Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
   questions Question[] // back‑relation for question bank
 
   @@unique([courseId, name])
@@ -207,11 +219,11 @@ model CourseDifficultyLevel {
 /// Trợ lí (`assistant`) thực hiện. Thành viên `lesson_plan` chỉ thấy khoá mình được gán;
 /// `lesson_plan_head` thấy và sửa được nội dung của mọi khoá.
 model CourseLessonPlanMember {
-  id        String   @id @default(uuid())
-  courseId   String   @map("course_id")
-  staffId   String   @map("staff_id")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  id        String    @id @default(dbgenerated("gen_random_uuid()"))
+  courseId  String    @map("course_id")
+  staffId   String    @map("staff_id")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  course    Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   staff     StaffInfo @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
   @@unique([courseId, staffId])
@@ -222,16 +234,17 @@ model CourseLessonPlanMember {
 
 /// Chuyên đề — nhóm tiết học bên trong một Khoá học. Chỉ tồn tại ở cấp khoá.
 model Module {
-  id        String   @id @default(uuid())
-  courseId  String   @map("course_id")
-  title     String
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  lessons   Lesson[]
-  questions Question[] // back‑relation for question bank
-  classModules ClassModule[]
+  id              String           @id @default(dbgenerated("gen_random_uuid()"))
+  courseId        String           @map("course_id")
+  title           String
+  sortOrder       Int              @default(0) @map("sort_order")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons         Lesson[]
+  questions       Question[] // back‑relation for question bank
+  sharedMaterials SharedMaterial[]
+  classModules    ClassModule[]
 
   @@index([courseId])
   @@map("modules")
@@ -334,9 +347,20 @@ model Session {
   notes                                  String?
   lessonContent                          String?              @map("lesson_content")
   homework                               String?
-   tutorial                               String?
-   recordingUrl                           String?              @map("recording_url")
-   tuitionFee                             Int?                 @map("tuition_fee")
+  tutorial                               String?
+  /// Null = buổi tạo trước nhận xét có cấu trúc (legacy, đọc `attendance.notes`).
+  progressStatus                         SessionProgressStatus? @map("progress_status")
+  progressDone                           String?              @map("progress_done")
+  progressRemaining                      String?              @map("progress_remaining")
+  hasInClassTest                         Boolean              @default(false) @map("has_in_class_test")
+  inClassTestContent                     String?              @map("in_class_test_content")
+  inClassTestTotal                       Int?                 @map("in_class_test_total")
+  homeworkDueAt                          DateTime?            @map("homework_due_at") @db.Timestamptz(6)
+  nextSessionPlan                        String?              @map("next_session_plan")
+  hasRetest                              Boolean              @default(false) @map("has_retest")
+  retestContent                          String?              @map("retest_content")
+  recordingUrl                           String?              @map("recording_url")
+  tuitionFee                             Int?                 @map("tuition_fee")
   googleMeetLink                         String?              @map("google_meet_link")
   googleCalendarEventId                  String?              @map("google_calendar_event_id")
   calendarSyncedAt                       DateTime?            @map("calendar_synced_at") @db.Timestamptz(6)
@@ -422,7 +446,14 @@ model Attendance {
   sessionId                           String                     @map("session_id")
   studentId                           String                     @map("student_id")
   status                              AttendanceStatus           @default(present)
+  /// Nhận xét tự do legacy; buổi có `sessions.progress_status` dùng các field nhận xét có cấu trúc bên dưới.
   notes                               String?
+  testCorrectCount                    Int?                       @map("test_correct_count")
+  testComment                         String?                    @map("test_comment")
+  strengths                           String?
+  improvements                        String?
+  homeworkQuality                     HomeworkQuality?           @map("homework_quality")
+  homeworkComment                     String?                    @map("homework_comment")
   createdAt                           DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   customerCareCoef                    Decimal?                   @map("customer_care_coef") @db.Decimal(3, 2)
   customerCareStaffId                 String?                    @map("customer_care_staff_id")
@@ -432,6 +463,10 @@ model Attendance {
   /// Học phí dùng để tính hoa hồng đã chốt (paid/pending) khi `tuition_fee` bị dồn sang buổi khác.
   payrollBasisTuitionFee              Int?                       @map("payroll_basis_tuition_fee")
   transactionId                       String?                    @unique @map("transaction_id")
+  /// Phần thu bù học thử đã gộp vào `tuition_fee` của buổi này (null nếu buổi không phải buổi thu bù).
+  trialCatchUpFee                     Int?                       @map("trial_catch_up_fee")
+  /// Dòng ví `extend` thứ hai của buổi thu bù học thử.
+  trialCatchUpTransactionId           String?                    @unique @map("trial_catch_up_transaction_id")
   assistantManagerStaffId             String?                    @map("assistant_manager_staff_id")
   assistantPaymentStatus              PaymentStatus?             @map("assistant_payment_status")
   assistantTaxDeductionRatePercent    Decimal                    @default(0) @map("assistant_tax_deduction_rate_percent") @db.Decimal(5, 2)
@@ -439,7 +474,8 @@ model Attendance {
   customerCareStaff                   StaffInfo?                 @relation("AttendanceCustomerCare", fields: [customerCareStaffId], references: [id])
   session                             Session                    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   student                             StudentInfo                @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  transaction                         WalletTransactionsHistory? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transaction                         WalletTransactionsHistory? @relation("AttendanceTransaction", fields: [transactionId], references: [id], onDelete: Cascade)
+  trialCatchUpTransaction             WalletTransactionsHistory? @relation("AttendanceTrialCatchUpTransaction", fields: [trialCatchUpTransactionId], references: [id], onDelete: SetNull)
   lessonPlanHeadCommissions           LessonPlanHeadCommission[]
 
   @@unique([sessionId, studentId])
@@ -489,28 +525,34 @@ model CfProblemTutorial {
 /// (`course_id` + `module_id`) hoặc thuộc riêng một lớp (`class_id`) — không bao giờ cả hai.
 /// Tiết riêng của lớp đã ngừng tạo mới qua chuyên đề lớp; dữ liệu cũ được lưu trữ (`archived_at`).
 model Lesson {
-  id        String     @id @default(uuid())
-  kind      LessonKind
-  courseId  String?    @map("course_id")
-  moduleId  String?    @map("module_id")
-  classId   String?    @map("class_id")
-  title     String
-  videoUrl  String?    @map("video_url")
-  content   String?
-  order     Int        @default(0)
+  id            String     @id @default(dbgenerated("gen_random_uuid()"))
+  kind          LessonKind
+  courseId      String?    @map("course_id")
+  moduleId      String?    @map("module_id")
+  classId       String?    @map("class_id")
+  title         String
+  videoUrl      String?    @map("video_url")
+  content       String?
+  order         Int        @default(0)
+  /// Tên hai nhóm tự chọn của tiết thực hành (hồ sơ IT).
+  elective1Name String?    @map("elective_1_name")
+  elective2Name String?    @map("elective_2_name")
+  /// Thời lượng làm bài (phút/lượt, 1–720) của tiết thực hành; null với tiết lý thuyết.
+  /// Lượt mới của mọi lần giao đọc từ đây (trừ lần giao cũ đã chốt `class_content_items.duration_minutes`).
+  durationMinutes Int?     @map("duration_minutes")
   /// Lưu trữ mềm (không xoá). Tiết riêng của lớp cũ bị lưu trữ khi chuyển sang nội dung theo chuyên đề.
-  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
-  createdBy String?    @map("created_by")
-  updatedBy String?    @map("updated_by")
-  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt    DateTime?  @map("archived_at") @db.Timestamptz(6)
+  createdBy     String?    @map("created_by")
+  updatedBy     String?    @map("updated_by")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  course        Course?    @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  module        Module?    @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  class         Class?     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  course        Course?            @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module        Module?            @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  class         Class?             @relation(fields: [classId], references: [id], onDelete: Cascade)
   contentItems  ClassContentItem[]
-  createdByUser User?      @relation("LessonCreatedBy", fields: [createdBy], references: [id])
-  updatedByUser User?      @relation("LessonUpdatedBy", fields: [updatedBy], references: [id])
+  createdByUser User?              @relation("LessonCreatedBy", fields: [createdBy], references: [id])
+  updatedByUser User?              @relation("LessonUpdatedBy", fields: [updatedBy], references: [id])
   quizzes       LessonQuiz[]
   quizAnswers   LessonQuizAnswer[]
   questionLinks QuestionLink[]
@@ -523,10 +565,10 @@ model Lesson {
 
 /// Liên kết câu hỏi từ ngân hàng vào bài tập ôn nhẹ của một tiết lý thuyết.
 model LessonQuiz {
-  id         String   @id @default(uuid())
-  lessonId   String   @map("lesson_id")
-  questionId String   @map("question_id")
-  order      Int      @default(0)
+  id         String @id @default(uuid())
+  lessonId   String @map("lesson_id")
+  questionId String @map("question_id")
+  order      Int    @default(0)
 
   lesson   Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
   question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
@@ -539,14 +581,20 @@ model LessonQuiz {
 
 /// Trả lời bài tập ôn nhẹ — KHÔNG sinh Attempt, KHÔNG tính điểm.
 model LessonQuizAnswer {
-  id          String    @id @default(uuid())
-  lessonId    String    @map("lesson_id")
-  questionId  String    @map("question_id")
-  studentId   String    @map("student_id")
-  choiceIndex Int?      @map("choice_index")
-  essayAnswer String?   @map("essay_answer")
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id           String   @id @default(uuid())
+  lessonId     String   @map("lesson_id")
+  questionId   String   @map("question_id")
+  studentId    String   @map("student_id")
+  choiceIndex  Int?     @map("choice_index")
+  essayAnswer  String?  @map("essay_answer")
+  /// Nhóm câu Đúng/Sai: `(boolean | null)[4]`, null = bỏ trống nhận định.
+  tfChoices    Json?    @map("tf_choices")
+  /// Chữ học sinh gõ vào từng ô trống: `(string | null)[]`.
+  blankAnswers Json?    @map("blank_answers")
+  /// Câu sắp xếp: chữ trên thẻ theo thứ tự học sinh xếp. Rỗng = chưa xếp.
+  orderAnswer  String[] @default([]) @map("order_answer")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   lesson   Lesson      @relation(fields: [lessonId], references: [id], onDelete: Cascade)
   question Question    @relation(fields: [questionId], references: [id], onDelete: Restrict)
@@ -561,44 +609,127 @@ model LessonQuizAnswer {
 
 // Question bank models
 
+/// Audio làm tư liệu (hồ sơ JP), lưu ở bucket private `question-audio`, đọc qua
+/// signed URL. Bất biến: thay audio = tạo bản mới, bản cũ giữ cho snapshot bài làm.
+model AudioAsset {
+  id              String             @id @default(uuid())
+  courseId        String             @map("course_id")
+  storagePath     String             @map("storage_path")
+  mimeType        String             @map("mime_type")
+  sizeBytes       Int                @map("size_bytes")
+  originalName    String             @map("original_name")
+  /// Giới hạn nghe trong lượt làm: null = không giới hạn, 1 hoặc 2 lần.
+  maxPlays        Int?               @map("max_plays")
+  /// false = học sinh không tua được (vẫn tạm dừng) trong lượt làm.
+  allowSeek       Boolean            @default(true) @map("allow_seek")
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  course          Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  questions       Question[]
+  sharedMaterials SharedMaterial[]
+  attemptPlays    AttemptAudioPlay[]
+
+  @@index([courseId])
+  @@map("audio_assets")
+}
+
+/// Số lần học sinh đã bấm phát một audio giới hạn trong một lượt làm (đếm ở server).
+model AttemptAudioPlay {
+  id        String     @id @default(uuid())
+  attemptId String     @map("attempt_id")
+  audioId   String     @map("audio_id")
+  playCount Int        @default(0) @map("play_count")
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  attempt   Attempt    @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  audio     AudioAsset @relation(fields: [audioId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, audioId])
+  @@map("attempt_audio_plays")
+}
+
+/// Phần đầu của Bộ câu hỏi (hồ sơ JP): văn bản / ảnh / audio các câu trong bộ cùng
+/// dựa vào. Thuộc đúng một chuyên đề; mọi câu của bộ cùng chuyên đề đó
+/// (ADR 2026-10-09-question-set).
+model SharedMaterial {
+  id        String      @id @default(uuid())
+  courseId  String      @map("course_id")
+  moduleId  String      @map("module_id")
+  title     String
+  content   String      @db.Text // HTML từ TipTap
+  /// Xoá bộ = xoá mềm bộ cùng mọi câu; giữ dòng để lượt đã làm còn xem lại được.
+  deletedAt DateTime?   @map("deleted_at") @db.Timestamptz(6)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  course    Course      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module    Module      @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  /// Audio dùng chung (hội thoại cho nhiều câu).
+  audioId   String?     @map("audio_id")
+  audio     AudioAsset? @relation(fields: [audioId], references: [id], onDelete: SetNull)
+  questions Question[]
+
+  @@index([courseId])
+  @@index([moduleId])
+  @@map("shared_materials")
+}
+
 /// Ngân hàng câu hỏi – mỗi câu thuộc một Module (chuyên đề) và một DifficultyLevel của course
 model Question {
-  id                String   @id @default(uuid())
-  courseId          String   @map("course_id")
-  moduleId          String   @map("module_id")
-  difficultyLevelId String   @map("difficulty_level_id")
-  type              QuestionType @default(single_choice)
-  content           String   // HTML from TipTap
-  options           Json?    // array of option strings (HTML or LaTeX) – only for single_choice
-  correctIndex      Int?     // zero‑based index into options – required for single_choice
-  explanation       String?  // optional explanation for answer (HTML)
-  answerGuide       String?  // for essay type – optional guide text (HTML)
-  deletedAt         DateTime? @map("deleted_at")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                String               @id @default(uuid())
+  courseId          String               @map("course_id")
+  moduleId          String               @map("module_id")
+  difficultyLevelId String               @map("difficulty_level_id")
+  type              QuestionType         @default(single_choice)
+  content           String // HTML from TipTap
+  options           Json? // single_choice: 2–6 phương án; true_false_group: 4 nhận định a–d (HTML)
+  correctIndex      Int? // zero‑based index into options – required for single_choice
+  /// Đáp án 4 nhận định của nhóm câu Đúng/Sai (true = Đúng). Rỗng với loại khác.
+  tfAnswerKey       Boolean[]            @default([]) @map("tf_answer_key")
+  explanation       String? // optional explanation for answer (HTML)
+  answerGuide       String? // for essay type – optional guide text (HTML)
+  /// Kỹ năng (chỉ hồ sơ JP, chọn nhiều). Câu cũ được phép rỗng.
+  skills            QuestionSkill[]      @default([])
+  /// Kiểu ô nhập câu tự luận (hồ sơ JP). null = ô dài (câu cũ). Không ảnh hưởng chấm.
+  essayInputSize    EssayInputSize?      @map("essay_input_size")
+  /// Kiểu nhãn Câu Đúng/Sai (JP). null = ○/×.
+  tfLabelStyle      TrueFalseLabelStyle? @map("tf_label_style")
+  /// Câu điền vào ô trống: đáp án hợp lệ từng ô `string[][]` (thứ tự ô trong `content`).
+  blankAnswerKey    Json?                @map("blank_answer_key")
+  /// Tư liệu dùng chung (hồ sơ JP): các câu cùng tư liệu luôn đứng liền nhau trong đề.
+  sharedMaterialId  String?              @map("shared_material_id")
+  /// Vị trí của câu trong bộ (0-based); null với câu lẻ.
+  setPosition       Int?                 @map("set_position")
+  /// Audio nhúng riêng của câu (hồ sơ JP).
+  audioId           String?              @map("audio_id")
+  deletedAt         DateTime?            @map("deleted_at") @db.Timestamptz(6)
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  course            Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  module            Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  difficultyLevel   CourseDifficultyLevel @relation(fields: [difficultyLevelId], references: [id], onDelete: Restrict)
+  course          Course                @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  module          Module                @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  difficultyLevel CourseDifficultyLevel @relation(fields: [difficultyLevelId], references: [id], onDelete: Restrict)
+  sharedMaterial  SharedMaterial?       @relation(fields: [sharedMaterialId], references: [id], onDelete: NoAction)
+  audio           AudioAsset?           @relation(fields: [audioId], references: [id], onDelete: SetNull)
 
-  questionLinks        QuestionLink[]
-  lessonQuizzes        LessonQuiz[]
-  lessonQuizAnswers    LessonQuizAnswer[]
-  attemptAnswers       AttemptAnswer[]
+  questionLinks     QuestionLink[]
+  lessonQuizzes     LessonQuiz[]
+  lessonQuizAnswers LessonQuizAnswer[]
+  attemptAnswers    AttemptAnswer[]
 
   @@index([courseId])
   @@index([moduleId])
   @@index([difficultyLevelId])
+  @@index([sharedMaterialId])
   @@map("questions")
 }
 
 /// Liên kết câu hỏi với một tiết luyện tập — minimal for delete‑warning
 model QuestionLink {
-  id         String @id @default(uuid())
-  lessonId   String @map("lesson_id")
-  questionId String @map("question_id")
-  order      Int?   @map("order")
-  points     Int?   @map("points")
+  id         String       @id @default(uuid())
+  lessonId   String       @map("lesson_id")
+  questionId String       @map("question_id")
+  order      Int?         @map("order")
+  points     Int?         @map("points")
+  /// Vị trí trong đề (hồ sơ IT): Bắt buộc / Tự chọn 1 / Tự chọn 2.
+  slot       QuestionSlot @default(required)
 
   lesson   Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
   question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
@@ -609,9 +740,53 @@ model QuestionLink {
   @@map("question_links")
 }
 
+/// Kỹ năng câu hỏi hồ sơ JP (CONTEXT.md — Kỹ năng). Chỉ phân loại, không quyết định cách trả lời.
+/// Kiểu ô nhập câu tự luận: ngắn (một dòng, tự xuống dòng) / dài (nhiều dòng).
+enum EssayInputSize {
+  short
+  long
+}
+
+enum QuestionSkill {
+  kanji
+  vocabulary
+  grammar
+  reading
+  listening
+  conversation
+  writing
+}
+
 enum QuestionType {
   single_choice
   essay
+  true_false_group
+  /// Câu Đúng/Sai (JP): một nhận định, đáp án `tfAnswerKey[0]`, chấm cả câu.
+  true_false
+  /// Câu điền vào ô trống (JP): ô `[[___]]` trong `content`, đáp án hợp lệ `blankAnswerKey`.
+  fill_blank
+  /// Câu sắp xếp (JP): thẻ ở `options` theo thứ tự đúng; snapshot luôn xáo.
+  ordering
+}
+
+/// Kiểu nhãn Câu Đúng/Sai (JP), chọn theo từng câu. null = ○/×.
+enum TrueFalseLabelStyle {
+  maru_batsu
+  dung_sai
+  true_false
+}
+
+/// Vị trí câu trong đề thực hành (ADR it-absolute-scoring). Ôn nhẹ luôn `required`.
+enum QuestionSlot {
+  required
+  elective_1
+  elective_2
+}
+
+/// Thang điểm của một Bài làm: `equal_100` chia đều 100/N; `absolute_it` điểm tuyệt đối, đơn vị 1/100 điểm.
+enum AttemptScoring {
+  equal_100
+  absolute_it
 }
 
 enum AttemptStatus {
@@ -622,23 +797,28 @@ enum AttemptStatus {
 
 /// Lượt làm bài của học sinh — gắn lần giao (`class_content_items`), không gắn tiết (`lessons`).
 model Attempt {
-  id                 String        @id @default(uuid())
-  assignmentId       String        @map("assignment_id")
-  studentId          String        @map("student_id")
-  startedAt          DateTime      @map("started_at") @db.Timestamptz(6)
+  id               String         @id @default(uuid())
+  assignmentId     String         @map("assignment_id")
+  studentId        String         @map("student_id")
+  startedAt        DateTime       @map("started_at") @db.Timestamptz(6)
   /// Snapshot thời lượng lần giao lúc bấm bắt đầu — đồng hồ riêng HS, không đổi nếu gia sư sửa lịch sau đó.
-  durationMinutes    Int           @map("duration_minutes")
-  submittedAt        DateTime?     @map("submitted_at") @db.Timestamptz(6)
-  status             AttemptStatus @default(in_progress)
-  autoGradedScore    Int?          @map("auto_graded_score")
-  autoGradedMax      Int?          @map("auto_graded_max")
-  hasUngradedEssay   Boolean       @default(false) @map("has_ungraded_essay")
-  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  durationMinutes  Int            @map("duration_minutes")
+  submittedAt      DateTime?      @map("submitted_at") @db.Timestamptz(6)
+  status           AttemptStatus  @default(in_progress)
+  autoGradedScore  Int?           @map("auto_graded_score")
+  autoGradedMax    Int?           @map("auto_graded_max")
+  hasUngradedEssay Boolean        @default(false) @map("has_ungraded_essay")
+  /// Snapshot hồ sơ lúc start. Bài cũ = `equal_100`.
+  scoring          AttemptScoring @default(equal_100)
+  /// Học sinh làm cả hai nhóm tự chọn → phần tự chọn 0 điểm.
+  electiveVoided   Boolean        @default(false) @map("elective_voided")
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  assignment ClassContentItem @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
-  student    StudentInfo      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  assignment ClassContentItem   @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  student    StudentInfo        @relation(fields: [studentId], references: [id], onDelete: Cascade)
   answers    AttemptAnswer[]
+  audioPlays AttemptAudioPlay[]
 
   @@index([assignmentId, studentId])
   @@index([studentId])
@@ -647,30 +827,55 @@ model Attempt {
 
 /// Câu trả lời trong một Attempt. Snapshot toàn bộ đề lúc `start`; chấm không đọc `Question` live.
 model AttemptAnswer {
-  id              String       @id @default(uuid())
-  attemptId       String       @map("attempt_id")
-  questionId      String       @map("question_id")
-  order           Int          @default(0)
-  /// Thang điểm câu = 100/N (Hamilton) lúc start — không lấy `question_links.points`.
-  pointsPossible  Int          @map("points_possible")
+  id                    String               @id @default(uuid())
+  attemptId             String               @map("attempt_id")
+  questionId            String               @map("question_id")
+  order                 Int                  @default(0)
+  /// `equal_100`: 100/N (Hamilton). `absolute_it`: 25 (trắc nghiệm) / 100 (Đúng/Sai), đơn vị 1/100 điểm.
+  pointsPossible        Int                  @map("points_possible")
+  /// Snapshot vị trí câu (Bắt buộc / Tự chọn 1 / Tự chọn 2).
+  slot                  QuestionSlot         @default(required)
   /// Snapshot loại câu lúc start.
-  type            QuestionType
-  content         String       @db.Text
-  options         Json?
-  correctIndex    Int?         @map("correct_index")
-  explanation     String?      @db.Text
-  answerGuide     String?      @map("answer_guide") @db.Text
-  difficultyLabel String       @map("difficulty_label")
-  choiceIndex     Int?         @map("choice_index")
-  essayAnswer     String?      @map("essay_answer") @db.Text
+  type                  QuestionType
+  content               String               @db.Text
+  options               Json?
+  correctIndex          Int?                 @map("correct_index")
+  /// Đảo đáp án: `optionOrder[i]` = chỉ số gốc của phương án hiển thị thứ i. Rỗng = không đảo.
+  /// `options`/`correctIndex`/`tfAnswerKey`/`choiceIndex`/`tfChoices` đều theo thứ tự hiển thị.
+  optionOrder           Int[]                @default([]) @map("option_order")
+  explanation           String?              @db.Text
+  answerGuide           String?              @map("answer_guide") @db.Text
+  /// Snapshot kiểu ô tự luận lúc start (null = ô dài).
+  essayInputSize        EssayInputSize?      @map("essay_input_size")
+  /// Snapshot kiểu nhãn Câu Đúng/Sai lúc start.
+  tfLabelStyle          TrueFalseLabelStyle? @map("tf_label_style")
+  difficultyLabel       String               @map("difficulty_label")
+  /// Snapshot đáp án nhóm câu Đúng/Sai — được cập nhật khi sửa đáp án (chấm lại).
+  tfAnswerKey           Boolean[]            @default([]) @map("tf_answer_key")
+  choiceIndex           Int?                 @map("choice_index")
+  /// Lựa chọn 4 nhận định: `(boolean | null)[4]`.
+  tfChoices             Json?                @map("tf_choices")
+  /// Snapshot đáp án hợp lệ từng ô — được cập nhật khi sửa đáp án (chấm lại), trừ khi đổi số ô.
+  blankAnswerKey        Json?                @map("blank_answer_key")
+  /// Chữ học sinh gõ vào từng ô trống: `(string | null)[]`.
+  blankAnswers          Json?                @map("blank_answers")
+  /// Câu sắp xếp: chữ trên thẻ theo thứ tự học sinh xếp (so theo chữ). Rỗng = chưa xếp.
+  orderAnswer           String[]             @default([]) @map("order_answer")
+  /// Snapshot tư liệu dùng chung lúc start (id để gom khối, content để hiển thị).
+  sharedMaterialId      String?              @map("shared_material_id")
+  sharedMaterialContent String?              @map("shared_material_content") @db.Text
+  /// Snapshot audio lúc start (id của audio_assets, không FK — asset bất biến).
+  audioId               String?              @map("audio_id")
+  sharedMaterialAudioId String?              @map("shared_material_audio_id")
+  essayAnswer           String?              @map("essay_answer") @db.Text
   /// Học sinh đánh dấu quay lại xem trước nộp — không ảnh hưởng chấm điểm.
-  markedForReview Boolean      @default(false) @map("marked_for_review")
-  isCorrect       Boolean?     @map("is_correct")
-  pointsAwarded   Int?         @map("points_awarded")
+  markedForReview       Boolean              @default(false) @map("marked_for_review")
+  isCorrect             Boolean?             @map("is_correct")
+  pointsAwarded         Int?                 @map("points_awarded")
   /// Nhận xét của gia sư cho câu tự luận này — chỉ có khi đã chấm.
-  feedback        String?      @db.Text
-  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  feedback              String?              @db.Text
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   attempt  Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)

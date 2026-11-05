@@ -1,8 +1,9 @@
 /**
  * Shared helpers for student↔class tuition: class defaults vs optional overrides on `student_classes`.
  *
- * Custom override columns (`custom_*`) treat `0` as **unset** (inherit class tuition), matching
- * operator expectations when clearing fields; only positive amounts are real overrides.
+ * Custom override columns (`custom_*`): `null` = kế thừa học phí lớp; `0` là override thật
+ * (học sinh miễn phí, vd tài khoản test). Dữ liệu cũ lưu `0` với nghĩa "kế thừa" đã được
+ * migration `student_class_zero_tuition` đổi về `NULL`.
  */
 
 import {
@@ -20,18 +21,21 @@ export function normalizeNullableMoney(
   return Math.floor(value);
 }
 
-/** Custom override on `student_classes`: `0` means inherit from class (same as `null`). */
+/** Custom override on `student_classes`: `null` = inherit from class, `0` = free. */
 export function normalizeStudentClassCustomTuitionMoney(
   value: number | null | undefined,
 ): number | null {
-  const n = normalizeNullableMoney(value);
-  return n === 0 ? null : n;
+  return normalizeNullableMoney(value);
 }
 
 export function resolveDerivedTuitionPerSession(
   packageTotal: number | null | undefined,
   packageSession: number | null | undefined,
 ): number | null {
+  // Gói 0đ = miễn phí, không phụ thuộc số buổi (kể cả 0 buổi).
+  if (packageTotal === 0) {
+    return 0;
+  }
   if (
     typeof packageTotal !== 'number' ||
     !Number.isFinite(packageTotal) ||
@@ -164,6 +168,10 @@ export function resolveSessionChargeTuitionFee(options: {
     const packageTotal = normalizeNullableMoney(options.effectivePackageTotal);
     if (packageTotal != null && packageTotal > 0) {
       return packageTotal;
+    }
+    // Gói riêng 0đ = học sinh miễn phí; gói lớp 0đ vẫn coi là gói trống.
+    if (packageTotal === 0 && options.hasCustomPackageOverride) {
+      return 0;
     }
   }
 

@@ -57,7 +57,7 @@ export default function ScheduleTimeCard({
               {compactEndTime}
             </span>
           </div>
-          <p className="mt-0.5 truncate text-[11px] text-text-secondary">
+          <p className="mt-0.5 break-words text-[11px] text-text-secondary">
             {teacherName?.trim() || "Chưa phân công gia sư"}
           </p>
         </div>
@@ -73,7 +73,7 @@ export default function ScheduleTimeCard({
               <p className="text-[11px] font-medium leading-tight text-text-primary">
                 {dayLabel ? `Khung giờ ${dayLabel}` : `Khung giờ ${slotLabel}`}
               </p>
-              <p className="mt-0.5 truncate text-[11px] text-text-secondary">
+              <p className="mt-0.5 break-words text-[11px] text-text-secondary">
                 {teacherName?.trim() || "Chưa phân công gia sư"}
               </p>
             </div>

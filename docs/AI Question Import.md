@@ -54,15 +54,23 @@ Prompt dựng sẵn có mục **CẤU TRÚC BẮT BUỘC** với ví dụ ĐÚNG
 
 | Trường | Bắt buộc | Áp dụng cho | Ràng buộc |
 |---|---|---|---|
-| `type` | có | mọi câu | `"single_choice"` hoặc `"essay"` |
-| `content` | có | mọi câu | chuỗi không rỗng |
+| `type` | có | mọi câu | loại câu được hồ sơ môn cho phép (`GET /public/app-config` → `questionTypes`): JP `"single_choice"` \| `"essay"` \| `"true_false"` \| `"fill_blank"` \| `"ordering"`; ENG `"single_choice"` \| `"essay"`; IT `"single_choice"` \| `"true_false_group"` (không có tự luận) |
+| `content` | có | mọi câu | chuỗi không rỗng. `fill_blank`: mỗi ô trống viết đúng `[[___]]` (1–10 ô); `true_false`: chính là nhận định |
 | `options` | có | chỉ `single_choice` | mảng 2–6 **chuỗi** (không phải object `{text}`). API `POST/PATCH /questions` và `POST /questions/bulk` validate `@IsString({ each: true })`. Không tự đánh A/B/C/D. |
 | `correctIndex` | có | chỉ `single_choice` | số nguyên, đếm từ 0, `< options.length` |
-| `explanation` | không | `single_choice` | chuỗi |
+| `options` (Đúng/Sai) | có | chỉ `true_false_group` | đúng 4 chuỗi khác rỗng = 4 nhận định a–d |
+| `options` (thẻ) | có | chỉ `ordering` | 2–12 thẻ không rỗng, viết **theo đúng thứ tự đáp án** (học sinh nhận thẻ đã xáo); không có `correctIndex` |
+| `tfAnswerKey` | có | `true_false_group`, `true_false` | `true_false_group`: đúng 4 boolean (`true` = Đúng); `true_false`: đúng 1 boolean. Loại khác gửi `tfAnswerKey` → lỗi |
+| `tfLabelStyle` | không | chỉ `true_false` | `"maru_batsu"` (○/×, mặc định) \| `"dung_sai"` \| `"true_false"` |
+| `blankAnswerKey` | có | chỉ `fill_blank` | mảng, mỗi phần tử là mảng đáp án chấp nhận của một ô theo thứ tự `[[___]]`, vd `[["七時","7時"],["十一時"]]`; số phần tử = số ô; mỗi ô 1–10 đáp án không rỗng ≤ 200 ký tự |
+| `essayInputSize` | không | chỉ `essay` (hồ sơ có `essayInputSizes`) | `"short"` (ô một dòng) \| `"long"` (ô nhiều dòng, mặc định) |
+| `explanation` | không | mọi loại trừ `essay` | chuỗi |
 | `answerGuide` | không | chỉ `essay` | chuỗi, dùng làm barem cho gia sư chấm |
 | `difficulty` | có | mọi câu | khớp tuyệt đối một giá trị trong `difficulty_levels` của khoá |
 
 Trường lạ ngoài danh sách trên bị từ chối, không bị bỏ qua im lặng.
+
+Prompt dựng sẵn (`apps/web/lib/ai-import-prompt.ts`, `buildAiImportPrompt`) được sinh theo hồ sơ: mỗi loại câu được phép có một ví dụ, một khối schema, quy tắc trường và một dòng tự kiểm tra riêng — loại hồ sơ không có thì AI không thấy (test `ai-import-prompt.test.ts` kiểm ví dụ trong prompt qua được validator nhập), và mục **CODE / BẢNG** hướng dẫn AI dùng `<pre><code class="language-python|cpp">`, code song song `<div data-code-parallel>` (2 khối Python | C++), `<table>` và `<img src="https://…">`. Ở bước soát, câu Đúng/Sai 4 nhận định sửa được từng nhận định và bấm đổi Đúng/Sai; Câu Đúng/Sai một nhận định chọn đáp án theo nhãn + đổi kiểu nhãn; câu điền vào ô trống xem đề với ô đánh số 【1】【2】 và sửa đáp án từng ô (`FillBlankAnswerFields`, chèn thêm ô được); câu sắp xếp sửa / đổi chỗ / thêm thẻ (`OrderingCardFields`); câu tự luận JP chọn kiểu ô ngắn/dài.
 
 Công thức toán viết bằng LaTeX đặt giữa hai dấu `$`, khớp với extension `@tiptap/extension-mathematics` đang dùng ở editor.
 
@@ -77,7 +85,7 @@ Hệ thống sinh prompt theo khoá đang mở, không hard-code. Các tham số
 Hai tham số người dùng chỉnh trên panel: **số câu cần sinh** và **chuyên đề**. Chuyên đề lấy từ danh sách Chuyên đề hiện có của khoá; nếu chưa có, người dùng gõ tên mới và chọn mục **Tạo chuyên đề “…”** ngay trong dropdown. Chuyên đề được chọn ở bước lấy prompt cũng là nơi các câu hỏi sẽ được gắn khi lưu.
 
 ```
-Bạn là trợ lý soạn câu hỏi cho khoá {{TÊN KHOÁ}} của Unicorns Edu.
+Bạn là trợ lý soạn câu hỏi cho khoá {{TÊN KHOÁ}} của UniEdu.
 
 NHIỆM VỤ
 Sinh {{SỐ CÂU}} câu hỏi về: {{CHUYÊN ĐỀ}}.
@@ -102,13 +110,13 @@ SAI — tuyệt đối không bọc mỗi câu trong dấu ngoặc kép:
 ]
 
 SCHEMA + QUY TẮC TRƯỜNG + CÔNG THỨC TOÁN + TỶ LỆ ĐỘ KHÓ
-(xem bản đầy đủ trong `AiImportModal.tsx` — sinh theo khoá đang mở)
+(xem bản đầy đủ trong `lib/ai-import-prompt.ts` — sinh theo khoá đang mở và loại câu của hồ sơ)
 
 TỰ KIỂM TRA
 1. JSON.parse thành công.
 2. Mỗi phần tử là object, không phải string.
-3. single_choice / essay đúng schema.
-4. difficulty khớp tuyệt đối {{DANH SÁCH ĐỘ KHÓ}}.
+3…n. Mỗi loại câu được phép một dòng kiểm tra riêng (vd fill_blank: số [[___]] = blankAnswerKey.length).
+n+1. difficulty khớp tuyệt đối {{DANH SÁCH ĐỘ KHÓ}}.
 ```
 
 Các ràng buộc dễ bị coi là thừa nhưng xử lý lỗi có thật:

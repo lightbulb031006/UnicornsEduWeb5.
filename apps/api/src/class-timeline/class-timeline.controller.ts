@@ -21,6 +21,7 @@ import {
 } from 'src/auth/decorators/current-user.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { ParseClassIdPipe } from 'src/common/pipes/parse-entity-id.pipe';
+import type { ProtectedVideoPlaybackDto } from 'src/dtos/protected-video.dto';
 import { ClassTimelineService } from './class-timeline.service';
 
 @Controller('class/:classId/timeline')
@@ -77,6 +78,41 @@ export class ClassTimelineController {
       studentId,
       cursor,
       Number.isFinite(parsed) ? parsed : 20,
+    );
+  }
+
+  @Get('sessions/:sessionId/playback')
+  @Roles(UserRole.student)
+  @ApiOperation({
+    summary: 'Link phát recording buổi học (Video bảo vệ)',
+    description:
+      'Ký Playback Token UniVideo (TTL 4 giờ) khi video đã sẵn sàng. Không trả link YouTube. Gặp 403 khi phát → gọi lại endpoint này để lấy link mới.',
+  })
+  @ApiParam({ name: 'classId' })
+  @ApiParam({ name: 'sessionId' })
+  @ApiResponse({
+    status: 200,
+    description:
+      "{ state: 'ready', masterUrl, expiresAt } | { state: 'processing', progress } | { state: 'unavailable' } | { state: 'none' }",
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Không học lớp này hoặc lớp hết hạn xem nội dung.',
+  })
+  @ApiResponse({ status: 404, description: 'Buổi học không thuộc lớp.' })
+  async getRecordingPlayback(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Param('sessionId') sessionId: string,
+  ): Promise<ProtectedVideoPlaybackDto> {
+    const studentId = await this.timeline.findStudentIdByUserId(user.id);
+    if (!studentId) {
+      throw new NotFoundException('Student profile not found');
+    }
+    return this.timeline.getRecordingPlaybackForStudent(
+      classId,
+      sessionId,
+      studentId,
     );
   }
 }

@@ -8,10 +8,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { toast } from "sonner";
 import * as authApi from "@/lib/apis/auth.api";
-import type { LoginDto } from "@/dtos/Auth.dto";
+import type {
+  LoginDto,
+  StudentLoginEmailNotVerifiedError,
+} from "@/dtos/Auth.dto";
 import { useAuth } from "@/context/AuthContext";
 import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 import { AuthCardSkeleton } from "@/components/auth/AuthCardSkeleton";
+import { SentToEmailNotice } from "@/components/auth/SentToEmailNotice";
 import {
   buildSetupPasswordHref,
   readSafeNextPath,
@@ -22,12 +26,28 @@ import {
 } from "@/lib/post-login-session";
 import { getClientApiBaseUrl } from "@/lib/api-base-url";
 import { getLoginErrorToastMessage } from "@/lib/auth-error-message.helpers";
+import {
+  EMAIL_VERIFICATION_RESEND_COOLDOWN_MS,
+  openEmailVerificationModal,
+} from "@/lib/email-verification-access";
+import { useResendCooldown } from "@/hooks/use-resend-cooldown";
 
 function hasAuthenticatedSession(user: { id: string; accountHandle: string }) {
   return Boolean(user.id && user.accountHandle);
 }
 
-type LoginStep = "form" | "pending" | "blocked";
+type LoginStep = "form" | "blocked" | "email-unverified";
+
+function readEmailNotVerifiedMaskedEmail(error: unknown): string | null {
+  if (!isAxiosError(error) || error.response?.status !== 400) return null;
+  const data = error.response.data as
+    | Partial<StudentLoginEmailNotVerifiedError>
+    | undefined;
+  if (data?.error !== "EMAIL_NOT_VERIFIED") return null;
+  return typeof data.maskedEmail === "string" && data.maskedEmail
+    ? data.maskedEmail
+    : null;
+}
 
 function LoginPageContent() {
   const { replace } = useRouter();
@@ -45,10 +65,15 @@ function LoginPageContent() {
     const err = getSearchParam("error");
     return err === "device_blocked" ? "blocked" : "form";
   });
-  const [activateSecret, setActivateSecret] = useState<string | null>(null);
-  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const existingSessionRedirectRef = useRef<string | null>(null);
   const [isActivating, setIsActivating] = useState(false);
+  // Email nhận mail (đã che) và lúc gửi — dùng cho màn «đã gửi» + cooldown Gửi lại.
+  const [sentMaskedEmail, setSentMaskedEmail] = useState<string | null>(null);
+  const [emailSentAt, setEmailSentAt] = useState<number | null>(null);
+  const resendSecondsLeft = useResendCooldown(
+    emailSentAt,
+    EMAIL_VERIFICATION_RESEND_COOLDOWN_MS,
+  );
 
   useEffect(() => {
     const err = getSearchParam("error");
@@ -58,14 +83,21 @@ function LoginPageContent() {
     if (err === "google_no_user") toast.error("Không lấy được thông tin từ Google. Vui lòng thử lại.");
   }, [getSearchParam]);
 
-  // Cleanup poll timer on unmount
-  useEffect(() => {
-    return () => {
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-      }
-    };
-  }, []);
+  // Staff/admin chưa xác minh email: bấm Đăng nhập một lần là gửi luôn mail
+  // xác minh, rồi popup chung hiện «Đã gửi thành công tới ...abcd@domain».
+  const sendVerificationAfterLoginMutation = useMutation({
+    mutationFn: () => authApi.resendVerificationEmail(),
+    onSuccess: (payload) => {
+      openEmailVerificationModal({ kind: "sent", email: payload.email });
+    },
+    onError: (error) => {
+      toast.error(
+        nestMessageFromResponseData(
+          isAxiosError(error) ? error.response?.data : null,
+        ) ?? "Không gửi được email xác minh.",
+      );
+    },
+  });
 
   // Staff/admin login (existing flow)
   const staffLoginMutation = useMutation({
@@ -93,6 +125,12 @@ function LoginPageContent() {
             ? buildSetupPasswordHref(redirectHref)
             : redirectHref,
         );
+        if (
+          session.canAccessRestrictedRoutes === false &&
+          !session.requiresPasswordSetup
+        ) {
+          sendVerificationAfterLoginMutation.mutate();
+        }
       } catch (error) {
         setIsRedirecting(false);
         toast.error(getLoginErrorToastMessage(error));
@@ -104,17 +142,42 @@ function LoginPageContent() {
     },
   });
 
+  // Cookie phiên học sinh đã được set → nạp session rồi chuyển trang.
+  const finishStudentLogin = async () => {
+    setIsActivating(true);
+    try {
+      const session = await authApi.getSession();
+      const fallbackSession = buildLoginFallbackSession({
+        id: session.id,
+        accountHandle: session.accountHandle,
+        roleType: session.roleType,
+        avatarUrl: session.avatarUrl,
+      });
+      setUser(fallbackSession);
+      queryClient.setQueryData(["auth", "session"], fallbackSession);
+
+      const { redirectHref } = await bootstrapPostLoginSession({
+        fallbackUser: fallbackSession,
+        queryClient,
+        setUser,
+        requestedNextPath: getSearchParam("next"),
+      });
+
+      toast.success("Đăng nhập thành công.");
+      replace(redirectHref);
+    } catch (error) {
+      setIsActivating(false);
+      toast.error(getLoginErrorToastMessage(error));
+    }
+  };
+
   // Student login init
   const studentLoginInitMutation = useMutation({
     mutationFn: async (body: LoginDto) => {
       return authApi.studentLoginInit(body);
     },
-    onSuccess: (response) => {
-      setActivateSecret(response.activateSecret);
-      setLoginStep("pending");
-      toast.success("Đã gửi email xác minh. Vui lòng kiểm tra hộp thư.");
-      startPolling(response.requestId);
-    },
+    // Email đã xác minh → server cấp phiên luôn, không còn bước magic link.
+    onSuccess: finishStudentLogin,
     onError: (error) => {
       if (isAxiosError(error) && error.response?.status === 400) {
         const errorCode = error.response.data?.error;
@@ -123,7 +186,16 @@ function LoginPageContent() {
           staffLoginMutation.mutate({ accountHandle, password, rememberMe });
           return;
         }
-        // EMAIL_NOT_VERIFIED or other 400 → show backend message
+        // EMAIL_NOT_VERIFIED: server đã gửi mail xác minh email ngay trong lần
+        // bấm này → hiện màn «đã gửi». Gửi lỗi (không có maskedEmail) → toast.
+        const unverifiedMaskedEmail = readEmailNotVerifiedMaskedEmail(error);
+        if (unverifiedMaskedEmail) {
+          setSentMaskedEmail(unverifiedMaskedEmail);
+          setEmailSentAt(Date.now());
+          setLoginStep("email-unverified");
+          return;
+        }
+        // Other 400 → show backend message
         toast.error(
           error.response.data?.message || "Đăng nhập thất bại.",
         );
@@ -136,75 +208,6 @@ function LoginPageContent() {
       toast.error(getLoginErrorToastMessage(error));
     },
   });
-
-  // Student activate
-  const studentActivateMutation = useMutation({
-    mutationFn: async (reqId: string) => {
-      if (!activateSecret) throw new Error("Missing activation secret");
-      return authApi.studentActivate({
-        requestId: reqId,
-        activateSecret,
-        rememberMe,
-      });
-    },
-    onSuccess: async () => {
-      setIsActivating(true);
-      try {
-        const session = await authApi.getSession();
-        const fallbackSession = buildLoginFallbackSession({
-          id: session.id,
-          accountHandle: session.accountHandle,
-          roleType: session.roleType,
-          avatarUrl: session.avatarUrl,
-        });
-        setUser(fallbackSession);
-        queryClient.setQueryData(["auth", "session"], fallbackSession);
-
-        const { redirectHref } = await bootstrapPostLoginSession({
-          fallbackUser: fallbackSession,
-          queryClient,
-          setUser,
-          requestedNextPath: getSearchParam("next"),
-        });
-
-        toast.success("Đăng nhập thành công.");
-        replace(redirectHref);
-      } catch (error) {
-        setIsActivating(false);
-        toast.error(getLoginErrorToastMessage(error));
-      }
-    },
-    onError: (error) => {
-      setIsActivating(false);
-      toast.error(getLoginErrorToastMessage(error));
-    },
-  });
-
-  const startPolling = (reqId: string) => {
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-    }
-    pollTimerRef.current = setInterval(async () => {
-      try {
-        const result = await authApi.studentLoginPoll(reqId);
-        if (result.verified) {
-          if (pollTimerRef.current) {
-            clearInterval(pollTimerRef.current);
-            pollTimerRef.current = null;
-          }
-          // Activate device
-          studentActivateMutation.mutate(reqId);
-        }
-      } catch {
-        if (pollTimerRef.current) {
-          clearInterval(pollTimerRef.current);
-          pollTimerRef.current = null;
-        }
-        toast.error("Phiên đăng nhập đã hết hạn. Vui lòng thử lại.");
-        setLoginStep("form");
-      }
-    }, 2000); // Poll every 2 seconds
-  };
 
   useEffect(() => {
     if (!isAuthReady || staffLoginMutation.isPending || isRedirecting || isActivating) {
@@ -249,16 +252,17 @@ function LoginPageContent() {
     studentLoginInitMutation.mutate({ accountHandle, password, rememberMe });
   };
 
+  const handleResendUnverifiedEmail = () => {
+    studentLoginInitMutation.mutate({ accountHandle, password, rememberMe });
+  };
+
   const handleBackToForm = () => {
     setLoginStep("form");
-    setActivateSecret(null);
+    setSentMaskedEmail(null);
+    setEmailSentAt(null);
     setAccountHandle("");
     setPassword("");
     setRememberMe(false);
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
   };
 
   const isLoading =
@@ -307,8 +311,8 @@ function LoginPageContent() {
     );
   }
 
-  // Pending verification screen
-  if (loginStep === "pending") {
+  // Email chưa xác minh: mail xác minh email đã gửi ngay khi bấm Đăng nhập
+  if (loginStep === "email-unverified" && sentMaskedEmail) {
     return (
       <div className="flex min-h-dvh items-start justify-center bg-bg-primary px-4 py-6 sm:items-center sm:py-10">
         <div className="w-full max-w-md motion-fade-up">
@@ -321,28 +325,38 @@ function LoginPageContent() {
               />
             </div>
             <h1 className="text-2xl font-semibold text-text-primary text-center mb-4">
-              Kiểm tra email của bạn
+              Xác minh email để đăng nhập
             </h1>
-            <div className="rounded-lg bg-primary/10 border border-primary/20 p-4 mb-6">
-              <p className="text-sm text-primary text-center">
-                Chúng tôi đã gửi liên kết xác minh đến email của bạn. Vui lòng kiểm tra hộp thư và bấm liên kết để hoàn tất đăng nhập.
-              </p>
-            </div>
-            <div className="text-center text-sm text-text-secondary mb-6">
-              <p>Đang chờ xác minh…</p>
-              <div className="mt-3 flex justify-center">
-                <div className="size-6 animate-spin rounded-full border-2 border-border-default border-t-primary" />
-              </div>
-            </div>
-            <p className="text-xs text-text-muted text-center mb-4">
-              Liên kết hết hạn sau 10 phút.
+            <p className="mb-4 text-center text-sm text-text-secondary">
+              Email của tài khoản chưa được xác minh. Chúng tôi đã gửi liên kết xác minh — bấm liên kết trong email rồi đăng nhập lại.
             </p>
-            <button
-              onClick={handleBackToForm}
-              className="w-full rounded-lg border border-border-default bg-bg-surface py-2.5 font-medium text-text-primary hover:bg-bg-tertiary focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 transition-colors duration-200"
-            >
-              Hủy và quay lại
-            </button>
+            <SentToEmailNotice
+              maskedEmail={sentMaskedEmail}
+              className="mb-6 text-center"
+            />
+            <div className="flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={handleResendUnverifiedEmail}
+                disabled={
+                  studentLoginInitMutation.isPending || resendSecondsLeft > 0
+                }
+                className="min-h-11 w-full rounded-lg bg-primary py-2.5 font-medium text-text-inverse hover:bg-primary-hover active:bg-primary-active focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {studentLoginInitMutation.isPending
+                  ? "Đang gửi…"
+                  : resendSecondsLeft > 0
+                    ? `Gửi lại (${resendSecondsLeft} giây)`
+                    : "Gửi lại"}
+              </button>
+              <button
+                type="button"
+                onClick={handleBackToForm}
+                className="min-h-11 w-full rounded-lg border border-border-default bg-bg-surface py-2.5 font-medium text-text-primary hover:bg-bg-tertiary focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 transition-colors duration-200"
+              >
+                Quay lại đăng nhập
+              </button>
+            </div>
           </div>
         </div>
       </div>

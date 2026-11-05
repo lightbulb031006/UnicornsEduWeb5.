@@ -15,7 +15,7 @@ export interface QrStudentInfo {
 }
 
 export async function copyStudentWalletQrWithToast(
-  qrCodeUrl: string,
+  qrCodeUrl: string | Promise<string>,
   student?: QrStudentInfo,
 ): Promise<CopyQrResult> {
   const copied = await copyQrImageOrLink(qrCodeUrl, student);
@@ -119,14 +119,105 @@ async function drawStudentInfoOnQr(
   });
 }
 
-export async function copyQrImageOrLink(
+/**
+ * img.vietqr.io đã chuyển `/image/*.png` sang 301 redirect tới `.svg`, và response
+ * redirect không có header CORS nên `fetch` cross-origin bị chặn. Gọi thẳng `.svg`
+ * (có `Access-Control-Allow-Origin: *`) rồi rasterize sang PNG bằng canvas.
+ */
+function resolveFetchableQrUrl(qrCodeUrl: string): string {
+  try {
+    const url = new URL(qrCodeUrl);
+    if (url.hostname === "img.vietqr.io" && /\.(png|jpg|jpeg)$/i.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\.(png|jpg|jpeg)$/i, ".svg");
+      return url.toString();
+    }
+  } catch {
+    // URL không hợp lệ thì giữ nguyên, để fetch tự báo lỗi.
+  }
+  return qrCodeUrl;
+}
+
+async function rasterizeToPng(imageBlob: Blob): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(imageBlob);
+
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          throw new Error("Could not get 2d canvas context");
+        }
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob((blob) => {
+          URL.revokeObjectURL(objectUrl);
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error("Canvas toBlob output is null"));
+          }
+        }, "image/png");
+      } catch (err) {
+        URL.revokeObjectURL(objectUrl);
+        reject(err);
+      }
+    };
+
+    img.onerror = (err) => {
+      URL.revokeObjectURL(objectUrl);
+      reject(err);
+    };
+
+    img.src = objectUrl;
+  });
+}
+
+async function buildQrPngBlob(
   qrCodeUrl: string,
   student?: QrStudentInfo,
-): Promise<CopyQrResult> {
-  const safeQrCodeUrl = qrCodeUrl.trim();
-  if (!safeQrCodeUrl) {
-    throw new Error("QR URL is empty.");
+): Promise<Blob> {
+  const response = await fetch(resolveFetchableQrUrl(qrCodeUrl));
+  if (!response.ok) {
+    throw new Error("Unable to fetch QR image.");
   }
+
+  const imageBlob = await response.blob();
+
+  // Nếu có thông tin học sinh, vẽ thêm text vào ảnh (output luôn là PNG)
+  if (student) {
+    try {
+      return await drawStudentInfoOnQr(imageBlob, student);
+    } catch (canvasErr) {
+      console.error("Failed to draw student info on QR code image:", canvasErr);
+      // Vẫn tiếp tục copy ảnh gốc nếu vẽ canvas thất bại
+    }
+  }
+
+  // Clipboard chỉ chắc chắn nhận image/png; SVG/JPEG phải rasterize trước.
+  return imageBlob.type === "image/png" ? imageBlob : rasterizeToPng(imageBlob);
+}
+
+/**
+ * `qrCodeUrl` có thể là Promise (vd. URL lấy từ API) — truyền Promise thay vì await
+ * trước khi gọi để `navigator.clipboard.write` chạy đồng bộ trong user gesture.
+ * Safari từ chối ghi clipboard nếu đã `await` mạng trước đó.
+ */
+export async function copyQrImageOrLink(
+  qrCodeUrl: string | Promise<string>,
+  student?: QrStudentInfo,
+): Promise<CopyQrResult> {
+  const safeQrCodeUrlPromise = Promise.resolve(qrCodeUrl).then((url) => {
+    const safeUrl = url.trim();
+    if (!safeUrl) {
+      throw new Error("QR URL is empty.");
+    }
+    return safeUrl;
+  });
 
   if (
     typeof navigator !== "undefined" &&
@@ -135,31 +226,11 @@ export async function copyQrImageOrLink(
     typeof ClipboardItem !== "undefined"
   ) {
     try {
-      const response = await fetch(safeQrCodeUrl);
-      if (!response.ok) {
-        throw new Error("Unable to fetch QR image.");
-      }
-
-      let imageBlob = await response.blob();
-
-      // Nếu có thông tin học sinh, tiến hành vẽ thêm text vào ảnh
-      if (student) {
-        try {
-          imageBlob = await drawStudentInfoOnQr(imageBlob, student);
-        } catch (canvasErr) {
-          console.error("Failed to draw student info on QR code image:", canvasErr);
-          // Vẫn tiếp tục copy ảnh gốc nếu vẽ canvas thất bại
-        }
-      }
-
-      const mimeType = imageBlob.type || "image/png";
-      const clipboardBlob =
-        imageBlob.type === mimeType
-          ? imageBlob
-          : new Blob([imageBlob], { type: mimeType });
-
+      // Gọi write() ngay, nội dung ảnh được resolve bất đồng bộ bên trong ClipboardItem.
       await navigator.clipboard.write([
-        new ClipboardItem({ [mimeType]: clipboardBlob }),
+        new ClipboardItem({
+          "image/png": safeQrCodeUrlPromise.then((url) => buildQrPngBlob(url, student)),
+        }),
       ]);
       return "image";
     } catch (err) {
@@ -167,6 +238,8 @@ export async function copyQrImageOrLink(
       // Fall through to link copy when image clipboard is unavailable or blocked.
     }
   }
+
+  const safeQrCodeUrl = await safeQrCodeUrlPromise;
 
   if (
     typeof navigator === "undefined" ||

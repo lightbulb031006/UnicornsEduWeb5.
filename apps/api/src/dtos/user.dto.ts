@@ -310,6 +310,16 @@ export class ChangePasswordDto {
   newPassword: string;
 }
 
+export class AdminSetUserPasswordDto {
+  @ApiProperty({
+    description: 'New password set by admin/assistant for the target user',
+    example: '123456',
+  })
+  @IsString()
+  @MinLength(6)
+  newPassword: string;
+}
+
 export class SetupPasswordDto {
   @ApiProperty({
     description: 'First password for an OAuth-created account',

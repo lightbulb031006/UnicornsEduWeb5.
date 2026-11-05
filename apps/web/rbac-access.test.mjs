@@ -45,9 +45,13 @@ const adminShellAccess = compileModule("lib/admin-shell-access.ts", {
 const notificationPublisherAccess = compileModule(
   "lib/notification-publisher-access.ts",
 );
+const staffAchievementRequirement = compileModule(
+  "lib/staff-achievement-requirement.ts",
+);
 const staffShellAccess = compileModule("lib/staff-shell-access.ts", {
   "@/dtos/Auth.dto": authDto,
   "@/lib/notification-publisher-access": notificationPublisherAccess,
+  "@/lib/staff-achievement-requirement": staffAchievementRequirement,
   "@/lib/staff-lesson-workspace": staffLessonWorkspace,
 });
 const authRedirect = compileModule("lib/auth-redirect.ts", {

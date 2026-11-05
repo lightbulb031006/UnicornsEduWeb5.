@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ProtectedVideoModule } from 'src/protected-video/protected-video.module';
 import { ActionHistoryModule } from '../action-history/action-history.module';
 import { SessionController } from './session.controller';
 import { SessionService } from './session.service';
@@ -12,13 +13,19 @@ import { SessionReportingService } from './session-reporting.service';
 import { SessionValidationService } from './session-validation.service';
 import { SessionStudentBalanceService } from './session-student-balance.service';
 import { SessionLedgerService } from './session-ledger.service';
+import { SessionTrialCatchUpService } from './session-trial-catch-up.service';
 import { SessionRosterService } from './session-roster.service';
 import { SessionSnapshotService } from './session-snapshot.service';
 import { SessionScheduleRulesService } from './session-schedule-rules.service';
 import { MissedTeachingExplanationService } from './missed-teaching-explanation.service';
 
 @Module({
-  imports: [PrismaModule, StaffOperationsModule, ActionHistoryModule],
+  imports: [
+    PrismaModule,
+    StaffOperationsModule,
+    ActionHistoryModule,
+    ProtectedVideoModule,
+  ],
   controllers: [SessionController, StaffOpsSessionController],
   providers: [
     SessionService,
@@ -29,6 +36,7 @@ import { MissedTeachingExplanationService } from './missed-teaching-explanation.
     SessionValidationService,
     SessionStudentBalanceService,
     SessionLedgerService,
+    SessionTrialCatchUpService,
     SessionRosterService,
     SessionSnapshotService,
     SessionScheduleRulesService,
@@ -36,6 +44,7 @@ import { MissedTeachingExplanationService } from './missed-teaching-explanation.
   ],
   exports: [
     SessionService,
+    SessionTrialCatchUpService,
     SessionScheduleRulesService,
     MissedTeachingExplanationService,
   ],

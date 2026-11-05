@@ -20,17 +20,21 @@ jest.mock('src/storage/supabase-storage', () => ({
       options.path ? `public:${options.bucket}:${options.path}` : null,
   ),
   getSupabaseAdminClient: jest.fn(),
+  removeStorageObjects: jest.fn(() => Promise.resolve()),
   validateImageFile: jest.fn(),
 }));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
   PaymentStatus,
   StaffRole,
   StaffStatus,
   UserRole,
 } from '../../generated/enums';
-import { createSignedStorageUrl } from 'src/storage/supabase-storage';
+import {
+  createSignedStorageUrl,
+  removeStorageObjects,
+} from 'src/storage/supabase-storage';
 import { StaffService } from './staff.service';
 import { LESSON_PLAN_LABEL } from '../common/lesson-plan-label';
 
@@ -2911,8 +2915,11 @@ describe('StaffService', () => {
             },
           },
           classTeachers: {
+            where: {
+              OR: [{ status: null }, { status: 'active' }],
+              class: { status: 'running' },
+            },
             select: {
-              status: true,
               class: { select: { id: true, name: true } },
             },
           },
@@ -2934,58 +2941,32 @@ describe('StaffService', () => {
     expect(result.data[0]).not.toHaveProperty('_count');
   });
 
-  it('hides inactive class_teachers without remaining allowance on staff list', async () => {
-    mockPrisma.staffInfo.count.mockResolvedValue(1);
-    mockPrisma.staffInfo.findMany.mockResolvedValue([
-      {
-        id: 'staff-1',
-        fullName: 'Teacher A',
-        status: 'active',
-        roles: [StaffRole.teacher],
-        user: {
-          first_name: 'Teacher',
-          last_name: 'A',
-          accountHandle: 'teacher-a',
-          email: 'teacher@example.com',
-          province: 'Hanoi',
-          avatarPath: null,
-        },
-        classTeachers: [
-          {
-            status: 'active',
-            class: { id: 'class-active', name: 'BASIC 08' },
-          },
-          {
-            status: 'inactive',
-            class: { id: 'class-retired-zero', name: 'BASIC 07' },
-          },
-          {
-            status: 'inactive',
-            class: { id: 'class-retired-unpaid', name: 'ADVANCED 10' },
-          },
-        ],
-        _count: { achievements: 0 },
-      },
-    ]);
+  it('filters staff list class filter to current teaching classes only', async () => {
+    mockPrisma.staffInfo.count.mockResolvedValue(0);
+    mockPrisma.staffInfo.findMany.mockResolvedValue([]);
     jest
       .spyOn(service as any, 'getUnpaidTotalsByStaffIds')
-      .mockResolvedValue(new Map([['staff-1', 380000]]));
-    jest
-      .spyOn(service as any, 'getListVisibleClassIdsByTeacherIds')
-      .mockResolvedValue(
-        new Map([['staff-1', new Set(['class-retired-unpaid'])]]),
-      );
+      .mockResolvedValue(new Map());
 
-    const result = await service.getStaff({
+    await service.getStaff({
       page: 1,
       limit: 20,
+      className: 'BASIC 32',
     });
 
-    expect(result.data[0].classTeachers).toEqual([
-      { class: { id: 'class-active', name: 'BASIC 08' } },
-      { class: { id: 'class-retired-unpaid', name: 'ADVANCED 10' } },
-    ]);
-    expect(result.data[0].unpaidAmountTotal).toBe(380000);
+    expect(mockPrisma.staffInfo.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        classTeachers: {
+          some: {
+            OR: [{ status: null }, { status: 'active' }],
+            class: {
+              status: 'running',
+              name: { contains: 'BASIC 32', mode: 'insensitive' },
+            },
+          },
+        },
+      }),
+    });
   });
 
   it('attaches signed avatar URL to staff detail user without exposing storage path', async () => {
@@ -3362,5 +3343,95 @@ describe('StaffService', () => {
     expect(result.otherRoleSummaries[0]?.total).toBe(0);
     expect(result.monthlyIncomeTotals.total).toBe(900000);
     expect(result.fixedSalaryPayables).toHaveLength(1);
+  });
+
+  describe('deleteStaffAvatar', () => {
+    const actor = {
+      userId: 'admin-user',
+      userEmail: 'admin@example.com',
+      roleType: UserRole.admin,
+    };
+    const mockRemoveStorageObjects = removeStorageObjects as jest.Mock;
+
+    beforeEach(() => {
+      mockPrisma.$transaction.mockImplementation(
+        async (callback: (tx: typeof mockPrisma) => unknown) =>
+          callback(mockPrisma),
+      );
+      jest
+        .spyOn(service, 'getStaffById')
+        .mockResolvedValue({ id: 'staff-1' } as never);
+    });
+
+    it('removes both avatar objects, clears user paths and audits', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-1',
+        userId: 'user-1',
+        user: {
+          avatarPath: 'users/user-1/avatar',
+          avatarWatermarkedPath: 'users/user-1/avatar-wm.webp',
+        },
+      });
+
+      await expect(service.deleteStaffAvatar('staff-1', actor)).resolves.toEqual(
+        { id: 'staff-1' },
+      );
+
+      expect(mockRemoveStorageObjects).toHaveBeenCalledWith({
+        bucket: 'avatars',
+        paths: ['users/user-1/avatar'],
+      });
+      expect(mockRemoveStorageObjects).toHaveBeenCalledWith(
+        expect.objectContaining({ paths: ['users/user-1/avatar-wm.webp'] }),
+      );
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { avatarPath: null, avatarWatermarkedPath: null },
+      });
+      expect(actionHistoryService.recordUpdate).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'staff',
+          entityId: 'staff-1',
+          description: 'Xoá ảnh đại diện nhân sự',
+        }),
+      );
+      expect(authIdentityCacheService.invalidateUser).toHaveBeenCalledWith(
+        'user-1',
+      );
+    });
+
+    it('is a no-op when the user has no avatar', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-1',
+        userId: 'user-1',
+        user: { avatarPath: null, avatarWatermarkedPath: null },
+      });
+
+      await service.deleteStaffAvatar('staff-1', actor);
+
+      expect(mockRemoveStorageObjects).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects staff without a linked user', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-1',
+        userId: null,
+        user: null,
+      });
+
+      await expect(
+        service.deleteStaffAvatar('staff-1', actor),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('throws when staff does not exist', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.deleteStaffAvatar('missing', actor),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 });

@@ -1,8 +1,8 @@
-# Workplan Unicorns Edu 5.0 (8 Tuần)
+# Workplan UniEdu 5.0 (8 Tuần)
 
 ## 1) Bối cảnh và mục tiêu
 
-Unicorns Edu 5.0 đang chuyển từ PoC sang production trên monorepo Turborepo (`apps/web`, `apps/api`) với nền tảng Prisma + PostgreSQL đã có schema rõ ràng theo domain. Mục tiêu của kế hoạch này là hoàn thiện bản chạy production trong 8 tuần, ưu tiên độ đúng của dữ liệu tài chính/phân quyền và tốc độ triển khai giao diện theo route.
+UniEdu 5.0 đang chuyển từ PoC sang production trên monorepo Turborepo (`apps/web`, `apps/api`) với nền tảng Prisma + PostgreSQL đã có schema rõ ràng theo domain. Mục tiêu của kế hoạch này là hoàn thiện bản chạy production trong 8 tuần, ưu tiên độ đúng của dữ liệu tài chính/phân quyền và tốc độ triển khai giao diện theo route.
 
 Mục tiêu cụ thể:
 - Hoàn thiện backend cốt lõi tại `apps/api` cho Auth, Learning, Finance, Lesson, Assistant, Content.

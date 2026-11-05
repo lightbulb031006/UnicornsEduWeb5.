@@ -1,7 +1,17 @@
 import { ClassTimelineItemKind } from '../../generated/enums';
 
+/** Phần từng học sinh của Nhận xét buổi học có cấu trúc. */
+export interface ClassTimelineAttendanceReviewDto {
+  testCorrectCount: number | null;
+  testComment: string | null;
+  strengths: string | null;
+  improvements: string | null;
+  homeworkQuality: string | null;
+  homeworkComment: string | null;
+}
+
 /** Điểm danh rút gọn, chỉ trả cho staff để dựng nhận xét buổi học trên timeline. */
-export interface ClassTimelineAttendanceDto {
+export interface ClassTimelineAttendanceDto extends ClassTimelineAttendanceReviewDto {
   studentId: string;
   status: string;
   notes: string | null;
@@ -32,10 +42,28 @@ export interface ClassTimelineItemDto {
     lessonContent: string | null;
     homework: string | null;
     tutorial: string | null;
+    /** Số thứ tự buổi trong lớp (suy ra, không lưu). */
+    ordinal: number | null;
+    /** Null = buổi legacy (nhận xét tự do trong notes). */
+    progressStatus: string | null;
+    progressDone: string | null;
+    progressRemaining: string | null;
+    hasInClassTest: boolean;
+    inClassTestContent: string | null;
+    inClassTestTotal: number | null;
+    homeworkDueAt: string | null;
+    nextSessionPlan: string | null;
+    hasRetest: boolean;
+    retestContent: string | null;
+    /** Link YouTube gốc; null ở timeline học sinh (Video bảo vệ). */
     recordingUrl: string | null;
+    /** Buổi có recording — học sinh xin link phát qua `…/sessions/:sessionId/playback`. */
+    hasRecording: boolean;
     teacherName: string | null;
     myAttendanceStatus: string | null;
     myAttendanceNotes: string | null;
+    /** Phần nhận xét riêng của học sinh đang xem (null với staff hoặc HS không có điểm danh). */
+    myReview: ClassTimelineAttendanceReviewDto | null;
     /** Các field dưới đây chỉ có ở payload staff (dựng row 3 cột trên timeline). */
     notes?: string | null;
     teacherPaymentStatus?: string | null;

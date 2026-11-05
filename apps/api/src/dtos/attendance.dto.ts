@@ -11,8 +11,9 @@ import {
 import { AttendanceStatus } from '../../generated/enums';
 import { IsStudentId } from '../common/entity-id.validators';
 import { CONTENT_LIMITS } from './content-limits';
+import { AttendanceReviewFieldsDto } from './session-review.dto';
 
-export class AttendanceCreateDto {
+export class AttendanceCreateDto extends AttendanceReviewFieldsDto {
   @ApiProperty({
     description: 'Student id',
     example: 'UNIST-a1b2c3d4e5',

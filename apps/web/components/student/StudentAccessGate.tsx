@@ -7,7 +7,7 @@ import { Role } from "@/dtos/Auth.dto";
 import { useAuth } from "@/context/AuthContext";
 import {
   isRestrictedByEmailVerification,
-  OPEN_EMAIL_VERIFICATION_MODAL_EVENT,
+  openEmailVerificationModal,
 } from "@/lib/email-verification-access";
 
 export default function StudentAccessGate({
@@ -33,7 +33,7 @@ export default function StudentAccessGate({
 
   useEffect(() => {
     if (isAuthReady && restrictedByEmailVerification) {
-      window.dispatchEvent(new Event(OPEN_EMAIL_VERIFICATION_MODAL_EVENT));
+      openEmailVerificationModal({ kind: "status" });
       replace("/");
       return;
     }

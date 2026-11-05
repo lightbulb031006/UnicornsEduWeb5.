@@ -21,6 +21,7 @@ import {
 } from 'src/action-history/action-history.service';
 import { PaginationQueryDto } from 'src/dtos/pagination.dto';
 import {
+  ClassTeacherCompensationItemDto,
   CreateClassDto,
   CreateStaffOpsClassDto,
   ClassStatusActionDto,
@@ -32,6 +33,7 @@ import {
   UpdateClassStudentsDto,
   UpdateClassStudentTuitionDto,
   UpdateClassTeacherCompensationDto,
+  UpdateClassTeacherPayDto,
   UpdateClassTeachersDto,
 } from 'src/dtos/class.dto';
 import { Prisma } from '../../generated/client';
@@ -100,6 +102,7 @@ import {
   resolveTeacherScaleAmountVnd,
 } from 'src/session/session-allowance.util';
 import { computeTrainingManagerSessionSnapshot } from 'src/training-manager/training-manager.utils';
+import { SessionTrialCatchUpService } from '../session/session-trial-catch-up.service';
 import { syncLessonPlanHeadCommissions } from 'src/payroll/lesson-plan-head-commission.util';
 
 /** `0` is stored as unlimited (same semantics as `null`) across SQL aggregates. */
@@ -199,6 +202,7 @@ export class ClassService {
     private readonly staffOperationsAccess: StaffOperationsAccessService,
     private readonly actionHistoryService: ActionHistoryService,
     private readonly calendarService: CalendarService,
+    private readonly sessionTrialCatchUpService: SessionTrialCatchUpService,
   ) {}
 
   private readonly logger = new Logger(ClassService.name);
@@ -547,11 +551,12 @@ export class ClassService {
     };
   }
 
+  /** Xoá buổi bù tương lai; trả về lỗi từng buổi thay vì dừng ở buổi lỗi đầu tiên. */
   private async deleteFutureMakeupEvents(
     classId: string,
     actor: ActionHistoryActor | undefined,
     teacherId?: string,
-  ) {
+  ): Promise<string[]> {
     const futureMakeupEvents = await this.prisma.makeupScheduleEvent.findMany({
       where: {
         classId,
@@ -562,11 +567,64 @@ export class ClassService {
       orderBy: { date: 'asc' },
     });
 
+    const failures: string[] = [];
     for (const event of futureMakeupEvents) {
-      await this.calendarService.deleteMakeupScheduleEvent(event.id, actor);
+      try {
+        await this.calendarService.deleteMakeupScheduleEvent(event.id, actor);
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : String(error));
+      }
     }
 
-    return futureMakeupEvents.length;
+    return failures;
+  }
+
+  /**
+   * Dọn lịch cố định + buổi bù trên Google Calendar sau khi transaction đã
+   * commit. Không throw: DB đã đổi, lỗi ở đây chỉ trả về dạng cảnh báo để FE
+   * vẫn coi thao tác là thành công (và refresh dữ liệu).
+   */
+  private async cleanupCalendarAfterCommit(
+    classId: string,
+    /** `null` = không có slot nào bị đóng, bỏ qua sync lịch cố định. */
+    closedSchedule: StoredClassScheduleEntry[] | null,
+    actor: ActionHistoryActor | undefined,
+    teacherId?: string,
+  ): Promise<string[]> {
+    const warnings: string[] = [];
+
+    if (closedSchedule) {
+      try {
+        await this.calendarService.syncScheduleWithCalendar(
+          classId,
+          closedSchedule,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `[ClassService] Calendar sync failed after commit for class ${classId}: ${message}`,
+        );
+        warnings.push(
+          `Không gỡ được lịch cố định trên Google Calendar: ${message}`,
+        );
+      }
+    }
+
+    const makeupFailures = await this.deleteFutureMakeupEvents(
+      classId,
+      actor,
+      teacherId,
+    );
+    if (makeupFailures.length > 0) {
+      this.logger.error(
+        `[ClassService] ${makeupFailures.length} makeup event(s) not deleted for class ${classId}: ${makeupFailures.join('; ')}`,
+      );
+      warnings.push(
+        `Còn ${makeupFailures.length} buổi bù chưa xoá được (lỗi Google Calendar), xoá lại trong card Lịch dạy bù.`,
+      );
+    }
+
+    return warnings;
   }
 
   private async getClassDetailSnapshot(
@@ -843,6 +901,21 @@ export class ClassService {
           ? ClassStatus.ended
           : undefined;
 
+    const teacherWhere = teacherId
+      ? {
+          teachers: {
+            some: {
+              teacherId,
+              OR: [{ status: null }, { status: 'active' }],
+              teacher: { is: { status: StaffStatus.active } },
+            },
+          },
+        }
+      : undefined;
+    const trainingManagerWhere = trainingManagerStaffId
+      ? { trainingManagerStaffId }
+      : undefined;
+
     const where = {
       ...(trimmedSearch
         ? {
@@ -854,18 +927,10 @@ export class ClassService {
         : {}),
       ...(statusFilter ? { status: statusFilter } : {}),
       ...(courseId ? { courseId } : {}),
-      ...(teacherId
-        ? {
-            teachers: {
-              some: {
-                teacherId,
-                OR: [{ status: null }, { status: 'active' }],
-                teacher: { is: { status: StaffStatus.active } },
-              },
-            },
-          }
-        : {}),
-      ...(trainingManagerStaffId ? { trainingManagerStaffId } : {}),
+      // Kiêm gia sư + Ban Đào Tạo: lớp mình dạy HOẶC lớp mình quản lý.
+      ...(teacherWhere && trainingManagerWhere
+        ? { OR: [teacherWhere, trainingManagerWhere] }
+        : { ...teacherWhere, ...trainingManagerWhere }),
     };
 
     const total = await this.prisma.class.count({ where });
@@ -1146,20 +1211,24 @@ export class ClassService {
       search?: string;
       status?: string;
       courseId?: string;
+      /** `managed`: Ban Đào Tạo chỉ lấy lớp mình quản lý (bỏ lớp mình dạy). */
+      scope?: string;
     },
   ) {
+    const { scope, ...listQuery } = query;
     const actor = await this.staffOperationsAccess.resolveActor(
       userId,
       roleType,
     );
+    const scopeToTrainingManager =
+      this.shouldScopeStaffClassesToTrainingManager(actor.roles);
+    const managedOnly = scope === 'managed' && scopeToTrainingManager;
     const classes = await this.getClasses({
-      ...query,
-      ...(this.shouldScopeStaffClassesToTeacher(actor.roles)
+      ...listQuery,
+      ...(!managedOnly && this.shouldScopeStaffClassesToTeacher(actor.roles)
         ? { teacherId: actor.id }
         : {}),
-      ...(this.shouldScopeStaffClassesToTrainingManager(actor.roles)
-        ? { trainingManagerStaffId: actor.id }
-        : {}),
+      ...(scopeToTrainingManager ? { trainingManagerStaffId: actor.id } : {}),
     });
 
     const financeView = resolveAccountantFinanceView(roleType, actor.roles);
@@ -1168,7 +1237,7 @@ export class ClassService {
       financeView,
     );
 
-    if (this.shouldScopeStaffClassesToTrainingManager(actor.roles)) {
+    if (scopeToTrainingManager) {
       return redactClassListForTrainingManagerView(accountantScoped);
     }
 
@@ -1196,8 +1265,12 @@ export class ClassService {
     }
 
     if (accessMode === 'teacher') {
+      // Kiêm quản lý lớp này: thấy lương mọi gia sư để chỉnh (trừ dòng của mình ở FE/BE write).
+      const managesClass =
+        actor.roles.includes(StaffRole.training) &&
+        classDetail.trainingManager?.id === actor.id;
       return redactClassStudentWalletBalances(
-        redactOtherTeachersIncome(result, actor.id),
+        managesClass ? result : redactOtherTeachersIncome(result, actor.id),
         { mode: 'none' },
       );
     }
@@ -2115,6 +2188,7 @@ export class ClassService {
             studentId: true,
             status: true,
             tuitionFee: true,
+            trialCatchUpFee: true,
             transactionId: true,
           },
         },
@@ -2224,7 +2298,11 @@ export class ClassService {
               blockCount: snapshotBlockCount,
             })
           : null;
-        const oldFee = attendance.tuitionFee ?? 0;
+        // Phần thu bù học thử đã gộp không thuộc học phí buổi; đối soát lại sau vòng lặp.
+        const oldFee = Math.max(
+          0,
+          (attendance.tuitionFee ?? 0) - (attendance.trialCatchUpFee ?? 0),
+        );
         const newFee = nextFee ?? 0;
         const delta = oldFee - newFee;
         if (delta !== 0) {
@@ -2241,7 +2319,7 @@ export class ClassService {
         }
         await tx.attendance.update({
           where: { id: attendance.id },
-          data: { tuitionFee: nextFee },
+          data: { tuitionFee: nextFee, trialCatchUpFee: null },
         });
         tuitionTotal += newFee;
         attendanceIds.push(attendance.id);
@@ -2274,6 +2352,16 @@ export class ClassService {
 
       await syncLessonPlanHeadCommissions(tx, attendanceIds);
     }
+
+    await this.sessionTrialCatchUpService.reconcile(
+      tx,
+      sessions.flatMap((session) =>
+        session.attendance.map((attendance) => ({
+          studentId: attendance.studentId,
+          classId,
+        })),
+      ),
+    );
   }
 
   async updateClassTeachers(
@@ -2456,47 +2544,13 @@ export class ClassService {
         : null;
       const standardBlockCount = await this.loadStandardBlockCount(tx, id);
 
-      for (const teacher of dto.teachers) {
-        const currentOperatingDeductionRatePercent =
-          existingRateByTeacherId.get(teacher.teacher_id) ?? 0;
-        const nextOperatingDeductionRatePercent =
-          teacher.operating_deduction_rate_percent == null &&
-          teacher.tax_rate_percent == null
-            ? currentOperatingDeductionRatePercent
-            : normalizeRatePercent(
-                teacher.operating_deduction_rate_percent ??
-                  teacher.tax_rate_percent,
-              );
-
-        const data: {
-          customAllowance?: number | null;
-          customScaleAmount?: number | null;
-          operatingDeductionRatePercent: number;
-        } = {
-          operatingDeductionRatePercent: nextOperatingDeductionRatePercent,
-        };
-        if (teacher.custom_allowance !== undefined) {
-          data.customAllowance = storeCustomAllowanceFromPerSessionInput(
-            normalizeNullableMoney(teacher.custom_allowance),
-            standardBlockCount,
-          );
-        }
-        if (teacher.custom_scale_amount !== undefined) {
-          data.customScaleAmount = normalizeNullableMoney(
-            teacher.custom_scale_amount,
-          );
-        }
-
-        await tx.classTeacher.update({
-          where: {
-            classId_teacherId: {
-              classId: id,
-              teacherId: teacher.teacher_id,
-            },
-          },
-          data,
-        });
-      }
+      await this.applyClassTeacherCompensationUpdates(
+        tx,
+        id,
+        dto.teachers,
+        existingRateByTeacherId,
+        standardBlockCount,
+      );
 
       const afterValue = await this.getClassAuditSnapshot(tx, id);
       if (!afterValue) {
@@ -2517,6 +2571,274 @@ export class ClassService {
 
       return afterValue;
     });
+  }
+
+  private async applyClassTeacherCompensationUpdates(
+    tx: Prisma.TransactionClient,
+    classId: string,
+    teachers: ClassTeacherCompensationItemDto[],
+    existingRateByTeacherId: Map<string, number>,
+    standardBlockCount: number | null,
+  ) {
+    for (const teacher of teachers) {
+      const currentOperatingDeductionRatePercent =
+        existingRateByTeacherId.get(teacher.teacher_id) ?? 0;
+      const nextOperatingDeductionRatePercent =
+        teacher.operating_deduction_rate_percent == null &&
+        teacher.tax_rate_percent == null
+          ? currentOperatingDeductionRatePercent
+          : normalizeRatePercent(
+              teacher.operating_deduction_rate_percent ??
+                teacher.tax_rate_percent,
+            );
+
+      const data: {
+        customAllowance?: number | null;
+        customScaleAmount?: number | null;
+        operatingDeductionRatePercent: number;
+      } = {
+        operatingDeductionRatePercent: nextOperatingDeductionRatePercent,
+      };
+      if (teacher.custom_allowance !== undefined) {
+        data.customAllowance = storeCustomAllowanceFromPerSessionInput(
+          normalizeNullableMoney(teacher.custom_allowance),
+          standardBlockCount,
+        );
+      }
+      if (teacher.custom_scale_amount !== undefined) {
+        data.customScaleAmount = normalizeNullableMoney(
+          teacher.custom_scale_amount,
+        );
+      }
+
+      await tx.classTeacher.update({
+        where: {
+          classId_teacherId: {
+            classId,
+            teacherId: teacher.teacher_id,
+          },
+        },
+        data,
+      });
+    }
+  }
+
+  /**
+   * Ban Đào Tạo (quản lý lớp): chỉnh mức trợ cấp/scale mặc định của lớp và
+   * trợ cấp/scale/% vận hành của gia sư đã có trong lớp, trong 1 transaction.
+   * `lockedTeacherId` = staff id của quản lý lớp — không được sửa dòng của chính mình.
+   * Không đụng tới buổi đã tạo (buổi snapshot tiền lúc tạo).
+   */
+  async updateClassTeacherPay(
+    id: string,
+    dto: UpdateClassTeacherPayDto,
+    options: { lockedTeacherId?: string | null } = {},
+    auditActor?: ActionHistoryActor,
+  ) {
+    const existing = await this.prisma.class.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        teachers: {
+          select: {
+            teacherId: true,
+            operatingDeductionRatePercent: true,
+          },
+        },
+      },
+    });
+    if (!existing) {
+      throw new NotFoundException('Class not found');
+    }
+
+    const teachers = dto.teachers ?? [];
+    if (
+      dto.allowance_per_session_per_student === undefined &&
+      dto.max_allowance_per_session === undefined &&
+      dto.scale_amount === undefined &&
+      teachers.length === 0
+    ) {
+      throw new BadRequestException('Không có thay đổi lương nào để lưu.');
+    }
+
+    const lockedTeacherId = options.lockedTeacherId ?? null;
+    if (
+      lockedTeacherId &&
+      teachers.some((teacher) => teacher.teacher_id === lockedTeacherId)
+    ) {
+      throw new ForbiddenException(
+        'Quản lý lớp không được tự chỉnh lương của chính mình.',
+      );
+    }
+
+    const existingRateByTeacherId = new Map(
+      existing.teachers.map((teacher) => [
+        teacher.teacherId,
+        normalizeRatePercent(teacher.operatingDeductionRatePercent),
+      ]),
+    );
+    if (
+      teachers.some(
+        (teacher) => !existingRateByTeacherId.has(teacher.teacher_id),
+      )
+    ) {
+      throw new BadRequestException(
+        'Only existing class teachers can have compensation updated',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const beforeValue = auditActor
+        ? await this.getClassAuditSnapshot(tx, id)
+        : null;
+      const standardBlockCount = await this.loadStandardBlockCount(tx, id);
+
+      const classData: Prisma.ClassUncheckedUpdateInput = {};
+      if (dto.allowance_per_session_per_student !== undefined) {
+        classData.allowancePerSessionPerStudent =
+          dto.allowance_per_session_per_student;
+        Object.assign(
+          classData,
+          dualWritePerBlockClassFields({
+            allowancePerSessionPerStudent:
+              dto.allowance_per_session_per_student,
+            standardBlockCount,
+          }),
+        );
+      }
+      if (dto.max_allowance_per_session !== undefined) {
+        const maxAllowancePerSession = normalizeMaxAllowancePerSessionWrite(
+          dto.max_allowance_per_session,
+        );
+        classData.maxAllowancePerSession = maxAllowancePerSession;
+        Object.assign(
+          classData,
+          dualWritePerBlockClassFields({
+            maxAllowancePerSession,
+            standardBlockCount,
+          }),
+        );
+      }
+      if (dto.scale_amount !== undefined) {
+        classData.scaleAmount = dto.scale_amount;
+      }
+      if (Object.keys(classData).length > 0) {
+        await tx.class.update({ where: { id }, data: classData });
+      }
+
+      await this.applyClassTeacherCompensationUpdates(
+        tx,
+        id,
+        teachers,
+        existingRateByTeacherId,
+        standardBlockCount,
+      );
+
+      const afterValue = await this.getClassAuditSnapshot(tx, id);
+      if (!afterValue) {
+        throw new NotFoundException('Class not found');
+      }
+
+      if (auditActor) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'class',
+          entityId: id,
+          description: 'Cập nhật lương gia sư của lớp học (quản lý lớp)',
+          beforeValue,
+          afterValue,
+        });
+      }
+
+      return afterValue;
+    });
+  }
+
+  /**
+   * Thêm 1 gia sư vào lớp mà không đụng các gia sư khác. Gia sư phải có role
+   * `teacher` và đang active. Nếu gia sư từng nghỉ dạy lớp này thì mở lại dòng cũ
+   * và reset lương về mặc định của lớp (override = null, % vận hành = 0).
+   */
+  async addClassTeacher(
+    classId: string,
+    teacherId: string,
+    auditActor?: ActionHistoryActor,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const beforeValue = await this.getClassAuditSnapshot(tx, classId);
+      if (!beforeValue) {
+        throw new NotFoundException('Class not found');
+      }
+      if (beforeValue.status === ClassStatus.ended) {
+        throw new BadRequestException('Lớp đã kết thúc.');
+      }
+
+      const staff = await tx.staffInfo.findUnique({
+        where: { id: teacherId },
+        select: { status: true, roles: true },
+      });
+      if (!staff || !staff.roles.includes(StaffRole.teacher)) {
+        throw new NotFoundException('Không tìm thấy gia sư.');
+      }
+      assertStaffCanReceiveAssignment(staff.status);
+
+      const assignment = await tx.classTeacher.findUnique({
+        where: { classId_teacherId: { classId, teacherId } },
+        select: { status: true },
+      });
+      if (assignment && assignment.status !== 'inactive') {
+        throw new ConflictException('Gia sư đã ở trong lớp này.');
+      }
+
+      const resetPay = {
+        customAllowance: null,
+        customScaleAmount: null,
+        operatingDeductionRatePercent: 0,
+        status: 'active',
+      };
+      if (assignment) {
+        await tx.classTeacher.update({
+          where: { classId_teacherId: { classId, teacherId } },
+          data: resetPay,
+        });
+      } else {
+        await tx.classTeacher.create({
+          data: { classId, teacherId, ...resetPay },
+        });
+      }
+
+      const afterValue = await this.getClassAuditSnapshot(tx, classId);
+      if (!afterValue) {
+        throw new NotFoundException('Class not found');
+      }
+
+      if (auditActor) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'class',
+          entityId: classId,
+          description: assignment
+            ? 'Mở lại gia sư đã nghỉ dạy lớp học'
+            : 'Thêm gia sư vào lớp học',
+          beforeValue,
+          afterValue,
+        });
+      }
+    });
+
+    return this.getClassById(classId);
+  }
+
+  /** Gói 0 buổi chỉ hợp lệ khi gói 0đ (học sinh miễn phí); gói có tiền phải có số buổi > 0. */
+  private assertCustomTuitionPackagePair(
+    pkgTotal: number | null,
+    pkgSession: number | null,
+  ) {
+    if (pkgSession === 0 && pkgTotal !== 0) {
+      throw new BadRequestException(
+        'Số buổi trong gói chỉ được bằng 0 khi tổng gói học phí bằng 0.',
+      );
+    }
   }
 
   async updateClassStudentTuition(
@@ -2551,6 +2873,7 @@ export class ClassService {
       const pkgSession = normalizeStudentClassCustomTuitionMoney(
         dto.custom_tuition_package_session,
       );
+      this.assertCustomTuitionPackagePair(pkgTotal, pkgSession);
       const perSession = normalizeStudentClassCustomTuitionMoney(
         dto.custom_tuition_per_session,
       );
@@ -2906,6 +3229,7 @@ export class ClassService {
             const pkgSession = normalizeStudentClassCustomTuitionMoney(
               student.custom_tuition_package_session,
             );
+            this.assertCustomTuitionPackagePair(pkgTotal, pkgSession);
             const perSession = normalizeStudentClassCustomTuitionMoney(
               student.custom_tuition_per_session,
             );
@@ -2971,14 +3295,8 @@ export class ClassService {
     dto: ClassStatusActionDto = {},
     auditActor?: ActionHistoryActor,
   ) {
-    const settlement = await getClassTeacherSessionSettlement(this.prisma, id);
-    if (!settlement.canEndClass) {
-      throw new BadRequestException(
-        settlement.blockReason ??
-          'Chưa thể kết thúc lớp khi còn buổi học chưa thanh toán trợ cấp gia sư.',
-      );
-    }
-
+    // Không chặn theo trợ cấp gia sư: buổi chưa thanh toán vẫn thanh toán sau
+    // khi lớp đã kết thúc (session/payroll giữ nguyên).
     const result = await this.prisma.$transaction(async (tx) => {
       const beforeValue = await this.getClassAuditSnapshot(tx, id);
       if (!beforeValue) {
@@ -3024,10 +3342,13 @@ export class ClassService {
       return { oldSchedule };
     });
 
-    await this.calendarService.syncScheduleWithCalendar(id, result.oldSchedule);
-    await this.deleteFutureMakeupEvents(id, auditActor);
+    const calendarSyncWarnings = await this.cleanupCalendarAfterCommit(
+      id,
+      result.oldSchedule,
+      auditActor,
+    );
 
-    return this.getClassById(id);
+    return { ...(await this.getClassById(id)), calendarSyncWarnings };
   }
 
   async stopClassTeacher(
@@ -3089,15 +3410,16 @@ export class ClassService {
       return { scheduleRemoval };
     });
 
-    if (result.scheduleRemoval.removedScheduleEntries > 0) {
-      await this.calendarService.syncScheduleWithCalendar(
-        classId,
-        result.scheduleRemoval.closedEntries,
-      );
-    }
-    await this.deleteFutureMakeupEvents(classId, auditActor, teacherId);
+    const calendarSyncWarnings = await this.cleanupCalendarAfterCommit(
+      classId,
+      result.scheduleRemoval.removedScheduleEntries > 0
+        ? result.scheduleRemoval.closedEntries
+        : null,
+      auditActor,
+      teacherId,
+    );
 
-    return this.getClassById(classId);
+    return { ...(await this.getClassById(classId)), calendarSyncWarnings };
   }
 
   async deleteClass(id: string, auditActor?: ActionHistoryActor) {

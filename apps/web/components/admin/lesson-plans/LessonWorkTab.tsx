@@ -167,7 +167,7 @@ function PaymentPill({
           <span className="text-current/70" aria-hidden>
             ·
           </span>
-          <span className="min-w-0 max-w-[9rem] truncate">{recipient}</span>
+          <span className="min-w-0 break-words">{recipient}</span>
         </>
       ) : null}
       {pendingAmount ? (

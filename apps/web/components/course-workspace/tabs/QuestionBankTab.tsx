@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  QUESTION_SKILL_LABELS,
+  QUESTION_TYPE_LABELS,
+  questionTypeLabel,
+} from "@/dtos/question.dto";
+import { useAppConfig } from "@/lib/hooks/useAppConfig";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
@@ -22,12 +28,17 @@ import {
   TableCell,
 } from "@/components/ui/table";
 import type { Question, QuestionFilter } from "@/dtos/question.dto";
-import { QuestionTypeDto } from "@/dtos/question.dto";
+import { QuestionSkillDto, QuestionTypeDto } from "@/dtos/question.dto";
 import QuestionFormDialog from "@/components/admin/question/QuestionFormDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import AiImportModal from "@/components/admin/question-bank/AiImportModal";
+import SharedMaterialFormDialog from "@/components/admin/question-bank/SharedMaterialFormDialog";
+import QuestionSetCard from "@/components/admin/question-bank/QuestionSetCard";
+import type { SharedMaterial } from "@/dtos/shared-material.dto";
+import { useSharedMaterials } from "@/lib/hooks/useSharedMaterials";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { resolveQuestionBankEmptyModuleCopy } from "@/lib/question-bank-empty-module";
+import { numberBlanks } from "@/lib/fill-blank";
 
 const PAGE_SIZE = 20;
 
@@ -48,6 +59,13 @@ export function QuestionBankTab({
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [chapterFilter, setChapterFilter] = useState<string>("");
   const [difficultyFilter, setDifficultyFilter] = useState<string>("");
+  const [skillFilter, setSkillFilter] = useState<string>("");
+  const { data: appConfig } = useAppConfig();
+  const showSkills = appConfig?.questionSkills ?? false;
+  const showMaterials = appConfig?.sharedMaterials ?? false;
+  // Form Bộ câu hỏi: null = đóng, "new" = tạo bộ.
+  const [setForm, setSetForm] = useState<SharedMaterial | "new" | null>(null);
+  const { data: materials = [] } = useSharedMaterials(courseId, showMaterials);
   const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [showAiImport, setShowAiImport] = useState(false);
@@ -61,7 +79,13 @@ export function QuestionBankTab({
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, typeFilter, chapterFilter, difficultyFilter]);
+  }, [
+    debouncedSearch,
+    typeFilter,
+    chapterFilter,
+    difficultyFilter,
+    skillFilter,
+  ]);
 
   const filter: QuestionFilter = {
     courseId,
@@ -69,6 +93,9 @@ export function QuestionBankTab({
     type: (typeFilter as QuestionTypeDto) || undefined,
     moduleId: chapterFilter || undefined,
     difficultyLevelId: difficultyFilter || undefined,
+    skill: showSkills ? (skillFilter as QuestionSkillDto) || undefined : undefined,
+    // JP: bộ hiện dạng thẻ riêng, danh sách dưới chỉ còn câu lẻ.
+    standalone: showMaterials ? "true" : undefined,
   };
   const skip = (page - 1) * PAGE_SIZE;
 
@@ -131,9 +158,29 @@ export function QuestionBankTab({
   ];
   const typeOptions = [
     { value: "", label: "Tất cả loại" },
-    { value: "single_choice", label: "Trắc nghiệm" },
-    { value: "essay", label: "Tự luận" },
+    ...Object.entries(QUESTION_TYPE_LABELS).map(([value, label]) => ({
+      value,
+      label,
+    })),
   ];
+  const skillOptions = [
+    { value: "", label: "Tất cả kỹ năng" },
+    ...Object.entries(QUESTION_SKILL_LABELS).map(([value, label]) => ({
+      value,
+      label,
+    })),
+  ];
+  const moduleTitleById = new Map(modules.map((m) => [m.id, m.title]));
+  const searchText = debouncedSearch.toLowerCase();
+  const visibleSets = showMaterials
+    ? materials.filter(
+        (m) =>
+          (!chapterFilter || m.moduleId === chapterFilter) &&
+          (!searchText ||
+            m.title.toLowerCase().includes(searchText) ||
+            m.content.toLowerCase().includes(searchText)),
+      )
+    : [];
 
   if (isChaptersLoading) {
     return (
@@ -184,6 +231,15 @@ export function QuestionBankTab({
             >
               Nhập từ AI
             </button>
+            {showMaterials ? (
+              <button
+                type="button"
+                onClick={() => setSetForm("new")}
+                className="inline-flex min-h-11 flex-1 items-center justify-center rounded-md border border-primary/40 bg-bg-surface px-4 py-2 text-sm font-medium text-primary hover:bg-primary/5 sm:min-h-10 sm:flex-none sm:w-auto"
+              >
+                + Thêm bộ câu hỏi
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={openCreate}
@@ -228,8 +284,39 @@ export function QuestionBankTab({
             placeholder="Loại câu hỏi"
             ariaLabel="Lọc theo loại"
           />
+          {showSkills ? (
+            <UpgradedSelect
+              value={skillFilter}
+              onValueChange={setSkillFilter}
+              options={skillOptions}
+              placeholder="Kỹ năng"
+              ariaLabel="Lọc theo kỹ năng"
+            />
+          ) : null}
         </div>
       </div>
+
+      {page === 1 && visibleSets.length > 0 ? (
+        <section aria-label="Bộ câu hỏi" className="space-y-2">
+          <h3 className="text-sm font-semibold text-text-secondary">
+            Bộ câu hỏi ({visibleSets.length})
+          </h3>
+          <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {visibleSets.map((set) => (
+              <QuestionSetCard
+                key={set.id}
+                courseId={courseId}
+                set={set}
+                moduleTitle={moduleTitleById.get(set.moduleId)}
+                onOpen={() => setSetForm(set)}
+              />
+            ))}
+          </ul>
+          <h3 className="pt-2 text-sm font-semibold text-text-secondary">
+            Câu lẻ
+          </h3>
+        </section>
+      ) : null}
 
       {isLoading ? (
         <div
@@ -245,7 +332,7 @@ export function QuestionBankTab({
         </div>
       ) : questions.length === 0 ? (
         <p className="rounded-lg border border-dashed border-border-default p-6 text-center text-sm text-text-muted">
-          Chưa có câu hỏi nào.
+          {showMaterials ? "Chưa có câu lẻ nào." : "Chưa có câu hỏi nào."}
         </p>
       ) : (
         <>
@@ -280,13 +367,14 @@ export function QuestionBankTab({
                   </button>
                 ) : null}
                 <MathContent
-                  content={q.content}
+                  content={numberBlanks(q.content)}
                   className="line-clamp-4 pr-10 text-sm text-text-primary"
                 />
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
                   <Badge variant={q.type === "single_choice" ? "info" : "success"}>
-                    {q.type === "single_choice" ? "Trắc nghiệm" : "Tự luận"}
+                    {questionTypeLabel(q.type)}
                   </Badge>
+                  <QuestionSkillBadges skills={q.skills} />
                 </div>
               </li>
             ))}
@@ -297,7 +385,7 @@ export function QuestionBankTab({
               <TableHeader>
                 <TableRow>
                   <TableHead>Nội dung</TableHead>
-                  <TableHead className="w-28">Loại</TableHead>
+                  <TableHead className="w-40">Loại</TableHead>
                   <TableHead className="w-12">
                     <span className="sr-only">Xoá</span>
                   </TableHead>
@@ -321,14 +409,17 @@ export function QuestionBankTab({
                   >
                     <TableCell className="max-w-xs">
                       <MathContent
-                        content={q.content}
+                        content={numberBlanks(q.content)}
                         className="line-clamp-2 text-sm"
                       />
                     </TableCell>
                     <TableCell>
-                      <Badge variant={q.type === "single_choice" ? "info" : "success"}>
-                        {q.type === "single_choice" ? "Trắc nghiệm" : "Tự luận"}
-                      </Badge>
+                      <div className="flex flex-wrap gap-1">
+                        <Badge variant={q.type === "single_choice" ? "info" : "success"}>
+                          {questionTypeLabel(q.type)}
+                        </Badge>
+                        <QuestionSkillBadges skills={q.skills} />
+                      </div>
                     </TableCell>
                     <TableCell
                       className="text-right"
@@ -419,6 +510,28 @@ export function QuestionBankTab({
           }}
         />
       ) : null}
+
+      {setForm ? (
+        <SharedMaterialFormDialog
+          courseId={courseId}
+          material={setForm === "new" ? null : setForm}
+          onClose={() => setSetForm(null)}
+        />
+      ) : null}
+
     </div>
+  );
+}
+
+function QuestionSkillBadges({ skills }: { skills?: QuestionSkillDto[] }) {
+  if (!skills?.length) return null;
+  return (
+    <>
+      {skills.map((skill) => (
+        <Badge key={skill} variant="secondary">
+          {QUESTION_SKILL_LABELS[skill]}
+        </Badge>
+      ))}
+    </>
   );
 }

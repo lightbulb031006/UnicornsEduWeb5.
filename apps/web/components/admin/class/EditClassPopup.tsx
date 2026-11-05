@@ -381,12 +381,14 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
   });
 
   const { data: studentSearchResult } = useQuery({
-    queryKey: ["student", "list", { page: 1, limit: 50, search: debouncedStudentSearch }],
+    // Chỉ gợi ý học sinh đang học; học sinh đã nghỉ không xếp vào lớp.
+    queryKey: ["student", "list", { page: 1, limit: 50, search: debouncedStudentSearch, status: "active" }],
     queryFn: () =>
       studentApi.getStudents({
         page: 1,
         limit: 50,
         search: debouncedStudentSearch || undefined,
+        status: "active",
       }),
     enabled: true,
   });
@@ -779,7 +781,7 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
                     key={t.id}
                     className="flex flex-wrap items-center gap-2 rounded-lg border border-border-default bg-bg-surface p-2 sm:flex-nowrap"
                   >
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
+                    <span className="min-w-0 flex-1 break-words text-sm font-medium text-text-primary">
                       {t.name}
                     </span>
                     <label className="flex shrink-0 items-center gap-1.5 text-sm text-text-secondary">

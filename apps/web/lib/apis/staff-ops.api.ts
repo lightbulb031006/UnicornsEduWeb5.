@@ -1,4 +1,9 @@
-import type { ClassDetail, ClassListResponse } from "@/dtos/class.dto";
+import type {
+  ClassDetail,
+  ClassListResponse,
+  ClassStatusActionPayload,
+  ClassStatusActionResponse,
+} from "@/dtos/class.dto";
 import type {
   ClassScheduleGoogleCalendarResyncSummary,
   ClassScopedMakeupScheduleEventPayload,
@@ -18,13 +23,16 @@ import type {
   MissedTeachingAlert,
   MissedTeachingExplanationRecord,
   SessionItem,
+  SessionNextOrdinalResponse,
   UpdateMissedTeachingExplanationPayload,
 } from "@/dtos/session.dto";
 import type {
+  StaffOpsAddClassTeacherPayload,
   StaffOpsCreateClassPayload,
   StaffOpsCreateSessionPayload,
   StaffOpsSessionMonthYearParams,
   StaffOpsUpdateClassSchedulePayload,
+  StaffOpsUpdateClassTeacherPayPayload,
   StaffOpsUpdateSessionPayload,
 } from "@/dtos/staff-ops.dto";
 import {
@@ -40,6 +48,8 @@ export async function getClasses(params: {
   search?: string;
   status?: string;
   type?: string;
+  /** `managed`: Ban Đào Tạo chỉ lấy lớp mình quản lý. */
+  scope?: "managed";
 }): Promise<ClassListResponse> {
   const response = await api.get("/staff-ops/classes", {
     params: {
@@ -48,6 +58,7 @@ export async function getClasses(params: {
       ...(params.search ? { search: params.search } : {}),
       ...(params.status ? { status: params.status } : {}),
       ...(params.type ? { type: params.type } : {}),
+      ...(params.scope ? { scope: params.scope } : {}),
     },
   });
 
@@ -129,6 +140,38 @@ export async function updateClassSchedule(
   return response.data;
 }
 
+export async function updateClassTeacherPay(
+  id: string,
+  data: StaffOpsUpdateClassTeacherPayPayload,
+): Promise<ClassDetail> {
+  const safeId = encodeURIComponent(id);
+  const response = await api.patch(`/staff-ops/classes/${safeId}/teacher-pay`, data);
+  return response.data as ClassDetail;
+}
+
+export async function addClassTeacher(
+  id: string,
+  data: StaffOpsAddClassTeacherPayload,
+): Promise<ClassDetail> {
+  const safeId = encodeURIComponent(id);
+  const response = await api.post(`/staff-ops/classes/${safeId}/teachers`, data);
+  return response.data as ClassDetail;
+}
+
+export async function stopClassTeacher(
+  classId: string,
+  teacherId: string,
+  data: ClassStatusActionPayload = {},
+): Promise<ClassStatusActionResponse> {
+  const safeClassId = encodeURIComponent(classId);
+  const safeTeacherId = encodeURIComponent(teacherId);
+  const response = await api.post(
+    `/staff-ops/classes/${safeClassId}/teachers/${safeTeacherId}/stop-teaching`,
+    data,
+  );
+  return response.data as ClassStatusActionResponse;
+}
+
 export async function resyncClassScheduleGoogleCalendar(
   id: string,
 ): Promise<
@@ -150,6 +193,19 @@ export async function getSessionsByClassId(
     params,
   });
   return Array.isArray(response.data) ? (response.data as SessionItem[]) : [];
+}
+
+/** Số thứ tự buổi nếu tạo buổi mới tại ngày/giờ cho trước. */
+export async function getNextSessionOrdinal(
+  classId: string,
+  params: { date: string; startTime?: string },
+): Promise<SessionNextOrdinalResponse> {
+  const safeId = encodeURIComponent(classId);
+  const response = await api.get<SessionNextOrdinalResponse>(
+    `/staff-ops/classes/${safeId}/sessions/next-ordinal`,
+    { params },
+  );
+  return response.data;
 }
 
 export async function getMissedTeachingAlertsByClassId(

@@ -1,6 +1,6 @@
-# Unicorns Edu 5.0
+# UniEdu 5.0
 
-Monorepo cho hệ thống quản lý giáo dục của Unicorns Edu, gồm frontend Next.js và backend NestJS.
+Monorepo cho hệ thống quản lý giáo dục của UniEdu, gồm frontend Next.js và backend NestJS.
 
 ## Workspace
 

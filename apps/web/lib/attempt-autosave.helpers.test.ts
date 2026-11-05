@@ -21,8 +21,86 @@ function q(
     choiceIndex: partial.choiceIndex ?? null,
     essayAnswer: partial.essayAnswer ?? null,
     markedForReview: partial.markedForReview ?? false,
+    slot: partial.slot ?? "required",
+    tfChoices: partial.tfChoices ?? null,
+    blankCount: partial.blankCount ?? null,
+    blankAnswers: partial.blankAnswers ?? null,
+    orderAnswer: partial.orderAnswer ?? null,
   };
 }
+
+describe("câu Đúng/Sai + nhóm tự chọn", () => {
+  it("chỉ tính đã làm khi đủ 4 nhận định", () => {
+    expect(
+      isAttemptQuestionUnanswered(
+        q({ type: "true_false_group", tfChoices: [true, false, null, true] }),
+      ),
+    ).toBe(true);
+    expect(
+      isAttemptQuestionUnanswered(
+        q({ type: "true_false_group", tfChoices: [true, false, false, true] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("đã chọn Tự chọn 1 thì câu Tự chọn 2 không bị nhắc chưa làm", () => {
+    const qs = [
+      q({ questionId: "a", type: "true_false_group", slot: "elective_1", tfChoices: [true, true, true, true] }),
+      q({ questionId: "b", type: "true_false_group", slot: "elective_1", tfChoices: [true, null, null, null] }),
+      q({ questionId: "c", type: "true_false_group", slot: "elective_2" }),
+    ];
+    expect(unansweredQuestionNumbers(qs)).toEqual([2]);
+  });
+});
+
+describe("Câu Đúng/Sai (một nhận định)", () => {
+  it("chọn một lựa chọn là tính đã làm, kể cả chọn Sai", () => {
+    expect(isAttemptQuestionUnanswered(q({ type: "true_false", tfChoices: [false] }))).toBe(false);
+    expect(isAttemptQuestionUnanswered(q({ type: "true_false", tfChoices: [true, null, null, null] }))).toBe(false);
+  });
+
+  it("chưa chọn là chưa làm", () => {
+    expect(isAttemptQuestionUnanswered(q({ type: "true_false", tfChoices: null }))).toBe(true);
+    expect(isAttemptQuestionUnanswered(q({ type: "true_false", tfChoices: [null] }))).toBe(true);
+  });
+});
+
+describe("Câu điền vào ô trống", () => {
+  it("chỉ tính đã làm khi mọi ô đều có chữ", () => {
+    const fb = (blankAnswers: (string | null)[] | null) =>
+      q({ type: "fill_blank", blankCount: 2, blankAnswers });
+    expect(isAttemptQuestionUnanswered(fb(["たべ", "のみ"]))).toBe(false);
+    expect(isAttemptQuestionUnanswered(fb(["たべ", null]))).toBe(true);
+    expect(isAttemptQuestionUnanswered(fb(["たべ", "　 "]))).toBe(true);
+    expect(isAttemptQuestionUnanswered(fb(["たべ"]))).toBe(true);
+    expect(isAttemptQuestionUnanswered(fb(null))).toBe(true);
+  });
+
+  it("chữ gõ vào ô làm đổi chữ ký tự lưu", () => {
+    const a = q({ type: "fill_blank", blankCount: 1, blankAnswers: ["a"] });
+    const b = q({ type: "fill_blank", blankCount: 1, blankAnswers: ["b"] });
+    expect(answersSignature([a])).not.toBe(answersSignature([b]));
+  });
+});
+
+describe("Câu sắp xếp", () => {
+  const cards = ["本", "の", "机", "の"];
+  const ord = (orderAnswer: string[] | null) =>
+    q({ type: "ordering", options: cards, orderAnswer });
+
+  it("chỉ tính đã làm khi đã dùng hết thẻ", () => {
+    expect(isAttemptQuestionUnanswered(ord(["の", "本", "の", "机"]))).toBe(false);
+    expect(isAttemptQuestionUnanswered(ord(["の", "本"]))).toBe(true);
+    expect(isAttemptQuestionUnanswered(ord([]))).toBe(true);
+    expect(isAttemptQuestionUnanswered(ord(null))).toBe(true);
+  });
+
+  it("đổi thứ tự thẻ làm đổi chữ ký tự lưu", () => {
+    expect(answersSignature([ord(["の", "本", "の", "机"])])).not.toBe(
+      answersSignature([ord(["本", "の", "の", "机"])]),
+    );
+  });
+});
 
 describe("isAttemptQuestionUnanswered", () => {
   it("treats choiceIndex 0 as answered", () => {

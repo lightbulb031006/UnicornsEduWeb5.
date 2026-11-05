@@ -139,6 +139,13 @@ export async function updateStaffWithFixedSalaryOverrides(
     return response.data;
 }
 
+/** Admin xoá ảnh đại diện của user gắn với nhân sự (bản gốc + bản watermark). */
+export async function deleteStaffAvatar(id: string): Promise<StaffDetail> {
+    const safeId = encodeURIComponent(id);
+    const response = await api.delete(`/staff/${safeId}/avatar`);
+    return response.data as StaffDetail;
+}
+
 export async function updateStaffStatus(
     id: string,
     status: StaffStatus,

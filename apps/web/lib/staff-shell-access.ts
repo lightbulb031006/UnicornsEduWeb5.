@@ -1,6 +1,7 @@
 import { Role, type UserInfoDto } from "@/dtos/Auth.dto";
 import type { FullProfileDto } from "@/dtos/profile.dto";
 import { canPublishNotifications } from "@/lib/notification-publisher-access";
+import { isMissingRequiredStaffAchievement } from "@/lib/staff-achievement-requirement";
 import { resolveStaffLessonWorkspace } from "@/lib/staff-lesson-workspace";
 
 type StaffShellProfile = FullProfileDto | UserInfoDto | null | undefined;
@@ -31,6 +32,7 @@ export type StaffShellRouteFlags = {
   isCommunicationSelfRoute: boolean;
   isTechnicalSelfRoute: boolean;
   isTrainingSelfRoute: boolean;
+  isSaleSelfRoute: boolean;
   isLessonPlanSelfRoute: boolean;
   isLessonPlanAdminDetailRoute: boolean;
   isLessonPlanLegacyRoute: boolean;
@@ -62,6 +64,7 @@ export type StaffShellAccessContext = {
   isAccountantExpense: boolean;
   isCommunication: boolean;
   isTechnical: boolean;
+  isSale: boolean;
   isAssistantStaff: boolean;
   isLessonPlanner: boolean;
 };
@@ -126,7 +129,8 @@ function isCompleteFullProfileStaffInfo(profile: FullProfileDto): boolean {
     hasText(staffInfo.university) &&
     hasText(staffInfo.highSchool) &&
     hasText(staffInfo.bankAccount) &&
-    hasText(staffInfo.bankQrLink)
+    hasText(staffInfo.bankQrLink) &&
+    !isMissingRequiredStaffAchievement(staffInfo)
   );
 }
 
@@ -182,6 +186,7 @@ function resolveStaffShellContext(
   const isAccountant = isAccountantIncome || isAccountantExpense;
   const isCommunication = staffRoles.includes("communication");
   const isTechnical = staffRoles.includes("technical");
+  const isSale = staffRoles.includes("sale");
 
   return {
     roleType,
@@ -204,6 +209,7 @@ function resolveStaffShellContext(
     isAccountantExpense,
     isCommunication,
     isTechnical,
+    isSale,
     isAssistantStaff: hasStaffProfile && staffProfileComplete && isAssistant,
     isLessonPlanner:
       staffRoles.includes("lesson_plan") ||
@@ -229,6 +235,9 @@ function resolveStaffShellRouteFlags(pathname: string): StaffShellRouteFlags {
   const isStaffStudentsListRoute = pathname === "/staff/students";
   const isStaffStudentDetailRoute = pathname.startsWith("/staff/students/");
   const isAssistantHistoryRoute = pathname.startsWith("/staff/history");
+  const isAssistantMonthlyReportRoute = pathname.startsWith(
+    "/staff/monthly-report",
+  );
   const isStaffNotificationRoute = pathname.startsWith("/staff/notification");
   const isStaffNotificationManageRoute = pathname.startsWith(
     "/staff/notification/manage",
@@ -247,6 +256,7 @@ function resolveStaffShellRouteFlags(pathname: string): StaffShellRouteFlags {
   );
   const isTechnicalSelfRoute = pathname.startsWith("/staff/technical-detail");
   const isTrainingSelfRoute = pathname.startsWith("/staff/training-detail");
+  const isSaleSelfRoute = pathname.startsWith("/staff/sale-detail");
   const isLessonPlanSelfRoute =
     pathname.startsWith("/staff/lesson-plan-detail") ||
     pathname.startsWith("/staff/lesson_plan_detail");
@@ -272,7 +282,8 @@ function resolveStaffShellRouteFlags(pathname: string): StaffShellRouteFlags {
     isAssistantUsersRoute ||
     isAssistantStaffsRoute ||
     isStaffStudentsListRoute ||
-    isAssistantHistoryRoute;
+    isAssistantHistoryRoute ||
+    isAssistantMonthlyReportRoute;
 
   return {
     isDashboardRoute,
@@ -300,6 +311,7 @@ function resolveStaffShellRouteFlags(pathname: string): StaffShellRouteFlags {
     isCommunicationSelfRoute,
     isTechnicalSelfRoute,
     isTrainingSelfRoute,
+    isSaleSelfRoute,
     isLessonPlanSelfRoute,
     isLessonPlanAdminDetailRoute,
     isLessonPlanLegacyRoute,
@@ -336,6 +348,7 @@ export function resolveStaffShellRouteAccess(
     isAccountantExpense,
     isCommunication,
     isTechnical,
+    isSale,
     isAssistantStaff,
     isLessonPlanner,
   } = context;
@@ -442,6 +455,12 @@ export function resolveStaffShellRouteAccess(
                                     ? hasStaffWorkspaceAccess &&
                                       isStaffOrAdmin &&
                                       (isTraining ||
+                                        isAssistantStaff ||
+                                        isAccountantExpense)
+                                    : flags.isSaleSelfRoute
+                                    ? hasStaffWorkspaceAccess &&
+                                      isStaffOrAdmin &&
+                                      (isSale ||
                                         isAssistantStaff ||
                                         isAccountantExpense)
                                     : flags.isLessonPlanLegacyRoute

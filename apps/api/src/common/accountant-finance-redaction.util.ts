@@ -276,11 +276,13 @@ export function redactSessionsForAccountantView<T>(
   );
 }
 
+/**
+ * Quản lý lớp (Ban Đào Tạo) chỉnh được lương gia sư nên thấy trợ cấp/scale
+ * của lớp và của từng gia sư; chỉ ẩn học phí.
+ */
 const CLASS_TRAINING_MANAGER_HIDDEN_FIELDS = [
-  'allowancePerSessionPerStudent',
-  'maxAllowancePerSession',
-  'scaleAmount',
   'studentTuitionPerSession',
+  'studentTuitionPerBlock',
   'tuitionPackageTotal',
   'tuitionPackageSession',
   'sessionTuitionTotal',
@@ -306,17 +308,6 @@ export function redactClassForTrainingManagerView<T>(classRecord: T): T {
     classRecord as Record<string, unknown>,
     CLASS_TRAINING_MANAGER_HIDDEN_FIELDS,
   );
-
-  if (Array.isArray(next.teachers)) {
-    next.teachers = next.teachers.map((teacher) =>
-      teacher && typeof teacher === 'object'
-        ? omitFields(
-            teacher as Record<string, unknown>,
-            TEACHER_INCOME_HIDDEN_FIELDS,
-          )
-        : teacher,
-    );
-  }
 
   if (Array.isArray(next.students)) {
     next.students = next.students.map((student) =>

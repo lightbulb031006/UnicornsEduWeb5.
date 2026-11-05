@@ -1,6 +1,7 @@
 import {
   hasCustomTuitionOverride,
   normalizeStudentClassCustomTuitionMoney,
+  resolveDerivedTuitionPerSession,
   resolveEffectiveTuitionPerSession,
   resolveSessionChargeTuitionFee,
 } from './student-class-tuition.util';
@@ -27,7 +28,7 @@ describe('student-class-tuition.util', () => {
     ).toBe(0);
   });
 
-  it('treats custom tuition 0 as unset for effective per-session resolution', () => {
+  it('treats custom tuition 0 as a free override, not inherit', () => {
     expect(
       resolveEffectiveTuitionPerSession({
         customTuitionPerSession: 0,
@@ -35,7 +36,36 @@ describe('student-class-tuition.util', () => {
         effectivePackageTotal: null,
         effectivePackageSession: null,
       }),
-    ).toBe(200000);
+    ).toBe(0);
+  });
+
+  it('derives 0 per session from a 0đ package, even with 0 sessions', () => {
+    expect(resolveDerivedTuitionPerSession(0, 0)).toBe(0);
+    expect(resolveDerivedTuitionPerSession(0, null)).toBe(0);
+    expect(resolveDerivedTuitionPerSession(1600000, 0)).toBeNull();
+  });
+
+  it('one_time: custom 0đ package charges 0 instead of class tuition', () => {
+    expect(
+      resolveSessionChargeTuitionFee({
+        pricingMode: 'one_time',
+        classTuitionPerSession: 20000,
+        effectivePackageTotal: 0,
+        effectivePackageSession: 0,
+        hasCustomPackageOverride: true,
+      }),
+    ).toBe(0);
+  });
+
+  it('per_block: custom 0 per block charges 0', () => {
+    expect(
+      resolveSessionChargeTuitionFee({
+        pricingMode: 'per_block',
+        customTuitionPerBlock: 0,
+        classTuitionPerBlock: 50000,
+        blockCount: 3,
+      }),
+    ).toBe(0);
   });
 
   it('keeps positive custom per-session override', () => {
@@ -333,14 +363,15 @@ describe('student-class-tuition.util', () => {
     ).toBe(280000);
   });
 
-  it('maps stored custom 0 to null for override detection', () => {
-    expect(normalizeStudentClassCustomTuitionMoney(0)).toBeNull();
+  it('keeps stored custom 0 as an override; only null inherits', () => {
+    expect(normalizeStudentClassCustomTuitionMoney(0)).toBe(0);
+    expect(normalizeStudentClassCustomTuitionMoney(null)).toBeNull();
     expect(
       hasCustomTuitionOverride({
         customTuitionPerSession: 0,
         customTuitionPackageTotal: null,
         customTuitionPackageSession: null,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });

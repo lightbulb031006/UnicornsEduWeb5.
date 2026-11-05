@@ -7,14 +7,19 @@ import {
 import { ClassTimelineItemKind } from '../../generated/enums';
 import { Prisma } from '../../generated/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { ProtectedVideoService } from 'src/protected-video/protected-video.service';
+import type { ProtectedVideoPlaybackDto } from 'src/dtos/protected-video.dto';
 import { StaffOperationsAccessService } from 'src/staff-ops/staff-operations-access.service';
 import type { ActionHistoryActor } from 'src/course-content/course-content.service';
-import { NOT_ARCHIVED_TIMELINE_ITEM } from 'src/course-content/archived-lesson-filter';
+import { PRESENT_TIMELINE_ITEM } from 'src/course-content/archived-lesson-filter';
 import { getUserFullNameFromParts } from 'src/common/user-name.util';
+import { loadSessionOrdinals } from 'src/session/session-ordinal.util';
 import type {
+  ClassTimelineAttendanceReviewDto,
   ClassTimelineItemDto,
   ClassTimelinePageDto,
 } from 'src/dtos/class-timeline.dto';
+import { assignmentDurationMinutes } from 'src/attempt/assignment-window';
 
 /**
  * Include dùng chung cho cả staff và student. `studentId` chỉ lọc `studentAssessments`
@@ -68,11 +73,30 @@ function findTimelineItems(
 
 type TimelineRow = Awaited<ReturnType<typeof findTimelineItems>>[number];
 
+function toAttendanceReviewDto(item: {
+  testCorrectCount: number | null;
+  testComment: string | null;
+  strengths: string | null;
+  improvements: string | null;
+  homeworkQuality: string | null;
+  homeworkComment: string | null;
+}): ClassTimelineAttendanceReviewDto {
+  return {
+    testCorrectCount: item.testCorrectCount,
+    testComment: item.testComment,
+    strengths: item.strengths,
+    improvements: item.improvements,
+    homeworkQuality: item.homeworkQuality,
+    homeworkComment: item.homeworkComment,
+  };
+}
+
 @Injectable()
 export class ClassTimelineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly staffAccess: StaffOperationsAccessService,
+    private readonly protectedVideos: ProtectedVideoService,
   ) {}
 
   async listForStaff(
@@ -83,12 +107,13 @@ export class ClassTimelineService {
     const rows = await findTimelineItems(
       this.prisma,
       {
-        where: { classId, ...NOT_ARCHIVED_TIMELINE_ITEM },
+        where: { classId, ...PRESENT_TIMELINE_ITEM },
         orderBy: { sortOrder: 'asc' },
       },
       null,
     );
-    return rows.map((row) => this.mapItem(row, null));
+    const ordinals = await this.loadOrdinals(rows);
+    return rows.map((row) => this.mapItem(row, null, ordinals));
   }
 
   async listForStudent(
@@ -116,7 +141,7 @@ export class ClassTimelineService {
         where: {
           classId,
           hiddenAt: null,
-          ...NOT_ARCHIVED_TIMELINE_ITEM,
+          ...PRESENT_TIMELINE_ITEM,
           OR: [
             { classContentItemId: null },
             { classContentItem: { hiddenAt: null } },
@@ -130,9 +155,10 @@ export class ClassTimelineService {
     );
     const hasMore = rows.length > take;
     const page = hasMore ? rows.slice(0, take) : rows;
+    const ordinals = await this.loadOrdinals(page);
     return {
-      items: page.map((row) => this.mapItem(row, studentId)),
-      nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
+      items: page.map((row) => this.mapItem(row, studentId, ordinals)),
+      nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
     };
   }
 
@@ -144,9 +170,17 @@ export class ClassTimelineService {
     return student?.id ?? null;
   }
 
+  private loadOrdinals(rows: TimelineRow[]) {
+    return loadSessionOrdinals(
+      this.prisma,
+      rows.flatMap((row) => (row.session ? [row.session.id] : [])),
+    );
+  }
+
   private mapItem(
     row: TimelineRow,
     studentId: string | null,
+    ordinals: Map<string, number>,
   ): ClassTimelineItemDto {
     const isStaffAudience = studentId === null;
 
@@ -175,6 +209,7 @@ export class ClassTimelineService {
               studentId: item.studentId,
               status: item.status as string,
               notes: item.notes,
+              ...toAttendanceReviewDto(item),
               student: { fullName: item.student?.fullName ?? null },
             })),
           }
@@ -203,10 +238,24 @@ export class ClassTimelineService {
           lessonContent: row.session.lessonContent,
           homework: row.session.homework,
           tutorial: row.session.tutorial,
-          recordingUrl: row.session.recordingUrl,
+          ordinal: ordinals.get(row.session.id) ?? null,
+          progressStatus: row.session.progressStatus,
+          progressDone: row.session.progressDone,
+          progressRemaining: row.session.progressRemaining,
+          hasInClassTest: row.session.hasInClassTest,
+          inClassTestContent: row.session.inClassTestContent,
+          inClassTestTotal: row.session.inClassTestTotal,
+          homeworkDueAt: row.session.homeworkDueAt?.toISOString() ?? null,
+          nextSessionPlan: row.session.nextSessionPlan,
+          hasRetest: row.session.hasRetest,
+          retestContent: row.session.retestContent,
+          // Học sinh không nhận link YouTube gốc (Video bảo vệ) — xin link qua `…/playback`.
+          recordingUrl: isStaffAudience ? row.session.recordingUrl : null,
+          hasRecording: Boolean(row.session.recordingUrl?.trim()),
           teacherName,
           myAttendanceStatus: mine?.status ?? null,
           myAttendanceNotes: mine?.notes ?? null,
+          myReview: mine ? toAttendanceReviewDto(mine) : null,
           ...staffOnlySession,
         },
         survey: null,
@@ -273,7 +322,8 @@ export class ClassTimelineService {
       kind: ClassTimelineItemKind.content_item,
       sortOrder: row.sortOrder,
       title: lesson?.title ?? 'Tiết học',
-      kindLabel: lessonKind === 'practice' ? 'Tiết thực hành' : 'Tiết lý thuyết',
+      kindLabel:
+        lessonKind === 'practice' ? 'Tiết thực hành' : 'Tiết lý thuyết',
       occurredAt: content?.openAt?.toISOString() ?? null,
       sessionId: null,
       classSurveyId: null,
@@ -282,11 +332,9 @@ export class ClassTimelineService {
       lessonKind,
       isOpen,
       openAt: content?.openAt?.toISOString() ?? null,
-      durationMinutes: content?.durationMinutes ?? null,
+      durationMinutes: content ? assignmentDurationMinutes(content) : null,
       hiddenAt:
-        row.hiddenAt?.toISOString() ??
-        content?.hiddenAt?.toISOString() ??
-        null,
+        row.hiddenAt?.toISOString() ?? content?.hiddenAt?.toISOString() ?? null,
       session: null,
       survey: null,
     };
@@ -301,6 +349,26 @@ export class ClassTimelineService {
       actor.roleType,
     );
     return this.staffAccess.resolveClassViewAccessMode(viewer, classId);
+  }
+
+  /**
+   * Link phát recording buổi học (Video bảo vệ). Buổi phải thuộc lớp và còn hiện trên
+   * timeline; không bao giờ trả link YouTube.
+   */
+  async getRecordingPlaybackForStudent(
+    classId: string,
+    sessionId: string,
+    studentId: string,
+  ): Promise<ProtectedVideoPlaybackDto> {
+    await this.validateStudentClassAccess(classId, studentId);
+    const session = await this.prisma.session.findFirst({
+      where: { id: sessionId, classId, timelineItem: { isNot: null } },
+      select: { recordingUrl: true },
+    });
+    if (!session) {
+      throw new NotFoundException('Buổi học không tồn tại');
+    }
+    return this.protectedVideos.issuePlayback(session.recordingUrl);
   }
 
   private async validateStudentClassAccess(
@@ -328,7 +396,9 @@ export class ClassTimelineService {
  * Việt Nam: họ + đệm (`last_name`) rồi tên (`first_name`).
  */
 function staffFullName(
-  staff: { user?: { first_name: string | null; last_name: string | null } | null } | null,
+  staff: {
+    user?: { first_name: string | null; last_name: string | null } | null;
+  } | null,
 ): string | null {
   return getUserFullNameFromParts(staff?.user);
 }

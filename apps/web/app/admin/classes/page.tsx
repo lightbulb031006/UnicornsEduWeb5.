@@ -21,6 +21,7 @@ import { resolveCourseWorkspaceCapabilities } from "@/lib/course-workspace-acces
 import { authKeys, classKeys, uniojKeys } from "@/lib/query-keys";
 import { getClassesLevels } from "@/lib/apis/unioj.api";
 import { LevelBadge } from "@/components/ui/LevelBadge";
+import { useAppConfig } from "@/lib/hooks/useAppConfig";
 import { cn } from "@/lib/utils";
 
 const SEARCH_DEBOUNCE_MS = 1000;
@@ -273,10 +274,14 @@ function AdminClassesPageContent({
 
   const classIds = useMemo(() => list.map((item) => item.id), [list]);
 
+  // Level lớp lấy từ UNIOJ — chỉ instance IT có.
+  const { data: appConfig } = useAppConfig();
+  const showUniojLevels = appConfig?.profile === "it";
+
   const { data: classesLevels, isLoading: isLoadingLevels } = useQuery({
     queryKey: uniojKeys.classesLevels(classIds),
     queryFn: () => getClassesLevels(classIds),
-    enabled: classIds.length > 0,
+    enabled: showUniojLevels && classIds.length > 0,
     staleTime: 60_000,
     retry: false,
   });
@@ -457,14 +462,18 @@ function AdminClassesPageContent({
                           {formatSeatSummary(row.studentCount, row.maxStudents)}
                         </span>
                       </div>
-                      <span className="text-text-muted">Level</span>
-                      <div>
-                        {isLoadingLevels ? (
-                          <span className="text-[11px] text-text-muted">Đang tải...</span>
-                        ) : (
-                          <LevelBadge level={classesLevels?.[row.id]} />
-                        )}
-                      </div>
+                      {showUniojLevels ? (
+                        <>
+                          <span className="text-text-muted">Level</span>
+                          <div>
+                            {isLoadingLevels ? (
+                              <span className="text-[11px] text-text-muted">Đang tải...</span>
+                            ) : (
+                              <LevelBadge level={classesLevels?.[row.id]} />
+                            )}
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   </article>
                 ))}
@@ -485,9 +494,11 @@ function AdminClassesPageContent({
                       <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
                         Sĩ số / tối đa
                       </th>
-                      <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                        Level lớp
-                      </th>
+                      {showUniojLevels ? (
+                        <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                          Level lớp
+                        </th>
+                      ) : null}
                       <th scope="col" className="w-16 px-4 py-3">
                         <span className="sr-only">Xóa</span>
                       </th>
@@ -533,13 +544,15 @@ function AdminClassesPageContent({
                             {formatSeatSummary(row.studentCount, row.maxStudents)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 align-middle text-left text-text-secondary">
-                          {isLoadingLevels ? (
-                            <span className="text-[11px] text-text-muted">Đang tải...</span>
-                          ) : (
-                            <LevelBadge level={classesLevels?.[row.id]} />
-                          )}
-                        </td>
+                        {showUniojLevels ? (
+                          <td className="px-4 py-3 align-middle text-left text-text-secondary">
+                            {isLoadingLevels ? (
+                              <span className="text-[11px] text-text-muted">Đang tải...</span>
+                            ) : (
+                              <LevelBadge level={classesLevels?.[row.id]} />
+                            )}
+                          </td>
+                        ) : null}
                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
                             {canDeleteClass ? (

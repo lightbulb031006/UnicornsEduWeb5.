@@ -63,7 +63,7 @@ export class ClassCourseModuleController {
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
   @ApiOperation({
     summary:
-      'Thêm chuyên đề vào lớp: nhóm lên đầu, đưa mọi tiết lý thuyết của chuyên đề vào nội dung lớp, hiện lại item bị ẩn do lần gỡ trước (item gia sư tự ẩn giữ nguyên). Tiết thực hành không tự giao.',
+      'Thêm cả chuyên đề vào lớp (chốt một lần): chép mọi tiết lý thuyết + thực hành đang có còn thiếu (tiết thực hành thành lần giao, mở bài lúc thêm, hạn = hạn xem nội dung của lớp), hiện lại item bị ẩn do lần gỡ trước (item gia sư tự ẩn giữ nguyên). Chuyên đề mới vào lớp lên đầu nhóm; lớp đã có nhóm thì giữ vị trí. Tiết khoá thêm về sau không tự vào lớp.',
   })
   @ApiParam({ name: 'classId', description: 'ID lớp học' })
   @ApiBody({ type: ClassModuleAddDto })
@@ -79,7 +79,6 @@ export class ClassCourseModuleController {
     status: 404,
     description: 'Không tìm thấy lớp hoặc chuyên đề.',
   })
-  @ApiResponse({ status: 409, description: 'Lớp đã có chuyên đề này.' })
   async add(
     @CurrentUser() user: JwtPayload,
     @Param('classId', new ParseClassIdPipe()) classId: string,
@@ -149,7 +148,7 @@ export class ClassCourseModuleController {
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
   @ApiOperation({
     summary:
-      'Gỡ chuyên đề khỏi lớp (coi như chưa từng thêm): ẩn mềm tiết lý thuyết và lần giao tiết thực hành của chuyên đề. Bài làm, điểm, lượt xem giữ nguyên.',
+      'Gỡ chuyên đề khỏi lớp: mọi tiết của chuyên đề (kể cả tiết đang Ẩn) biến mất ở mọi phía. Bài làm, điểm, lượt xem giữ nguyên; thêm lại chuyên đề thì hiện lại, tiết từng Ẩn vẫn ẩn.',
   })
   @ApiParam({ name: 'classId', description: 'ID lớp học' })
   @ApiParam({ name: 'moduleId', description: 'ID chuyên đề' })

@@ -6,7 +6,9 @@ import { toast } from "sonner";
 
 import * as questionApi from "@/lib/apis/question.api";
 import * as classApi from "@/lib/apis/class.api";
+import * as sharedMaterialApi from "@/lib/apis/shared-material.api";
 import { courseKeys } from "@/lib/query-keys";
+import { useAppConfig } from "@/lib/hooks/useAppConfig";
 import { invalidateQuestionScopedQueries } from "@/lib/query-invalidation";
 import {
   ResponsiveActionFooter,
@@ -22,6 +24,10 @@ import type { CreateQuestionInput, QuestionFormInitial } from "@/dtos/question.d
 import QuestionFormFields, {
   type QuestionFormValue,
 } from "@/components/admin/question/QuestionFormFields";
+import {
+  questionFormToPayload,
+  questionToFormParts,
+} from "@/components/admin/question/question-form-payload";
 
 /**
  * Dialog soạn / sửa một câu hỏi trong ngân hàng. Dùng chung cho tab Câu hỏi
@@ -33,24 +39,32 @@ import QuestionFormFields, {
 export default function QuestionFormDialog({
   question,
   courseId,
+  set,
   onClose,
   onSaved,
 }: {
   question: QuestionFormInitial | null;
   courseId: string;
+  /** Thêm câu mới vào Bộ câu hỏi này: câu nhận chuyên đề của bộ. */
+  set?: { id: string; moduleId: string };
   onClose: () => void;
   onSaved: () => void;
 }) {
   const queryClient = useQueryClient();
+  const { data: appConfig } = useAppConfig();
   const initialValue: QuestionFormValue = {
-    moduleId: question?.moduleId || "",
+    moduleId: question?.moduleId || set?.moduleId || "",
     difficultyLevelId: question?.difficultyLevelId || "",
     type: (question?.type ?? QuestionTypeDto.single_choice) as QuestionTypeDto,
     content: question?.content || "",
-    options: question?.options || ["", ""],
-    correctIndex: question?.correctIndex ?? 0,
+    ...questionToFormParts(question),
     explanation: question?.explanation || "",
     answerGuide: question?.answerGuide || "",
+    skills: question?.skills ?? [],
+    // Câu cũ (null) giữ ô dài như trước; câu mới mặc định ô ngắn.
+    essayInputSize: question ? (question.essayInputSize ?? "long") : "short",
+    sharedMaterialId: question?.sharedMaterialId ?? set?.id ?? "",
+    audio: question?.audio ?? null,
   };
   const [form, setForm] = useState<QuestionFormValue>(initialValue);
   const patchForm = (patch: Partial<QuestionFormValue>) =>
@@ -66,7 +80,9 @@ export default function QuestionFormDialog({
     mutationFn: (data: CreateQuestionInput) =>
       question
         ? questionApi.updateQuestion(question.id, data)
-        : questionApi.createQuestion(data),
+        : set
+          ? sharedMaterialApi.createSetQuestion(set.id, data)
+          : questionApi.createQuestion(data),
     onSuccess: async () => {
       toast.success(question ? "Đã cập nhật câu hỏi." : "Đã tạo câu hỏi.");
       await invalidateQuestionScopedQueries(queryClient, courseId);
@@ -79,18 +95,15 @@ export default function QuestionFormDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const isChoice = form.type === QuestionTypeDto.single_choice;
-    saveMutation.mutate({
-      courseId,
-      moduleId: form.moduleId,
-      difficultyLevelId: form.difficultyLevelId,
-      type: form.type,
-      content: form.content,
-      options: isChoice ? form.options : undefined,
-      correctIndex: isChoice ? form.correctIndex : undefined,
-      explanation: form.explanation || undefined,
-      answerGuide: form.answerGuide || undefined,
+    const result = questionFormToPayload(form, {
+      requireSkills: appConfig?.questionSkills,
+      essayInputSizes: appConfig?.essayInputSizes,
     });
+    if ("error" in result) {
+      toast.error(result.error);
+      return;
+    }
+    saveMutation.mutate({ courseId, ...result.payload });
   };
 
   const { confirm, dialog } = useConfirmDialog();
@@ -119,6 +132,7 @@ export default function QuestionFormDialog({
         <ResponsiveDialogBody className="space-y-4">
           <QuestionFormFields
             courseId={courseId}
+            questionId={question?.id}
             value={form}
             onChange={patchForm}
             courseSlot={

@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { STUDENT_CUSTOMER_SOURCE_OPTIONS } from "@/dtos/student.dto";
 
 describe("STUDENT_CUSTOMER_SOURCE_OPTIONS", () => {
-  it("đặt Khách cũ ngay trước Khác", () => {
+  it("chỉ có 4 nguồn, Người quen ở cuối", () => {
     const labels = STUDENT_CUSTOMER_SOURCE_OPTIONS.map((option) => option.label);
-    expect(labels.slice(-2)).toEqual(["Khách cũ", "Khác"]);
+    expect(labels).toHaveLength(4);
+    expect(labels.at(-1)).toBe("Người quen");
   });
 });

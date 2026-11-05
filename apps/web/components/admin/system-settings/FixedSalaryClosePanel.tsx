@@ -1,7 +1,8 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { FixedSalaryCloseDialog } from "@/components/admin/system-settings/FixedSalaryCloseDialog";
 import {
   Table,
   TableBody,
@@ -13,7 +14,6 @@ import {
 import type { StaffFixedSalaryPayable } from "@/dtos/fixed-salary-settings.dto";
 import * as fixedSalarySettingsApi from "@/lib/apis/fixed-salary-settings.api";
 import { ROLE_LABELS } from "@/lib/staff.constants";
-import { getFixedSalaryApiErrorMessage } from "@/lib/fixed-salary-settings.helpers";
 
 function formatVnd(amount: number) {
   return `${amount.toLocaleString("vi-VN")}đ`;
@@ -34,29 +34,7 @@ export function FixedSalaryClosePanel({ canEdit }: { canEdit: boolean }) {
     queryFn: () => fixedSalarySettingsApi.getStaffFixedSalaryPayables(),
   });
 
-  const closeMutation = useMutation({
-    mutationFn: fixedSalarySettingsApi.closeFixedSalaryMonth,
-    onSuccess: async (result) => {
-      queryClient.setQueryData(
-        ["fixed-salary-settings", "payables", "current"],
-        {
-          month: result.month,
-          items: result.items,
-        },
-      );
-      await queryClient.invalidateQueries({
-        queryKey: ["fixed-salary-settings", "payables"],
-      });
-      toast.success(
-        `Đã chốt tháng ${result.month}: sinh ${result.createdCount} khoản, bỏ qua ${result.skippedCount} khoản đã có.`,
-      );
-    },
-    onError: (error) => {
-      toast.error(
-        getFixedSalaryApiErrorMessage(error, "Không chốt được lương tháng này."),
-      );
-    },
-  });
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
 
   const month = payablesQuery.data?.month ?? "tháng này";
   const items = payablesQuery.data?.items ?? [];
@@ -70,21 +48,34 @@ export function FixedSalaryClosePanel({ canEdit }: { canEdit: boolean }) {
               Chốt lương tháng này
             </h2>
             <p className="mt-1 text-sm text-text-secondary">
-              Sinh khoản lương cứng tháng hiện tại. Ngày 28 hàng tháng hệ thống
-              tự chốt; nếu tháng này đã chốt sớm thì lần tự động đó bỏ qua. Bấm
-              chốt lại vẫn chạy như bình thường.
+              Chọn từng nhân sự để sinh khoản lương cứng tháng hiện tại. Ngày
+              28 hàng tháng hệ thống tự chốt nốt những người chưa chốt hoặc
+              chốt dở; khoản đã chốt giữ nguyên số.
             </p>
           </div>
           <button
             type="button"
-            onClick={() => closeMutation.mutate()}
-            disabled={!canEdit || closeMutation.isPending}
+            onClick={() => setCloseDialogOpen(true)}
+            disabled={!canEdit}
             className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-text-inverse transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-10 sm:w-auto"
           >
-            {closeMutation.isPending ? "Đang chốt…" : "Chốt lương tháng này"}
+            Chốt lương tháng này
           </button>
         </div>
       </div>
+
+      {closeDialogOpen ? (
+        <FixedSalaryCloseDialog
+          canEdit={canEdit}
+          onClose={() => setCloseDialogOpen(false)}
+          onClosed={(result) =>
+            queryClient.setQueryData(
+              ["fixed-salary-settings", "payables", "current"],
+              { month: result.month, items: result.items },
+            )
+          }
+        />
+      ) : null}
 
       {payablesQuery.isError ? (
         <p className="mb-4 text-sm text-error">

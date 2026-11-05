@@ -24,6 +24,7 @@ enum StaffRole {
   customer_care
   training
   assistant
+  sale
 }
 
 enum StaffStatus {
@@ -36,15 +37,12 @@ enum StudentStatus {
   inactive
 }
 
-/// Kênh Nguồn khách trên hồ sơ học sinh. Null trên cột = Chưa gán, không phải giá trị enum.
+/// Kênh Nguồn khách trên hồ sơ học sinh. `acquaintance` = Người quen (gộp các nhóm cũ, ADR 2026-10-18).
 enum StudentCustomerSource {
   tiktok
   fanpage_hoc_tin
   fanpage_luyen_tin
-  referral
-  personal
-  returning_customer
-  other
+  acquaintance
 }
 
 enum StudentClassStatus {
@@ -74,6 +72,22 @@ enum AttendanceStatus {
   present
   excused
   absent
+  /// Học thử: không trừ ví, không tính sĩ số trợ cấp; thu bù gấp đôi ở buổi present/excused kế tiếp cùng lớp.
+  trial
+}
+
+/// Tiến độ buổi: mức hoàn thành nội dung dự kiến của cả buổi.
+enum SessionProgressStatus {
+  completed
+  partial
+  not_completed
+}
+
+/// Chất lượng BTVN buổi trước của một học sinh.
+enum HomeworkQuality {
+  passed
+  needs_revision
+  failed
 }
 
 enum WalletTransactionType {
@@ -135,6 +149,7 @@ enum RegulationAudience {
   staff_technical
   staff_customer_care
   staff_training
+  staff_sale
 }
 
 enum SessionPaymentStatus {
@@ -175,4 +190,16 @@ enum AchievementLevel {
 enum LessonKind {
   theory
   practice
+}
+
+/// Trạng thái Đồng bộ video (ADR 2026-10-18-protected-video-via-unioj-sync).
+/// `pending` = LMS chưa gửi được sang UNIOJ; các giá trị còn lại mirror `status` của UNIOJ.
+enum ProtectedVideoStatus {
+  pending
+  queued
+  downloading
+  transcoding
+  uploading
+  ready
+  failed
 }

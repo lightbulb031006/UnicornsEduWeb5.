@@ -57,7 +57,7 @@ export class DeviceController {
     @Param('studentId') studentId: string,
     @Query('includeExpired') includeExpired?: string,
   ) {
-    const devices = await this.deviceService.getDevicesByUserId(studentId);
+    const devices = await this.deviceService.getDevicesByStudentId(studentId);
 
     if (includeExpired !== 'true') {
       return devices.filter((d) => !d.isExpired);
@@ -95,7 +95,8 @@ export class DeviceController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Dọn dẹp thiết bị hết hạn',
-    description: 'Xóa các thiết bị không hoạt động quá 60 ngày.',
+    description:
+      'Xóa các thiết bị không hoạt động quá 60 ngày hoặc refresh token đã hết hạn.',
   })
   @ApiResponse({ status: 200, description: 'Đã dọn dẹp thành công' })
   async cleanupExpired() {

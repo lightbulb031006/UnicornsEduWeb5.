@@ -29,10 +29,12 @@ import { Roles } from 'src/auth/decorators/roles.decorator';
 import { StaffRole, UserRole } from 'generated/enums';
 import {
   AdminCreateStudentUserDto,
+  AdminSetUserPasswordDto,
   AdminCreateUserDto,
   GetUsersQueryDto,
   UpdateUserDto,
 } from 'src/dtos/user.dto';
+import { AuthService } from 'src/auth/auth.service';
 import { UserService } from './user.service';
 import { readProxyPublicOrigin } from 'src/mail/public-frontend-url';
 
@@ -41,7 +43,10 @@ import { readProxyPublicOrigin } from 'src/mail/public-frontend-url';
 @ApiCookieAuth('access_token')
 @Roles(UserRole.admin)
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -203,6 +208,35 @@ export class UserController {
     @Body() data: UpdateUserDto,
   ) {
     return this.userService.updateUser(data, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Patch(':id/password')
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @ApiOperation({
+    summary: 'Set user password',
+    description:
+      'Admin/assistant sets a new password for a user without the old one. Revokes all devices and refresh token of the target user. Assistants cannot change passwords of admin/assistant accounts.',
+  })
+  @ApiParam({ name: 'id', description: 'User ID' })
+  @ApiBody({ type: AdminSetUserPasswordDto })
+  @ApiResponse({ status: 200, description: 'Password updated.' })
+  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden. Assistant targeting an admin/assistant account.',
+  })
+  @ApiResponse({ status: 404, description: 'User not found.' })
+  async setUserPassword(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() data: AdminSetUserPasswordDto,
+  ) {
+    return this.authService.adminSetUserPassword(id, data.newPassword, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,

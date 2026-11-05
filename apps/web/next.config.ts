@@ -17,6 +17,12 @@ const nextConfig: NextConfig = {
         hostname: "*.supabase.co",
         pathname: "/storage/v1/object/sign/**",
       },
+      // Supabase Storage self-host trên VPS, cùng domain instance (it/eng/jp.uniedu.vn).
+      {
+        protocol: "https",
+        hostname: "*.uniedu.vn",
+        pathname: "/storage/v1/object/sign/**",
+      },
     ],
   },
   async rewrites() {

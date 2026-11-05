@@ -123,6 +123,23 @@ export class ExtraAllowanceController {
     });
   }
 
+  @Get('student-options')
+  @ApiOperation({
+    summary: 'Search students for sale allowance',
+    description:
+      'Picker học sinh cho Trợ cấp sale: mọi học sinh (kể cả nghỉ học), tối đa 20 dòng, chỉ trả id, họ tên, năm sinh, trường và trạng thái.',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search by student full name',
+  })
+  @ApiResponse({ status: 200, description: 'Student options.' })
+  async getSaleStudentOptions(@Query('search') search?: string) {
+    return this.extraAllowanceService.searchSaleStudentOptions(search);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get extra allowance by id',

@@ -6,11 +6,15 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { renderMathInHtml } from "@/lib/math-render";
+import { prepareRichHtml } from "@/lib/rich-html";
+import { expandMarkdownInRichHtml } from "@/lib/rich-markdown";
 import { cn } from "@/lib/utils";
 
 interface MathContentProps {
   content: string;
   className?: string;
+  /** Nội dung soạn bằng markdown raw trong TipTap (tiết lý thuyết): render heading, bảng, … */
+  markdown?: boolean;
 }
 
 /**
@@ -19,21 +23,22 @@ interface MathContentProps {
  */
 function isHtmlContent(text: string): boolean {
   const trimmed = text.trim();
-  return /<\/?(p|div|h[1-6]|ul|ol|li|table|tr|td|th|blockquote|pre|code|span|strong|em|br|hr)[^>]*>/i.test(
+  return /<\/?(p|div|h[1-6]|ul|ol|li|table|tr|td|th|blockquote|pre|code|span|strong|em|br|hr|img)[^>]*>/i.test(
     trimmed,
   );
 }
 
-export default function MathContent({ content, className }: MathContentProps) {
+export default function MathContent({ content, className, markdown = false }: MathContentProps) {
   const isHtml = useMemo(() => isHtmlContent(content || ""), [content]);
 
   const renderedHtml = useMemo(() => {
     if (!content) return "";
     if (isHtml) {
-      return renderMathInHtml(content);
+      const html = markdown ? expandMarkdownInRichHtml(content) : content;
+      return renderMathInHtml(prepareRichHtml(html));
     }
     return "";
-  }, [content, isHtml]);
+  }, [content, isHtml, markdown]);
 
   if (!content) {
     return null;
@@ -44,15 +49,12 @@ export default function MathContent({ content, className }: MathContentProps) {
     return (
       <div
         className={cn(
-          "prose prose-sm sm:prose-base max-w-none text-text-primary break-words [overflow-wrap:anywhere]",
+          "rich-content prose prose-sm sm:prose-base max-w-none text-text-primary break-words [overflow-wrap:anywhere]",
           "[&_a]:text-primary [&_a]:underline [&_a:hover]:text-primary-hover [&_a]:break-all",
           "[&_p]:mb-3 [&_p:last-child]:mb-0",
           "[&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:mb-1",
           "[&_strong]:font-bold [&_h1]:text-xl [&_h2]:text-lg [&_h3]:text-base [&_h4]:text-sm",
           "[&_blockquote]:border-l-4 [&_blockquote]:border-primary/50 [&_blockquote]:bg-primary/5 [&_blockquote]:py-2 [&_blockquote]:px-4 [&_blockquote]:rounded-r-lg [&_blockquote]:italic [&_blockquote]:my-3",
-          "[&_table]:w-full [&_table]:border-collapse [&_table]:my-4",
-          "[&_th]:border-b [&_th]:border-border-default [&_th]:bg-bg-secondary [&_th]:px-3 [&_th]:py-2 [&_th]:font-semibold [&_th]:text-left",
-          "[&_td]:border-b [&_td]:border-border-subtle [&_td]:px-3 [&_td]:py-2",
           "[&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto [&_.katex-display]:py-1",
           "[&_.katex]:text-text-primary",
           className,

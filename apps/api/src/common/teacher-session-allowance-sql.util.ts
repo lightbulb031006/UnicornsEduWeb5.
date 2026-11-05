@@ -53,3 +53,30 @@ LEAST(
   allowance_per_session * coefficient
 )
 `;
+
+/** Buổi cọc không khấu trừ vận hành (khớp payroll trong `staff.service.ts`). */
+const SQL_TEACHER_SESSION_OPERATING_RATE = Prisma.sql`
+CASE
+  WHEN LOWER(COALESCE(sessions.teacher_payment_status, '')) IN ('deposit', 'deposite', 'coc', 'cọc')
+  THEN 0
+  ELSE COALESCE(sessions.teacher_tax_rate_percent, 0)
+END
+`;
+
+/**
+ * Trợ cấp buổi (đã cap) **sau khấu trừ vận hành, trước thuế** — mốc tính Chi
+ * phí nhân sự trên dashboard. `% vận hành` lấy snapshot trên buổi
+ * (`sessions.teacher_tax_rate_percent`).
+ */
+export const SQL_TEACHER_SESSION_AFTER_OPERATING = Prisma.sql`
+(
+  ${SQL_TEACHER_SESSION_CAPPED_GROSS} -
+  ROUND((${SQL_TEACHER_SESSION_CAPPED_GROSS} * ${SQL_TEACHER_SESSION_OPERATING_RATE}) / 100.0, 0)
+)
+`;
+
+/** Cột thêm vào GROUP BY khi dùng `SQL_TEACHER_SESSION_AFTER_OPERATING`. */
+export const SQL_TEACHER_SESSION_OPERATING_GROUP_BY = Prisma.sql`
+sessions.teacher_payment_status,
+sessions.teacher_tax_rate_percent
+`;

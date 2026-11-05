@@ -84,6 +84,13 @@ Trường hợp đáng giá nhất: `Object.values(StaffRole).includes(role)` b�
 - Thanh tua video (`YouTubeEmbed`): `role="slider"` + `aria-valuemin/max/now` + phím `ArrowLeft`/`ArrowRight` ±5s.
 - Field chỉ có `placeholder`: bổ sung `aria-label`. **Không** tự thêm label hiển thị — đó là thay đổi thiết kế, cần quyết định của người dùng.
 
+### 7. Tên người luôn hiển thị đầy đủ (bổ sung 2026-11-03)
+
+- Tên người (nhân sự, gia sư, học sinh, display name của user) trong **bảng, list row/card và row trong dialog/popup** không được cắt bằng `truncate` / `line-clamp-*` / `text-ellipsis` / `max-w-*` cố định. Dùng `break-words` (giữ `min-w-0` trên con của flex/grid) để tên dài xuống dòng.
+- Nếu cột tên bị ép hẹp, đổi layout thay vì cắt (vd. `EditClassTeachersPopup`: tên gia sư nằm một hàng riêng `col-span-full` phía trên các ô nhập).
+- Ngoại lệ — vẫn được truncate: chrome hẹp (StaffSidebar/StudentSidebar/AdminSidebar, breadcrumb, header, chip/ô lịch, trigger + option của dropdown/select/filter, caption lightbox, mục TOC).
+- Không áp dụng cho text không phải tên người (tên lớp, bài học, khoá học, file, email, URL…). Cột hiển thị lúc là gia sư lúc là lớp (`SessionHistoryTable` entity) chỉ wrap khi đang hiển thị gia sư.
+
 ## Hệ quả
 
 - Các trang dùng `useSearchParams` lấy lại khả năng static render.

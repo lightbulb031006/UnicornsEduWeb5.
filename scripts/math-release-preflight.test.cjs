@@ -11,7 +11,7 @@ const names = fs.readdirSync(root).filter((name) =>
 const source = fs.readFileSync(path.join(__dirname, 'math-release-preflight.cjs'), 'utf8');
 const oneTimeRepair = '20261004000000_one_time_course_setting';
 
-async function runPreflight({ pending = [oneTimeRepair], impact = '0', legacyCollision = 0 } = {}) {
+async function runPreflight({ pending = [oneTimeRepair], impact = '0', legacyCollision = 0, studentAccounts = 0, refundTargets = false } = {}) {
   const queries = [];
   const output = [];
   let ended = false;
@@ -35,6 +35,8 @@ async function runPreflight({ pending = [oneTimeRepair], impact = '0', legacyCol
           if (sql.includes('SELECT migration_name')) return { rows: names.filter((name) => !pending.includes(name)).map((migration_name) => ({ migration_name, finished_at: new Date() })) };
           if (sql.includes("name IN ('THPTQG', 'PREVOI')")) return { rows: [{ count: impact }] };
           if (sql.includes('WHERE id = ANY($1::text[])')) return { rows: [{ count: legacyCollision }] };
+          if (sql.includes('FROM public.users WHERE role_type')) return { rows: [{ count: studentAccounts }] };
+          if (sql.includes('AS matches')) return { rows: [{ matches: refundTargets }] };
           if (sql.includes('AS total_wallet_balance')) return { rows: [{ students: 35, users: 43, classes: 38, sessions: 551, attendance: 552, wallet_transactions: 222, total_wallet_balance: '-3778000', attendance_financial_digest: 'attendance', wallet_ledger_digest: 'wallet' }] };
           if (sql.includes('count(*)::int AS count')) return { rows: [{ count: 0 }] };
           return { rows: [] };
@@ -85,4 +87,19 @@ test('does not block already-applied one-time backfills', async () => {
 test('preserves the stop for pending legacy Tin student repairs', async () => {
   const { error } = await runPreflight({ pending: ['20260818120000_backfill_achievement_import_student_dates'], legacyCollision: 1 });
   assert.match(error.message, /Tin repair IDs exist/);
+});
+
+test('stops the pending Tin password reset when Math has student accounts', async () => {
+  const pending = ['20261025090000_reset_student_passwords'];
+  const { error } = await runPreflight({ pending, studentAccounts: 1 });
+  assert.match(error.message, /overwrite Math student credentials/);
+  assert.equal((await runPreflight({ pending })).error, undefined);
+});
+
+test('stops the pending Tin refund when the target account and class exist', async () => {
+  const pending = ['20261026100000_student_class_zero_tuition'];
+  const { error, queries } = await runPreflight({ pending, refundTargets: true });
+  assert.match(error.message, /Tin tuition refund targets exist/);
+  assert.deepEqual(Array.from(queries.find(({ sql }) => sql.includes('AS matches')).params), ['test123', 'THPTQG 02']);
+  assert.equal((await runPreflight({ pending })).error, undefined);
 });

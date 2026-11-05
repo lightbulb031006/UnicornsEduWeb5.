@@ -264,12 +264,35 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
 
   const staffList = staffSearchResult?.data ?? [];
   const availableStaff = staffList.filter((s) => !selectedTeachers.some((t) => t.id === s.id));
-  const trainingManagerOptions = [
-    { value: "", label: "Chưa gán" },
-    ...((trainingManagerSearchResult?.data ?? []).map((staff) => ({
+  const trainingStaffOptions = (trainingManagerSearchResult?.data ?? []).map(
+    (staff) => ({
       value: staff.id,
       label: staff.fullName?.trim() || staff.id,
-    }))),
+    }),
+  );
+  // Gia sư kiêm quản lý: gia sư đang chọn của lớp chưa thuộc Ban Đào Tạo
+  // cũng được chọn; backend tự cấp role `training` khi lưu.
+  const classTeacherOptions = selectedTeachers
+    .filter((t) => !trainingStaffOptions.some((o) => o.value === t.id))
+    .map((t) => ({ value: t.id, label: `${t.name} (gia sư lớp)` }));
+  const currentManager = classDetail.trainingManager;
+  const keepCurrentManagerOption =
+    currentManager?.id &&
+    ![...trainingStaffOptions, ...classTeacherOptions].some(
+      (o) => o.value === currentManager.id,
+    );
+  const trainingManagerOptions = [
+    { value: "", label: "Chưa gán" },
+    ...trainingStaffOptions,
+    ...classTeacherOptions,
+    ...(keepCurrentManagerOption
+      ? [
+          {
+            value: currentManager.id,
+            label: currentManager.fullName?.trim() || currentManager.id,
+          },
+        ]
+      : []),
   ];
   const dropdownDirection = teacherSearchFocused ? dropdownRect?.direction : null;
 
@@ -314,12 +337,12 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                 key={t.id}
                 className="rounded-2xl border border-border-default bg-bg-surface p-3 shadow-sm"
               >
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start lg:grid-cols-[minmax(0,1fr)_minmax(8.5rem,10rem)_minmax(8.5rem,10rem)_minmax(6.5rem,7.5rem)_auto]">
-                  <div className="min-w-0">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(6.5rem,7.5rem)_auto]">
+                  <div className="col-span-full min-w-0">
                     <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
                       Gia sư phụ trách
                     </p>
-                    <p className="truncate text-lg font-semibold text-text-primary">{t.name}</p>
+                    <p className="break-words text-lg font-semibold text-text-primary">{t.name}</p>
                   </div>
                   <label className="min-w-0">
                     <span className="sr-only">Trợ cấp riêng cho {t.name}</span>

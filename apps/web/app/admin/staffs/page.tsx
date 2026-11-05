@@ -656,7 +656,7 @@ function AdminStaffPageContent() {
                             status={row.status}
                             routeBase={routeBase}
                           />
-                          <span className="min-w-0 truncate font-semibold text-text-primary">
+                          <span className="min-w-0 break-words font-semibold text-text-primary">
                             {row.fullName?.trim() || "—"}
                           </span>
                         </div>
@@ -790,7 +790,7 @@ function AdminStaffPageContent() {
                             />
                           </td>
                           <td className="w-[20%] min-w-0 px-4 py-3 text-text-primary">
-                            <span className="block truncate">{row.fullName?.trim() || "—"}</span>
+                            <span className="block break-words">{row.fullName?.trim() || "—"}</span>
                             <StaffAchievementsButton
                               count={row.achievementCount}
                               onOpen={() => openAchievements(row)}

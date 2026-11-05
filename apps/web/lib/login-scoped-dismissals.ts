@@ -1,4 +1,4 @@
-/** Key sessionStorage của panel nhắc CSKH điền bù lý do nghỉ ("Để sau" tới hết phiên đăng nhập). */
+/** Key sessionStorage của panel nhắc CSKH điền lý do nghỉ ("Đóng" ẩn tới hết phiên đăng nhập). */
 export const DROP_OUT_REASON_REMINDER_DISMISS_KEY = "drop-out-reason-reminder-dismissed-session";
 
 /** Xoá các lựa chọn "Để sau" gắn với phiên đăng nhập, để lần đăng nhập sau nhắc lại. */

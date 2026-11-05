@@ -31,6 +31,7 @@ import {
   LessonUpdateDto,
   LessonResponseDto,
 } from 'src/dtos/course-content.dto';
+import type { ProtectedVideoPlaybackDto } from 'src/dtos/protected-video.dto';
 import { CourseLessonService } from './course-lesson.service';
 import { ClassContentService } from './class-content.service';
 
@@ -186,6 +187,41 @@ export class ClassLessonController {
       );
     }
     return this.topicService.getLessonById(lessonId);
+  }
+
+  @Get(':lessonId/playback')
+  @Roles(UserRole.student)
+  @ApiOperation({
+    summary: 'Link phát video tiết lý thuyết (Video bảo vệ)',
+    description:
+      'Ký Playback Token UniVideo (TTL 4 giờ) khi video đã sẵn sàng. Không trả link YouTube. Gặp 403 khi phát → gọi lại endpoint này để lấy link mới.',
+  })
+  @ApiParam({ name: 'classId', description: 'ID lớp học' })
+  @ApiParam({ name: 'lessonId', description: 'ID tiết học' })
+  @ApiResponse({
+    status: 200,
+    description:
+      "{ state: 'ready', masterUrl, expiresAt } | { state: 'processing', progress } | { state: 'unavailable' } | { state: 'none' }",
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Không học lớp này, lớp hết hạn hoặc chưa tới giờ mở bài.',
+  })
+  @ApiResponse({ status: 404, description: 'Tiết học không có trong lớp.' })
+  async getLessonPlayback(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Param('lessonId') lessonId: string,
+  ): Promise<ProtectedVideoPlaybackDto> {
+    const studentId = await this.topicService.findStudentIdByUserId(user.id);
+    if (!studentId) {
+      throw new NotFoundException('Student profile not found');
+    }
+    return this.classContentService.getLessonVideoPlaybackForStudent(
+      classId,
+      lessonId,
+      studentId,
+    );
   }
 
   @Post('reorder')

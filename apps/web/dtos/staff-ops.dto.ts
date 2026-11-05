@@ -5,9 +5,11 @@ import type {
   ClassStatus,
 } from "./class.dto";
 import type {
+  AttendanceReviewFields,
   SessionAttendanceStatus,
   SessionItem,
   SessionMonthYearParams,
+  SessionReviewFields,
 } from "./session.dto";
 
 export type StaffOpsClassListResponse = ClassListResponse;
@@ -30,26 +32,58 @@ export interface StaffOpsUpdateClassSchedulePayload {
   expectedUpdatedAt?: string;
 }
 
-export interface StaffOpsSessionAttendancePayload {
+/** Lương một gia sư trong lớp. Bỏ field = giữ nguyên; `null` = theo mức của lớp. */
+export interface StaffOpsClassTeacherPayItem {
+  teacher_id: string;
+  custom_allowance?: number | null;
+  /** `null` = theo scale lớp, `0` = gia sư không có scale. */
+  custom_scale_amount?: number | null;
+  operating_deduction_rate_percent?: number;
+}
+
+/** `PATCH /staff-ops/classes/:id/teacher-pay` — quản lý lớp chỉnh lương gia sư (không có học phí). */
+export interface StaffOpsUpdateClassTeacherPayPayload {
+  allowance_per_session_per_student?: number;
+  /** `null` = bỏ trần trợ cấp / buổi. */
+  max_allowance_per_session?: number | null;
+  scale_amount?: number;
+  teachers?: StaffOpsClassTeacherPayItem[];
+}
+
+/** `POST /staff-ops/classes/:id/teachers` — thêm (hoặc mở lại) một gia sư. */
+export interface StaffOpsAddClassTeacherPayload {
+  teacher_id: string;
+}
+
+export interface StaffOpsSessionAttendancePayload
+  extends AttendanceReviewFields {
   studentId: string;
   status: SessionAttendanceStatus;
   notes?: string | null;
 }
 
-export interface StaffOpsCreateSessionPayload {
+export interface StaffOpsCreateSessionPayload extends SessionReviewFields {
   date: string;
   startTime?: string;
   endTime?: string;
   notes?: string | null;
+  lessonContent?: string | null;
+  homework?: string | null;
+  tutorial?: string | null;
+  recordingUrl?: string | null;
   coefficient?: number;
   attendance?: StaffOpsSessionAttendancePayload[];
 }
 
-export interface StaffOpsUpdateSessionPayload {
+export interface StaffOpsUpdateSessionPayload extends SessionReviewFields {
   date?: string;
   startTime?: string;
   endTime?: string;
   notes?: string | null;
+  lessonContent?: string | null;
+  homework?: string | null;
+  tutorial?: string | null;
+  recordingUrl?: string | null;
   coefficient?: number;
   attendance?: StaffOpsSessionAttendancePayload[];
 }

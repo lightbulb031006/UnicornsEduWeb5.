@@ -44,6 +44,8 @@ type Props = {
   canStopTeaching?: boolean;
   onStopTeaching?: (teacherId: string) => void;
   stopTeachingPendingTeacherId?: string | null;
+  /** Không hiện nút Nghỉ dạy cho dòng này (quản lý lớp không tự cho mình nghỉ). */
+  stopTeachingLockedTeacherId?: string | null;
 };
 
 function normalizeMoneyAmount(value?: number | null): number | null {
@@ -125,6 +127,7 @@ export default function TutorCard({
   canStopTeaching = false,
   onStopTeaching,
   stopTeachingPendingTeacherId = null,
+  stopTeachingLockedTeacherId = null,
 }: Props) {
   const tutorItems = normalizeTutors(
     teachers,
@@ -150,7 +153,9 @@ export default function TutorCard({
                 const showCompensation =
                   showTeacherCompensation && (compensationTeacherId == null || isSelf);
                 const showStopTeaching =
-                  canStopTeaching && teacher.assignmentStatus !== "inactive";
+                  canStopTeaching &&
+                  teacher.assignmentStatus !== "inactive" &&
+                  teacher.id !== stopTeachingLockedTeacherId;
                 const isStopTeachingPending = stopTeachingPendingTeacherId === teacher.id;
 
                 return (
@@ -194,7 +199,7 @@ export default function TutorCard({
                         {String(index + 1).padStart(2, "0")}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium leading-tight text-text-primary">
+                        <p className="break-words text-sm font-medium leading-tight text-text-primary">
                           {teacher.name}
                           {isSelf ? (
                             <span className="ml-1.5 font-normal text-text-muted">(bạn)</span>
@@ -299,7 +304,7 @@ export default function TutorCard({
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted">
                   Nhân sự quản lý
                 </p>
-                <p className="mt-1 truncate font-medium text-text-primary">
+                <p className="mt-1 break-words font-medium text-text-primary">
                   {managerDisplayName}
                 </p>
               </div>

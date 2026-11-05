@@ -33,7 +33,27 @@ export type CloseFixedSalaryMonthResult = {
   createdCount: number;
   skippedCount: number;
   items: StaffFixedSalaryPayableView[];
-  skippedBecauseAlreadyClosed?: boolean;
+};
+
+export type FixedSalaryCloseCandidateRole = {
+  roleType: StaffRole;
+  /** `closed`: đã có khoản tháng này (số đóng băng); `unclosed`: số dự kiến theo mức hiện hành. */
+  status: 'closed' | 'unclosed';
+  grossAmount: number;
+  netAmount: number;
+};
+
+export type FixedSalaryCloseCandidate = {
+  staffId: string;
+  staffFullName: string;
+  totalGrossAmount: number;
+  closedRoleCount: number;
+  roles: FixedSalaryCloseCandidateRole[];
+};
+
+export type FixedSalaryCloseCandidatesResult = {
+  month: string;
+  items: FixedSalaryCloseCandidate[];
 };
 
 type PayableCreateRow = {
@@ -53,38 +73,82 @@ type PayableCreateRow = {
 export class FixedSalaryCloseService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async closeCurrentMonth(): Promise<CloseFixedSalaryMonthResult> {
-    return this.closeMonth(getCurrentVietnamMonthKey());
-  }
-
   /**
-   * Day-28 cron entry: if the current month already has any frozen payables
-   * (typically from an early manual close), skip the whole run so later hires
-   * or newly configured roles are not added automatically.
+   * Chốt tháng hiện tại. `staffIds` có thì chỉ chốt những nhân sự đó (role còn
+   * thiếu); không có thì chốt mọi nhân sự đủ điều kiện. Cron ngày 28 cũng gọi
+   * nhánh không có `staffIds` để chốt nốt người chưa chốt / chốt dở.
    */
-  async closeCurrentMonthAutomatically(): Promise<CloseFixedSalaryMonthResult> {
-    return this.closeMonthIfUnclosed(getCurrentVietnamMonthKey());
+  async closeCurrentMonth(
+    staffIds?: string[],
+  ): Promise<CloseFixedSalaryMonthResult> {
+    return this.closeMonth(getCurrentVietnamMonthKey(), staffIds);
   }
 
-  async closeMonthIfUnclosed(
-    monthKey: string,
-  ): Promise<CloseFixedSalaryMonthResult> {
-    const month = this.normalizeMonthKey(monthKey);
-    const existingCount = await this.prisma.staffFixedSalaryPayable.count({
-      where: { month },
-    });
+  async listCloseCandidates(): Promise<FixedSalaryCloseCandidatesResult> {
+    const month = getCurrentVietnamMonthKey();
+    const [candidateRows, payableViews] = await Promise.all([
+      this.buildPayableCandidates(month, new Date()),
+      this.loadPayableViews(month),
+    ]);
 
-    if (existingCount > 0) {
-      return {
-        month,
-        createdCount: 0,
-        skippedCount: 0,
-        skippedBecauseAlreadyClosed: true,
-        items: await this.loadPayableViews(month),
-      };
+    const byStaff = new Map<string, FixedSalaryCloseCandidate>();
+    const ensure = (staffId: string, staffFullName: string) => {
+      let entry = byStaff.get(staffId);
+      if (!entry) {
+        entry = {
+          staffId,
+          staffFullName,
+          totalGrossAmount: 0,
+          closedRoleCount: 0,
+          roles: [],
+        };
+        byStaff.set(staffId, entry);
+      }
+      return entry;
+    };
+
+    for (const payable of payableViews) {
+      const entry = ensure(payable.staffId, payable.staffFullName);
+      entry.roles.push({
+        roleType: payable.roleType,
+        status: 'closed',
+        grossAmount: payable.grossAmount,
+        netAmount: payable.netAmount,
+      });
+      entry.closedRoleCount += 1;
+      entry.totalGrossAmount += payable.grossAmount;
     }
 
-    return this.closeMonth(month);
+    const closedKeys = new Set(
+      payableViews.map((row) => `${row.staffId}:${row.roleType}`),
+    );
+    const unclosedRows = candidateRows.filter(
+      (row) => !closedKeys.has(`${row.staffId}:${row.roleType}`),
+    );
+    const names = await this.loadStaffNames(
+      unclosedRows
+        .map((row) => row.staffId)
+        .filter((staffId) => !byStaff.has(staffId)),
+    );
+    for (const row of unclosedRows) {
+      const entry = ensure(row.staffId, names.get(row.staffId) ?? row.staffId);
+      entry.roles.push({
+        roleType: row.roleType,
+        status: 'unclosed',
+        grossAmount: row.grossAmount,
+        netAmount: row.netAmount,
+      });
+      entry.totalGrossAmount += row.grossAmount;
+    }
+
+    const items = Array.from(byStaff.values()).sort((a, b) =>
+      a.staffFullName.localeCompare(b.staffFullName, 'vi'),
+    );
+    for (const item of items) {
+      item.roles.sort((a, b) => a.roleType.localeCompare(b.roleType));
+    }
+
+    return { month, items };
   }
 
   async listPayables(monthKey?: string): Promise<{
@@ -100,10 +164,13 @@ export class FixedSalaryCloseService {
     };
   }
 
-  async closeMonth(monthKey: string): Promise<CloseFixedSalaryMonthResult> {
+  async closeMonth(
+    monthKey: string,
+    staffIds?: string[],
+  ): Promise<CloseFixedSalaryMonthResult> {
     const month = this.normalizeMonthKey(monthKey);
     const asOf = new Date();
-    const candidates = await this.buildPayableCandidates(month, asOf);
+    const candidates = await this.buildPayableCandidates(month, asOf, staffIds);
 
     const created = candidates.length
       ? await this.prisma.staffFixedSalaryPayable.createMany({
@@ -136,16 +203,20 @@ export class FixedSalaryCloseService {
   private async buildPayableCandidates(
     month: string,
     asOf: Date,
+    staffIds?: string[],
   ): Promise<PayableCreateRow[]> {
     const staffRows = await this.prisma.staffInfo.findMany({
-      where: { status: StaffStatus.active },
+      where: {
+        status: StaffStatus.active,
+        ...(staffIds ? { id: { in: staffIds } } : {}),
+      },
       select: {
         id: true,
         roles: true,
       },
     });
     const activeStaff = staffRows.filter((row) => row.roles.length > 0);
-    const staffIds = activeStaff.map((row) => row.id);
+    const activeStaffIds = activeStaff.map((row) => row.id);
 
     const [
       salaryDefaults,
@@ -156,10 +227,10 @@ export class FixedSalaryCloseService {
       this.prisma.roleFixedSalaryDefault.findMany(),
       this.prisma.roleFixedSalaryOperatingRateDefault.findMany(),
       this.prisma.staffFixedSalaryOverride.findMany({
-        where: { staffId: { in: staffIds } },
+        where: { staffId: { in: activeStaffIds } },
       }),
       this.prisma.staffFixedSalaryOperatingRateOverride.findMany({
-        where: { staffId: { in: staffIds } },
+        where: { staffId: { in: activeStaffIds } },
       }),
     ]);
 
@@ -227,6 +298,31 @@ export class FixedSalaryCloseService {
     }
 
     return candidates;
+  }
+
+  private async loadStaffNames(
+    staffIds: string[],
+  ): Promise<Map<string, string>> {
+    if (staffIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.prisma.staffInfo.findMany({
+      where: { id: { in: Array.from(new Set(staffIds)) } },
+      select: {
+        id: true,
+        user: {
+          select: {
+            first_name: true,
+            last_name: true,
+            accountHandle: true,
+            email: true,
+          },
+        },
+      },
+    });
+    return new Map(
+      rows.map((row) => [row.id, getPreferredUserFullName(row.user) ?? row.id]),
+    );
   }
 
   private async loadPayableViews(

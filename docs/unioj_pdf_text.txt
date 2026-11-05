@@ -1,4 +1,4 @@
-TRUNG TÂM UNIOJ: UNICORNS
+TRUNG TÂM UNIOJ: UNI
 ONLINE JUDGE
 CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT
 NAM
@@ -9,7 +9,7 @@ Kính gửi: Các đơn vị, hệ thống đối tác tích hợp
 Bộ phận công tác:  Bộ phận kỹ thuật – phát triển website UNIOJ
 Phiên bản tài liệu:  1.0
 Cơ sở API:  https://oj.uniedu.vn
-Tài liệu này hướng dẫn các đơn vị trong hệ sinh thái Unicorns Edu kết nối với nền tảng
+Tài liệu này hướng dẫn các đơn vị trong hệ sinh thái UniEdu kết nối với nền tảng
 UNIOJ để đồng bộ tên học viên, lấy dữ liệu báo cáo cá nhân và nhúng báo cáo PDF cho phụ
 huynh. API key chỉ được sử dụng trên máy chủ backend của đơn vị đối tác; không đưa ra
 trình duyệt người dùng cuối.

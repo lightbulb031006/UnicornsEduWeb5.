@@ -1,7 +1,19 @@
+import type { HomeworkQuality, SessionProgressStatus } from "./session.dto";
+
 export type ClassTimelineKind = "session" | "class_survey" | "content_item";
 
+/** Phần từng học sinh của Nhận xét buổi học có cấu trúc. */
+export interface ClassTimelineAttendanceReviewDto {
+  testCorrectCount: number | null;
+  testComment: string | null;
+  strengths: string | null;
+  improvements: string | null;
+  homeworkQuality: HomeworkQuality | null;
+  homeworkComment: string | null;
+}
+
 /** Điểm danh rút gọn, chỉ có ở payload staff. */
-export interface ClassTimelineAttendanceDto {
+export interface ClassTimelineAttendanceDto extends ClassTimelineAttendanceReviewDto {
   studentId: string;
   status: string;
   notes: string | null;
@@ -32,10 +44,27 @@ export interface ClassTimelineItemDto {
     lessonContent: string | null;
     homework: string | null;
     tutorial: string | null;
+    /** Số thứ tự buổi trong lớp (suy ra, không lưu). */
+    ordinal: number | null;
+    /** Null = buổi legacy (nhận xét tự do trong notes). */
+    progressStatus: SessionProgressStatus | null;
+    progressDone: string | null;
+    progressRemaining: string | null;
+    hasInClassTest: boolean;
+    inClassTestContent: string | null;
+    inClassTestTotal: number | null;
+    homeworkDueAt: string | null;
+    nextSessionPlan: string | null;
+    hasRetest: boolean;
+    retestContent: string | null;
+    /** Chỉ có ở payload staff; payload học sinh luôn null — dùng `hasRecording`. */
     recordingUrl: string | null;
+    hasRecording: boolean;
     teacherName: string | null;
     myAttendanceStatus: string | null;
     myAttendanceNotes: string | null;
+    /** Phần nhận xét riêng của học sinh đang xem. */
+    myReview: ClassTimelineAttendanceReviewDto | null;
     /** Các field dưới đây chỉ có ở payload staff (dựng row 3 cột trên timeline). */
     notes?: string | null;
     teacherPaymentStatus?: string | null;

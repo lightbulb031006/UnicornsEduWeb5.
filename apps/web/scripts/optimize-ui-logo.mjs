@@ -1,5 +1,5 @@
 /**
- * Shrinks apps/web/image/logo/logo_light.png for Next/Image (max edge + PNG zlib).
+ * Shrinks apps/web/image/logo/logo.png for Next/Image (max edge + PNG zlib).
  * Does not trim by default (designer padding preserved). Set UI_LOGO_TRIM=1 to trim like favicon.
  * Env: UI_LOGO_MAX_EDGE (default 1600), UI_LOGO_TRIM (0|1, default 0)
  * Run from apps/web: node scripts/optimize-ui-logo.mjs
@@ -11,7 +11,7 @@ import sharp from "sharp";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
-const targetPath = path.join(root, "image", "logo", "logo_light.png");
+const targetPath = path.join(root, "image", "logo", "logo.png");
 
 const MAX_EDGE = Math.min(
   4096,

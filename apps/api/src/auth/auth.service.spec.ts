@@ -11,7 +11,11 @@ jest.mock('./user-device.service', () => ({
 
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
-import { ServiceUnavailableException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { StaffRole, UserRole } from '../../generated/enums';
 import { AuthService, STAFF_DATA_CONSENT_VERSION } from './auth.service';
 
@@ -41,6 +45,10 @@ describe('AuthService', () => {
     loginRequest: {
       findUnique: jest.fn(),
       delete: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    staffInfo: {
+      findUnique: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -78,6 +86,7 @@ describe('AuthService', () => {
     generateDeviceToken: jest.fn(),
     generateActivateSecret: jest.fn(),
     createDevice: jest.fn().mockResolvedValue({ id: 'device-1' }),
+    replaceDevicesForUser: jest.fn().mockResolvedValue({ id: 'device-1' }),
     removeAllDevicesForUser: jest.fn().mockResolvedValue({ count: 1 }),
     removeDeviceById: jest.fn().mockResolvedValue({ count: 1 }),
     hasActiveDevice: jest.fn(),
@@ -768,6 +777,158 @@ describe('AuthService', () => {
     );
   });
 
+  it('rejects password login for students so they must use the magic-link flow', async () => {
+    mockPrisma.user.findFirst.mockResolvedValueOnce({
+      id: 'student-1',
+      accountHandle: 'hocsinh1',
+      roleType: UserRole.student,
+      passwordHash: 'hash',
+    });
+    (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+
+    await expect(service.login('hocsinh1', 'secret')).rejects.toMatchObject({
+      response: expect.objectContaining({ error: 'STUDENT_LOGIN_REQUIRED' }),
+    });
+    expect(userDeviceService.createDevice).not.toHaveBeenCalled();
+  });
+
+  describe('studentLoginInit with an unverified email', () => {
+    const unverifiedStudent = {
+      id: 'student-1',
+      email: 'NguyenVanA2026@gmail.com',
+      passwordHash: 'hash',
+      roleType: UserRole.student,
+      emailVerified: false,
+    };
+
+    it('sends the email-verification mail on the same click and returns the masked email', async () => {
+      mockPrisma.user.findFirst.mockResolvedValueOnce(unverifiedStudent);
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+
+      const error: unknown = await service
+        .studentLoginInit('hocsinh1', 'secret')
+        .catch((caught: unknown) => caught);
+
+      expect(
+        (error as { response: Record<string, unknown> }).response,
+      ).toMatchObject({
+        error: 'EMAIL_NOT_VERIFIED',
+        maskedEmail: '...2026@gmail.com',
+      });
+      expect(mailService.sendVerificationEmail).toHaveBeenCalledWith(
+        'nguyenvana2026@gmail.com',
+        'token',
+        undefined,
+      );
+      expect(userDeviceService.hasActiveDevice).not.toHaveBeenCalled();
+    });
+
+    it('omits the masked email when the verification mail cannot be sent', async () => {
+      mockPrisma.user.findFirst.mockResolvedValueOnce(unverifiedStudent);
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+      mailService.sendVerificationEmail.mockRejectedValueOnce(
+        new ServiceUnavailableException('SMTP is not configured'),
+      );
+
+      const error: unknown = await service
+        .studentLoginInit('hocsinh1', 'secret')
+        .catch((caught: unknown) => caught);
+
+      const response = (error as { response: Record<string, unknown> })
+        .response;
+      expect(response).toMatchObject({ error: 'EMAIL_NOT_VERIFIED' });
+      expect(response).not.toHaveProperty('maskedEmail');
+    });
+
+    it('does not send any mail when the password is wrong', async () => {
+      mockPrisma.user.findFirst.mockResolvedValueOnce(unverifiedStudent);
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(false);
+
+      await expect(
+        service.studentLoginInit('hocsinh1', 'wrong'),
+      ).rejects.toThrow('Invalid credentials');
+      expect(mailService.sendVerificationEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('studentLoginInit with a verified email', () => {
+    const verifiedStudent = {
+      id: 'student-1',
+      email: 'hocsinh1@gmail.com',
+      accountHandle: 'hocsinh1',
+      passwordHash: 'hash',
+      roleType: UserRole.student,
+      emailVerified: true,
+    };
+
+    beforeEach(() => {
+      userDeviceService.generateDeviceToken = jest
+        .fn()
+        .mockReturnValue('device-token');
+      userDeviceService.replaceDevicesForUser = jest
+        .fn()
+        .mockResolvedValue({ id: 'device-1' });
+      jwtService.signAsync = jest.fn().mockResolvedValue('jwt-token');
+    });
+
+    it('issues tokens directly without sending a login magic link', async () => {
+      mockPrisma.user.findFirst.mockResolvedValueOnce(verifiedStudent);
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+
+      await expect(
+        service.studentLoginInit('hocsinh1', 'secret'),
+      ).resolves.toMatchObject({
+        accessToken: 'jwt-token',
+        refreshToken: 'jwt-token',
+      });
+
+      // Kiểm tra + thay thiết bị trong một transaction có khoá theo user.
+      expect(userDeviceService.replaceDevicesForUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'student-1',
+          rejectIfLive: true,
+          refreshExpiresAt: expect.any(Date) as Date,
+        }),
+      );
+      expect(userDeviceService.bindRefreshToken).toHaveBeenCalledWith(
+        'device-1',
+        'jwt-token',
+        expect.any(Date),
+      );
+      expect(mailService.sendVerificationEmail).not.toHaveBeenCalled();
+    });
+
+    it('still blocks when another device is active', async () => {
+      mockPrisma.user.findFirst.mockResolvedValueOnce(verifiedStudent);
+      (bcrypt.compare as jest.Mock).mockResolvedValueOnce(true);
+      userDeviceService.replaceDevicesForUser.mockResolvedValueOnce(null);
+
+      await expect(
+        service.studentLoginInit('hocsinh1', 'secret'),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error: 'DEVICE_ACTIVE',
+        }) as Record<string, unknown>,
+      });
+      expect(userDeviceService.bindRefreshToken).not.toHaveBeenCalled();
+    });
+
+    it('Google login for a student is blocked by a live device', async () => {
+      userDeviceService.replaceDevicesForUser.mockResolvedValueOnce(null);
+
+      await expect(
+        service.issueStudentGoogleSession({
+          id: 'student-1',
+          accountHandle: 'hocsinh1',
+          roleType: UserRole.student,
+        }),
+      ).resolves.toBeNull();
+      expect(userDeviceService.replaceDevicesForUser).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'student-1', rejectIfLive: true }),
+      );
+    });
+  });
+
   describe('activateStudentDevice', () => {
     const baseRequest = {
       id: 'req-1',
@@ -790,12 +951,9 @@ describe('AuthService', () => {
       userDeviceService.generateDeviceToken = jest
         .fn()
         .mockReturnValue('device-token');
-      userDeviceService.createDevice = jest
+      userDeviceService.replaceDevicesForUser = jest
         .fn()
         .mockResolvedValue({ id: 'device-1' });
-      userDeviceService.removeAllDevicesForUser = jest
-        .fn()
-        .mockResolvedValue({});
       authIdentityCacheService.invalidateHasActiveDevice = jest.fn();
       jwtService.signAsync = jest.fn().mockResolvedValue('jwt-token');
     });
@@ -825,12 +983,26 @@ describe('AuthService', () => {
         refreshToken: 'jwt-token',
       });
 
-      expect(userDeviceService.createDevice).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: 'student-1' }),
+      // Magic link thay thiết bị cũ, không bị chặn bởi thiết bị sống.
+      expect(userDeviceService.replaceDevicesForUser).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'student-1', rejectIfLive: false }),
       );
       expect(
         authIdentityCacheService.invalidateHasActiveDevice,
       ).toHaveBeenCalledWith('student-1');
+    });
+
+    it('rejects a second concurrent activation of the same request', async () => {
+      mockPrisma.loginRequest.findUnique.mockResolvedValueOnce({
+        ...baseRequest,
+        activateSecretHash: 'hashed-secret',
+      });
+      mockPrisma.loginRequest.deleteMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(
+        service.activateStudentDevice('req-1', 'correct-secret'),
+      ).rejects.toThrow(ConflictException);
+      expect(userDeviceService.replaceDevicesForUser).not.toHaveBeenCalled();
     });
 
     it('rejects when request is not verified', async () => {
@@ -898,6 +1070,65 @@ describe('AuthService', () => {
       expect(authIdentityCacheService.invalidateUser).toHaveBeenCalledWith(
         'user-1',
       );
+    });
+
+    it('student logout ends the session even when the access token has expired', async () => {
+      // Access cookie đã hết hạn nhưng refresh cookie còn khớp thiết bị:
+      // logout phải xoá device, nếu không lần đăng nhập sau bị DEVICE_ACTIVE
+      // chặn dù không ai đang đăng nhập.
+      userDeviceService.findDeviceByRefreshToken.mockResolvedValueOnce({
+        id: 'device-9',
+        userId: 'student-1',
+      });
+
+      await expect(
+        service.studentSelfLogout({
+          refreshToken: 'refresh-cookie',
+          accessToken: 'expired-access',
+        }),
+      ).resolves.toEqual({ message: 'Đã đăng xuất' });
+
+      expect(userDeviceService.removeAllDevicesForUser).toHaveBeenCalledWith(
+        'student-1',
+      );
+      expect(
+        authIdentityCacheService.invalidateHasActiveDevice,
+      ).toHaveBeenCalledWith('student-1');
+    });
+
+    it('student logout falls back to the access token deviceId', async () => {
+      userDeviceService.findDeviceByRefreshToken.mockResolvedValueOnce(null);
+      jwtService.verifyAsync.mockResolvedValueOnce({ deviceId: 'device-9' });
+      userDeviceService.findLiveDeviceById.mockResolvedValueOnce({
+        id: 'device-9',
+        userId: 'student-1',
+      });
+
+      await service.studentSelfLogout({
+        refreshToken: 'rotated-refresh',
+        accessToken: 'access-cookie',
+      });
+
+      expect(userDeviceService.removeAllDevicesForUser).toHaveBeenCalledWith(
+        'student-1',
+      );
+    });
+
+    it('student logout with tokens of a kicked device does not end the new session', async () => {
+      // Máy A đã bị force-logout: refresh hash không còn, deviceId trong access
+      // đã bị xoá. Không được xoá thiết bị mới của học sinh.
+      userDeviceService.findDeviceByRefreshToken.mockResolvedValueOnce(null);
+      jwtService.verifyAsync.mockResolvedValueOnce({ deviceId: 'device-old' });
+      userDeviceService.findLiveDeviceById.mockResolvedValueOnce(null);
+
+      await expect(
+        service.studentSelfLogout({
+          refreshToken: 'stale-refresh',
+          accessToken: 'stale-access',
+        }),
+      ).resolves.toEqual({ message: 'Đã đăng xuất' });
+
+      expect(userDeviceService.removeAllDevicesForUser).not.toHaveBeenCalled();
     });
 
     it('ends every live device on changePassword', async () => {
@@ -970,6 +1201,88 @@ describe('AuthService', () => {
       await expect(
         service.getSessionProfile('revoked-refresh'),
       ).resolves.toBeNull();
+    });
+  });
+
+  describe('adminSetUserPassword', () => {
+    const adminActor = {
+      userId: 'admin-1',
+      userEmail: 'admin@example.com',
+      roleType: UserRole.admin,
+    };
+    const assistantActor = {
+      userId: 'assistant-1',
+      userEmail: 'assistant@example.com',
+      roleType: UserRole.staff,
+    };
+
+    const mockTarget = (target: {
+      roleType: UserRole;
+      roles?: StaffRole[];
+    }) => {
+      const snapshot = {
+        id: 'target-1',
+        roleType: target.roleType,
+        staffInfo: target.roles ? { roles: target.roles } : null,
+      };
+      mockPrisma.user.findUnique.mockResolvedValue(snapshot);
+    };
+
+    it('lets admin set password of any user and revokes sessions', async () => {
+      mockTarget({ roleType: UserRole.admin });
+      mockPrisma.staffInfo.findUnique.mockResolvedValueOnce(null);
+
+      await expect(
+        service.adminSetUserPassword('target-1', '123456', adminActor),
+      ).resolves.toEqual({ message: 'Đã đổi mật khẩu user' });
+
+      expect(bcrypt.hash).toHaveBeenCalledWith('123456', 10);
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'target-1' },
+        data: { passwordHash: 'hashed-password', refreshToken: null },
+      });
+      expect(userDeviceService.removeAllDevicesForUser).toHaveBeenCalledWith(
+        'target-1',
+      );
+      expect(actionHistoryService.recordUpdate).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          actor: adminActor,
+          entityId: 'target-1',
+          description: 'Admin đặt lại mật khẩu',
+        }),
+      );
+    });
+
+    it('lets assistant set password of a student', async () => {
+      mockTarget({ roleType: UserRole.student });
+      mockPrisma.staffInfo.findUnique.mockResolvedValueOnce({
+        roles: [StaffRole.assistant],
+      });
+
+      await expect(
+        service.adminSetUserPassword('target-1', '123456', assistantActor),
+      ).resolves.toEqual({ message: 'Đã đổi mật khẩu user' });
+    });
+
+    it.each([
+      ['admin user', { roleType: UserRole.admin }],
+      ['staff admin', { roleType: UserRole.staff, roles: [StaffRole.admin] }],
+      [
+        'other assistant',
+        { roleType: UserRole.staff, roles: [StaffRole.assistant] },
+      ],
+    ])('forbids assistant from targeting %s', async (_label, target) => {
+      mockTarget(target);
+      mockPrisma.staffInfo.findUnique.mockResolvedValueOnce({
+        roles: [StaffRole.assistant],
+      });
+
+      await expect(
+        service.adminSetUserPassword('target-1', '123456', assistantActor),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      expect(userDeviceService.removeAllDevicesForUser).not.toHaveBeenCalled();
     });
   });
 });

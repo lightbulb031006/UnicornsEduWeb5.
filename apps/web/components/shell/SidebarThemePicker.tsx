@@ -10,15 +10,7 @@ import {
   type AppThemeId,
   THEME_OPTIONS,
 } from "@/dtos/theme.dto";
-import logoDark from "@/image/logo/logo_dark.png";
-import logoHana from "@/image/logo/logo_hana.png";
-import logoLight from "@/image/logo/logo_light.png";
-
-const previewLogos: Record<AppThemeId, typeof logoLight> = {
-  light: logoLight,
-  dark: logoDark,
-  pink: logoHana,
-};
+import brandLogo from "@/image/logo/logo.png";
 
 const previewSwatches: Record<AppThemeId, string> = {
   light:
@@ -137,7 +129,7 @@ export function SidebarThemePicker({ compact, onMobileClose }: Props) {
                             aria-hidden
                           >
                             <Image
-                              src={previewLogos[opt.id]}
+                              src={brandLogo}
                               alt=""
                               width={40}
                               height={40}

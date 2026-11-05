@@ -46,7 +46,7 @@ export interface AssistantSessionShareItem {
   tuitionFee: number;
   shareRatePercent: number;
   shareAmount: number;
-  attendanceStatus: StudentStatus | "present" | "excused" | "absent";
+  attendanceStatus: StudentStatus | "present" | "excused" | "absent" | "trial";
   paymentStatus: AssistantCommissionPaymentStatus;
   customerCareStaffName: string;
 }

@@ -22,7 +22,6 @@ import {
   type OpenNotificationDetailPayload,
 } from "@/lib/notification-tray-events";
 import {
-  useMutation,
   QueryClient,
   QueryClientProvider,
   useQueryClient,
@@ -31,16 +30,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { toast, Toaster } from "sonner";
-import * as authApi from "@/lib/apis/auth.api";
 import {
   buildSetupPasswordHref,
   resolvePasswordSetupNextPath,
 } from "@/lib/auth-redirect";
-import {
-  isRestrictedByEmailVerification,
-  maskEmailAddress,
-  OPEN_EMAIL_VERIFICATION_MODAL_EVENT,
-} from "@/lib/email-verification-access";
+import { EmailVerificationDialog } from "@/components/auth/EmailVerificationDialog";
 import {
   invalidateActionHistoryScopedQueries,
   invalidateNotificationFeedScopedQueries,
@@ -59,120 +53,6 @@ function hasAuthenticatedSession(user: UserInfoDto) {
 
 function hasEffectiveRole(user: UserInfoDto, role: Role) {
   return user.roleType === role || Boolean(user.effectiveRoleTypes?.includes(role));
-}
-
-function EmailVerificationAccessModal() {
-  const queryClient = useQueryClient();
-  const { user, setUser } = useAuth();
-  const [open, setOpen] = useState(false);
-  const [emailInput, setEmailInput] = useState("");
-
-  useEffect(() => {
-    const handleOpen = () => {
-      setOpen(true);
-      setEmailInput("");
-    };
-    window.addEventListener(OPEN_EMAIL_VERIFICATION_MODAL_EVENT, handleOpen);
-    return () => {
-      window.removeEventListener(
-        OPEN_EMAIL_VERIFICATION_MODAL_EVENT,
-        handleOpen,
-      );
-    };
-  }, []);
-
-  const resendVerificationMutation = useMutation({
-    mutationFn: authApi.resendVerificationEmail,
-    onSuccess: (payload) => {
-      const normalizedEmail = payload.email?.trim() ?? "";
-      setUser((currentUser) => ({
-        ...currentUser,
-        email: normalizedEmail || currentUser.email || "",
-        emailVerified: false,
-        canAccessRestrictedRoutes: false,
-      }));
-      queryClient.setQueryData(["auth", "session"], (prev: UserInfoDto) => ({
-        ...(prev ?? user),
-        email: normalizedEmail || user.email || "",
-        emailVerified: false,
-        canAccessRestrictedRoutes: false,
-      }));
-      toast.success("Đã gửi email xác minh. Vui lòng kiểm tra hộp thư.");
-      setOpen(false);
-    },
-    onError: (err: unknown) => {
-      const ax = err as { response?: { data?: { message?: string } } };
-      toast.error(ax.response?.data?.message ?? "Không gửi được email xác minh.");
-    },
-  });
-
-  if (!open || !isRestrictedByEmailVerification(user)) {
-    return null;
-  }
-
-  const currentEmail = user.email?.trim() ?? "";
-  const hasEmail = currentEmail.length > 0;
-
-  return (
-      <div className="fixed inset-0 z-100 flex items-center justify-center bg-bg-primary/75 px-4">
-      <div className="w-full max-w-md rounded-2xl border border-border-default bg-bg-surface p-5 shadow-xl">
-        <h2 className="text-lg font-semibold text-text-primary">
-          Vui lòng xác minh email
-        </h2>
-        <p className="mt-2 text-sm text-text-secondary">
-          Bạn đã đăng nhập thành công nhưng cần xác minh email để mở các trang cá nhân và lớp học.
-        </p>
-
-        {hasEmail ? (
-          <p className="mt-4 rounded-lg border border-border-default bg-bg-secondary px-3 py-2 text-sm text-text-primary">
-            Email hiện tại: <span className="font-medium">{maskEmailAddress(currentEmail)}</span>
-          </p>
-        ) : (
-          <div className="mt-4">
-            <label
-              htmlFor="verification-email"
-              className="mb-1 block text-xs font-medium text-text-muted"
-            >
-              Nhập email để nhận link xác minh
-            </label>
-            <input
-              id="verification-email"
-              type="email"
-              value={emailInput}
-              onChange={(event) => setEmailInput(event.target.value)}
-              placeholder="you@example.com"
-              className="w-full rounded-lg border border-border-default bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus:ring-2 focus:ring-border-focus/20"
-            />
-          </div>
-        )}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-secondary"
-          >
-            Đóng
-          </button>
-          <button
-            type="button"
-            disabled={
-              resendVerificationMutation.isPending ||
-              (!hasEmail && emailInput.trim().length === 0)
-            }
-            onClick={() =>
-              resendVerificationMutation.mutate(
-                hasEmail ? {} : { email: emailInput.trim() },
-              )
-            }
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {resendVerificationMutation.isPending ? "Đang gửi…" : "Xác minh"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function ActionHistoryInvalidationBridge() {
@@ -203,7 +83,7 @@ function RateLimitToastBridge() {
     const handleRateLimitToast = (event: Event) => {
       const detail = (event as CustomEvent<RateLimitToastDetail>).detail;
 
-      toast.error(detail?.title ?? "Too many requests", {
+      toast.error(detail?.title ?? "Thao tác quá nhanh", {
         id: RATE_LIMIT_TOAST_EVENT,
         description:
           detail?.description ??
@@ -214,6 +94,36 @@ function RateLimitToastBridge() {
     window.addEventListener(RATE_LIMIT_TOAST_EVENT, handleRateLimitToast);
     return () => {
       window.removeEventListener(RATE_LIMIT_TOAST_EVENT, handleRateLimitToast);
+    };
+  }, []);
+
+  return null;
+}
+
+/**
+ * Cuộn chuột trên `<input type="number">` đang focus làm trình duyệt tăng/giảm
+ * giá trị (80000 → 80001). Bỏ focus trước khi default action chạy để chặn việc
+ * đó cho mọi ô số trong app; trang vẫn cuộn bình thường.
+ */
+function NumberInputWheelGuard() {
+  useEffect(() => {
+    const handleWheel = (event: WheelEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement &&
+        target.type === "number" &&
+        target === document.activeElement
+      ) {
+        target.blur();
+      }
+    };
+
+    document.addEventListener("wheel", handleWheel, {
+      capture: true,
+      passive: true,
+    });
+    return () => {
+      document.removeEventListener("wheel", handleWheel, { capture: true });
     };
   }, []);
 
@@ -428,11 +338,12 @@ export function Providers({
         <ThemeProvider>
           <ActionHistoryInvalidationBridge />
           <RateLimitToastBridge />
+          <NumberInputWheelGuard />
           <AuthProvider initialUser={initialUser ?? defaultUser}>
             <NotificationSocketBridge />
             <DirectTopUpApprovalModal />
             <AuthPasswordSetupGate />
-            <EmailVerificationAccessModal />
+            <EmailVerificationDialog />
             <PublicThemePickerBridge />
             {children}
             <Toaster richColors position="top-right" />

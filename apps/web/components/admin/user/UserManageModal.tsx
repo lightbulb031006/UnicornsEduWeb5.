@@ -27,6 +27,7 @@ import {
   type UserManageFormState,
 } from "@/lib/user-manage-form";
 import DeleteUserConfirmDialog from "./DeleteUserConfirmDialog";
+import SetUserPasswordDialog from "./SetUserPasswordDialog";
 import UserLinkedProfileLinks from "./UserLinkedProfileLinks";
 
 const INPUT_CLASS =
@@ -57,6 +58,7 @@ const STAFF_ROLES: StaffRole[] = [
   "technical",
   "customer_care",
   "training",
+  "sale",
 ];
 
 type Props = {
@@ -82,6 +84,7 @@ export default function UserManageModal({
   );
   const [errors, setErrors] = useState<UserManageFormErrors>({});
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const fieldRefs = useRef<Partial<Record<UserManageField, HTMLInputElement | null>>>({});
 
   // Khởi tạo lại form ngay trong render khi đổi sang user khác. Dùng useEffect
@@ -95,6 +98,7 @@ export default function UserManageModal({
     setForm(user ? buildUserManageFormState(user) : null);
     setErrors({});
     setDeleteConfirmOpen(false);
+    setPasswordDialogOpen(false);
   }
 
   const visibleRoleTypeOptions = hideAdminOptions
@@ -485,6 +489,22 @@ export default function UserManageModal({
             ) : null}
           </section>
 
+          <section className="space-y-3 rounded-2xl border border-border-default bg-bg-secondary/40 p-4">
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">Mật khẩu</h3>
+              <p className="mt-1 text-sm text-text-muted">
+                Đặt mật khẩu mới khi user quên mật khẩu. User sẽ bị đăng xuất khỏi mọi thiết bị.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPasswordDialogOpen(true)}
+              className="min-h-11 w-full rounded-md border border-border-default bg-bg-surface px-4 py-2.5 text-sm font-medium text-text-primary transition hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:w-auto"
+            >
+              Đổi mật khẩu
+            </button>
+          </section>
+
           {canDeleteUser ? (
             <section className="rounded-2xl border border-error/20 bg-error/5 p-4">
               <h3 className="text-sm font-semibold text-error">Vùng nguy hiểm</h3>
@@ -527,6 +547,12 @@ export default function UserManageModal({
           </button>
         </div>
       </div>
+
+      <SetUserPasswordDialog
+        user={user}
+        open={passwordDialogOpen}
+        onClose={() => setPasswordDialogOpen(false)}
+      />
 
       <DeleteUserConfirmDialog
         user={user}

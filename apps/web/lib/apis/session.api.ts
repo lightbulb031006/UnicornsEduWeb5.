@@ -3,6 +3,7 @@ import {
   SessionBulkPaymentStatusUpdateResult,
   SessionCreatePayload,
   SessionItem,
+  SessionNextOrdinalResponse,
   CreateMissedTeachingExplanationPayload,
   MissedTeachingAlert,
   MissedTeachingExplanationRecord,
@@ -24,6 +25,19 @@ export async function getSessionsByClassId(
   });
   const payload = response.data;
   return Array.isArray(payload) ? payload : [];
+}
+
+/** Số thứ tự buổi nếu tạo buổi mới tại ngày/giờ cho trước. */
+export async function getNextSessionOrdinal(
+  classId: string,
+  params: { date: string; startTime?: string },
+): Promise<SessionNextOrdinalResponse> {
+  const safeId = encodeURIComponent(classId);
+  const response = await api.get<SessionNextOrdinalResponse>(
+    `/sessions/class/${safeId}/next-ordinal`,
+    { params },
+  );
+  return response.data;
 }
 
 export async function getSessionsByStaffId(

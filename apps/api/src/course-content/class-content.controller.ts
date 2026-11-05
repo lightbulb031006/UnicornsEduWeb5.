@@ -43,12 +43,20 @@ export class ClassContentController {
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
   @ApiOperation({
     summary:
-      'Thêm nội dung vào lớp học. Luyện tập: openAt tuỳ chọn — bỏ trống thì backend lấy thời điểm thêm vào lớp (server).',
+      'Thêm lẻ một tiết (lý thuyết hoặc thực hành) của khoá vào lớp, kể cả chuyên đề lớp chưa có tiết nào — nhóm chuyên đề mới đứng đầu. Thực hành thành lần giao: openAt tuỳ chọn (bỏ trống = lúc thêm, server).',
   })
   @ApiParam({ name: 'classId', description: 'ID lớp học' })
   @ApiBody({ type: ClassContentCreateDto })
   @ApiResponse({ status: 201, description: 'Đã thêm nội dung.' })
-  @ApiResponse({ status: 400, description: 'Lỗi dữ liệu đầu vào.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Thiếu lessonId, tiết không thuộc khoá của lớp, tiết đã có / đang Ẩn trong lớp, hoặc lịch không hợp lệ.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Tiết không tồn tại hoặc đã lưu trữ.',
+  })
   async create(
     @CurrentUser() user: JwtPayload,
     @Param('classId', new ParseClassIdPipe()) classId: string,
@@ -105,9 +113,16 @@ export class ClassContentController {
   @Get('course-lessons')
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
-  @ApiOperation({ summary: 'Lấy danh sách tiết học cấp khoá để giao vào lớp' })
+  @ApiOperation({
+    summary:
+      'Mọi tiết (lý thuyết + thực hành) chưa lưu trữ của khoá để thêm vào lớp, kèm moduleId và alreadyAdded',
+  })
   @ApiParam({ name: 'classId', description: 'ID lớp học' })
-  @ApiResponse({ status: 200, description: 'Danh sách tiết học từ khoá học.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Danh sách tiết theo thứ tự chuyên đề; tiết đã gỡ khỏi lớp có alreadyAdded=false.',
+  })
   async listCourseLessons(
     @CurrentUser() user: JwtPayload,
     @Param('classId', new ParseClassIdPipe()) classId: string,
@@ -171,7 +186,8 @@ export class ClassContentController {
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
   @ApiOperation({
-    summary: 'Cập nhật lịch lần giao (openAt, durationMinutes) — không sửa đề',
+    summary:
+      'Cập nhật lần giao (openAt, durationMinutes, shuffleQuestions) — không sửa đề',
   })
   @ApiParam({ name: 'classId', description: 'ID lớp học' })
   @ApiParam({ name: 'itemId', description: 'ID lần giao / class content item' })
@@ -202,7 +218,8 @@ export class ClassContentController {
   @ApiParam({ name: 'itemId', description: 'ID nội dung' })
   @ApiResponse({
     status: 200,
-    description: 'Đã ẩn. Danh sách nội dung (gồm item đã ẩn).',
+    description:
+      'Đã ẩn. Danh sách nội dung (gồm item đã ẩn, không gồm item đã gỡ).',
   })
   @ApiResponse({ status: 404, description: 'Không tìm thấy nội dung.' })
   async delete(
@@ -231,6 +248,64 @@ export class ClassContentController {
     @Param('itemId') itemId: string,
   ) {
     return this.topicService.restoreClassContentItem(classId, itemId, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Post(':itemId/remove')
+  @Roles(UserRole.admin)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @ApiOperation({
+    summary:
+      'Gỡ tiết khỏi lớp (khác Ẩn): biến mất ở mọi phía, giữ bài làm/điểm; gỡ tiết cuối của chuyên đề thì nhóm biến mất',
+  })
+  @ApiParam({ name: 'classId', description: 'ID lớp học' })
+  @ApiParam({ name: 'itemId', description: 'ID nội dung' })
+  @ApiResponse({
+    status: 200,
+    description: 'Đã gỡ. Danh sách nội dung còn trong lớp.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Không tìm thấy nội dung (hoặc đã gỡ).',
+  })
+  async remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.topicService.removeClassContentItem(classId, itemId, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  @Get(':itemId/removal-impact')
+  @Roles(UserRole.admin)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @ApiOperation({
+    summary:
+      'Ảnh hưởng nếu gỡ tiết: số câu tự luận chưa chấm, số học sinh đang làm dở',
+  })
+  @ApiParam({ name: 'classId', description: 'ID lớp học' })
+  @ApiParam({ name: 'itemId', description: 'ID nội dung' })
+  @ApiResponse({
+    status: 200,
+    description: '{ itemId, ungradedEssayCount, inProgressStudentCount }',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Không tìm thấy nội dung (hoặc đã gỡ).',
+  })
+  async removalImpact(
+    @CurrentUser() user: JwtPayload,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.topicService.getClassContentItemRemovalImpact(classId, itemId, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,

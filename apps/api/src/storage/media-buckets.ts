@@ -10,3 +10,9 @@ export const STUDENT_GALLERY_PUBLIC_BUCKET = 'student-gallery-public';
 
 /** Private bucket ảnh bìa lớp (đọc qua signed URL). */
 export const CLASS_COVER_STORAGE_BUCKET = 'class-covers';
+
+/** Private bucket audio tư liệu câu hỏi (hồ sơ JP, đọc qua signed URL). */
+export const QUESTION_AUDIO_STORAGE_BUCKET = 'question-audio';
+
+/** Private bucket ảnh trong nội dung câu hỏi / Bộ câu hỏi (đọc qua signed URL). */
+export const QUESTION_IMAGE_STORAGE_BUCKET = 'question-images';

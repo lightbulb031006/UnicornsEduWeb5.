@@ -1,22 +1,28 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
+  ArrayMaxSize,
   ArrayUnique,
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   Max,
   MaxLength,
   Min,
+  Validate,
   ValidateIf,
 } from 'class-validator';
 import { LessonKind } from 'generated/enums';
+import { BlankAnswerConstraint } from './attempt.dto';
 import { CONTENT_LIMITS, HTTP_URL_OPTIONS } from './content-limits';
 
-/** Product cap for practice lần giao duration (12 hours). Matches FE + schema docs. */
+/** Product cap for practice lesson duration (12 hours). Matches FE + schema docs. */
 export const PRACTICE_DURATION_MIN_MINUTES = 1;
 export const PRACTICE_DURATION_MAX_MINUTES = 720;
 
@@ -83,6 +89,17 @@ export class LessonCreateDto {
   @IsString()
   @MaxLength(CONTENT_LIMITS.theoryContent)
   content?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Thời lượng làm bài (phút/lượt, tính từ lúc học sinh bấm bắt đầu) của tiết thực hành. Bắt buộc khi tạo tiết thực hành; tiết lý thuyết bị bỏ qua. 1–720.',
+    example: 60,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(PRACTICE_DURATION_MIN_MINUTES)
+  @Max(PRACTICE_DURATION_MAX_MINUTES)
+  durationMinutes?: number;
 }
 
 export class LessonUpdateDto {
@@ -111,6 +128,39 @@ export class LessonUpdateDto {
   @IsString()
   @MaxLength(CONTENT_LIMITS.theoryContent)
   content?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Tên nhóm Tự chọn 1 (tiết thực hành IT), vd "Khoa học máy tính"',
+    nullable: true,
+    maxLength: 120,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  elective1Name?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Tên nhóm Tự chọn 2 (tiết thực hành IT), vd "Tin học ứng dụng"',
+    nullable: true,
+    maxLength: 120,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  elective2Name?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Thời lượng làm bài (phút/lượt, tính từ lúc học sinh bấm bắt đầu) của tiết thực hành. Áp cho mọi lớp từ lượt bắt đầu sau khi sửa; lượt đang làm giữ snapshot. Tiết lý thuyết bị từ chối. 1–720.',
+    example: 60,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(PRACTICE_DURATION_MIN_MINUTES)
+  @Max(PRACTICE_DURATION_MAX_MINUTES)
+  durationMinutes?: number;
 }
 
 export interface LessonResponseDto {
@@ -120,9 +170,17 @@ export interface LessonResponseDto {
   moduleId: string | null;
   classId: string | null;
   title: string;
+  /** Link YouTube gốc; luôn null ở response cho học sinh (Video bảo vệ). */
   videoUrl: string | null;
+  /** Chỉ response cho học sinh: tiết có video (xin link qua `…/playback`). */
+  hasVideo?: boolean;
   content: string | null;
   order: number;
+  /** Tên nhóm tự chọn (tiết thực hành IT). */
+  elective1Name?: string | null;
+  elective2Name?: string | null;
+  /** Thời lượng làm bài (phút/lượt) — chỉ tiết thực hành. */
+  durationMinutes?: number | null;
   createdBy: string | null;
   updatedBy: string | null;
   createdAt: Date;
@@ -180,7 +238,7 @@ export interface ModuleResponseDto {
 export class ClassContentCreateDto {
   @ApiProperty({
     description:
-      'ID tiết thực hành có sẵn của khoá để giao cho lớp. Tiết lý thuyết vào lớp theo chuyên đề (POST /class/:classId/modules).',
+      'ID tiết (lý thuyết hoặc thực hành) có sẵn của khoá để thêm vào lớp. Tiết thực hành thành lần giao.',
   })
   @IsString()
   lessonId!: string;
@@ -196,14 +254,22 @@ export class ClassContentCreateDto {
 
   @ApiPropertyOptional({
     description:
-      'Thời lượng làm bài (phút) của lần giao. Bắt buộc khi tiết thực hành. 1–720.',
-    example: 60,
+      'Hạn làm bài của lần giao (ISO 8601): từ mốc này không bắt đầu lượt mới; lượt dở vẫn chạy hết thời lượng. Bỏ qua khi tạo = hạn xem nội dung của lớp (lớp không hạn → không hạn). `null` = không có hạn. Phải sau `openAt`.',
+    nullable: true,
+    example: '2026-12-31T00:00:00.000Z',
   })
   @IsOptional()
-  @IsInt()
-  @Min(PRACTICE_DURATION_MIN_MINUTES)
-  @Max(PRACTICE_DURATION_MAX_MINUTES)
-  durationMinutes?: number;
+  @IsDateString()
+  closeAt?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Đảo câu: mỗi lượt làm xáo thứ tự câu (đề IT xáo trong từng nhóm Phần I / bắt buộc / Tự chọn 1 / Tự chọn 2) và thứ tự phương án, nhận định. Câu có phương án nhắc vị trí (vd «Cả A và B», «ở trên») giữ nguyên thứ tự phương án. Mặc định true khi tạo; chỉ áp cho lượt bắt đầu sau khi đổi.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  shuffleQuestions?: boolean;
 }
 
 export class ClassContentScheduleUpdateDto {
@@ -214,15 +280,24 @@ export class ClassContentScheduleUpdateDto {
   @IsDateString()
   openAt: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description:
-      'Thời lượng làm bài (phút) của lần giao. 1–720. Không đụng đề.',
-    example: 90,
+      'Hạn làm bài của lần giao (ISO 8601): từ mốc này không bắt đầu lượt mới; lượt dở vẫn chạy hết thời lượng. Bỏ qua = giữ hạn hiện tại. `null` = không có hạn. Phải sau `openAt`.',
+    nullable: true,
+    example: '2026-12-31T00:00:00.000Z',
   })
-  @IsInt()
-  @Min(PRACTICE_DURATION_MIN_MINUTES)
-  @Max(PRACTICE_DURATION_MAX_MINUTES)
-  durationMinutes: number;
+  @IsOptional()
+  @IsDateString()
+  closeAt?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Đảo câu: mỗi lượt làm xáo thứ tự câu (đề IT xáo trong từng nhóm Phần I / bắt buộc / Tự chọn 1 / Tự chọn 2) và thứ tự phương án, nhận định. Câu có phương án nhắc vị trí (vd «Cả A và B», «ở trên») giữ nguyên thứ tự phương án. Mặc định true khi tạo; chỉ áp cho lượt bắt đầu sau khi đổi.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  shuffleQuestions?: boolean;
 }
 
 export interface ClassContentItemResponseDto {
@@ -237,10 +312,17 @@ export interface ClassContentItemResponseDto {
   moduleId?: string;
   moduleTitle?: string;
   openAt: Date | string | null;
+  /** Hạn làm bài của lần giao; null = không hạn. */
+  closeAt: Date | string | null;
+  /** Thời lượng hiệu lực: đã chốt trên lần giao cũ, không thì của tiết thực hành. */
   durationMinutes: number | null;
+  /** Đảo câu + đảo phương án mỗi lượt làm. */
+  shuffleQuestions: boolean;
   isOpen: boolean;
   hiddenAt: Date | string | null;
   hiddenByStaffId: string | null;
+  /** `module_removed` = ẩn kèm khi gỡ khỏi lớp (item đã gỡ không trả về staff); `manual` = gia sư Ẩn. */
+  hiddenReason: 'manual' | 'module_removed' | null;
 }
 
 /** Nội dung lớp gom theo chuyên đề (trang lớp admin/staff). */
@@ -248,7 +330,7 @@ export interface ClassContentModuleGroupDto {
   /** `null` = nhóm item không thuộc chuyên đề nào (xếp cuối). */
   moduleId: string | null;
   title: string;
-  /** `false` = lớp đã gỡ chuyên đề (còn lần giao thực hành / item ẩn) hoặc nhóm `null`. */
+  /** `true` với mọi nhóm chuyên đề; `false` chỉ ở nhóm `null`. */
   added: boolean;
   /** Theo `order` tiết trong chuyên đề. */
   theoryItems: ClassContentItemResponseDto[];
@@ -297,13 +379,23 @@ export class QuestionLinkCreateDto {
   order?: number | null;
 
   @ApiPropertyOptional({
-    description: 'Điểm của câu hỏi',
+    description:
+      'Điểm của câu hỏi. Hồ sơ JP: trọng số câu-trong-tiết (≥ 1, null = 1), đề chia 100 theo trọng số lúc bắt đầu làm bài',
     nullable: true,
   })
   @IsOptional()
   @IsInt()
   @Min(0)
   points?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Vị trí câu trong đề (chỉ hồ sơ IT): required = Bắt buộc, elective_1/2 = Tự chọn 1/2',
+    enum: ['required', 'elective_1', 'elective_2'],
+  })
+  @IsOptional()
+  @IsIn(['required', 'elective_1', 'elective_2'])
+  slot?: 'required' | 'elective_1' | 'elective_2';
 }
 
 export class QuestionLinkUpdateDto {
@@ -314,13 +406,31 @@ export class QuestionLinkUpdateDto {
   order?: number | null;
 
   @ApiPropertyOptional({
-    description: 'Điểm của câu hỏi',
+    description:
+      'Điểm của câu hỏi. Hồ sơ JP: trọng số câu-trong-tiết (≥ 1, null = 1), đề chia 100 theo trọng số lúc bắt đầu làm bài',
     nullable: true,
   })
   @IsOptional()
   @IsInt()
   @Min(0)
   points?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Vị trí câu trong đề (chỉ hồ sơ IT): required = Bắt buộc, elective_1/2 = Tự chọn 1/2',
+    enum: ['required', 'elective_1', 'elective_2'],
+  })
+  @IsOptional()
+  @IsIn(['required', 'elective_1', 'elective_2'])
+  slot?: 'required' | 'elective_1' | 'elective_2';
+}
+
+export class QuestionSetLinkCreateDto {
+  @ApiProperty({
+    description: 'ID Bộ câu hỏi (shared material) cần thêm cả bộ',
+  })
+  @IsUUID()
+  sharedMaterialId: string;
 }
 
 export class ReorderQuestionLinksDto {
@@ -339,6 +449,7 @@ export interface QuestionLinkResponseDto {
   questionId: string;
   order: number | null;
   points: number | null;
+  slot: 'required' | 'elective_1' | 'elective_2';
   question: {
     id: string;
     courseId: string;
@@ -347,6 +458,17 @@ export interface QuestionLinkResponseDto {
     type: string;
     content: string;
     options: unknown;
+    tfAnswerKey: boolean[];
+    essayInputSize: 'short' | 'long' | null;
+    tfLabelStyle: 'maru_batsu' | 'dung_sai' | 'true_false' | null;
+    /** Đáp án hợp lệ từng ô (câu điền vào ô trống, JP). */
+    blankAnswerKey: string[][] | null;
+    sharedMaterialId: string | null;
+    /** Audio nhúng (JP) — giữ khi sửa câu từ màn xếp đề. */
+    audioId: string | null;
+    audio: { id: string; originalName: string } | null;
+    /** Tư liệu dùng chung (JP) — badge trong danh sách câu của đề. */
+    sharedMaterial: { id: string; title: string } | null;
   };
 }
 
@@ -382,6 +504,41 @@ export class LessonQuizAnswerDto {
   @IsString()
   @MaxLength(CONTENT_LIMITS.essayAnswer)
   essayAnswer?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Lựa chọn 4 nhận định a–d (câu Đúng/Sai): true = Đúng, false = Sai, null = chưa chọn',
+    nullable: true,
+    type: [Boolean],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(4)
+  tfChoices?: (boolean | null)[] | null;
+  @ApiPropertyOptional({
+    description:
+      'Câu điền vào ô trống (JP): chữ học sinh gõ vào từng ô; null/rỗng = bỏ trống.',
+    nullable: true,
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @Validate(BlankAnswerConstraint, { each: true })
+  blankAnswers?: (string | null)[] | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    type: [String],
+    description:
+      'Câu sắp xếp (JP): chữ thẻ theo thứ tự học sinh xếp; [] = chưa xếp.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  orderAnswer?: string[] | null;
 }
 
 export interface LessonQuizResponseDto {
@@ -395,14 +552,35 @@ export interface LessonQuizResponseDto {
     content: string;
     options: string[] | null;
     correctIndex: number | null;
+    tfAnswerKey: boolean[];
     explanation: string | null;
     answerGuide: string | null;
+    /** Kiểu ô tự luận (JP): short = một dòng, long/null = nhiều dòng. */
+    essayInputSize: 'short' | 'long' | null;
+    /** Kiểu nhãn Câu Đúng/Sai (JP); null = ○/×. */
+    tfLabelStyle: 'maru_batsu' | 'dung_sai' | 'true_false' | null;
+    /** Đáp án hợp lệ từng ô — học sinh nhận null (chỉ biết `blankCount`). */
+    blankAnswerKey: string[][] | null;
+    /** Số ô trống (câu điền vào ô trống); loại khác = null / không có. */
+    blankCount?: number | null;
+    /** Audio nhúng (JP): signed URL ngắn hạn; null = không có. */
+    audioUrl: string | null;
+    /** Tư liệu dùng chung (JP); câu cùng tư liệu đứng liền nhau. */
+    sharedMaterial: {
+      id: string;
+      content: string;
+      audioUrl: string | null;
+    } | null;
   };
 }
 
 export interface QuestionLinkSummaryDto {
   totalQuestions: number;
   totalPoints: number;
+  /** Tổng trọng số (null tính là 1) — hồ sơ JP chia 100 theo trọng số. */
+  totalWeight: number;
+  /** Lý do đề sai form nhóm tự chọn (IT), null khi hợp lệ. Đề sai form bị chặn lúc bắt đầu làm bài. */
+  formWarning: string | null;
 }
 
 export interface LessonQuizAnswerResponseDto {
@@ -412,6 +590,11 @@ export interface LessonQuizAnswerResponseDto {
   studentId: string;
   choiceIndex: number | null;
   essayAnswer: string | null;
+  tfChoices: (boolean | null)[] | null;
+  /** Chữ học sinh gõ vào từng ô (câu điền vào ô trống). */
+  blankAnswers: (string | null)[] | null;
+  /** Chữ thẻ theo thứ tự học sinh xếp (câu sắp xếp). */
+  orderAnswer: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -447,13 +630,22 @@ export class ClassModuleReorderDto {
   moduleIds: string[];
 }
 
-/** Ảnh hưởng nếu gỡ chuyên đề: dialog xác nhận báo trước, không chặn gỡ. */
-export interface ClassModuleRemovalImpactDto {
-  moduleId: string;
-  /** Số câu tự luận đã nộp nhưng chưa chấm, thuộc lần giao của chuyên đề trong lớp. */
+/** Ảnh hưởng nếu gỡ khỏi lớp: dialog xác nhận báo trước, không chặn gỡ. */
+export interface ClassContentRemovalImpactDto {
+  /** Số câu tự luận đã nộp nhưng chưa chấm, thuộc lần giao bị gỡ. */
   ungradedEssayCount: number;
-  /** Số học sinh đang làm dở (bài chưa nộp) lần giao của chuyên đề trong lớp. */
+  /** Số học sinh đang làm dở (bài chưa nộp) lần giao bị gỡ. */
   inProgressStudentCount: number;
+}
+
+/** Ảnh hưởng nếu gỡ cả chuyên đề. */
+export interface ClassModuleRemovalImpactDto extends ClassContentRemovalImpactDto {
+  moduleId: string;
+}
+
+/** Ảnh hưởng nếu gỡ một tiết khỏi lớp. */
+export interface ClassContentItemRemovalImpactDto extends ClassContentRemovalImpactDto {
+  itemId: string;
 }
 
 /** Một chuyên đề của khoá, nhìn từ một lớp: đã thêm hay chưa + số tiết. */
@@ -466,6 +658,8 @@ export interface ClassModuleResponseDto {
   classSortOrder: number | null;
   theoryLessonCount: number;
   practiceLessonCount: number;
+  /** Số tiết (chưa lưu trữ) của chuyên đề lớp đang có, không tính tiết đã gỡ. */
+  inClassLessonCount: number;
   added: boolean;
   addedAt: Date | string | null;
 }

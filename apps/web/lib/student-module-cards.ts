@@ -54,3 +54,50 @@ export function moduleItemHref(classId: string, item: ClassContentItemDto) {
 export function moduleCardItems(group: ClassContentModuleGroupDto) {
   return [...group.theoryItems, ...group.practiceItems];
 }
+
+export interface ModuleTocEntry {
+  id: string;
+  /** Số thứ tự trong chuyên đề, đánh lại từ 1 ở mỗi nhóm. */
+  index: number;
+  title: string;
+  lessonKind: "theory" | "practice" | null;
+  locked: boolean;
+}
+
+/** Id mục lục của thẻ chuyên đề (có tiền tố để không trùng id tiết). */
+export function moduleTocId(key: string) {
+  return `module:${key}`;
+}
+
+export interface ModuleTocSection {
+  key: string;
+  /** Id để mục lục cuộn tới thẻ chuyên đề (`moduleTocId`). */
+  id: string;
+  title: string;
+  entries: ModuleTocEntry[];
+}
+
+/**
+ * Mục lục tab Chuyên đề: mỗi chuyên đề là một nhóm (tên chuyên đề làm đầu
+ * nhóm, bấm được), các tiết nằm dưới theo thứ tự thẻ. Chuyên đề chưa có tiết
+ * vẫn giữ để học sinh nhảy tới thẻ.
+ */
+export function buildModuleTocSections(
+  groups: ClassContentModuleGroupDto[],
+): ModuleTocSection[] {
+  return groups.map((group) => {
+    const key = moduleCardKey(group);
+    return {
+      key,
+      id: moduleTocId(key),
+      title: group.title,
+      entries: moduleCardItems(group).map((item, index) => ({
+        id: item.id,
+        index: index + 1,
+        title: item.title,
+        lessonKind: item.lessonKind,
+        locked: isLockedModuleItem(item),
+      })),
+    };
+  });
+}

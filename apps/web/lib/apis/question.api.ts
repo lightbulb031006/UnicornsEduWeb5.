@@ -19,7 +19,11 @@ export async function getQuestions(
   if (filter.difficultyLevelId)
     params.set("difficultyLevelId", filter.difficultyLevelId);
   if (filter.type) params.set("type", filter.type);
+  if (filter.skill) params.set("skill", filter.skill);
   if (filter.search) params.set("search", filter.search);
+  if (filter.sharedMaterialId)
+    params.set("sharedMaterialId", filter.sharedMaterialId);
+  if (filter.standalone) params.set("standalone", filter.standalone);
   params.set("skip", String(skip));
   params.set("take", String(take));
   const response = await api.get<Question[]>(

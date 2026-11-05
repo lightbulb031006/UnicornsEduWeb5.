@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ==========================================================================
-   Unicorns Edu 5.0 – Theme Tokens (per docs/UI-Schema.md)
+   UniEdu 5.0 – Theme Tokens (per docs/UI-Schema.md)
    Runtime switch via [data-theme] on <html>
    ========================================================================== */
 
@@ -237,7 +237,7 @@
   }
 }
 
-/* Video.js Unicorns Theme Customization */
+/* Video.js Uni Theme Customization */
 .video-js.vjs-theme-unicorns {
   font-family: inherit;
   color: #ffffff;
@@ -339,5 +339,137 @@
   .motion-hover-lift:hover {
     transform: none;
     box-shadow: none;
+  }
+}
+
+/* ==========================================================================
+   Rich text: bảng, ảnh, code có số dòng, code song song (Python | C++)
+   Dùng chung cho MathContent (render) và MathRichTextEditor (soạn).
+   ========================================================================== */
+.rich-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.875rem;
+}
+.rich-content th,
+.rich-content td {
+  border: 1px solid var(--ue-border-default);
+  padding: 0.375rem 0.625rem;
+  text-align: left;
+  vertical-align: top;
+  min-width: 3rem;
+}
+.rich-content th {
+  background: var(--ue-bg-secondary);
+  font-weight: 600;
+}
+.rich-content th p,
+.rich-content td p {
+  margin: 0;
+}
+/* Placeholder TipTap: bảng/code trống vẫn làm editor "trống", nên chỉ hiện khi
+   tài liệu đúng một paragraph — tránh chữ đè lên bảng và float đẩy lệch grid. */
+.rich-content > p.is-editor-empty:first-child:last-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--ue-text-muted);
+  opacity: 0.7;
+}
+.rich-content .selectedCell {
+  background: color-mix(in srgb, var(--ue-border-focus) 12%, transparent);
+}
+.rich-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.75rem auto;
+  border-radius: 0.5rem;
+}
+.rich-content img.ProseMirror-selectednode {
+  outline: 2px solid var(--ue-border-focus);
+}
+.rich-content pre {
+  position: relative;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  border: 1px solid var(--ue-border-default);
+  border-radius: 0.5rem;
+  background: var(--ue-bg-secondary);
+  padding: 0.625rem 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--ue-text-primary);
+  white-space: pre;
+}
+.rich-content pre code {
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  counter-reset: code-line;
+}
+.rich-content pre code::before,
+.rich-content pre code::after {
+  content: none;
+}
+.rich-content pre:has(> code[class*="language-"]) {
+  padding-top: 1.75rem;
+}
+.rich-content pre:has(> code[class*="language-"])::before {
+  position: absolute;
+  top: 0.375rem;
+  left: 0.75rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ue-text-muted);
+}
+.rich-content pre:has(> code.language-python)::before {
+  content: "Python";
+}
+.rich-content pre:has(> code.language-cpp)::before {
+  content: "C++";
+}
+.rich-content pre:has(> code.language-sql)::before {
+  content: "SQL";
+}
+.rich-content pre:has(> code.language-html)::before {
+  content: "HTML";
+}
+.rich-content pre:has(> code.language-css)::before {
+  content: "CSS";
+}
+.rich-content .code-line {
+  display: block;
+  counter-increment: code-line;
+}
+.rich-content .code-line::before {
+  content: counter(code-line);
+  display: inline-block;
+  width: 2em;
+  margin-right: 0.75em;
+  text-align: right;
+  color: var(--ue-text-muted);
+  user-select: none;
+}
+.rich-content [data-code-parallel] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.rich-content [data-code-parallel] > pre {
+  margin: 0;
+}
+@media (min-width: 640px) {
+  .rich-content [data-code-parallel] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -851,6 +851,28 @@ export class StaffController {
     });
   }
 
+  @Delete(':id/avatar')
+  @ApiOperation({
+    summary: 'Delete staff avatar',
+    description:
+      'Full admin only. Removes clean + watermarked avatar of the user linked to this staff record.',
+  })
+  @ApiParam({ name: 'id', description: 'Staff ID' })
+  @ApiResponse({ status: 200, description: 'Staff detail without avatar.' })
+  @ApiResponse({ status: 400, description: 'Staff has no linked user.' })
+  @ApiResponse({ status: 403, description: 'Forbidden. Admin only.' })
+  @ApiResponse({ status: 404, description: 'Staff not found.' })
+  async deleteStaffAvatar(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStaffIdPipe()) id: string,
+  ) {
+    return this.staffService.deleteStaffAvatar(id, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
   @Delete(':id')
   @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({

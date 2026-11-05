@@ -188,7 +188,6 @@ export default function EditStudentPopup({
   const [customerSource, setCustomerSource] = useState<StudentCustomerSource | "">(
     student.customerSource ?? "",
   );
-  const [customerSourceNote, setCustomerSourceNote] = useState(student.customerSourceNote ?? "");
   const [dropOutDate, setDropOutDate] = useState(student.dropOutDate ?? "");
   const [selectedCustomerCare, setSelectedCustomerCare] = useState<CustomerCareStaffOption | null>(
     () => getInitialCustomerCareSelection(student),
@@ -287,12 +286,6 @@ export default function EditStudentPopup({
     const trimmedName = fullName.trim();
     if (!trimmedName) {
       toast.error("Họ tên là bắt buộc.");
-      return;
-    }
-
-    const trimmedSourceNote = customerSourceNote.trim();
-    if (customerSource === "other" && !trimmedSourceNote) {
-      toast.error("Chú thích nguồn là bắt buộc khi chọn Khác.");
       return;
     }
 
@@ -401,12 +394,7 @@ export default function EditStudentPopup({
           goal: goal.trim() || undefined,
           drop_out_date: dropOutDate.trim() || undefined,
           ...(editingDropOutReason ? { drop_out_reason: trimmedDropOutReason } : {}),
-          ...(customerSource
-            ? {
-                customer_source: customerSource,
-                customer_source_note: customerSource === "other" ? trimmedSourceNote : null,
-              }
-            : {}),
+          ...(customerSource ? { customer_source: customerSource } : {}),
           ...(canManageCustomerCareAssignment
             ? {
                 customer_care_staff_id: selectedCustomerCare?.id ?? null,
@@ -537,13 +525,7 @@ export default function EditStudentPopup({
                     <CustomerSourceFields
                       idPrefix="edit-student"
                       source={customerSource}
-                      note={customerSourceNote}
-                      emptyLabel="Chưa gán"
-                      onSourceChange={(nextSource) => {
-                        setCustomerSource(nextSource);
-                        if (nextSource !== "other") setCustomerSourceNote("");
-                      }}
-                      onNoteChange={setCustomerSourceNote}
+                      onSourceChange={setCustomerSource}
                     />
 
                     <label className="flex flex-col gap-1 text-sm text-text-secondary">
@@ -750,7 +732,7 @@ export default function EditStudentPopup({
                       <div className="mb-2 rounded-xl border border-primary/15 bg-bg-surface/90 p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-text-primary">
+                            <p className="break-words text-sm font-semibold text-text-primary">
                               {selectedCustomerCare.fullName}
                             </p>
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
@@ -1053,7 +1035,7 @@ export default function EditStudentPopup({
                     className="flex w-full items-start justify-between gap-3 border-b border-border-subtle px-3.5 py-3 text-left transition-colors last:border-b-0 hover:bg-bg-secondary focus:outline-none focus-visible:bg-bg-secondary"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-text-primary">
+                      <p className="break-words text-sm font-semibold text-text-primary">
                         {option.fullName}
                       </p>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">

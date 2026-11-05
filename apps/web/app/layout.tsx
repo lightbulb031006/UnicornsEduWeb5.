@@ -28,7 +28,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Unicorns Edu – Nền tảng quản lý giáo dục & luyện thi",
+  title: "UniEdu – Nền tảng quản lý giáo dục & luyện thi",
   description:
     "Quản lý lớp học, giáo án, học sinh và nhân sự trong một hệ thống duy nhất. Dành cho trung tâm luyện thi, bồi dưỡng văn hoá và lập trình.",
 };

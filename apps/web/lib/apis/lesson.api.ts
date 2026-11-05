@@ -264,6 +264,8 @@ function normalizeLessonOutputItem(
     includesTest: value?.includesTest === true,
     includesSolution: value?.includesSolution === true,
     includesLectureVideo: value?.includesLectureVideo === true,
+    includesTheoryLecture: value?.includesTheoryLecture === true,
+    theoryLectureLinks: normalizeStringList(value?.theoryLectureLinks),
     tags: normalizeStringList(value?.tags),
     cost:
       typeof value?.cost === "number" && Number.isFinite(value.cost)

@@ -4,7 +4,7 @@ Labels: ready-for-agent
 
 ## Problem Statement
 
-Users on phones and small tablets cannot reliably use every Unicorns Edu workspace surface. Some pages already have mobile cards and drawers, but important role surfaces still depend on desktop tables, early breakpoints, cramped dialogs, small touch targets, or placeholder pages. Admin, staff, student, auth, and public experiences need one consistent mobile-responsive contract.
+Users on phones and small tablets cannot reliably use every UniEdu workspace surface. Some pages already have mobile cards and drawers, but important role surfaces still depend on desktop tables, early breakpoints, cramped dialogs, small touch targets, or placeholder pages. Admin, staff, student, auth, and public experiences need one consistent mobile-responsive contract.
 
 ## Solution
 

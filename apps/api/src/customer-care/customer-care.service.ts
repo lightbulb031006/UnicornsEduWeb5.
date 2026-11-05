@@ -38,10 +38,10 @@ const DEFAULT_DAYS = 30;
 const RECENT_TOP_UP_DAYS = 21;
 const RECENT_TOP_UP_THRESHOLD = 300_000;
 /**
- * Lý do nghỉ bắt buộc từ 10/2026; tháng trước đó CSKH điền bù qua popup nhắc.
- * Điền bù xong thì bỏ endpoint `me/missing-drop-out-reasons` và hằng này.
+ * Học sinh nghỉ từ ngày này trở đi mà thiếu lý do nghỉ thì
+ * CSKH phụ trách bị nhắc điền qua popup (không có cận trên).
  */
-const DROP_OUT_REASON_BACKFILL_MONTH_KEY = '2026-09';
+const DROP_OUT_REASON_REMINDER_SINCE = '2026-09-01';
 
 function toNumber(value: unknown): number {
   if (value == null) return 0;
@@ -391,30 +391,38 @@ export class CustomerCareService {
   }
 
   /**
-   * Học sinh CSKH đang đăng nhập phụ trách, nghỉ trong tháng điền bù mà chưa có
-   * lý do nghỉ. Người không phải CSKH nhận danh sách rỗng.
+   * Học sinh CSKH đang đăng nhập phụ trách, nghỉ từ mốc nhắc trở đi mà còn
+   * thiếu lý do nghỉ. Người không có role CSKH (kể cả nhân sự
+   * kiêm nhiều role khác) nhận danh sách rỗng; học sinh chưa có CSKH không
+   * xuất hiện ở ai.
    */
   async getMyMissingDropOutReasons(
     userId: string,
   ): Promise<CustomerCareMissingDropOutReasonListDto> {
-    const monthKey = DROP_OUT_REASON_BACKFILL_MONTH_KEY;
+    const since = DROP_OUT_REASON_REMINDER_SINCE;
     const staff = await this.resolveStaffProfile(userId);
     if (!staff?.roles.includes(StaffRole.customer_care)) {
-      return { monthKey, items: [] };
+      return { since, items: [] };
     }
 
-    const { start, endExclusive } = parseMonthRange(monthKey);
     const assignments = await this.prisma.customerCareService.findMany({
       where: {
         staffId: staff.id,
         student: {
           status: StudentStatus.inactive,
+          dropOutDate: { gte: new Date(`${since}T00:00:00.000Z`) },
           dropOutReason: null,
-          dropOutDate: { gte: start, lt: endExclusive },
         },
       },
       select: {
-        student: { select: { id: true, fullName: true, dropOutDate: true } },
+        student: {
+          select: {
+            id: true,
+            fullName: true,
+            dropOutDate: true,
+            dropOutReason: true,
+          },
+        },
       },
       orderBy: [
         { student: { dropOutDate: 'asc' } },
@@ -423,11 +431,12 @@ export class CustomerCareService {
     });
 
     return {
-      monthKey,
+      since,
       items: assignments.map(({ student }) => ({
         studentId: student.id,
         fullName: student.fullName,
         dropOutDate: student.dropOutDate?.toISOString().slice(0, 10) ?? '',
+        dropOutReason: student.dropOutReason,
       })),
     };
   }

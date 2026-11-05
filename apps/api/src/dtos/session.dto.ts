@@ -27,6 +27,10 @@ import {
 import { AttendanceStatus, SessionPaymentStatus } from '../../generated/enums';
 import { AttendanceCreateDto, AttendanceUpdateDto } from './attendance.dto';
 import { CONTENT_LIMITS, HTTP_URL_OPTIONS } from './content-limits';
+import {
+  AttendanceReviewFieldsDto,
+  SessionReviewFieldsDto,
+} from './session-review.dto';
 
 export class MissedTeachingAlertExplanationDto {
   @ApiProperty({ example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
@@ -152,7 +156,7 @@ export class MissedTeachingExplanationResponseDto {
   explainedByName: string | null;
 }
 
-export class SessionCreateDto {
+export class SessionCreateDto extends SessionReviewFieldsDto {
   @ApiProperty({
     description: 'Class id',
     example: 'UNICL-b2c3d4e5f6',
@@ -391,7 +395,7 @@ export interface SessionUnpaidSummaryItem {
   totalAllowance: number | string;
 }
 
-export class StaffOpsAttendanceDto {
+export class StaffOpsAttendanceDto extends AttendanceReviewFieldsDto {
   @ApiProperty({
     description: 'Student id',
     example: 'UNIST-a1b2c3d4e5',
@@ -415,7 +419,7 @@ export class StaffOpsAttendanceDto {
   notes?: string | null;
 }
 
-export class CreateStaffOpsSessionDto {
+export class CreateStaffOpsSessionDto extends SessionReviewFieldsDto {
   @ApiProperty({
     description: 'Session date YYYY-MM-DD',
     example: '2026-03-18',

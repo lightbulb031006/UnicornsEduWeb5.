@@ -143,7 +143,7 @@ export class StudentLandingAchievementsQueryDto {
   @ApiPropertyOptional({
     default: false,
     description:
-      'When true, ignores `sourceIds`/publish gate and returns achievements for ALL students (level-list surface, e.g. /thanh-tich by-level browse). Keep false for publish-gated surfaces (e.g. "Tự Hào Unicorns" showcase).',
+      'When true, ignores `sourceIds`/publish gate and returns achievements for ALL students (level-list surface, e.g. /thanh-tich by-level browse). Keep false for publish-gated surfaces (e.g. "Tự Hào Uni" showcase).',
   })
   @IsOptional()
   @Type(() => Boolean)
@@ -180,6 +180,13 @@ export class LandingAchievementDto {
     description: 'Display order ascending (0 first).',
   })
   sortOrder: number;
+
+  @ApiProperty({
+    example: true,
+    description:
+      'Thành tích nổi bật do nhân sự tích sao (tối đa 1, luôn đứng đầu mảng). Không có dòng nào true nghĩa là gia sư chưa chọn — landing fallback dòng đầu.',
+  })
+  isHighlight: boolean;
 }
 
 /** Student landing achievements — structured fields for CMS /thanh-tich. */

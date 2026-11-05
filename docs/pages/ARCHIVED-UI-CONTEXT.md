@@ -1,6 +1,6 @@
 # Archived UI Context (UniEdu-Web 3.9)
 
-Reference from `archived/UniEdu-Web-3.9/frontend/` for rebuilding pages in Unicorns Edu 5.0 (`apps/web`). Use this with the per-route plan files (admin.md, student.md, mentor.md, assistant.md, landing.md, auth.md) for better model results.
+Reference from `archived/UniEdu-Web-3.9/frontend/` for rebuilding pages in UniEdu 5.0 (`apps/web`). Use this with the per-route plan files (admin.md, student.md, mentor.md, assistant.md, landing.md, auth.md) for better model results.
 
 ## Route and role mapping (archived → 5.0)
 

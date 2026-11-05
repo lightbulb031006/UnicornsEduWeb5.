@@ -42,13 +42,17 @@ import Link from "next/link";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import MathRichTextEditor from "@/components/ui/MathRichTextEditor";
+import MathRichTextEditorWithPreview from "@/components/ui/MathRichTextEditorWithPreview";
 import { CONTENT_LIMITS, isHttpUrl } from "@/dtos/content-limits";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
 } from "@/components/ui/ResponsiveDialog";
-import type { ClassContentItemDto } from "@/dtos/class-content.dto";
+import type {
+  AssignmentCloseAtDraft,
+  ClassContentItemDto,
+} from "@/dtos/class-content.dto";
+import type { CourseLessonForClassDto } from "@/dtos/course-content.dto";
 import { lessonKindBadgeClass } from "@/lib/course-content-labels";
 import * as classApi from "@/lib/apis/class.api";
 import CourseLessonPicker from "./CourseLessonPicker";
@@ -58,12 +62,17 @@ import {
   fromOpenAtIso,
   toOpenAtIso,
 } from "./AssignmentScheduleFields";
+import { AssignmentCloseAtField } from "./AssignmentCloseAtField";
+import { ShuffleQuestionsField } from "./ShuffleQuestionsField";
 import {
+  closeAtDraftFromIso,
+  closeAtPayload,
   isOpenAtPairComplete,
   isOpenAtPairPartial,
-  parseAssignmentDurationMinutes,
 } from "@/lib/assignment-schedule.helpers";
 import { formatVnDateTime } from "@/lib/formatters";
+import { practiceResultsHref } from "@/lib/practice-results-routes";
+import ProtectedVideoSyncStatus from "@/components/admin/ProtectedVideoSyncStatus";
 
 function formatOpenAt(iso: string | null): string {
   if (!iso) return "";
@@ -76,14 +85,15 @@ function formatOpenAt(iso: string | null): string {
 
 function SortableContentRow({
   item,
-  classId,
+  practiceBase,
   canManage,
   onHide,
   onRestore,
   onEditSchedule,
 }: {
   item: ClassContentItemDto;
-  classId: string;
+  /** Trang lớp của shell đang đứng — gốc link Kết quả / Chấm bài. */
+  practiceBase: string;
   canManage: boolean;
   onHide: (id: string) => void;
   onRestore: (id: string) => void;
@@ -107,7 +117,9 @@ function SortableContentRow({
 
   return (
     <div ref={setNodeRef} style={style}>
-      <Card className={`transition-colors hover:border-border-focus/50 ${item.hiddenAt ? "opacity-70" : ""}`}>
+      <Card
+        className={`transition-colors hover:border-border-focus/50 ${item.hiddenAt ? "opacity-70" : ""}`}
+      >
         <div className="flex items-center gap-3 p-3.5 sm:p-4">
           {canManage && (
             <button
@@ -148,7 +160,7 @@ function SortableContentRow({
             {item.lessonKind === "practice" && (
               <p className="mt-1 text-xs text-text-muted">
                 {item.openAt
-                  ? `Mở ${formatOpenAt(item.openAt)} · ${item.durationMinutes ?? "—"} phút`
+                  ? `Mở ${formatOpenAt(item.openAt)} · ${item.durationMinutes ?? "—"} phút${item.closeAt ? ` · hạn ${formatOpenAt(item.closeAt)}` : ""}`
                   : "Chưa đặt thời điểm mở"}
               </p>
             )}
@@ -158,18 +170,20 @@ function SortableContentRow({
               {item.lessonKind === "practice" && (
                 <>
                   <Link
-                    href={`/staff/classes/${classId}/practice/${item.id}/stats`}
+                    href={practiceResultsHref(practiceBase, item.id)}
+                    aria-label="Kết quả"
                     className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border-default px-3 py-1.5 text-xs sm:text-sm font-medium text-text-secondary hover:bg-bg-secondary transition-colors"
                   >
                     <BarChart3 className="size-3.5" />
-                    <span className="hidden sm:inline">Thống kê</span>
+                    <span className="hidden sm:inline">Kết quả</span>
                   </Link>
                   <Link
-                    href={`/staff/classes/${classId}/grading/${item.id}`}
+                    href={practiceResultsHref(practiceBase, item.id, "cho-cham")}
+                    aria-label="Chấm bài"
                     className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border-default px-3 py-1.5 text-xs sm:text-sm font-medium text-text-secondary hover:bg-bg-secondary transition-colors"
                   >
                     <PenLine className="size-3.5" />
-                    <span className="hidden sm:inline">Chấm tự luận</span>
+                    <span className="hidden sm:inline">Chấm bài</span>
                   </Link>
                 </>
               )}
@@ -219,9 +233,12 @@ export default function ClassContentManager({
   onChanged,
   autoOpenContentItemId = null,
   autoOpenToken = 0,
+  practiceActionsBasePath = null,
 }: {
   classId: string;
   canManage: boolean;
+  /** Trang lớp của shell (`/admin/classes/:id`); mặc định trang lớp staff. */
+  practiceActionsBasePath?: string | null;
   addOnly?: boolean;
   addOpen?: boolean;
   onAddOpenChange?: (open: boolean) => void;
@@ -230,6 +247,7 @@ export default function ClassContentManager({
   autoOpenToken?: number;
 }) {
   const queryClient = useQueryClient();
+  const practiceBase = practiceActionsBasePath ?? `/staff/classes/${classId}`;
   const [localItems, setLocalItems] = useState<ClassContentItemDto[]>([]);
   const [hasOrderChanged, setHasOrderChanged] = useState(false);
   const [uncontrolledAddOpen, setUncontrolledAddOpen] = useState(false);
@@ -260,7 +278,7 @@ export default function ClassContentManager({
   }, [autoOpenContentItemId, autoOpenToken, canManage, serverData]);
 
   const allItems = useMemo(
-    () => (localItems.length > 0 ? localItems : serverData ?? []),
+    () => (localItems.length > 0 ? localItems : (serverData ?? [])),
     [localItems, serverData],
   );
 
@@ -287,7 +305,9 @@ export default function ClassContentManager({
       classApi.deleteClassContentItem(classId, itemId),
     onSuccess: (newData) => {
       queryClient.setQueryData(["class-content", classId], newData);
-      void queryClient.invalidateQueries({ queryKey: classTimelineKeys.list(classId) });
+      void queryClient.invalidateQueries({
+        queryKey: classTimelineKeys.list(classId),
+      });
       setLocalItems([]);
       setHasOrderChanged(false);
       toast.success("Đã ẩn khỏi học sinh");
@@ -303,7 +323,9 @@ export default function ClassContentManager({
       classApi.restoreClassContentItem(classId, itemId),
     onSuccess: (newData) => {
       queryClient.setQueryData(["class-content", classId], newData);
-      void queryClient.invalidateQueries({ queryKey: classTimelineKeys.list(classId) });
+      void queryClient.invalidateQueries({
+        queryKey: classTimelineKeys.list(classId),
+      });
       setLocalItems([]);
       setHasOrderChanged(false);
       toast.success("Đã khôi phục");
@@ -408,42 +430,42 @@ export default function ClassContentManager({
             className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-text-inverse shadow-xs transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
           >
             <Plus className="size-4" />
-            Giao tiết thực hành
+            Thêm tiết
           </button>
         </div>
       )}
 
       {!addOnly && (
-      <div className="space-y-2.5">
-        {allItems.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border-default bg-bg-secondary/20 p-8 text-center text-sm text-text-muted">
-            Chưa có nội dung nào trong lớp học này.
-          </div>
-        ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={allItems.map((t) => t.id)}
-              strategy={verticalListSortingStrategy}
+        <div className="space-y-2.5">
+          {allItems.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border-default bg-bg-secondary/20 p-8 text-center text-sm text-text-muted">
+              Chưa có nội dung nào trong lớp học này.
+            </div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
             >
-              {allItems.map((item) => (
-                <SortableContentRow
-                  key={item.id}
-                  item={item}
-                  classId={classId}
-                  canManage={canManage}
-                  onHide={handleHide}
-                  onRestore={handleRestore}
-                  onEditSchedule={setScheduleItem}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-        )}
-      </div>
+              <SortableContext
+                items={allItems.map((t) => t.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {allItems.map((item) => (
+                  <SortableContentRow
+                    key={item.id}
+                    item={item}
+                    practiceBase={practiceBase}
+                    canManage={canManage}
+                    onHide={handleHide}
+                    onRestore={handleRestore}
+                    onEditSchedule={setScheduleItem}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+          )}
+        </div>
       )}
 
       {addOpen && (
@@ -478,6 +500,7 @@ export default function ClassContentManager({
       {viewItem && (
         <ViewContentDialog
           classId={classId}
+          practiceBase={practiceBase}
           item={viewItem}
           canManage={canManage}
           onClose={() => setViewItem(null)}
@@ -493,8 +516,8 @@ export default function ClassContentManager({
 }
 
 /**
- * Giao một tiết thực hành của khoá cho lớp. Tiết lý thuyết không thêm lẻ ở đây:
- * chúng vào lớp theo chuyên đề (`ClassModulesDialog`).
+ * Thêm lẻ một tiết của khoá vào lớp (ADR 2026-10-18). Tiết lý thuyết thêm thẳng;
+ * tiết thực hành qua bước **Đặt lần giao** (mở bài, hạn, trộn câu).
  */
 function AddContentDialog({
   classId,
@@ -506,50 +529,59 @@ function AddContentDialog({
   onSuccess: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [lessonId, setLessonId] = useState("");
+  const [lesson, setLesson] = useState<CourseLessonForClassDto | null>(null);
+  const isPractice = lesson?.kind === "practice";
   const [step, setStep] = useState<"pick" | "schedule">("pick");
-  const defaults = defaultAssignmentSchedule();
   const [openDate, setOpenDate] = useState("");
   const [openTime, setOpenTime] = useState("");
-  const [durationMinutes, setDurationMinutes] = useState(
-    defaults.durationMinutes,
-  );
+  const [closeAt, setCloseAt] = useState<AssignmentCloseAtDraft>({
+    mode: "class",
+    date: "",
+    time: "",
+  });
+  const [shuffleQuestions, setShuffleQuestions] = useState(true);
 
-  const parsedDuration = parseAssignmentDurationMinutes(durationMinutes);
-  const durationError =
-    parsedDuration == null
-      ? "Thời lượng phải từ 1 đến 720 phút."
-      : null;
   const openAtPartial = isOpenAtPairPartial(openDate, openTime);
-  const canSubmitSchedule = parsedDuration != null && !openAtPartial;
+  const closeAtValue = closeAtPayload(closeAt);
+  const canSubmitSchedule = !openAtPartial && closeAtValue !== false;
 
   const createMutation = useMutation({
-    mutationFn: () => {
-      if (parsedDuration == null) {
-        return Promise.reject(new Error("invalid-duration"));
-      }
-      return classApi.createClassContent(classId, {
-        lessonId: lessonId.trim(),
-        ...(isOpenAtPairComplete(openDate, openTime)
-          ? { openAt: toOpenAtIso(openDate, openTime) }
-          : {}),
-        durationMinutes: parsedDuration,
-      });
-    },
+    mutationFn: () =>
+      classApi.createClassContent(
+        classId,
+        isPractice ? practicePayload() : { lessonId: lesson!.id },
+      ),
     onSuccess: () => {
-      toast.success("Đã giao tiết thực hành");
+      toast.success(
+        isPractice ? "Đã giao tiết thực hành" : "Đã thêm tiết lý thuyết",
+      );
       queryClient.invalidateQueries({
         queryKey: classKeys.courseLessons(classId),
       });
+      // Tiết đầu của chuyên đề mới tạo nhóm mới cho lớp.
+      queryClient.invalidateQueries({ queryKey: classKeys.modules(classId) });
       onSuccess();
     },
     onError: (err: { response?: { data?: { message?: string } } }) => {
-      toast.error(err?.response?.data?.message || "Lỗi giao tiết thực hành");
+      toast.error(err?.response?.data?.message || "Lỗi thêm tiết vào lớp");
     },
   });
 
+  function practicePayload() {
+    return {
+      lessonId: lesson!.id,
+      ...(isOpenAtPairComplete(openDate, openTime)
+        ? { openAt: toOpenAtIso(openDate, openTime) }
+        : {}),
+      ...(closeAtValue === false || closeAtValue === undefined
+        ? {}
+        : { closeAt: closeAtValue }),
+      shuffleQuestions,
+    };
+  }
+
   const handlePrimary = () => {
-    if (step === "pick") {
+    if (step === "pick" && isPractice) {
       setStep("schedule");
       return;
     }
@@ -562,12 +594,12 @@ function AddContentDialog({
         <div className="flex items-center justify-between gap-3 border-b border-border-default pb-4 shrink-0">
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-text-primary">
-              {step === "schedule" ? "Đặt lần giao" : "Giao tiết thực hành"}
+              {step === "schedule" ? "Đặt lần giao" : "Thêm tiết vào lớp"}
             </h2>
             <p className="text-xs text-text-muted mt-0.5">
               {step === "schedule"
-                ? "Thời điểm mở bài và thời lượng thuộc lần giao của lớp này, không đụng đề."
-                : "Chọn chuyên đề lớp đã thêm, rồi chọn tiết thực hành. Tiết lý thuyết vào lớp theo chuyên đề."}
+                ? "Thời điểm mở bài và hạn làm bài thuộc lần giao của lớp này, không đụng đề."
+                : "Chọn chuyên đề của khoá, rồi chọn tiết lý thuyết hoặc thực hành. Chuyên đề mới vào lớp đứng đầu danh sách."}
             </p>
           </div>
           <button
@@ -585,24 +617,30 @@ function AddContentDialog({
               <AssignmentScheduleFields
                 openDate={openDate}
                 openTime={openTime}
-                durationMinutes={durationMinutes}
                 openAtOptional
-                durationError={durationError}
                 onOpenDateChange={setOpenDate}
                 onOpenTimeChange={setOpenTime}
-                onDurationChange={setDurationMinutes}
               />
               {openAtPartial ? (
                 <p className="text-xs text-error">
                   Nhập cả ngày và giờ, hoặc để trống cả hai.
                 </p>
               ) : null}
+              <AssignmentCloseAtField
+                value={closeAt}
+                onChange={setCloseAt}
+                allowClassDefault
+              />
+              <ShuffleQuestionsField
+                checked={shuffleQuestions}
+                onCheckedChange={setShuffleQuestions}
+              />
             </>
           ) : (
             <CourseLessonPicker
               classId={classId}
-              selectedLessonId={lessonId}
-              onSelect={(id) => setLessonId(id)}
+              selectedLessonId={lesson?.id ?? ""}
+              onSelect={setLesson}
             />
           )}
         </div>
@@ -628,17 +666,19 @@ function AddContentDialog({
             type="button"
             onClick={handlePrimary}
             disabled={
-              (step === "pick" && !lessonId.trim()) ||
+              (step === "pick" && !lesson) ||
               (step === "schedule" && !canSubmitSchedule) ||
               createMutation.isPending
             }
             className="cursor-pointer rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-text-inverse transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60 shadow-xs"
           >
             {createMutation.isPending
-              ? "Đang giao..."
-              : step === "pick"
-                ? "Tiếp theo"
-                : "Giao đề"}
+              ? "Đang thêm..."
+              : step === "schedule"
+                ? "Giao đề"
+                : isPractice
+                  ? "Tiếp theo"
+                  : "Thêm tiết"}
           </button>
         </div>
       </ResponsiveDialogBody>
@@ -663,28 +703,25 @@ function EditScheduleDialog({
     : { date: fallback.openDate, time: fallback.openTime };
   const [openDate, setOpenDate] = useState(parsed.date);
   const [openTime, setOpenTime] = useState(parsed.time);
-  const [durationMinutes, setDurationMinutes] = useState(
-    String(item.durationMinutes ?? 60),
+  const [closeAt, setCloseAt] = useState(() =>
+    closeAtDraftFromIso(item.closeAt),
   );
-  const parsedDuration = parseAssignmentDurationMinutes(durationMinutes);
-  const durationError =
-    parsedDuration == null
-      ? "Thời lượng phải từ 1 đến 720 phút."
-      : null;
+  const [shuffleQuestions, setShuffleQuestions] = useState(
+    item.shuffleQuestions,
+  );
+  const closeAtValue = closeAtPayload(closeAt);
   const canSave =
-    Boolean(openDate && openTime && parsedDuration != null) &&
-    !isOpenAtPairPartial(openDate, openTime);
+    Boolean(openDate && openTime) &&
+    !isOpenAtPairPartial(openDate, openTime) &&
+    closeAtValue !== false;
 
   const mutation = useMutation({
-    mutationFn: () => {
-      if (parsedDuration == null) {
-        return Promise.reject(new Error("invalid-duration"));
-      }
-      return classApi.updateClassContentSchedule(classId, item.id, {
+    mutationFn: () =>
+      classApi.updateClassContentSchedule(classId, item.id, {
         openAt: toOpenAtIso(openDate, openTime),
-        durationMinutes: parsedDuration,
-      });
-    },
+        closeAt: closeAtValue === false ? undefined : closeAtValue,
+        shuffleQuestions,
+      }),
     onSuccess: () => {
       toast.success("Đã cập nhật lần giao");
       onSuccess();
@@ -699,8 +736,12 @@ function EditScheduleDialog({
       <ResponsiveDialogBody className="flex flex-col p-4 sm:p-6">
         <div className="flex items-center justify-between gap-3 border-b border-border-default pb-4">
           <div>
-            <h2 className="text-lg font-bold text-text-primary">Đặt lần giao</h2>
-            <p className="text-xs text-text-muted mt-0.5 truncate">{item.title}</p>
+            <h2 className="text-lg font-bold text-text-primary">
+              Đặt lần giao
+            </h2>
+            <p className="text-xs text-text-muted mt-0.5 truncate">
+              {item.title}
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -710,15 +751,19 @@ function EditScheduleDialog({
             <X className="size-5" />
           </button>
         </div>
-        <div className="py-4">
+        <div className="space-y-4 py-4">
           <AssignmentScheduleFields
             openDate={openDate}
             openTime={openTime}
-            durationMinutes={durationMinutes}
-            durationError={durationError}
+            durationMinutes={item.durationMinutes}
             onOpenDateChange={setOpenDate}
             onOpenTimeChange={setOpenTime}
-            onDurationChange={setDurationMinutes}
+          />
+          <AssignmentCloseAtField value={closeAt} onChange={setCloseAt} />
+          <ShuffleQuestionsField
+            checked={shuffleQuestions}
+            onCheckedChange={setShuffleQuestions}
+            hint="Đổi chỉ áp cho lượt bắt đầu sau khi lưu."
           />
         </div>
         <div className="flex items-center justify-end gap-2 pt-4 border-t border-border-default">
@@ -832,18 +877,23 @@ function TheoryLessonInlineEditor({
           placeholder="https://youtube.com/watch?v=..."
           className="mt-1.5 w-full rounded-xl border border-border-default bg-bg-surface px-4 py-2.5 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
         />
+        <ProtectedVideoSyncStatus
+          savedUrl={lesson?.videoUrl}
+          currentUrl={videoUrlValue}
+        />
       </div>
       <div>
         <span className="block text-xs font-semibold uppercase tracking-wider text-text-muted">
           Nội dung lý thuyết (hỗ trợ LaTeX: $x^2$)
         </span>
         <div className="mt-1.5">
-          <MathRichTextEditor
+          <MathRichTextEditorWithPreview
             value={contentValue}
             onChange={setContent}
             ariaLabel="Nội dung lý thuyết"
             placeholder="Nhập nội dung tiết lý thuyết..."
             minHeight="min-h-[120px]"
+            markdown
           />
         </div>
       </div>
@@ -863,12 +913,14 @@ function TheoryLessonInlineEditor({
 
 function ViewContentDialog({
   classId,
+  practiceBase,
   item,
   canManage,
   onClose,
   onEditSchedule,
 }: {
   classId: string;
+  practiceBase: string;
   item: ClassContentItemDto;
   canManage: boolean;
   onClose: () => void;
@@ -882,7 +934,9 @@ function ViewContentDialog({
             <p className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">
               {item.kindLabel}
             </p>
-            <h2 className="mt-1 text-lg font-bold text-text-primary">{item.title}</h2>
+            <h2 className="mt-1 text-lg font-bold text-text-primary">
+              {item.title}
+            </h2>
             <p className="mt-1 text-xs text-text-muted">
               {item.source === "course" ? "Từ khoá" : "Riêng lớp"}
               {item.moduleTitle ? ` · ${item.moduleTitle}` : ""}
@@ -901,7 +955,7 @@ function ViewContentDialog({
           {item.lessonKind === "practice" ? (
             <p>
               {item.openAt
-                ? `Mở ${formatOpenAt(item.openAt)} · ${item.durationMinutes ?? "—"} phút`
+                ? `Mở ${formatOpenAt(item.openAt)} · ${item.durationMinutes ?? "—"} phút${item.closeAt ? ` · hạn ${formatOpenAt(item.closeAt)}` : ""}`
                 : "Chưa đặt thời điểm mở"}
             </p>
           ) : (
@@ -916,16 +970,16 @@ function ViewContentDialog({
         {canManage && item.lessonKind === "practice" ? (
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border-default pt-4">
             <Link
-              href={`/staff/classes/${classId}/practice/${item.id}/stats`}
+              href={practiceResultsHref(practiceBase, item.id)}
               className="inline-flex min-h-9 items-center rounded-lg border border-border-default px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-secondary"
             >
-              Thống kê
+              Kết quả
             </Link>
             <Link
-              href={`/staff/classes/${classId}/grading/${item.id}`}
+              href={practiceResultsHref(practiceBase, item.id, "cho-cham")}
               className="inline-flex min-h-9 items-center rounded-lg border border-border-default px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-secondary"
             >
-              Chấm tự luận
+              Chấm bài
             </Link>
             <button
               type="button"

@@ -14,6 +14,8 @@ import {
   ExtraAllowanceBulkStatusUpdateResult,
   CreateExtraAllowanceDto,
   CreateMyStaffExtraAllowanceDto,
+  SaleStudentOptionDto,
+  SELF_MANAGED_EXTRA_ALLOWANCE_ROLES,
   UpdateExtraAllowanceDto,
   UpdateMyStaffExtraAllowanceDto,
 } from '../dtos/extra-allowance.dto';
@@ -26,14 +28,36 @@ import {
 import { getUserFullNameFromParts } from '../common/user-name.util';
 import { assertStaffCanReceiveAssignment } from '../common/profile-status.policy';
 
+const EXTRA_ALLOWANCE_INCLUDE = {
+  staff: {
+    select: {
+      id: true,
+      user: {
+        select: {
+          first_name: true,
+          last_name: true,
+        },
+      },
+      roles: true,
+      status: true,
+    },
+  },
+  student: {
+    select: {
+      id: true,
+      fullName: true,
+    },
+  },
+} satisfies Prisma.ExtraAllowanceInclude;
+
+const SALE_STUDENT_OPTION_LIMIT = 20;
+
+type SelfServiceUser = { id: string; email: string; roleType: UserRole };
+
 @Injectable()
 export class ExtraAllowanceService {
   private static readonly SELF_MANAGED_EXTRA_ALLOWANCE_ROLES =
-    new Set<StaffRole>([
-      StaffRole.communication,
-      StaffRole.technical,
-      StaffRole.training,
-    ]);
+    new Set<StaffRole>(SELF_MANAGED_EXTRA_ALLOWANCE_ROLES);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -95,24 +119,52 @@ export class ExtraAllowanceService {
     assertStaffCanReceiveAssignment(staff.status);
   }
 
+  /**
+   * Trợ cấp sale: bắt buộc học sinh + ghi chú, dù ai tạo. Role khác không gắn
+   * học sinh. Chỉ kiểm lúc ghi — dòng sale có `student_id` null vì học sinh
+   * đã bị xoá vẫn hợp lệ (ADR 2026-10-23).
+   */
+  private async resolveAllowanceStudentId(
+    db: Prisma.TransactionClient | PrismaService,
+    params: {
+      roleType: StaffRole;
+      studentId: string | null | undefined;
+      note: string | null | undefined;
+    },
+  ): Promise<string | null> {
+    if (params.roleType !== StaffRole.sale) {
+      if (params.studentId) {
+        throw new BadRequestException(
+          'Chỉ trợ cấp sale mới được gắn học sinh.',
+        );
+      }
+      return null;
+    }
+
+    if (!params.studentId) {
+      throw new BadRequestException('Trợ cấp sale phải chọn học sinh.');
+    }
+
+    if (!params.note?.trim()) {
+      throw new BadRequestException('Trợ cấp sale phải có ghi chú.');
+    }
+
+    const student = await db.studentInfo.findUnique({
+      where: { id: params.studentId },
+      select: { id: true },
+    });
+
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    return student.id;
+  }
+
   private getExtraAllowanceSnapshot(id: string) {
     return this.prisma.extraAllowance.findUnique({
       where: { id },
-      include: {
-        staff: {
-          select: {
-            id: true,
-            user: {
-              select: {
-                first_name: true,
-                last_name: true,
-              },
-            },
-            roles: true,
-            status: true,
-          },
-        },
-      },
+      include: EXTRA_ALLOWANCE_INCLUDE,
     });
   }
 
@@ -167,6 +219,14 @@ export class ExtraAllowanceService {
                 },
               },
               {
+                student: {
+                  fullName: {
+                    contains: trimmedSearch,
+                    mode: 'insensitive' as const,
+                  },
+                },
+              },
+              {
                 staff: {
                   OR: [
                     {
@@ -207,21 +267,7 @@ export class ExtraAllowanceService {
       skip,
       take: limit,
       orderBy: [{ month: 'desc' }, { createdAt: 'desc' }],
-      include: {
-        staff: {
-          select: {
-            id: true,
-            user: {
-              select: {
-                first_name: true,
-                last_name: true,
-              },
-            },
-            roles: true,
-            status: true,
-          },
-        },
-      },
+      include: EXTRA_ALLOWANCE_INCLUDE,
     });
 
     return {
@@ -237,21 +283,7 @@ export class ExtraAllowanceService {
   async getExtraAllowanceById(id: string) {
     const allowance = await this.prisma.extraAllowance.findUnique({
       where: { id },
-      include: {
-        staff: {
-          select: {
-            id: true,
-            user: {
-              select: {
-                first_name: true,
-                last_name: true,
-              },
-            },
-            roles: true,
-            status: true,
-          },
-        },
-      },
+      include: EXTRA_ALLOWANCE_INCLUDE,
     });
 
     if (!allowance) {
@@ -269,6 +301,8 @@ export class ExtraAllowanceService {
         return 'Kỹ thuật';
       case StaffRole.training:
         return 'Đào Tạo';
+      case StaffRole.sale:
+        return 'Sale';
       default:
         return roleType;
     }
@@ -282,21 +316,19 @@ export class ExtraAllowanceService {
     }
   }
 
-  /**
-   * Staff self-service: only supported linked staff roles may create their own
-   * pending extra allowance.
-   */
-  async createMyStaffExtraAllowance(
-    user: { id: string; email: string; roleType: UserRole },
-    data: CreateMyStaffExtraAllowanceDto,
+  /** Hồ sơ nhân sự của user đang đăng nhập, có role tự quản `roleType`. */
+  private async getSelfManagedStaff(
+    user: SelfServiceUser,
+    roleType: StaffRole,
+    action: string,
   ) {
     if (user.roleType !== UserRole.staff) {
       throw new ForbiddenException(
-        'Chỉ tài khoản nhân sự mới được tự tạo trợ cấp này.',
+        `Chỉ tài khoản nhân sự mới được tự ${action} trợ cấp này.`,
       );
     }
 
-    this.ensureSelfManagedRole(data.roleType);
+    this.ensureSelfManagedRole(roleType);
 
     const staff = await this.prisma.staffInfo.findFirst({
       where: { userId: user.id },
@@ -307,13 +339,57 @@ export class ExtraAllowanceService {
       throw new BadRequestException('User has no linked staff record');
     }
 
-    if (!staff.roles.includes(data.roleType)) {
+    if (!staff.roles.includes(roleType)) {
       throw new ForbiddenException(
         `Chỉ nhân sự có role ${this.getSelfManagedRoleLabel(
-          data.roleType,
-        )} mới được tự thêm trợ cấp này.`,
+          roleType,
+        )} mới được tự ${action} trợ cấp này.`,
       );
     }
+
+    return staff;
+  }
+
+  /**
+   * Khoản trợ cấp tự quản của chính nhân sự, còn sửa/xoá được: khoản đã
+   * thanh toán là chứng từ nên khoá.
+   */
+  private async getOwnUnpaidSelfManagedAllowance(
+    staffId: string,
+    allowanceId: string,
+    roleType?: StaffRole,
+  ) {
+    const existingAllowance = await this.getExtraAllowanceSnapshot(allowanceId);
+
+    if (
+      !existingAllowance ||
+      existingAllowance.staffId !== staffId ||
+      !ExtraAllowanceService.SELF_MANAGED_EXTRA_ALLOWANCE_ROLES.has(
+        existingAllowance.roleType,
+      ) ||
+      (roleType !== undefined && existingAllowance.roleType !== roleType)
+    ) {
+      throw new NotFoundException('Extra allowance not found');
+    }
+
+    if (existingAllowance.status === PaymentStatus.paid) {
+      throw new ForbiddenException(
+        'Khoản trợ cấp đã thanh toán, không sửa hoặc xoá được.',
+      );
+    }
+
+    return existingAllowance;
+  }
+
+  /**
+   * Staff self-service: only supported linked staff roles may create their own
+   * pending extra allowance.
+   */
+  async createMyStaffExtraAllowance(
+    user: SelfServiceUser,
+    data: CreateMyStaffExtraAllowanceDto,
+  ) {
+    const staff = await this.getSelfManagedStaff(user, data.roleType, 'thêm');
 
     return this.createExtraAllowance(
       {
@@ -323,6 +399,7 @@ export class ExtraAllowanceService {
         status: PaymentStatus.pending,
         note: data.note,
         roleType: data.roleType,
+        studentId: data.studentId,
       },
       {
         userId: user.id,
@@ -333,43 +410,15 @@ export class ExtraAllowanceService {
   }
 
   async updateMyStaffExtraAllowance(
-    user: { id: string; email: string; roleType: UserRole },
+    user: SelfServiceUser,
     data: UpdateMyStaffExtraAllowanceDto,
   ) {
-    if (user.roleType !== UserRole.staff) {
-      throw new ForbiddenException(
-        'Chỉ tài khoản nhân sự mới được tự chỉnh trợ cấp này.',
-      );
-    }
-
-    this.ensureSelfManagedRole(data.roleType);
-
-    const staff = await this.prisma.staffInfo.findFirst({
-      where: { userId: user.id },
-      select: { id: true, roles: true },
-    });
-
-    if (!staff) {
-      throw new BadRequestException('User has no linked staff record');
-    }
-
-    if (!staff.roles.includes(data.roleType)) {
-      throw new ForbiddenException(
-        `Chỉ nhân sự có role ${this.getSelfManagedRoleLabel(
-          data.roleType,
-        )} mới được tự chỉnh trợ cấp này.`,
-      );
-    }
-
-    const existingAllowance = await this.getExtraAllowanceSnapshot(data.id);
-
-    if (
-      !existingAllowance ||
-      existingAllowance.staffId !== staff.id ||
-      existingAllowance.roleType !== data.roleType
-    ) {
-      throw new NotFoundException('Extra allowance not found');
-    }
+    const staff = await this.getSelfManagedStaff(user, data.roleType, 'chỉnh');
+    await this.getOwnUnpaidSelfManagedAllowance(
+      staff.id,
+      data.id,
+      data.roleType,
+    );
 
     return this.updateExtraAllowance(
       {
@@ -377,6 +426,7 @@ export class ExtraAllowanceService {
         month: data.month,
         amount: data.amount,
         note: data.note,
+        studentId: data.studentId,
       },
       {
         userId: user.id,
@@ -386,12 +436,77 @@ export class ExtraAllowanceService {
     );
   }
 
+  async deleteMyStaffExtraAllowance(user: SelfServiceUser, id: string) {
+    const existingAllowance = await this.prisma.extraAllowance.findUnique({
+      where: { id },
+      select: { roleType: true },
+    });
+
+    if (!existingAllowance) {
+      throw new NotFoundException('Extra allowance not found');
+    }
+
+    const staff = await this.getSelfManagedStaff(
+      user,
+      existingAllowance.roleType,
+      'xoá',
+    );
+    await this.getOwnUnpaidSelfManagedAllowance(staff.id, id);
+
+    return this.deleteExtraAllowance(id, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
+  /**
+   * Picker học sinh cho Trợ cấp sale: mọi học sinh (kể cả nghỉ học), chỉ trả
+   * trường đủ để nhận diện — không trả liên hệ, ví hay lớp.
+   */
+  async searchSaleStudentOptions(
+    search?: string,
+  ): Promise<SaleStudentOptionDto[]> {
+    const trimmedSearch = search?.trim();
+
+    return this.prisma.studentInfo.findMany({
+      where: trimmedSearch
+        ? {
+            fullName: {
+              contains: trimmedSearch,
+              mode: 'insensitive' as const,
+            },
+          }
+        : {},
+      select: {
+        id: true,
+        fullName: true,
+        birthYear: true,
+        school: true,
+        status: true,
+      },
+      orderBy: [{ fullName: 'asc' }, { id: 'asc' }],
+      take: SALE_STUDENT_OPTION_LIMIT,
+    });
+  }
+
+  /** Sale picker cho nhân sự đang đăng nhập — chỉ hồ sơ có role `sale`. */
+  async searchMySaleStudentOptions(user: SelfServiceUser, search?: string) {
+    await this.getSelfManagedStaff(user, StaffRole.sale, 'chọn học sinh cho');
+    return this.searchSaleStudentOptions(search);
+  }
+
   async createExtraAllowance(
     data: CreateExtraAllowanceDto,
     auditActor?: ActionHistoryActor,
   ) {
     return this.prisma.$transaction(async (tx) => {
       await this.assertActiveStaffForAllowance(tx, data.staffId);
+      const studentId = await this.resolveAllowanceStudentId(tx, {
+        roleType: data.roleType,
+        studentId: data.studentId,
+        note: data.note,
+      });
       const taxDeductionRatePercent = await resolveTaxDeductionRate(tx, {
         staffId: data.staffId,
         roleType: data.roleType,
@@ -405,6 +520,7 @@ export class ExtraAllowanceService {
           status: data.status,
           note: data.note,
           roleType: data.roleType,
+          studentId,
           taxDeductionRatePercent,
         },
       });
@@ -412,21 +528,7 @@ export class ExtraAllowanceService {
       if (auditActor) {
         const afterValue = await tx.extraAllowance.findUnique({
           where: { id: createdAllowance.id },
-          include: {
-            staff: {
-              select: {
-                id: true,
-                user: {
-                  select: {
-                    first_name: true,
-                    last_name: true,
-                  },
-                },
-                roles: true,
-                status: true,
-              },
-            },
-          },
+          include: EXTRA_ALLOWANCE_INCLUDE,
         });
         await this.actionHistoryService.recordCreate(tx, {
           actor: auditActor,
@@ -455,7 +557,7 @@ export class ExtraAllowanceService {
       throw new NotFoundException('Extra allowance not found');
     }
 
-    const updateData: Omit<UpdateExtraAllowanceDto, 'id'> = {};
+    const updateData: Omit<UpdateExtraAllowanceDto, 'id' | 'studentId'> = {};
 
     if (data.staffId !== undefined) updateData.staffId = data.staffId;
     if (data.month !== undefined) updateData.month = data.month;
@@ -469,10 +571,22 @@ export class ExtraAllowanceService {
       const nextRoleType = data.roleType ?? existingAllowance.roleType;
       const nextMonth = data.month ?? existingAllowance.month;
       await this.assertActiveStaffForAllowance(tx, nextStaffId);
+      // Không gửi studentId = giữ học sinh cũ nếu vẫn là sale; đổi sang role khác thì gỡ.
+      const nextStudentId = await this.resolveAllowanceStudentId(tx, {
+        roleType: nextRoleType,
+        studentId:
+          data.studentId !== undefined
+            ? data.studentId
+            : nextRoleType === StaffRole.sale
+              ? existingAllowance.studentId
+              : undefined,
+        note: data.note !== undefined ? data.note : existingAllowance.note,
+      });
       const updatedAllowance = await tx.extraAllowance.update({
         where: { id: data.id },
         data: {
           ...updateData,
+          studentId: nextStudentId,
           taxDeductionRatePercent: await resolveTaxDeductionRate(tx, {
             staffId: nextStaffId,
             roleType: nextRoleType,
@@ -484,21 +598,7 @@ export class ExtraAllowanceService {
       if (auditActor) {
         const afterValue = await tx.extraAllowance.findUnique({
           where: { id: data.id },
-          include: {
-            staff: {
-              select: {
-                id: true,
-                user: {
-                  select: {
-                    first_name: true,
-                    last_name: true,
-                  },
-                },
-                roles: true,
-                status: true,
-              },
-            },
-          },
+          include: EXTRA_ALLOWANCE_INCLUDE,
         });
         await this.actionHistoryService.recordUpdate(tx, {
           actor: auditActor,
@@ -528,21 +628,7 @@ export class ExtraAllowanceService {
             in: uniqueAllowanceIds,
           },
         },
-        include: {
-          staff: {
-            select: {
-              id: true,
-              user: {
-                select: {
-                  first_name: true,
-                  last_name: true,
-                },
-              },
-              roles: true,
-              status: true,
-            },
-          },
-        },
+        include: EXTRA_ALLOWANCE_INCLUDE,
       });
 
       if (existingAllowances.length !== uniqueAllowanceIds.length) {
@@ -597,21 +683,7 @@ export class ExtraAllowanceService {
               in: changedAllowanceIds,
             },
           },
-          include: {
-            staff: {
-              select: {
-                id: true,
-                user: {
-                  select: {
-                    first_name: true,
-                    last_name: true,
-                  },
-                },
-                roles: true,
-                status: true,
-              },
-            },
-          },
+          include: EXTRA_ALLOWANCE_INCLUDE,
         });
         const afterValueByAllowanceId = new Map(
           updatedAllowances.map((allowance) => [allowance.id, allowance]),

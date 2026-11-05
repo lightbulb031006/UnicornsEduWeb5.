@@ -667,7 +667,7 @@ function LessonPlanTeamCard({
                 className="flex items-center justify-between gap-3 rounded-lg border border-border-default bg-bg-surface px-3 py-2.5"
               >
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-sm font-medium text-text-primary">
+                  <span className="break-words text-sm font-medium text-text-primary">
                     {member.staff.fullName}
                   </span>
                   {isLessonPlanHead ? (

@@ -4,6 +4,7 @@ import {
   CreateExtraAllowancePayload,
   ExtraAllowanceDetailResponse,
   ExtraAllowanceListResponse,
+  SaleStudentOption,
   SearchExtraAllowanceParams,
   UpdateExtraAllowancePayload,
 } from "@/dtos/extra-allowance.dto";
@@ -69,4 +70,15 @@ export async function deleteExtraAllowanceById(id: string) {
   const safeId = encodeURIComponent(id);
   const response = await api.delete(`/extra-allowance/${safeId}`);
   return response.data;
+}
+
+/** Admin / kế toán chi: tìm học sinh để gắn vào Trợ cấp sale. */
+export async function searchSaleStudentOptions(
+  search?: string,
+): Promise<SaleStudentOption[]> {
+  const response = await api.get<SaleStudentOption[]>(
+    "/extra-allowance/student-options",
+    { params: search ? { search } : undefined },
+  );
+  return Array.isArray(response.data) ? response.data : [];
 }

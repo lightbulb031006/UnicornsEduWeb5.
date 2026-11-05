@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SessionLedgerService } from './session-ledger.service';
 import { SessionSnapshotService } from './session-snapshot.service';
 import { SessionStudentBalanceService } from './session-student-balance.service';
+import { SessionTrialCatchUpService } from './session-trial-catch-up.service';
 
 @Injectable()
 export class SessionDeleteService {
@@ -17,6 +18,7 @@ export class SessionDeleteService {
     private readonly sessionLedgerService: SessionLedgerService,
     private readonly sessionSnapshotService: SessionSnapshotService,
     private readonly actionHistoryService: ActionHistoryService,
+    private readonly sessionTrialCatchUpService: SessionTrialCatchUpService,
   ) {}
 
   async deleteSession(id: string, actor?: ActionHistoryActor) {
@@ -92,9 +94,23 @@ export class SessionDeleteService {
         });
       }
 
+      await this.sessionTrialCatchUpService.releaseBeforeDelete(
+        tx,
+        existingSession.attendance.map((attendanceItem) => attendanceItem.id),
+      );
+
       const deletedSession = await tx.session.delete({
         where: { id },
       });
+
+      // Xoá buổi thử → hoàn thu bù; xoá buổi thu bù → dời sang buổi đủ điều kiện kế tiếp.
+      await this.sessionTrialCatchUpService.reconcile(
+        tx,
+        existingSession.attendance.map((attendanceItem) => ({
+          studentId: attendanceItem.studentId,
+          classId: existingSession.classId,
+        })),
+      );
 
       if (actor && beforeValue) {
         await this.actionHistoryService.recordDelete(tx, {

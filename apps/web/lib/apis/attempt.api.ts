@@ -1,6 +1,7 @@
 import { api } from "@/lib/client";
 import type {
   AssignmentLobbyDto,
+  AttemptAudioPlayDto,
   AttemptDetailDto,
   SaveAttemptAnswersPayload,
 } from "@/dtos/attempt.dto";
@@ -57,6 +58,18 @@ export async function submitAttempt(
 ): Promise<AttemptDetailDto> {
   const { data } = await api.post<AttemptDetailDto>(
     `${base(classId)}/attempts/${encodeURIComponent(attemptId)}/submit`,
+  );
+  return data;
+}
+
+/** Bấm phát audio trong lượt đang làm — audio giới hạn trừ một lượt nghe. */
+export async function playAttemptAudio(
+  classId: string,
+  attemptId: string,
+  audioId: string,
+): Promise<AttemptAudioPlayDto> {
+  const { data } = await api.post<AttemptAudioPlayDto>(
+    `${base(classId)}/attempts/${encodeURIComponent(attemptId)}/audio/${encodeURIComponent(audioId)}/play`,
   );
   return data;
 }

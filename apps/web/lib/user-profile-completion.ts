@@ -1,5 +1,9 @@
 import type { FullProfileDto } from "@/dtos/profile.dto";
 import { resolveCanonicalUserName } from "@/dtos/user-name.dto";
+import {
+  ACHIEVEMENT_REQUIRED_STAFF_ROLE,
+  isMissingRequiredStaffAchievement,
+} from "@/lib/staff-achievement-requirement";
 
 export type CompletionStats = {
   filled: number;
@@ -81,6 +85,10 @@ export function getProfileCompletion(
         profile.staffInfo.cccdIssuedDate,
         profile.staffInfo.cccdIssuedPlace,
         staffDataConsentComplete,
+        // Gia sư: thành tích là trường bắt buộc.
+        ...(profile.staffInfo.roles?.includes(ACHIEVEMENT_REQUIRED_STAFF_ROLE)
+          ? [!isMissingRequiredStaffAchievement(profile.staffInfo)]
+          : []),
       ]
     : null;
   const studentValues: Array<unknown> | null = profile.studentInfo

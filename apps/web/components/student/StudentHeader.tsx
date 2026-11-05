@@ -1,23 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import * as authApi from "@/lib/apis/auth.api";
-import { clearLogoutScopedQueries } from "@/lib/query-invalidation";
+import { useStudentLogout } from "@/hooks/use-student-logout";
 import { AUTH_FULL_PROFILE_QUERY_KEY } from "@/lib/profile-full-query";
 import { SidebarThemePicker } from "@/components/shell";
 import UserAvatar from "@/components/ui/UserAvatar";
-import { UserProfileDialogTrigger } from "@/components/user-profile/UserProfileDialog";
 import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 import { cn } from "@/lib/utils";
 import { UserRound, WalletCards, type LucideIcon } from "lucide-react";
 
 export default function StudentHeader() {
-  const { push } = useRouter();
-  const queryClient = useQueryClient();
   const { user } = useAuth();
 
   const { data: fullProfile } = useQuery({
@@ -26,17 +21,7 @@ export default function StudentHeader() {
     staleTime: 60 * 1000,
   });
 
-  const logoutMutation = useMutation({
-    mutationFn: () => authApi.studentLogout(),
-    onSuccess: async () => {
-      clearLogoutScopedQueries(queryClient);
-      toast.success("Đã đăng xuất");
-      push("/auth/login");
-    },
-    onError: () => {
-      toast.error("Đăng xuất thất bại");
-    },
-  });
+  const logoutMutation = useStudentLogout();
 
   const avatarSrc = fullProfile?.avatarUrl || undefined;
   const displayName =
@@ -57,7 +42,7 @@ export default function StudentHeader() {
           href="/student"
           className="flex shrink-0 items-center gap-2 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
         >
-          <BrandLogoLockup variant="navbar" showWordmark={true} wordmarkClassName="hidden md:inline" />
+          <BrandLogoLockup variant="navbar" showWordmark={true} />
         </Link>
 
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
@@ -70,8 +55,9 @@ export default function StudentHeader() {
 
           <SidebarThemePicker compact onMobileClose={() => {}} />
 
-          <UserProfileDialogTrigger
-            ariaLabel="Mở hồ sơ của tôi"
+          <Link
+            href="/user-profile"
+            aria-label="Mở hồ sơ của tôi"
             title="Hồ sơ của tôi"
             className="flex items-center gap-2.5 rounded-full p-1 text-sm font-medium text-text-primary transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
           >
@@ -85,7 +71,7 @@ export default function StudentHeader() {
             <span className="hidden max-w-[120px] truncate text-xs font-semibold text-text-primary sm:inline">
               {displayName}
             </span>
-          </UserProfileDialogTrigger>
+          </Link>
 
           <button
             type="button"

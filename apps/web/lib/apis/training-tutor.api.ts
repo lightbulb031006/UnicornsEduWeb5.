@@ -3,7 +3,7 @@ import type {
   TrainingTutorListParams,
   TrainingTutorPage,
   TrainingTutorSession,
-  TrainingTutorSummary,
+  TrainingTutorListItem,
 } from "@/dtos/training-tutor.dto";
 import { api } from "@/lib/client";
 
@@ -18,8 +18,8 @@ export const trainingTutorKeys = {
 
 export async function listTrainingTutors(
   params: TrainingTutorListParams,
-): Promise<TrainingTutorPage<TrainingTutorSummary>> {
-  const response = await api.get<TrainingTutorPage<TrainingTutorSummary>>(
+): Promise<TrainingTutorPage<TrainingTutorListItem>> {
+  const response = await api.get<TrainingTutorPage<TrainingTutorListItem>>(
     "/training/tutors",
     {
       params: {

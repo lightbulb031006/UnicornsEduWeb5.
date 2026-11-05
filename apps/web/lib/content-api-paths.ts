@@ -34,6 +34,12 @@ export const contentApiPaths = {
   lessonQuestion: (lessonId: string, linkId: string) =>
     `/lessons/${enc(lessonId)}/questions/${enc(linkId)}`,
 
+  lessonQuestionSets: (lessonId: string) =>
+    `/lessons/${enc(lessonId)}/questions/sets`,
+
+  lessonQuestionSet: (lessonId: string, setId: string) =>
+    `/lessons/${enc(lessonId)}/questions/sets/${enc(setId)}`,
+
   lessonQuestionsReorder: (lessonId: string) =>
     `/lessons/${enc(lessonId)}/questions/reorder`,
 
@@ -47,6 +53,12 @@ export const contentApiPaths = {
 
   lessonQuiz: (lessonId: string, questionId: string) =>
     `/lessons/${enc(lessonId)}/quizzes/${enc(questionId)}`,
+
+  lessonQuizSets: (lessonId: string) =>
+    `/lessons/${enc(lessonId)}/quizzes/sets`,
+
+  lessonQuizSet: (lessonId: string, setId: string) =>
+    `/lessons/${enc(lessonId)}/quizzes/sets/${enc(setId)}`,
 
   studentClassLesson: (classId: string, lessonId: string) =>
     `/users/me/student-classes/${enc(classId)}/lessons/${enc(lessonId)}`,

@@ -84,6 +84,9 @@ export const classKeys = {
   /** Cảnh báo trước khi gỡ chuyên đề (`GET /class/:id/modules/:moduleId/removal-impact`). */
   moduleRemovalImpact: (id: string, moduleId: string) =>
     [...classKeys.all, "modules", id, "removal-impact", moduleId] as const,
+  /** Cảnh báo trước khi gỡ một tiết (`GET /class/:id/content/:itemId/removal-impact`). */
+  contentRemovalImpact: (id: string, itemId: string) =>
+    [...classKeys.all, "content", id, "removal-impact", itemId] as const,
   /** Tiết thực hành giao được cho lớp (`GET /class/:id/content/course-lessons`). */
   courseLessons: (id: string) => ["course-lessons-for-class", id] as const,
   /** Nằm dưới prefix `["class-content", id]` nên invalidate nội dung lớp kéo theo. */
@@ -148,6 +151,15 @@ export const questionKeys = {
   detail: (id: string) => [...questionKeys.all, "detail", id] as const,
 };
 
+export const sharedMaterialKeys = {
+  all: ["shared-material"] as const,
+  course: (courseId: string) =>
+    [...sharedMaterialKeys.all, "course", courseId] as const,
+  usage: (id: string) => [...sharedMaterialKeys.all, "usage", id] as const,
+  questionUsage: (questionId: string) =>
+    [...sharedMaterialKeys.all, "question-usage", questionId] as const,
+};
+
 export const practiceLessonQuestionKeys = {
   all: ["practice-lesson-question"] as const,
   list: (lessonId: string) =>
@@ -177,4 +189,8 @@ export const classTimelineKeys = {
   list: (classId: string) => [...classTimelineKeys.all, classId] as const,
   student: (classId: string) =>
     [...classTimelineKeys.all, "student", classId] as const,
+};
+
+export const appConfigKeys = {
+  all: ["app-config"] as const,
 };

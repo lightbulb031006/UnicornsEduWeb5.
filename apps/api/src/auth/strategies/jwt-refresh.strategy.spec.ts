@@ -67,7 +67,6 @@ describe('JwtRefreshStrategy', () => {
       refreshToken: 'live-refresh',
       userId: 'user-1',
       deviceId: 'device-1',
-      roleType: UserRole.staff,
     });
   });
 });

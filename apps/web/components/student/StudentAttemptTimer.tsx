@@ -15,10 +15,13 @@ function liveAnnouncement(leftMs: number): string {
 export default function StudentAttemptTimer({
   endsAt,
   onExpire,
+  className,
 }: {
   remainingMs?: number;
   endsAt: string;
   onExpire?: () => void;
+  /** Vị trí (sticky/top…) do trang quyết định. */
+  className?: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const expiredRef = useRef(false);
@@ -48,10 +51,11 @@ export default function StudentAttemptTimer({
   return (
     <div
       className={cn(
-        "sticky top-0 z-30 -mx-1 mb-4 flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 shadow-sm backdrop-blur-sm",
+        "z-30 flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 shadow-sm backdrop-blur-sm",
         urgent
           ? "border-error/40 bg-error/10 text-error supports-[backdrop-filter]:bg-error/15"
           : "border-border-default bg-bg-surface text-text-primary supports-[backdrop-filter]:bg-bg-surface/95",
+        className,
       )}
       role="timer"
     >
@@ -59,7 +63,10 @@ export default function StudentAttemptTimer({
         <Clock className="size-4" aria-hidden />
         Thời gian còn lại
       </span>
-      <span aria-hidden="true" className="font-mono text-lg font-bold tabular-nums">
+      <span
+        aria-hidden="true"
+        className="font-mono text-lg font-bold tabular-nums"
+      >
         {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}
       </span>
       <span className="sr-only" aria-live="polite" aria-atomic="true">

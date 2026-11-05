@@ -24,7 +24,7 @@ const png2icons = require("png2icons");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
-const inputPath = path.join(root, "image", "logo", "logo_light.png");
+const inputPath = path.join(root, "image", "logo", "logo.png");
 const inputFallback = path.join(root, "app", "icon.png");
 const src = fs.existsSync(inputPath) ? inputPath : inputFallback;
 

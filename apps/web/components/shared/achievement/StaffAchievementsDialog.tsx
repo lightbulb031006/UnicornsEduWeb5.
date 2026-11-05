@@ -17,6 +17,7 @@ import {
   ResponsiveDialogBody,
 } from "@/components/ui/ResponsiveDialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { HighlightAchievementBadge } from "./HighlightAchievementGuide";
 
 /** Nút «Xem thành tích (n)» trong dòng danh sách; không hiện khi n = 0. */
 export function StaffAchievementsButton({
@@ -91,7 +92,7 @@ export default function StaffAchievementsDialog({
           <h2 id={titleId} className="text-base font-semibold text-text-primary">
             Thành tích
           </h2>
-          <p className="truncate text-sm text-text-muted">{staffName || "Nhân sự"}</p>
+          <p className="break-words text-sm text-text-muted">{staffName || "Nhân sự"}</p>
         </div>
         <button
           type="button"
@@ -151,7 +152,13 @@ function AchievementReadonlyRow({
 }) {
   const title = item.title?.trim() || "Thành tích";
   return (
-    <li className="flex items-center gap-3 rounded-lg border border-border-default bg-bg-secondary/20 p-2">
+    <li
+      className={`flex items-center gap-3 rounded-lg border p-2 ${
+        item.isHighlight
+          ? "border-warning/40 bg-warning/5"
+          : "border-border-default bg-bg-secondary/20"
+      }`}
+    >
       {item.imageUrl ? (
         <button
           type="button"
@@ -169,7 +176,10 @@ function AchievementReadonlyRow({
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <p className="text-xs text-text-muted">#{order}</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <p className="text-xs text-text-muted">#{order}</p>
+          {item.isHighlight ? <HighlightAchievementBadge /> : null}
+        </div>
         <p className="text-sm font-medium text-text-primary wrap-anywhere">{title}</p>
       </div>
     </li>

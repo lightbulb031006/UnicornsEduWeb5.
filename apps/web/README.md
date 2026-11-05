@@ -1,6 +1,6 @@
-# Unicorns Edu Web
+# UniEdu Web
 
-Frontend của Unicorns Edu 5.0, dùng Next.js App Router.
+Frontend của UniEdu 5.0, dùng Next.js App Router.
 
 ## Routes hiện có
 

@@ -104,4 +104,4 @@ Người vận hành có thể tra cứu log theo request correlation id, xem la
 - The original PRD wording called `req.id` a Trace ID. For v1, the precise term is request correlation id.
 - The original PRD mentioned Promtail as an option. The chosen implementation should use Alloy because Promtail has reached EOL.
 - Because Nginx strips `/api/*` before proxying to the API, adding `/metrics` to the API would otherwise make it reachable at public `/api/metrics`; this must be explicitly denied.
-- `CONTEXT.md` does not need an observability glossary entry because these are technical operations terms, not domain language used by Unicorns Edu staff.
+- `CONTEXT.md` does not need an observability glossary entry because these are technical operations terms, not domain language used by UniEdu staff.

@@ -3,20 +3,13 @@
 import { useId } from "react";
 import { DateInput } from "@/components/ui/DateInput";
 import { TimeInput } from "@/components/ui/TimeInput";
-import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import {
-  ASSIGNMENT_DURATION_OPTIONS,
   defaultAssignmentSchedule,
   fromOpenAtIso,
   toOpenAtIso,
 } from "@/lib/assignment-schedule.helpers";
 
-export {
-  ASSIGNMENT_DURATION_OPTIONS,
-  defaultAssignmentSchedule,
-  fromOpenAtIso,
-  toOpenAtIso,
-};
+export { defaultAssignmentSchedule, fromOpenAtIso, toOpenAtIso };
 
 const inputClass =
   "mt-1.5 w-full rounded-xl border border-border-default bg-bg-surface px-4 py-2.5 text-sm text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus font-medium";
@@ -26,19 +19,16 @@ export function AssignmentScheduleFields({
   openTime,
   durationMinutes,
   openAtOptional = false,
-  durationError,
   onOpenDateChange,
   onOpenTimeChange,
-  onDurationChange,
 }: {
   openDate: string;
   openTime: string;
-  durationMinutes: string;
+  /** Thời lượng của tiết thực hành (chỉ đọc); null = chưa biết. */
+  durationMinutes?: number | null;
   openAtOptional?: boolean;
-  durationError?: string | null;
   onOpenDateChange: (value: string) => void;
   onOpenTimeChange: (value: string) => void;
-  onDurationChange: (value: string) => void;
 }) {
   const scheduleFieldId = useId();
 
@@ -85,23 +75,11 @@ export function AssignmentScheduleFields({
           </p>
         ) : null}
       </div>
-      <div className="sm:col-span-2">
-        <span className="block text-xs font-semibold uppercase tracking-wider text-text-muted">
-          Thời lượng làm bài <span className="text-error">*</span>
-        </span>
-        <div className="mt-1.5">
-          <UpgradedSelect
-            value={durationMinutes}
-            onValueChange={onDurationChange}
-            options={ASSIGNMENT_DURATION_OPTIONS}
-            ariaLabel="Thời lượng làm bài"
-            placeholder="Chọn thời lượng"
-          />
-        </div>
-        {durationError ? (
-          <p className="mt-1 text-xs text-error">{durationError}</p>
-        ) : null}
-      </div>
+      <p className="text-xs text-text-muted sm:col-span-2">
+        Thời lượng làm bài
+        {durationMinutes != null ? `: ${durationMinutes} phút/lượt` : null} —
+        đặt trên tiết thực hành ở trang nội dung khoá.
+      </p>
     </div>
   );
 }

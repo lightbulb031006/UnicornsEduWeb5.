@@ -2,10 +2,21 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Check, ChevronRight, Dumbbell, Layers, Search } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Check,
+  ChevronRight,
+  Dumbbell,
+  Layers,
+  Search,
+} from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { getClassModules, getCourseLessonsForClass } from "@/lib/apis/class.api";
+import {
+  getClassModules,
+  getCourseLessonsForClass,
+} from "@/lib/apis/class.api";
 import type {
   ClassModuleDto,
   CourseLessonForClassDto,
@@ -15,13 +26,13 @@ import { classKeys } from "@/lib/query-keys";
 interface CourseLessonPickerProps {
   classId: string;
   selectedLessonId: string;
-  /** `""` khi đổi chuyên đề (bỏ chọn tiết cũ). */
-  onSelect: (lessonId: string) => void;
+  /** `null` khi đổi chuyên đề (bỏ chọn tiết cũ). */
+  onSelect: (lesson: CourseLessonForClassDto | null) => void;
 }
 
 /**
- * Chọn tiết thực hành để giao theo hai bước: chuyên đề lớp đã thêm → tiết thực hành
- * của chuyên đề đó. API chỉ trả tiết thuộc chuyên đề lớp đã thêm.
+ * Chọn tiết để thêm vào lớp theo hai bước: chuyên đề của khoá (kể cả chuyên đề lớp
+ * chưa có tiết nào) → tiết lý thuyết hoặc thực hành của chuyên đề đó.
  */
 export default function CourseLessonPicker({
   classId,
@@ -39,10 +50,7 @@ export default function CourseLessonPicker({
     queryFn: () => getCourseLessonsForClass(classId),
   });
 
-  const addedModules = useMemo(
-    () => (modulesQuery.data ?? []).filter((module) => module.added),
-    [modulesQuery.data],
-  );
+  const modules = modulesQuery.data ?? [];
   const lessonsByModule = useMemo(() => {
     const map = new Map<string, CourseLessonForClassDto[]>();
     for (const lesson of lessonsQuery.data ?? []) {
@@ -59,7 +67,7 @@ export default function CourseLessonPicker({
     lessonsQuery.data?.find((lesson) => lesson.id === selectedLessonId)
       ?.moduleId ??
     null;
-  const selectedModule = addedModules.find(
+  const selectedModule = modules.find(
     (module) => module.moduleId === activeModuleId,
   );
 
@@ -76,16 +84,16 @@ export default function CourseLessonPicker({
   if (modulesQuery.isError || lessonsQuery.isError) {
     return (
       <p className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
-        Không tải được danh sách tiết thực hành.
+        Không tải được danh sách tiết học.
       </p>
     );
   }
 
-  if (addedModules.length === 0) {
+  if (modules.length === 0) {
     return (
       <EmptyState>
-        Lớp chưa thêm chuyên đề nào. Thêm chuyên đề (nút <b>Chuyên đề</b> trên
-        timeline lớp) trước khi giao tiết thực hành.
+        Khoá chưa có chuyên đề nào. Hãy tạo chuyên đề và tiết học trong quản trị
+        khoá học trước.
       </EmptyState>
     );
   }
@@ -96,14 +104,14 @@ export default function CourseLessonPicker({
         <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
           Chọn chuyên đề
         </p>
-        {addedModules.map((module) => (
+        {modules.map((module) => (
           <ModuleRow
             key={module.moduleId}
             module={module}
             lessons={lessonsByModule.get(module.moduleId) ?? []}
             onOpen={() => {
               setModuleId(module.moduleId);
-              onSelect("");
+              onSelect(null);
             }}
           />
         ))}
@@ -118,7 +126,7 @@ export default function CourseLessonPicker({
       selectedLessonId={selectedLessonId}
       onBack={() => {
         setModuleId(null);
-        onSelect("");
+        onSelect(null);
       }}
       onSelect={onSelect}
     />
@@ -142,7 +150,7 @@ function ModuleRow({
   lessons: CourseLessonForClassDto[];
   onOpen: () => void;
 }) {
-  const assignable = lessons.filter((lesson) => !lesson.alreadyAdded).length;
+  const addable = lessons.filter((lesson) => !lesson.alreadyAdded).length;
   return (
     <button
       type="button"
@@ -156,8 +164,9 @@ function ModuleRow({
         </div>
         <div className="text-xs text-text-muted">
           {lessons.length === 0
-            ? "Chưa có tiết thực hành"
-            : `${lessons.length} tiết thực hành · ${assignable} chưa giao`}
+            ? "Chưa có tiết học"
+            : `${lessons.length} tiết · ${addable} chưa thêm`}
+          {module.added ? " · đã có trong lớp" : ""}
         </div>
       </div>
       <ChevronRight className="size-4 shrink-0 text-text-muted" aria-hidden />
@@ -176,7 +185,7 @@ function ModuleLessonList({
   lessons: CourseLessonForClassDto[];
   selectedLessonId: string;
   onBack: () => void;
-  onSelect: (lessonId: string) => void;
+  onSelect: (lesson: CourseLessonForClassDto) => void;
 }) {
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
@@ -203,8 +212,8 @@ function ModuleLessonList({
 
       {lessons.length === 0 ? (
         <EmptyState>
-          Chuyên đề này chưa có tiết thực hành. Hãy tạo tiết thực hành trong quản
-          trị khoá học trước.
+          Chuyên đề này chưa có tiết học. Hãy tạo tiết trong quản trị khoá học
+          trước.
         </EmptyState>
       ) : (
         <>
@@ -214,19 +223,19 @@ function ModuleLessonList({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              aria-label="Tìm tiết thực hành"
-              placeholder="Tìm tiết thực hành..."
+              aria-label="Tìm tiết học"
+              placeholder="Tìm tiết học..."
               className="w-full rounded-xl border border-border-default bg-bg-surface py-2.5 pl-9 pr-4 text-sm text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
             />
           </div>
           <div
             role="group"
-            aria-label={`Tiết thực hành của ${module.title}`}
+            aria-label={`Tiết học của ${module.title}`}
             className="max-h-[50vh] space-y-1.5 overflow-y-auto overscroll-contain [scrollbar-width:thin]"
           >
             {filtered.length === 0 ? (
               <div className="py-6 text-center text-sm text-text-muted">
-                Không tìm thấy tiết thực hành phù hợp.
+                Không tìm thấy tiết học phù hợp.
               </div>
             ) : (
               filtered.map((lesson) => (
@@ -252,12 +261,13 @@ function LessonRow({
 }: {
   lesson: CourseLessonForClassDto;
   isSelected: boolean;
-  onSelect: (lessonId: string) => void;
+  onSelect: (lesson: CourseLessonForClassDto) => void;
 }) {
+  const isPractice = lesson.kind === "practice";
   return (
     <button
       type="button"
-      onClick={() => !lesson.alreadyAdded && onSelect(lesson.id)}
+      onClick={() => !lesson.alreadyAdded && onSelect(lesson)}
       disabled={lesson.alreadyAdded}
       aria-pressed={isSelected}
       className={cn(
@@ -269,18 +279,29 @@ function LessonRow({
             : "cursor-pointer border-border-default hover:border-border-focus/50",
       )}
     >
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
-        <Dumbbell className="size-4" />
+      <div
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-lg",
+          isPractice ? "bg-warning/10 text-warning" : "bg-info/10 text-info",
+        )}
+      >
+        {isPractice ? (
+          <Dumbbell className="size-4" aria-hidden />
+        ) : (
+          <BookOpen className="size-4" aria-hidden />
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-text-primary">
           {lesson.title}
         </div>
-        <div className="text-xs text-text-muted">Tiết thực hành</div>
+        <div className="text-xs text-text-muted">
+          {isPractice ? "Tiết thực hành" : "Tiết lý thuyết"}
+        </div>
       </div>
       {lesson.alreadyAdded ? (
         <span className="shrink-0 text-xs font-medium text-text-muted">
-          Đã giao
+          Đã có trong lớp
         </span>
       ) : (
         isSelected && <Check className="size-4 shrink-0 text-primary" />

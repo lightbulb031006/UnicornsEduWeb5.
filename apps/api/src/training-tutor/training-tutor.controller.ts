@@ -28,7 +28,7 @@ export class TrainingTutorController {
   @ApiOperation({
     summary: 'Ban Đào Tạo: danh sách gia sư (gồm cả inactive)',
     description:
-      'Chỉ trả field allowlist: id, fullName, status, email, phone, avatarUrl, university, highSchool, achievementCount.',
+      'Chỉ trả field allowlist: id, fullName, status, avatarUrl, university, highSchool, achievementCount, currentClasses (Lớp đang dạy: {id, name}[]).',
   })
   @ApiResponse({ status: 200, description: 'Paginated tutor summaries.' })
   @ApiResponse({ status: 403, description: 'Không phải Ban Đào Tạo.' })
@@ -41,7 +41,7 @@ export class TrainingTutorController {
 
   @Get(':id')
   @ApiOperation({
-    summary: 'Ban Đào Tạo: hồ sơ gia sư + lớp đang/đã dạy',
+    summary: 'Ban Đào Tạo: hồ sơ gia sư + Lớp đang dạy / Lớp đã nghỉ',
   })
   @ApiParam({ name: 'id', description: 'Staff id (UNISTAFF-…)' })
   @ApiResponse({

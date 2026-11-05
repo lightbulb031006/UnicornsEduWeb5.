@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   InternalServerErrorException,
@@ -13,7 +14,7 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
 import type { Prisma } from '../../generated/client';
-import { UserRole } from 'generated/enums';
+import { StaffRole, UserRole } from 'generated/enums';
 import {
   ActionHistoryActor,
   ActionHistoryService,
@@ -33,11 +34,18 @@ import { createSignedStorageUrl } from 'src/storage/supabase-storage';
 import { STAFF_DATA_CONSENT_VERSION } from './constants';
 import { UserDeviceService } from './user-device.service';
 import type { DeviceInfo } from './user-device.service';
+import { maskEmailAddress } from 'src/common/mask-email.util';
 
 type JwtSignOptions = Parameters<JwtService['signAsync']>[1];
 type UserAuditClient = Prisma.TransactionClient | PrismaService;
 const AVATAR_STORAGE_BUCKET = 'avatars';
 const AVATAR_SIGNED_URL_TTL_SECONDS = 60 * 60;
+const STUDENT_DEVICE_ACTIVE_ERROR = {
+  statusCode: 409,
+  error: 'DEVICE_ACTIVE',
+  message:
+    'Tài khoản đang đăng nhập ở thiết bị khác. Vui lòng đăng xuất thiết bị cũ hoặc liên hệ quản trị viên.',
+} as const;
 export { STAFF_DATA_CONSENT_VERSION } from './constants';
 
 export interface TokenPair {
@@ -212,6 +220,17 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Học sinh bắt buộc đi luồng `student/login` (magic link + một thiết bị).
+    // Không chặn ở đây thì gọi thẳng /auth/login là tạo thêm thiết bị tùy ý.
+    if (user.roleType === UserRole.student) {
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'STUDENT_LOGIN_REQUIRED',
+        message:
+          'Tài khoản học sinh cần đăng nhập qua xác minh email. Vui lòng đăng nhập lại.',
+      });
     }
 
     return {
@@ -430,7 +449,6 @@ export class AuthService {
       refreshToken,
       userId: payload.id,
       deviceId: payload.deviceId,
-      roleType: payload.roleType,
     });
     if (!device) {
       return null;
@@ -463,8 +481,7 @@ export class AuthService {
         await this.userDeviceService.findLiveDeviceById(accessDeviceId);
       await this.userDeviceService.removeDeviceById(accessDeviceId);
       const userId =
-        device?.userId ??
-        (await this.resolveUserIdFromSessionTokens(params));
+        device?.userId ?? (await this.resolveUserIdFromSessionTokens(params));
       if (userId) {
         this.authIdentityCacheService.invalidateHasActiveDevice(userId);
         this.invalidateAuthIdentityCache(userId);
@@ -741,6 +758,18 @@ export class AuthService {
     );
   }
 
+  private refreshExpiresInSeconds(rememberMe: boolean): number {
+    return rememberMe
+      ? this.refreshTokenRememberExpiresIn
+      : this.refreshTokenDefaultExpiresIn;
+  }
+
+  private computeRefreshExpiresAt(rememberMe: boolean): Date {
+    return new Date(
+      Date.now() + this.refreshExpiresInSeconds(rememberMe) * 1000,
+    );
+  }
+
   async generateTokenPairAndSave(
     userId: string,
     accountHandle: string,
@@ -755,10 +784,10 @@ export class AuthService {
       rememberMe,
       deviceId,
     };
+    const refreshExpiresInSeconds = this.refreshExpiresInSeconds(rememberMe);
+    const refreshExpiresAt = this.computeRefreshExpiresAt(rememberMe);
     const refreshTokenOptions: JwtSignOptions = {
-      expiresIn: rememberMe
-        ? this.refreshTokenRememberExpiresIn
-        : this.refreshTokenDefaultExpiresIn,
+      expiresIn: refreshExpiresInSeconds,
       secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
     };
 
@@ -767,7 +796,11 @@ export class AuthService {
       this.jwtService.signAsync(payload, refreshTokenOptions),
     ]);
 
-    await this.userDeviceService.bindRefreshToken(deviceId, refreshToken);
+    await this.userDeviceService.bindRefreshToken(
+      deviceId,
+      refreshToken,
+      refreshExpiresAt,
+    );
 
     return {
       accessToken,
@@ -911,6 +944,84 @@ export class AuthService {
     return { message: 'Đổi mật khẩu thành công' };
   }
 
+  /**
+   * Admin/trợ lí đặt mật khẩu mới cho user khác (không cần mật khẩu cũ).
+   * Thu hồi mọi thiết bị + refresh token của user đích để buộc đăng nhập lại.
+   * Trợ lí (không phải admin đầy đủ) không được đặt mật khẩu cho tài khoản
+   * admin/trợ lí khác, tránh leo thang quyền qua chiếm tài khoản.
+   */
+  async adminSetUserPassword(
+    targetUserId: string,
+    newPassword: string,
+    actor: { userId: string; userEmail: string; roleType: UserRole },
+  ): Promise<{ message: string }> {
+    const [target, actorStaff] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: {
+          id: true,
+          roleType: true,
+          staffInfo: { select: { roles: true } },
+        },
+      }),
+      this.prisma.staffInfo.findUnique({
+        where: { userId: actor.userId },
+        select: { roles: true },
+      }),
+    ]);
+
+    if (!target) {
+      throw new NotFoundException('User not found');
+    }
+
+    const actorIsFullAdmin =
+      actor.roleType === UserRole.admin ||
+      (actorStaff?.roles ?? []).includes(StaffRole.admin);
+    const targetRoles = target.staffInfo?.roles ?? [];
+    const targetIsPrivileged =
+      target.roleType === UserRole.admin ||
+      targetRoles.includes(StaffRole.admin) ||
+      targetRoles.includes(StaffRole.assistant);
+
+    if (!actorIsFullAdmin && targetIsPrivileged && target.id !== actor.userId) {
+      throw new ForbiddenException(
+        'Trợ lí không được đổi mật khẩu của tài khoản admin/trợ lí.',
+      );
+    }
+
+    await this.userDeviceService.removeAllDevicesForUser(targetUserId);
+    this.authIdentityCacheService.invalidateHasActiveDevice(targetUserId);
+
+    await this.prisma.$transaction(async (tx) => {
+      const beforeValue = await this.getUserAuditSnapshot(tx, targetUserId);
+      await tx.user.update({
+        where: { id: targetUserId },
+        data: {
+          passwordHash: await bcrypt.hash(newPassword, 10),
+          refreshToken: null,
+        },
+      });
+
+      const afterValue = await this.getUserAuditSnapshot(tx, targetUserId);
+      if (!beforeValue || !afterValue) {
+        return;
+      }
+
+      await this.actionHistoryService.recordUpdate(tx, {
+        actor,
+        entityType: 'user',
+        entityId: targetUserId,
+        description: 'Admin đặt lại mật khẩu',
+        beforeValue,
+        afterValue,
+      });
+    });
+
+    this.invalidateAuthIdentityCache(targetUserId);
+
+    return { message: 'Đã đổi mật khẩu user' };
+  }
+
   async setupPassword(
     userId: string,
     password: string,
@@ -1050,6 +1161,31 @@ export class AuthService {
     }
   }
 
+  /** Chủ của thiết bị mà cookie hiện tại đang giữ; `null` nếu phiên đã chết. */
+  private async resolveCurrentDeviceUserId(params: {
+    refreshToken?: string;
+    accessToken?: string;
+  }): Promise<string | null> {
+    if (params.refreshToken) {
+      const device = await this.userDeviceService.findDeviceByRefreshToken(
+        params.refreshToken,
+      );
+      if (device) {
+        return device.userId;
+      }
+    }
+
+    const accessDeviceId = await this.resolveDeviceIdFromAccessToken(
+      params.accessToken,
+    );
+    if (!accessDeviceId) {
+      return null;
+    }
+    const device =
+      await this.userDeviceService.findLiveDeviceById(accessDeviceId);
+    return device?.userId ?? null;
+  }
+
   private async resolveUserIdFromSessionTokens(params: {
     refreshToken?: string;
     accessToken?: string;
@@ -1090,7 +1226,8 @@ export class AuthService {
     deviceInfo?: DeviceInfo,
     ipAddress?: string,
     emailLinkOrigin?: PublicRequestOrigin,
-  ): Promise<{ requestId: string; activateSecret: string; message: string }> {
+    rememberMe = false,
+  ): Promise<TokenPair> {
     const user = await this.prisma.user.findFirst({
       where: {
         OR: [{ accountHandle }, { email: accountHandle }],
@@ -1098,6 +1235,7 @@ export class AuthService {
       select: {
         id: true,
         email: true,
+        accountHandle: true,
         passwordHash: true,
         roleType: true,
         emailVerified: true,
@@ -1123,11 +1261,19 @@ export class AuthService {
     }
 
     if (!user.emailVerified) {
+      // Bấm Đăng nhập một lần là gửi luôn mail xác minh email; FE hiện
+      // `maskedEmail` để người dùng biết mail đi tới hộp thư nào.
+      const maskedEmail = await this.sendLoginEmailVerification(
+        user.email,
+        emailLinkOrigin,
+      );
       throw new BadRequestException({
         statusCode: 400,
         error: 'EMAIL_NOT_VERIFIED',
-        message:
-          'Email chưa được xác minh. Vui lòng xác minh email trước khi đăng nhập.',
+        message: maskedEmail
+          ? 'Email chưa được xác minh. Đã gửi email xác minh, vui lòng kiểm tra hộp thư rồi đăng nhập lại.'
+          : 'Email chưa được xác minh. Vui lòng xác minh email trước khi đăng nhập.',
+        ...(maskedEmail ? { maskedEmail } : {}),
       });
     }
 
@@ -1137,55 +1283,57 @@ export class AuthService {
       this.userDeviceService.cleanupInactiveDevices(),
     ]);
 
-    // Check if student already has an active device
-    const hasActive = await this.userDeviceService.hasActiveDevice(user.id);
-    if (hasActive) {
-      throw new ConflictException({
-        statusCode: 409,
-        error: 'DEVICE_ACTIVE',
-        message:
-          'Tài khoản đang đăng nhập ở thiết bị khác. Vui lòng đăng xuất thiết bị cũ hoặc liên hệ quản trị viên.',
-      });
-    }
-
-    // Create login request
-    const loginRequestToken =
-      this.userDeviceService.generateLoginRequestToken();
-    const activateSecret = this.userDeviceService.generateActivateSecret();
-    const loginRequest = await this.userDeviceService.createLoginRequest({
+    // Email đã xác minh (admin tick «Email đã xác thực» hoặc học sinh bấm link)
+    // thì cấp phiên luôn, không gửi magic link xác minh đăng nhập nữa. Luật
+    // một thiết bị kiểm tra trong cùng transaction với lúc tạo thiết bị.
+    const tokenPair = await this.issueStudentDeviceSession({
       userId: user.id,
-      token: loginRequestToken,
-      activateSecret,
+      accountHandle: user.accountHandle,
+      roleType: user.roleType,
       deviceInfo,
       ipAddress,
+      rememberMe,
+      rejectIfLiveDevice: true,
     });
+    if (!tokenPair) {
+      throw new ConflictException(STUDENT_DEVICE_ACTIVE_ERROR);
+    }
+    return tokenPair;
+  }
 
-    const frontendUrl = resolvePublicFrontendUrl({
-      configuredUrl: this.configService.get<string>('FRONTEND_URL'),
-      backendUrl: this.configService.get<string>('BACKEND_URL'),
-      publicHost: this.configService.get<string>('VPS_PUBLIC_HOST'),
-      requestHost: emailLinkOrigin?.host,
-      requestProtocol: emailLinkOrigin?.protocol,
-      nodeEnv: process.env.NODE_ENV,
-    });
-    const verifyUrl = `${frontendUrl}/auth/verify-login?token=${encodeURIComponent(loginRequestToken)}`;
-
-    try {
-      await this.mailService.sendLoginVerificationEmail(user.email, verifyUrl);
-    } catch (error) {
-      this.logger.error(
-        `Failed to send login verification email to ${user.email}`,
-        error instanceof Error ? error.stack : error,
-      );
-      // Don't fail the request — email sending is best-effort
+  /**
+   * Gửi mail xác minh email cho học sinh chưa xác minh khi bấm Đăng nhập.
+   * Trả email đã che khi gửi được; `null` khi không có email hoặc gửi lỗi
+   * (FE khi đó chỉ toast lỗi).
+   */
+  private async sendLoginEmailVerification(
+    email: string,
+    emailLinkOrigin?: PublicRequestOrigin,
+  ): Promise<string | null> {
+    const targetEmail = email.trim().toLowerCase();
+    const maskedEmail = maskEmailAddress(targetEmail);
+    if (!maskedEmail) {
+      return null;
     }
 
-    return {
-      requestId: loginRequest.id,
-      activateSecret,
-      message:
-        'Đã gửi email xác minh. Vui lòng kiểm tra hộp thư và bấm liên kết để hoàn tất đăng nhập.',
-    };
+    try {
+      const token = await this.generateEmailVerificationToken(
+        targetEmail,
+        'email-verify',
+      );
+      await this.mailService.sendVerificationEmail(
+        targetEmail,
+        token,
+        emailLinkOrigin,
+      );
+      return maskedEmail;
+    } catch (error) {
+      this.logger.error(
+        `Failed to send email verification on login to ${targetEmail}`,
+        error instanceof Error ? error.stack : error,
+      );
+      return null;
+    }
   }
 
   async studentLoginPoll(requestId: string): Promise<{ verified: boolean }> {
@@ -1244,18 +1392,18 @@ export class AuthService {
       throw new UnauthorizedException('Invalid activation secret');
     }
 
-    // Remove any existing devices for this student (single-device rule)
-    await this.userDeviceService.removeAllDevicesForUser(request.userId);
-    this.authIdentityCacheService.invalidateHasActiveDevice(request.userId);
-
-    // Create the device
-    const deviceToken = this.userDeviceService.generateDeviceToken();
-    const device = await this.userDeviceService.createDevice({
-      userId: request.userId,
-      token: deviceToken,
-      deviceInfo: request.deviceInfo as DeviceInfo | undefined,
-      ipAddress: request.ipAddress ?? undefined,
+    // Claim nguyên tử: hai lần activate song song (poll chồng nhau) chỉ một lần
+    // đi tiếp, tránh sinh hai UserDevice cho cùng học sinh.
+    const claimed = await this.prisma.loginRequest.deleteMany({
+      where: { id: request.id, verified: true },
     });
+    if (claimed.count !== 1) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'LOGIN_REQUEST_ALREADY_USED',
+        message: 'Yêu cầu đăng nhập đã được sử dụng.',
+      });
+    }
 
     // Get user info for token generation
     const user = await this.prisma.user.findUnique({
@@ -1273,19 +1421,55 @@ export class AuthService {
       );
     }
 
-    // Generate JWT tokens
-    const tokenPair = await this.generateTokenPairAndSave(
-      user.id,
-      user.accountHandle,
-      user.roleType,
+    // Magic link: thiết bị vừa xác minh thay thế thiết bị cũ, không bị chặn.
+    const tokenPair = await this.issueStudentDeviceSession({
+      userId: user.id,
+      accountHandle: user.accountHandle,
+      roleType: user.roleType,
+      deviceInfo: request.deviceInfo as DeviceInfo | undefined,
+      ipAddress: request.ipAddress ?? undefined,
       rememberMe,
+      rejectIfLiveDevice: false,
+    });
+    if (!tokenPair) {
+      throw new ConflictException(STUDENT_DEVICE_ACTIVE_ERROR);
+    }
+    return tokenPair;
+  }
+
+  /**
+   * Thay mọi thiết bị cũ bằng thiết bị mới (luật một thiết bị) rồi cấp JWT.
+   * @returns `null` khi `rejectIfLiveDevice` và học sinh còn thiết bị sống.
+   */
+  private async issueStudentDeviceSession(params: {
+    userId: string;
+    accountHandle: string;
+    roleType: UserRole;
+    deviceInfo?: DeviceInfo;
+    ipAddress?: string;
+    rememberMe: boolean;
+    rejectIfLiveDevice: boolean;
+  }): Promise<TokenPair | null> {
+    const device = await this.userDeviceService.replaceDevicesForUser({
+      userId: params.userId,
+      token: this.userDeviceService.generateDeviceToken(),
+      refreshExpiresAt: this.computeRefreshExpiresAt(params.rememberMe),
+      rejectIfLive: params.rejectIfLiveDevice,
+      deviceInfo: params.deviceInfo,
+      ipAddress: params.ipAddress,
+    });
+    this.authIdentityCacheService.invalidateHasActiveDevice(params.userId);
+    if (!device) {
+      return null;
+    }
+
+    return this.generateTokenPairAndSave(
+      params.userId,
+      params.accountHandle,
+      params.roleType,
+      params.rememberMe,
       device.id,
     );
-
-    // Cleanup the login request
-    await this.prisma.loginRequest.delete({ where: { id: request.id } });
-
-    return tokenPair;
   }
 
   /**
@@ -1397,7 +1581,22 @@ export class AuthService {
     return { message: 'Đã buộc đăng xuất học sinh' };
   }
 
-  async studentSelfLogout(userId: string): Promise<{ message: string }> {
+  /**
+   * Public + idempotent: access token hay đã hết hạn đúng lúc học sinh bấm
+   * Đăng xuất, nếu đòi JWT còn sống thì logout 401 mà `UserDevice` vẫn sống,
+   * lần đăng nhập sau bị `DEVICE_ACTIVE` chặn. Chỉ thu hồi khi cookie khớp
+   * một thiết bị còn tồn tại (hash refresh hoặc `deviceId` của access), nên
+   * token của máy đã bị đá không thể đăng xuất máy đang đăng nhập.
+   */
+  async studentSelfLogout(params: {
+    refreshToken?: string;
+    accessToken?: string;
+  }): Promise<{ message: string }> {
+    const userId = await this.resolveCurrentDeviceUserId(params);
+    if (!userId) {
+      return { message: 'Đã đăng xuất' };
+    }
+
     // Remove all devices
     await this.userDeviceService.removeAllDevicesForUser(userId);
     this.authIdentityCacheService.invalidateHasActiveDevice(userId);
@@ -1410,6 +1609,27 @@ export class AuthService {
     this.invalidateAuthIdentityCache(userId);
 
     return { message: 'Đã đăng xuất' };
+  }
+
+  /**
+   * Google đã chứng minh quyền sở hữu email (tương đương magic link), nhưng
+   * luật một thiết bị vẫn phải áp: còn thiết bị sống → từ chối; không còn →
+   * thay các row chết bằng đúng một UserDevice (nguyên tử, xem
+   * `UserDeviceService.replaceDevicesForUser`).
+   * @returns `null` nếu học sinh đang đăng nhập ở thiết bị khác.
+   */
+  async issueStudentGoogleSession(user: {
+    id: string;
+    accountHandle: string;
+    roleType: UserRole;
+  }): Promise<TokenPair | null> {
+    return this.issueStudentDeviceSession({
+      userId: user.id,
+      accountHandle: user.accountHandle,
+      roleType: user.roleType,
+      rememberMe: true,
+      rejectIfLiveDevice: true,
+    });
   }
 
   async touchStudentDevice(deviceTokenHash: string) {

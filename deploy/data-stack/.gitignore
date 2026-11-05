@@ -1,0 +1,6 @@
+.env
+r2.env
+cloud/
+volumes/
+backups/
+.wrangler-cli/

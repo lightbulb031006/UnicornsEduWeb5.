@@ -10,6 +10,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { getUniojReport } from "@/lib/apis/unioj.api";
 import { uniojKeys } from "@/lib/query-keys";
+import { useAppConfig } from "@/lib/hooks/useAppConfig";
 
 export function LevelBadge({ level }: { level?: string | null }) {
   if (
@@ -58,13 +59,19 @@ export function LevelBadge({ level }: { level?: string | null }) {
 }
 
 export function StudentLevelBadge({ fullName }: { fullName: string }) {
+  // Level học sinh lấy từ UNIOJ — chỉ instance IT có.
+  const { data: appConfig } = useAppConfig();
+  const isItProfile = appConfig?.profile === "it";
+
   const { data, isLoading } = useQuery({
     queryKey: uniojKeys.report(fullName),
     queryFn: () => getUniojReport(fullName),
-    enabled: !!fullName,
+    enabled: isItProfile && !!fullName,
     staleTime: 60_000,
     retry: false,
   });
+
+  if (!isItProfile) return null;
 
   if (isLoading) {
     return (

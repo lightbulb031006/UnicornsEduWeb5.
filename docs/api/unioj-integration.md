@@ -28,7 +28,7 @@ sequenceDiagram
 
 Cấu hình env:
 - `UNIOJ_API_KEY`: API Key lấy từ hồ sơ Profile UNIOJ (Base64url key).
-- `UNIOJ_BASE_URL`: Mặc định `https://oj.uniedu.vn`. Giá trị này phải là origin của OJ, không phải URL backend Unicorns. Nếu cấu hình nhầm về `localhost`/API local, backend sẽ bỏ qua và dùng `https://oj.uniedu.vn`.
+- `UNIOJ_BASE_URL`: Mặc định `https://oj.uniedu.vn`. Giá trị này phải là origin của OJ, không phải URL backend Uni. Nếu cấu hình nhầm về `localhost`/API local, backend sẽ bỏ qua và dùng `https://oj.uniedu.vn`.
 
 ### 2.1 Lấy JSON dữ liệu tiến độ học tập
 - **Endpoint**: `GET /unioj/report`
@@ -51,7 +51,7 @@ Cấu hình env:
   - `days` (Không bắt buộc): Khoảng thời gian thống kê.
 - **Phản hồi**:
   File PDF (`application/pdf`). Frontend gọi endpoint này bằng shared Axios client với `responseType: "blob"`, nhận file qua backend proxy, tạo object URL nội bộ của trình duyệt rồi mới preview/download. Trình duyệt không nhúng trực tiếp `https://oj.uniedu.vn`, nên không bị chặn bởi `X-Frame-Options: deny` của OJ.
-- **Lưu ý upstream**: nếu UNIOJ trả `503` với message `pdf rendering is not available on this site`, site OJ hiện không bật renderer PDF. Khi đó backend không thể proxy PDF từ OJ; cần yêu cầu OJ bật renderer hoặc bổ sung luồng tự render PDF từ JSON báo cáo trong backend Unicorns.
+- **Lưu ý upstream**: nếu UNIOJ trả `503` với message `pdf rendering is not available on this site`, site OJ hiện không bật renderer PDF. Khi đó backend không thể proxy PDF từ OJ; cần yêu cầu OJ bật renderer hoặc bổ sung luồng tự render PDF từ JSON báo cáo trong backend Uni.
 
 ## 3. Giao diện Frontend (`apps/web`)
 
@@ -71,4 +71,5 @@ Các tính năng chính:
    - *Tải PDF*: tạo link download từ blob đã tải về.
    - *In / Lưu PDF*: mở blob URL ở tab mới để dùng trình xem PDF của trình duyệt.
    - *Mở rộng / Fullscreen*: hiển thị cùng blob URL trong modal phủ toàn màn hình.
-6. **Dữ liệu Demo (Mock)**: Nếu học sinh chưa có tài khoản đồng bộ trên UNIOJ (API lookup trả về 404), giao diện hiển thị trạng thái "Chưa có dữ liệu OJ" và cung cấp tuỳ chọn "Xem dữ liệu mẫu (Demo)" để dễ dàng xem thử tính năng.
+6. **Chỉ instance IT**: `OjProgressSection`, `StudentLevelBadge` và cột/badge «Level lớp» (`getClassesLevels`) đọc `GET /public/app-config`; profile `jp`/`eng` không render và không gọi API UNIOJ.
+7. **Không có profile / lỗi → ẩn hẳn**: lookup trả 404 (học sinh chưa có tài khoản UNIOJ) hoặc lỗi bất kỳ thì khối không render, không có dòng lỗi. Đã bỏ chế độ «Xem dữ liệu mẫu (Demo)» và mock data.

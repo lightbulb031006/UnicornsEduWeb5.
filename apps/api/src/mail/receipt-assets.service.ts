@@ -33,6 +33,19 @@ export class ReceiptAssetsService {
     }
   }
 
+  /** Logo UNI vuông nền trắng cho header email (`logo_mark_sm.png`, 144px). */
+  getBrandMarkDataUri(): string | null {
+    try {
+      const buf = readFileSync(this.resolveAssetPath('logo_mark_sm.png'));
+      return `data:image/png;base64,${buf.toString('base64')}`;
+    } catch (error) {
+      this.logger.warn(
+        `Không đọc được logo email (logo_mark_sm): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
   private resolveAssetPath(file: string): string {
     const dirs = [
       join(process.cwd(), 'dist', 'mail', 'assets'),

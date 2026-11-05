@@ -20,6 +20,10 @@ import type {
   LessonUpsertMode,
 } from "@/dtos/lesson.dto";
 import * as lessonApi from "@/lib/apis/lesson.api";
+import {
+  LESSON_OUTPUT_THEORY_LECTURE_MAX_LINKS,
+  getLessonOutputPricingError,
+} from "@/lib/lesson-output-pricing";
 import LessonOutputPricingFields from "./LessonOutputPricingFields";
 import {
   LESSON_PAYMENT_STATUS_OPTIONS,
@@ -119,7 +123,7 @@ function StaffCard({
     <article className="rounded-2xl border border-border-default bg-bg-secondary/70 p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-text-primary">
+          <p className="break-words text-sm font-semibold text-text-primary">
             {staff.fullName}
           </p>
           <p className="mt-1 text-xs text-text-secondary">
@@ -362,7 +366,16 @@ export default function LessonOutputEditorForm({
   const [includesLectureVideo, setIncludesLectureVideo] = useState(
     () => initialData?.includesLectureVideo ?? false,
   );
+  const [includesTheoryLecture, setIncludesTheoryLecture] = useState(
+    () => initialData?.includesTheoryLecture ?? false,
+  );
+  const [theoryLectureLinks, setTheoryLectureLinks] = useState<string[]>(
+    () => initialData?.theoryLectureLinks ?? [],
+  );
   const [level, setLevel] = useState(() => initialData?.level ?? "");
+  /** Output chỉ có Bài giảng lý thuyết → link video nằm ở danh sách riêng, Link output không bắt buộc. */
+  const isTheoryLectureOnly =
+    includesTheoryLecture && !includesTest && !includesSolution && !includesLectureVideo;
   const [source, setSource] = useState(() => initialData?.source ?? "");
   const [originalTitle, setOriginalTitle] = useState(
     () => initialData?.originalTitle ?? "",
@@ -461,7 +474,7 @@ export default function LessonOutputEditorForm({
       return;
     }
 
-    if (!link.trim()) {
+    if (!link.trim() && !isTheoryLectureOnly) {
       toast.error("Link output là bắt buộc.");
       return;
     }
@@ -471,6 +484,42 @@ export default function LessonOutputEditorForm({
       !validateOptionalUrl(link, "Link output")
     ) {
       return;
+    }
+
+    const pricingError = getLessonOutputPricingError(
+      difficultyBand || null,
+      level,
+      { includesTest, includesSolution, includesLectureVideo, includesTheoryLecture },
+    );
+    if (pricingError) {
+      toast.error(pricingError);
+      return;
+    }
+
+    const normalizedTheoryLectureLinks = includesTheoryLecture
+      ? Array.from(
+          new Set(
+            theoryLectureLinks.map((item) => item.trim()).filter(Boolean),
+          ),
+        )
+      : [];
+    if (includesTheoryLecture) {
+      if (normalizedTheoryLectureLinks.length === 0) {
+        toast.error("Bài giảng lý thuyết cần ít nhất 1 link video.");
+        return;
+      }
+      if (normalizedTheoryLectureLinks.length > LESSON_OUTPUT_THEORY_LECTURE_MAX_LINKS) {
+        toast.error(
+          `Tối đa ${LESSON_OUTPUT_THEORY_LECTURE_MAX_LINKS} link bài giảng lý thuyết.`,
+        );
+        return;
+      }
+      const hasInvalidLink = normalizedTheoryLectureLinks.some(
+        (item) => !validateOptionalUrl(item, "Link bài giảng lý thuyết"),
+      );
+      if (hasInvalidLink) {
+        return;
+      }
     }
 
     const resolvedTaskId = allowTasklessOutput
@@ -488,6 +537,8 @@ export default function LessonOutputEditorForm({
       includesTest,
       includesSolution,
       includesLectureVideo,
+      includesTheoryLecture,
+      theoryLectureLinks: normalizedTheoryLectureLinks,
       tags: enrichedTags,
       date: date.trim(),
       contestUploaded: contestUploaded.trim() || null,
@@ -565,7 +616,7 @@ export default function LessonOutputEditorForm({
                   value={source}
                   onChange={(event) => setSource(event.target.value)}
                   className={fieldInputClass()}
-                  placeholder="codeforces, Unicorns, …"
+                  placeholder="codeforces, Uni, …"
                   autoComplete="off"
                   required
                 />
@@ -639,13 +690,19 @@ export default function LessonOutputEditorForm({
               includesTest={includesTest}
               includesSolution={includesSolution}
               includesLectureVideo={includesLectureVideo}
+              includesTheoryLecture={includesTheoryLecture}
+              theoryLectureLinks={theoryLectureLinks}
+              level={level}
               storedCost={initialData?.cost ?? 0}
               selectButtonClassName={selectButtonClass()}
               selectMenuClassName={selectMenuClass()}
+              linkInputClassName={fieldInputClass()}
               onDifficultyBandChange={setDifficultyBand}
               onIncludesTestChange={setIncludesTest}
               onIncludesSolutionChange={setIncludesSolution}
               onIncludesLectureVideoChange={setIncludesLectureVideo}
+              onIncludesTheoryLectureChange={setIncludesTheoryLecture}
+              onTheoryLectureLinksChange={setTheoryLectureLinks}
             />
 
             {allowPaymentStatusEdit ? (
@@ -676,7 +733,8 @@ export default function LessonOutputEditorForm({
 
             <label className="flex flex-col gap-1.5">
               <span className="text-sm text-text-secondary">
-                Link output <span className="text-error">*</span>
+                Link output
+                {isTheoryLectureOnly ? null : <span className="text-error"> *</span>}
               </span>
               <input
                 type="url"
@@ -685,7 +743,7 @@ export default function LessonOutputEditorForm({
                 className={fieldInputClass()}
                 placeholder="https://..."
                 autoComplete="off"
-                required
+                required={!isTheoryLectureOnly}
               />
             </label>
           </div>
@@ -845,13 +903,19 @@ export default function LessonOutputEditorForm({
                 includesTest={includesTest}
                 includesSolution={includesSolution}
                 includesLectureVideo={includesLectureVideo}
+                includesTheoryLecture={includesTheoryLecture}
+                theoryLectureLinks={theoryLectureLinks}
+                level={level}
                 storedCost={initialData?.cost ?? 0}
                 selectButtonClassName={selectButtonClass()}
                 selectMenuClassName={selectMenuClass()}
+                linkInputClassName={fieldInputClass()}
                 onDifficultyBandChange={setDifficultyBand}
                 onIncludesTestChange={setIncludesTest}
                 onIncludesSolutionChange={setIncludesSolution}
                 onIncludesLectureVideoChange={setIncludesLectureVideo}
+                onIncludesTheoryLectureChange={setIncludesTheoryLecture}
+                onTheoryLectureLinksChange={setTheoryLectureLinks}
               />
             </div>
 
@@ -916,7 +980,8 @@ export default function LessonOutputEditorForm({
 
             <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
               <span>
-                Link output <span className="text-error">*</span>
+                Link output
+                {isTheoryLectureOnly ? null : <span className="text-error"> *</span>}
               </span>
               <input
                 type="url"
@@ -924,7 +989,7 @@ export default function LessonOutputEditorForm({
                 onChange={(event) => setLink(event.target.value)}
                 placeholder="https://..."
                 className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                required
+                required={!isTheoryLectureOnly}
               />
             </label>
 
@@ -1030,7 +1095,7 @@ export default function LessonOutputEditorForm({
                       >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-text-primary">
+                            <p className="break-words text-sm font-semibold text-text-primary">
                               {staff.fullName}
                             </p>
                             <p className="mt-1 text-xs text-text-secondary">

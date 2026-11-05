@@ -4,6 +4,7 @@ jest.mock('../prisma/prisma.service', () => ({
 
 import { StaffRole, StaffStatus } from '../../generated/enums';
 import { calculateDeductionAmounts } from '../payroll/deduction-rates';
+import { getCurrentVietnamMonthKey } from './current-month.util';
 import { FixedSalaryCloseService } from './fixed-salary-close.service';
 
 describe('FixedSalaryCloseService', () => {
@@ -53,10 +54,16 @@ describe('FixedSalaryCloseService', () => {
 
   const mockPrisma = {
     staffInfo: {
-      findMany: jest.fn(async () =>
-        staffRows
-          .filter((row) => row.status === StaffStatus.active)
-          .map((row) => ({ id: row.id, roles: row.roles })),
+      findMany: jest.fn(
+        async ({
+          where,
+        }: {
+          where: { status?: StaffStatus; id?: { in: string[] } };
+        }) =>
+          staffRows
+            .filter((row) => !where.status || row.status === where.status)
+            .filter((row) => !where.id || where.id.in.includes(row.id))
+            .map((row) => ({ id: row.id, roles: row.roles, user: row.user })),
       ),
     },
     roleFixedSalaryDefault: {
@@ -324,12 +331,12 @@ describe('FixedSalaryCloseService', () => {
     );
   });
 
-  it('automatic close skips the whole month when any payable already exists', async () => {
+  it('per-staff close only creates the missing roles of the selected staff', async () => {
     staffRows.push(
       {
         id: 'staff-a',
         status: StaffStatus.active,
-        roles: [StaffRole.assistant],
+        roles: [StaffRole.assistant, StaffRole.communication],
         user: { first_name: 'An', last_name: 'Nguyen' },
       },
       {
@@ -358,16 +365,83 @@ describe('FixedSalaryCloseService', () => {
       createdAt: new Date('2026-09-10T00:00:00.000Z'),
     });
 
-    const result = await service.closeMonthIfUnclosed('2026-09');
+    const result = await service.closeMonth('2026-09', ['staff-a']);
 
-    expect(result.skippedBecauseAlreadyClosed).toBe(true);
-    expect(result.createdCount).toBe(0);
-    expect(result.items).toHaveLength(1);
-    expect(result.items[0].staffId).toBe('staff-a');
+    expect(result.createdCount).toBe(1);
+    expect(result.skippedCount).toBe(1);
+    expect(
+      payables.map((row) => `${row.staffId}:${row.roleType}`).sort(),
+    ).toEqual(['staff-a:assistant', 'staff-a:communication']);
+  });
+
+  it('lists close candidates with closed and unclosed roles per staff', async () => {
+    const month = getCurrentVietnamMonthKey();
+    staffRows.push(
+      {
+        id: 'staff-a',
+        status: StaffStatus.active,
+        roles: [StaffRole.assistant, StaffRole.communication],
+        user: { first_name: 'An', last_name: 'Nguyen' },
+      },
+      {
+        id: 'staff-b',
+        status: StaffStatus.active,
+        roles: [StaffRole.communication],
+        user: { first_name: 'Binh', last_name: 'Tran' },
+      },
+      {
+        id: 'staff-c',
+        status: StaffStatus.active,
+        roles: [StaffRole.accountant_income],
+        user: { first_name: 'Chi', last_name: 'Le' },
+      },
+    );
+    salaryDefaults.push(
+      { roleType: StaffRole.assistant, amount: 9_000_000 },
+      { roleType: StaffRole.communication, amount: 2_000_000 },
+    );
+    payables.push({
+      id: 'existing',
+      staffId: 'staff-a',
+      roleType: StaffRole.assistant,
+      month,
+      status: 'pending',
+      grossAmount: 1_000_000,
+      operatingRatePercent: 0,
+      taxRatePercent: 0,
+      operatingDeductionAmount: 0,
+      taxDeductionAmount: 0,
+      netAmount: 1_000_000,
+      createdAt: new Date('2026-09-10T00:00:00.000Z'),
+    });
+
+    const result = await service.listCloseCandidates();
+
+    expect(result.month).toBe(month);
+    expect(result.items.map((item) => item.staffId)).toEqual([
+      'staff-a',
+      'staff-b',
+    ]);
+    expect(result.items[0]).toMatchObject({
+      closedRoleCount: 1,
+      totalGrossAmount: 3_000_000,
+      roles: [
+        { roleType: StaffRole.assistant, status: 'closed', grossAmount: 1_000_000 },
+        {
+          roleType: StaffRole.communication,
+          status: 'unclosed',
+          grossAmount: 2_000_000,
+        },
+      ],
+    });
+    expect(result.items[1]).toMatchObject({
+      closedRoleCount: 0,
+      roles: [{ roleType: StaffRole.communication, status: 'unclosed' }],
+    });
     expect(mockPrisma.staffFixedSalaryPayable.createMany).not.toHaveBeenCalled();
   });
 
-  it('manual close still creates payables for newly eligible staff after an early close', async () => {
+  it('close fills in staff not yet closed after an early per-staff close (day-28 cron path)', async () => {
     staffRows.push(
       {
         id: 'staff-a',
@@ -403,7 +477,6 @@ describe('FixedSalaryCloseService', () => {
 
     const result = await service.closeMonth('2026-09');
 
-    expect(result.skippedBecauseAlreadyClosed).toBeUndefined();
     expect(result.createdCount).toBe(1);
     expect(result.skippedCount).toBe(1);
     expect(result.items).toHaveLength(2);

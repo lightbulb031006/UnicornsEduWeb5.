@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActionHistoryService } from '../action-history/action-history.service';
 import { AuthIdentityCacheService } from '../auth/auth-identity-cache.service';
 import { DEVICE_INACTIVITY_DAYS } from '../auth/user-device.service';
+import { UserRole } from 'generated/enums';
 
 @Injectable()
 export class DeviceService {
@@ -12,7 +13,21 @@ export class DeviceService {
     private readonly authIdentityCacheService: AuthIdentityCacheService,
   ) {}
 
-  async getDevicesByUserId(userId: string) {
+  /** `studentId` là id hồ sơ `student_info` (UNIST-*), không phải `users.id`. */
+  async getDevicesByStudentId(studentId: string) {
+    // Trang này chỉ dành cho thiết bị học sinh — không lộ IP/thiết bị staff/admin.
+    const student = await this.prisma.studentInfo.findUnique({
+      where: { id: studentId },
+      select: { userId: true, user: { select: { roleType: true } } },
+    });
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+    if (!student.userId || student.user?.roleType !== UserRole.student) {
+      throw new NotFoundException('Học sinh chưa có tài khoản đăng nhập');
+    }
+    const userId = student.userId;
+
     const devices = await this.prisma.userDevice.findMany({
       where: { userId },
       orderBy: { lastActiveAt: 'desc' },
@@ -24,8 +39,13 @@ export class DeviceService {
       const daysSinceActive = Math.floor(
         (now.getTime() - lastActive.getTime()) / (1000 * 60 * 60 * 24),
       );
-      const isActive = daysSinceActive < DEVICE_INACTIVITY_DAYS;
-      const isExpired = daysSinceActive >= DEVICE_INACTIVITY_DAYS;
+      // Cùng định nghĩa với `UserDeviceService.isLive`: idle 60 ngày hoặc
+      // refresh token đã hết hạn đều là thiết bị không còn đăng nhập.
+      const refreshExpired =
+        device.refreshExpiresAt !== null && device.refreshExpiresAt <= now;
+      const isExpired =
+        daysSinceActive >= DEVICE_INACTIVITY_DAYS || refreshExpired;
+      const isActive = !isExpired;
 
       return {
         ...device,
@@ -42,7 +62,7 @@ export class DeviceService {
       include: { user: true },
     });
 
-    if (!device) {
+    if (!device || device.user.roleType !== UserRole.student) {
       throw new NotFoundException('Device not found');
     }
 
@@ -96,9 +116,10 @@ export class DeviceService {
 
     const result = await this.prisma.userDevice.deleteMany({
       where: {
-        lastActiveAt: {
-          lt: cutoffDate,
-        },
+        OR: [
+          { lastActiveAt: { lt: cutoffDate } },
+          { refreshExpiresAt: { lte: new Date() } },
+        ],
       },
     });
 

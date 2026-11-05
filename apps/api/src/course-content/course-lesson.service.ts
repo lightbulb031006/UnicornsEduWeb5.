@@ -5,12 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { LessonKind } from 'generated/enums';
+import { redactLessonVideo } from 'src/protected-video/redact-video-url';
 import {
   LessonCreateDto,
   LessonUpdateDto,
   LessonResponseDto,
 } from 'src/dtos/course-content.dto';
-import { syncNewTheoryLessonToClasses } from './class-course-module-sync';
 import {
   ActionHistoryActor,
   ARCHIVED_LESSON_READ_ONLY_MESSAGE,
@@ -26,6 +26,7 @@ export class CourseLessonService extends CourseContentSupportService {
     actor: ActionHistoryActor,
   ): Promise<LessonResponseDto> {
     await this.validateLessonOwnership(dto);
+    const durationMinutes = this.resolveCreateDurationMinutes(dto);
 
     if (dto.courseId) {
       await this.validateCourseExists(dto.courseId);
@@ -40,32 +41,40 @@ export class CourseLessonService extends CourseContentSupportService {
       await this.validateStaffClassAccess(dto.classId, actor);
     }
 
-    const lesson = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.lesson.create({
-        data: {
-          kind: dto.kind,
-          courseId: dto.courseId ?? null,
-          moduleId: dto.moduleId ?? null,
-          classId: dto.classId ?? null,
-          title: dto.title,
-          videoUrl: dto.videoUrl ?? null,
-          content: dto.content ?? null,
-          createdBy: actor.userId,
-          updatedBy: actor.userId,
-        },
-      });
-      // Tiết lý thuyết mới của chuyên đề → hiện trên mọi lớp đã thêm chuyên đề.
-      if (created.kind === LessonKind.theory && created.moduleId) {
-        await syncNewTheoryLessonToClasses(tx, created.moduleId);
-      }
-      return created;
+    // Tiết mới không tự hiện trên lớp nào: nội dung lớp là tập tiết gia sư đã thêm
+    // (ADR 2026-10-18-class-content-as-lesson-set).
+    const lesson = await this.prisma.lesson.create({
+      data: {
+        kind: dto.kind,
+        courseId: dto.courseId ?? null,
+        moduleId: dto.moduleId ?? null,
+        classId: dto.classId ?? null,
+        title: dto.title,
+        videoUrl: dto.videoUrl ?? null,
+        content: dto.content ?? null,
+        durationMinutes,
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      },
     });
 
     this.logger.log(
       `Lesson created: ${lesson.id} (${dto.kind}) by ${actor.userEmail}`,
     );
+    this.protectedVideos?.track(lesson.videoUrl);
 
     return lesson;
+  }
+
+  /** Tiết thực hành bắt buộc có thời lượng; tiết lý thuyết không lưu thời lượng. */
+  private resolveCreateDurationMinutes(dto: LessonCreateDto): number | null {
+    if (dto.kind !== LessonKind.practice) return null;
+    if (dto.durationMinutes == null) {
+      throw new BadRequestException(
+        'Tiết thực hành phải đặt thời lượng làm bài (phút).',
+      );
+    }
+    return dto.durationMinutes;
   }
 
   async updateLesson(
@@ -94,6 +103,14 @@ export class CourseLessonService extends CourseContentSupportService {
     const nextContent =
       dto.content !== undefined ? dto.content : existing.content;
     this.assertPracticeHasNoMedia(existing.kind, nextVideo, nextContent);
+    if (
+      dto.durationMinutes !== undefined &&
+      existing.kind !== LessonKind.practice
+    ) {
+      throw new BadRequestException(
+        'Chỉ tiết thực hành có thời lượng làm bài.',
+      );
+    }
 
     const lesson = await this.prisma.lesson.update({
       where: { id: lessonId },
@@ -101,11 +118,24 @@ export class CourseLessonService extends CourseContentSupportService {
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.videoUrl !== undefined && { videoUrl: dto.videoUrl }),
         ...(dto.content !== undefined && { content: dto.content }),
+        ...(dto.elective1Name !== undefined && {
+          elective1Name: dto.elective1Name?.trim() || null,
+        }),
+        ...(dto.elective2Name !== undefined && {
+          elective2Name: dto.elective2Name?.trim() || null,
+        }),
+        // Lượt đang làm giữ snapshot `attempts.duration_minutes`; lượt mới đọc giá trị này.
+        ...(dto.durationMinutes !== undefined && {
+          durationMinutes: dto.durationMinutes,
+        }),
         updatedBy: actor.userId,
       },
     });
 
     this.logger.log(`Lesson updated: ${lessonId} by ${actor.userEmail}`);
+    if (dto.videoUrl !== undefined && dto.videoUrl !== existing.videoUrl) {
+      this.protectedVideos?.track(lesson.videoUrl);
+    }
     return lesson;
   }
 
@@ -238,7 +268,7 @@ export class CourseLessonService extends CourseContentSupportService {
       this.prisma.lesson.count({ where: { classId } }),
     ]);
 
-    return { data, total, page, limit };
+    return { data: data.map(redactLessonVideo), total, page, limit };
   }
 
   async reorderLessons(

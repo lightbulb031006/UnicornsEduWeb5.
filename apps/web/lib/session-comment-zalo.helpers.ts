@@ -1,4 +1,10 @@
-import type { SessionAttendanceStatus } from "@/dtos/session.dto";
+import type {
+  AttendanceReviewFields,
+  HomeworkQuality,
+  SessionAttendanceStatus,
+  SessionProgressStatus,
+  SessionReviewFields,
+} from "@/dtos/session.dto";
 
 export const SESSION_LESSON_CONTENT_PLACEHOLDER =
   "Ghi nội dung đã dạy: bài LEVEL/CONTEST, kiến thức chính, phần HS cần nắm vững…";
@@ -8,10 +14,6 @@ export const SESSION_HOMEWORK_PLACEHOLDER =
 
 export const SESSION_TUTORIAL_PLACEHOLDER =
   "Ghi hướng dẫn/tài liệu tham khảo cho buổi học: link, bước làm bài, lưu ý kỹ thuật…";
-
-export function sessionStudentCommentPlaceholder(fullName: string): string {
-  return `Nhận xét về ${fullName}: tiến độ, điểm làm tốt và phần cần cải thiện trong buổi này`;
-}
 
 const EXCUSED_ABSENCE_LABEL = "Vắng có phép";
 const EMPTY_COMMENT_LABEL = "—";
@@ -23,6 +25,7 @@ export function attendanceStatusTemplateLabel(
 ): string {
   if (status === "present") return "học";
   if (status === "excused") return "nghỉ phép";
+  if (status === "trial") return "học thử";
   return "vắng";
 }
 
@@ -74,29 +77,38 @@ export function richTextToPlainTextPreservingStructure(
 
   let html = replaceAnchorsWithPlainText(String(value));
 
-  html = html.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, listContent: string) => {
-    let index = 0;
-    return listContent.replace(
-      /<li[^>]*>([\s\S]*?)<\/li>/gi,
-      (_, itemContent: string) => {
-        index += 1;
-        const text = stripInlineHtml(itemContent);
-        return text ? `${index}. ${text}\n` : "";
-      },
-    );
-  });
-
-  html = html.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, listContent: string) =>
-    listContent.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, itemContent: string) => {
-      const text = stripInlineHtml(itemContent);
-      return text ? `- ${text}\n` : "";
-    }),
+  html = html.replace(
+    /<ol[^>]*>([\s\S]*?)<\/ol>/gi,
+    (_, listContent: string) => {
+      let index = 0;
+      return listContent.replace(
+        /<li[^>]*>([\s\S]*?)<\/li>/gi,
+        (_, itemContent: string) => {
+          index += 1;
+          const text = stripInlineHtml(itemContent);
+          return text ? `${index}. ${text}\n` : "";
+        },
+      );
+    },
   );
 
-  html = html.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, itemContent: string) => {
-    const text = stripInlineHtml(itemContent);
-    return text ? `- ${text}\n` : "";
-  });
+  html = html.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, listContent: string) =>
+    listContent.replace(
+      /<li[^>]*>([\s\S]*?)<\/li>/gi,
+      (_, itemContent: string) => {
+        const text = stripInlineHtml(itemContent);
+        return text ? `- ${text}\n` : "";
+      },
+    ),
+  );
+
+  html = html.replace(
+    /<li[^>]*>([\s\S]*?)<\/li>/gi,
+    (_, itemContent: string) => {
+      const text = stripInlineHtml(itemContent);
+      return text ? `- ${text}\n` : "";
+    },
+  );
 
   return normalizePlainTextLines(
     decodeHtmlEntities(
@@ -109,7 +121,7 @@ export function richTextToPlainTextPreservingStructure(
   );
 }
 
-export function stripRichTextToPlainText(value: string | null | undefined): string {
+function stripRichTextToPlainText(value: string | null | undefined): string {
   return richTextToPlainTextPreservingStructure(value);
 }
 
@@ -213,7 +225,7 @@ function formatSessionTimeRangeLabel(
   return startLabel || endLabel || "";
 }
 
-export type SessionCommentZaloStudent = {
+export type SessionCommentZaloStudent = AttendanceReviewFields & {
   fullName: string;
   status: SessionAttendanceStatus;
   notes?: string | null;
@@ -228,12 +240,27 @@ export type BuildSessionCommentZaloTextInput = {
   lessonContent?: string | null;
   homework?: string | null;
   tutorial?: string | null;
+  /** Số thứ tự buổi trong lớp; null khi chưa biết. */
+  ordinal?: number | null;
+  /** Có `progressStatus` ⇒ dựng theo format Nhận xét buổi học có cấu trúc. */
+  review?: SessionReviewFields | null;
+  /** Ép dùng template mới kể cả khi chưa chọn tiến độ (form đang nhập). */
+  structured?: boolean;
+  /** Buổi không điểm danh: bỏ hẳn phần nhận xét từng học sinh (mục 3️⃣). */
+  noAttendance?: boolean;
   students: SessionCommentZaloStudent[];
 };
 
 export function buildSessionCommentZaloText(
   input: BuildSessionCommentZaloTextInput,
 ): string {
+  if (input.noAttendance && input.students.length > 0) {
+    return buildSessionCommentZaloText({ ...input, students: [] });
+  }
+  if (input.review && (input.structured || input.review.progressStatus)) {
+    return buildStructuredSessionReviewText(input, input.review);
+  }
+
   const dateLabel = formatVnDateLabel(input.date);
   const timeRange = formatSessionTimeRangeLabel(input.startTime, input.endTime);
 
@@ -245,7 +272,9 @@ export function buildSessionCommentZaloText(
     ? `Buổi học ngày ${dateLabel} (bù ngày ${makeupLabel}).`
     : `Buổi học ngày ${dateLabel}.`;
 
-  const lessonContent = richTextToPlainTextPreservingStructure(input.lessonContent);
+  const lessonContent = richTextToPlainTextPreservingStructure(
+    input.lessonContent,
+  );
   const homework = richTextToPlainTextPreservingStructure(input.homework);
   const tutorial = richTextToPlainTextPreservingStructure(input.tutorial);
 
@@ -268,12 +297,14 @@ export function buildSessionCommentZaloText(
 
   lines.push("", "1️⃣ Nhận xét ngày", dayReviewLine, "", "2️⃣ Nội dung bài học");
 
-  lines.push(lessonContent || "—", "", STUDENT_COMMENTS_SECTION_TITLE);
+  lines.push(lessonContent || "—");
 
-  if (studentBlocks.length > 0) {
-    lines.push(studentBlocks.join("\n\n"));
-  } else {
-    lines.push("—");
+  if (!input.noAttendance) {
+    lines.push(
+      "",
+      STUDENT_COMMENTS_SECTION_TITLE,
+      studentBlocks.length > 0 ? studentBlocks.join("\n\n") : "—",
+    );
   }
 
   lines.push(
@@ -284,7 +315,7 @@ export function buildSessionCommentZaloText(
     "5️⃣ Tutorial các buổi học",
     tutorial || "—",
     "",
-    "— Unicorns Edu",
+    "— UniEdu",
   );
 
   return lines.join("\n");
@@ -300,38 +331,9 @@ export function isChargeableAttendanceStatus(
   return status === "present" || status === "excused";
 }
 
-export type SessionAttendanceCommentItem = {
-  fullName: string;
-  status: SessionAttendanceStatus;
-  notes: string;
-};
-
-export function findStudentsMissingRequiredComments(
-  items: SessionAttendanceCommentItem[],
-): string[] {
-  return items
-    .filter(
-      (item) =>
-        isChargeableAttendanceStatus(item.status) &&
-        !isRichTextNonEmpty(item.notes),
-    )
-    .map((item) => item.fullName.trim())
-    .filter((name) => name.length > 0);
-}
-
-export function formatMissingStudentCommentsToast(missingNames: string[]): string {
-  if (missingNames.length === 0) return "";
-  if (missingNames.length === 1) {
-    return `Vui lòng nhập nhận xét cho ${missingNames[0]}.`;
-  }
-  if (missingNames.length === 2) {
-    return `Vui lòng nhập nhận xét cho ${missingNames[0]} và ${missingNames[1]}.`;
-  }
-  return `Vui lòng nhập nhận xét cho ${missingNames.length} học sinh có mặt/nghỉ phép.`;
-}
-
-export type SessionCommentZaloSource = {
+export type SessionCommentZaloSource = SessionReviewFields & {
   className?: string | null;
+  ordinal?: number | null;
   date: string;
   startTime?: string | null;
   endTime?: string | null;
@@ -340,11 +342,15 @@ export type SessionCommentZaloSource = {
   lessonContent?: string | null;
   homework?: string | null;
   tutorial?: string | null;
-  attendance?: Array<{
-    status: SessionAttendanceStatus;
-    notes?: string | null;
-    student?: { fullName?: string | null } | null;
-  }> | null;
+  /** Snapshot cờ lớp không điểm danh của buổi. */
+  snapshotNoAttendance?: boolean | null;
+  attendance?: Array<
+    AttendanceReviewFields & {
+      status: SessionAttendanceStatus;
+      notes?: string | null;
+      student?: { fullName?: string | null } | null;
+    }
+  > | null;
 };
 
 export function buildSessionCommentZaloTextFromSession(
@@ -359,10 +365,12 @@ export function buildSessionCommentZaloTextFromSession(
     lessonContent: session.lessonContent ?? session.notes ?? "",
     homework: session.homework ?? "",
     tutorial: session.tutorial ?? "",
+    ordinal: session.ordinal ?? null,
+    review: session,
+    noAttendance: Boolean(session.snapshotNoAttendance),
     students: (session.attendance ?? []).map((attendanceItem) => ({
+      ...attendanceItem,
       fullName: attendanceItem.student?.fullName?.trim() || "—",
-      status: attendanceItem.status,
-      notes: attendanceItem.notes,
     })),
   });
 }
@@ -381,6 +389,24 @@ function looksLikeZaloCommentTemplate(value: string): boolean {
   );
 }
 
+/**
+ * Bỏ mục 3️⃣ (nhận xét từng học sinh) khỏi nhận xét legacy lưu ở `notes`:
+ * từ dòng tiêu đề 3️⃣ tới trước mục 4️⃣ (hoặc hết văn bản).
+ */
+export function stripLegacyStudentCommentsSection(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) =>
+    /^\s*3️⃣\s*(Cụ thể từng học sinh|Nhận xét từng học sinh)/.test(line),
+  );
+  if (start < 0) return text;
+  const nextOffset = lines
+    .slice(start + 1)
+    .findIndex((line) => /^\s*4️⃣/.test(line));
+  const end = nextOffset < 0 ? lines.length : start + 1 + nextOffset;
+  const kept = [...lines.slice(0, start), ...lines.slice(end)];
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export type SessionCommentDisplayContent = {
   mode: "html" | "plain";
   text: string;
@@ -389,18 +415,30 @@ export type SessionCommentDisplayContent = {
 export function resolveSessionCommentDisplayContent(
   session: SessionCommentZaloSource,
 ): SessionCommentDisplayContent {
+  if (session.progressStatus) {
+    return {
+      mode: "plain",
+      text: buildSessionCommentZaloTextFromSession(session),
+    };
+  }
+
   const notes = session.notes?.trim() ?? "";
   const hasStructuredFields = Boolean(
     session.lessonContent?.trim() ||
-      session.homework?.trim() ||
-      session.tutorial?.trim(),
+    session.homework?.trim() ||
+    session.tutorial?.trim(),
   );
 
   if (notes) {
     if (looksLikeHtmlRichText(notes) && !looksLikeZaloCommentTemplate(notes)) {
       return { mode: "html", text: notes };
     }
-    return { mode: "plain", text: notes };
+    return {
+      mode: "plain",
+      text: session.snapshotNoAttendance
+        ? stripLegacyStudentCommentsSection(notes)
+        : notes,
+    };
   }
 
   if (hasStructuredFields) {
@@ -411,4 +449,295 @@ export function resolveSessionCommentDisplayContent(
   }
 
   return { mode: "plain", text: "" };
+}
+
+/* ───────────── Nhận xét buổi học có cấu trúc ───────────── */
+
+export const SESSION_PROGRESS_STATUS_LABELS: Record<
+  SessionProgressStatus,
+  string
+> = {
+  completed: "Hoàn thành",
+  partial: "Một phần",
+  not_completed: "Chưa hoàn thành",
+};
+
+export const HOMEWORK_QUALITY_LABELS: Record<HomeworkQuality, string> = {
+  passed: "Đạt",
+  needs_revision: "Cần sửa",
+  failed: "Chưa đạt",
+};
+
+const REVIEW_SECTION_DIVIDER = "━━━━━━━━━━━━━━━";
+const REVIEW_SIGNATURE = "— Gia sư Unicorns Edu";
+const VN_TIME_ZONE = "Asia/Ho_Chi_Minh";
+
+/** Tách textarea "mỗi dòng một ý" thành danh sách ý (bỏ dòng trống, bỏ gạch đầu dòng gõ tay). */
+export function splitReviewLines(value: string | null | undefined): string[] {
+  return String(value ?? "")
+    .split(/\r?\n/)
+    .map(normalizeBulletContent)
+    .filter(Boolean);
+}
+
+function formatReviewBullets(value: string | null | undefined): string[] {
+  return splitReviewLines(value).map((line) => `• ${line}`);
+}
+
+/** `• Nhãn: ý` khi 1 ý; nhiều ý thì xuống dòng thụt lề. */
+function formatLabeledReviewLines(
+  label: string,
+  value: string | null | undefined,
+): string[] {
+  const items = splitReviewLines(value);
+  if (items.length === 0) return [];
+  if (items.length === 1) return [`• ${label}: ${items[0]}`];
+  return [
+    `• ${label}:`,
+    ...items.map((item) => `${STUDENT_COMMENT_LINE_INDENT}- ${item}`),
+  ];
+}
+
+/** "HH:mm dd/MM/yyyy" theo giờ Việt Nam. */
+export function formatHomeworkDueAtLabel(
+  value: string | null | undefined,
+): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: VN_TIME_ZONE,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(date)
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.hour}:${parts.minute} ${parts.day}/${parts.month}/${parts.year}`;
+}
+
+export function formatTestScoreLabel(
+  correct: number | null | undefined,
+  total: number | null | undefined,
+): string {
+  if (correct == null || !total) return "";
+  return `${correct}/${total} câu – ${Math.round((correct / total) * 100)}%`;
+}
+
+function formatStructuredStudentBlock(
+  student: SessionCommentZaloStudent,
+  review: SessionReviewFields,
+): string {
+  const nameLine = `👤 ${student.fullName.trim() || "—"} (${attendanceStatusTemplateLabel(student.status)})`;
+  if (student.status !== "present" && student.status !== "trial") {
+    return nameLine;
+  }
+
+  const lines = [nameLine];
+  if (review.hasInClassTest) {
+    const score = formatTestScoreLabel(
+      student.testCorrectCount,
+      review.inClassTestTotal,
+    );
+    const comment = student.testComment?.trim();
+    lines.push(
+      `🧪 Kết quả: ${[score || "—", comment].filter(Boolean).join(" · ")}`,
+    );
+  }
+
+  lines.push("✅ Điểm tốt:", ...formatReviewBullets(student.strengths));
+  lines.push("⚠️ Cần cải thiện:", ...formatReviewBullets(student.improvements));
+
+  if (student.status === "present") {
+    const quality = student.homeworkQuality
+      ? HOMEWORK_QUALITY_LABELS[student.homeworkQuality]
+      : "—";
+    const comment = student.homeworkComment?.trim();
+    lines.push(
+      `📝 Chất lượng BTVN buổi trước: ${comment ? `${quality} – ${comment}` : quality}`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function buildStructuredSessionReviewText(
+  input: BuildSessionCommentZaloTextInput,
+  review: SessionReviewFields,
+): string {
+  const dateLabel = formatVnDateLabel(input.date);
+  const timeRange = formatSessionTimeRangeLabel(input.startTime, input.endTime);
+  const makeupLabel = input.makeupOriginalDate
+    ? formatVnDateLabel(input.makeupOriginalDate).slice(0, 5)
+    : null;
+  const sessionLabel = [
+    input.ordinal ? `Buổi ${input.ordinal} – ${dateLabel}` : dateLabel,
+    timeRange,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  const lines: string[] = [
+    "📚 NHẬN XÉT BUỔI HỌC",
+    `🏫 Lớp: ${input.className.trim() || "—"}`,
+    `📅 ${sessionLabel}${makeupLabel ? ` (bù ngày ${makeupLabel})` : ""}`,
+    "",
+    "📖 Nội dung:",
+    richTextToPlainTextPreservingStructure(input.lessonContent) || "—",
+    "",
+    `📊 Tiến độ: ${review.progressStatus ? SESSION_PROGRESS_STATUS_LABELS[review.progressStatus] : "—"}`,
+  ];
+
+  if (review.progressStatus !== "completed") {
+    lines.push(
+      ...formatLabeledReviewLines("Đã xong", review.progressDone),
+      ...formatLabeledReviewLines("Chưa xong", review.progressRemaining),
+    );
+  }
+
+  if (review.hasInClassTest) {
+    const content = review.inClassTestContent?.trim() || "—";
+    const total = review.inClassTestTotal
+      ? ` (${review.inClassTestTotal} câu)`
+      : "";
+    lines.push("", `🧪 Kiểm tra trong buổi: ${content}${total}`);
+  }
+
+  if (input.students.length > 0) {
+    lines.push(
+      "",
+      REVIEW_SECTION_DIVIDER,
+      input.students
+        .map((student) => formatStructuredStudentBlock(student, review))
+        .join("\n\n"),
+    );
+  }
+
+  const dueLabel = formatHomeworkDueAtLabel(review.homeworkDueAt);
+  const retest = review.hasRetest
+    ? review.retestContent?.trim() || "—"
+    : "Không";
+  lines.push(
+    "",
+    REVIEW_SECTION_DIVIDER,
+    "📌 BTVN được giao:",
+    richTextToPlainTextPreservingStructure(input.homework) || "—",
+  );
+  if (dueLabel) {
+    lines.push(`⏰ Hạn: ${dueLabel}`);
+  }
+  lines.push(
+    "",
+    `🔜 Buổi sau: ${splitReviewLines(review.nextSessionPlan).join("; ") || "—"}`,
+    `🔁 Kiểm tra lại: ${retest}`,
+    "",
+    "📎 Tutorial:",
+    richTextToPlainTextPreservingStructure(input.tutorial) || "—",
+    "",
+    REVIEW_SIGNATURE,
+  );
+
+  return lines.join("\n");
+}
+
+/**
+ * Như `findSessionReviewFormError` nhưng bỏ qua field bắt buộc còn trống — chỉ bắt giá trị
+ * sai định dạng/khoảng. Dùng khi admin/trợ lí/kế toán lưu buổi (`PUT /sessions/:id` skipRequired).
+ */
+export function findSessionReviewFormFormatError(
+  review: SessionReviewFields,
+  students: SessionCommentZaloStudent[],
+): string | null {
+  const total = review.hasInClassTest ? review.inClassTestTotal : null;
+  if (total != null && total < 1) return "Tổng số câu kiểm tra phải ≥ 1.";
+  if (!review.hasInClassTest) return null;
+
+  for (const student of students) {
+    if (student.status !== "present" && student.status !== "trial") continue;
+    const correct = student.testCorrectCount;
+    if (correct == null) continue;
+    if (
+      !Number.isInteger(correct) ||
+      correct < 0 ||
+      (total != null && correct > total)
+    ) {
+      const name = student.fullName.trim() || "học sinh";
+      return `Số câu đúng của ${name} phải trong khoảng 0–${total ?? 0}.`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Lỗi đầu tiên của form Nhận xét buổi học (để toast), null khi hợp lệ.
+ * Khớp quy tắc `SessionValidationService` ở API.
+ */
+export function findSessionReviewFormError(
+  review: SessionReviewFields,
+  students: SessionCommentZaloStudent[],
+): string | null {
+  if (!review.progressStatus) return "Vui lòng chọn tiến độ buổi.";
+  if (review.progressStatus !== "completed") {
+    if (
+      review.progressStatus === "partial" &&
+      splitReviewLines(review.progressDone).length === 0
+    ) {
+      return "Vui lòng nhập phần «Đã xong».";
+    }
+    if (splitReviewLines(review.progressRemaining).length === 0) {
+      return "Vui lòng nhập phần «Chưa xong» kèm lý do.";
+    }
+  }
+  if (review.hasInClassTest) {
+    if (!review.inClassTestContent?.trim())
+      return "Vui lòng nhập nội dung kiểm tra.";
+    if (!review.inClassTestTotal || review.inClassTestTotal < 1) {
+      return "Tổng số câu kiểm tra phải ≥ 1.";
+    }
+  }
+  if (!review.nextSessionPlan?.trim())
+    return "Vui lòng nhập nội dung buổi sau.";
+  if (review.hasRetest && !review.retestContent?.trim()) {
+    return "Vui lòng nhập nội dung kiểm tra lại.";
+  }
+
+  for (const student of students) {
+    const name = student.fullName.trim() || "học sinh";
+    if (student.status === "excused" && !student.notes?.trim()) {
+      return `Vui lòng nhập lý do nghỉ phép của ${name}.`;
+    }
+    if (student.status !== "present" && student.status !== "trial") continue;
+    if (review.hasInClassTest) {
+      const total = review.inClassTestTotal ?? 0;
+      const correct = student.testCorrectCount;
+      if (
+        correct == null ||
+        !Number.isInteger(correct) ||
+        correct < 0 ||
+        correct > total
+      ) {
+        return `Số câu đúng của ${name} phải trong khoảng 0–${total}.`;
+      }
+      if (!student.testComment?.trim())
+        return `Vui lòng nhận xét kết quả kiểm tra của ${name}.`;
+    }
+    if (splitReviewLines(student.strengths).length === 0) {
+      return `Vui lòng nhập điểm tốt của ${name}.`;
+    }
+    if (splitReviewLines(student.improvements).length === 0) {
+      return `Vui lòng nhập phần cần cải thiện của ${name}.`;
+    }
+    if (student.status === "present") {
+      if (!student.homeworkQuality)
+        return `Vui lòng chọn chất lượng BTVN của ${name}.`;
+      if (!student.homeworkComment?.trim())
+        return `Vui lòng nhận xét BTVN của ${name}.`;
+    }
+  }
+  return null;
 }

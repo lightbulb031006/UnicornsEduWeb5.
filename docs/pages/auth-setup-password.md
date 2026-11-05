@@ -21,7 +21,7 @@ Buộc user vừa đăng nhập Google OAuth nhưng chưa có `passwordHash` ph�
   - backend hash mật khẩu, rotate lại cookie auth, ghi audit
   - frontend clear cờ `requiresPasswordSetup`
   - redirect về `next` hợp lệ nếu có, ngược lại fallback theo role giống login thường
-- Page hiển thị đầy đủ logo mark + tên **Unicorns Edu** trước tiêu đề để đồng bộ với login/forgot/reset.
+- Page hiển thị đầy đủ logo mark + tên **UniEdu** trước tiêu đề để đồng bộ với login/forgot/reset.
 
 ## Feedback UI
 

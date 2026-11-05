@@ -224,6 +224,8 @@ export interface LessonOutputResponseDto {
   includesTest: boolean;
   includesSolution: boolean;
   includesLectureVideo: boolean;
+  includesTheoryLecture: boolean;
+  theoryLectureLinks: string[];
   tags: string[];
   cost: number;
   date: string;
@@ -663,6 +665,33 @@ export class CreateLessonOutputDto {
   @Type(() => Boolean)
   @IsBoolean()
   includesLectureVideo?: boolean;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'Hạng mục Bài giảng lý thuyết — cộng vào `cost` theo `level` (Level 0–5), không theo bậc. Tick thì bắt buộc có `level` và ít nhất 1 link trong `theoryLectureLinks`.',
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  includesTheoryLecture?: boolean;
+
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: 20,
+    example: ['https://youtu.be/abc123', 'https://drive.google.com/file/d/xyz'],
+    description:
+      'Link video bàn giao của Bài giảng lý thuyết (http/https). Backend trim, bỏ trống, gộp trùng; bỏ tick hạng mục thì danh sách bị xoá.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @IsUrl(
+    { require_protocol: true, require_tld: true, protocols: ['http', 'https'] },
+    { each: true },
+  )
+  theoryLectureLinks?: string[] | null;
 
   @ApiPropertyOptional({
     type: [String],

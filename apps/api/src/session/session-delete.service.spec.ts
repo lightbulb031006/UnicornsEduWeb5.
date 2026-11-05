@@ -52,6 +52,11 @@ describe('SessionDeleteService', () => {
       ledgerService as never,
       snapshotService as never,
       actionHistoryService as never,
+      {
+        assertTrialAttendanceAllowed: jest.fn(),
+        releaseBeforeDelete: jest.fn(),
+        reconcile: jest.fn(),
+      } as never,
     );
   });
 

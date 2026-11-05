@@ -1,9 +1,12 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ProtectedVideoService } from 'src/protected-video/protected-video.service';
 import {
   AttendanceStatus,
   PaymentStatus,
@@ -24,7 +27,15 @@ import { SessionLedgerService } from './session-ledger.service';
 import { SessionRosterService } from './session-roster.service';
 import { SessionSnapshotService } from './session-snapshot.service';
 import { SessionStudentBalanceService } from './session-student-balance.service';
-import { SessionValidationService } from './session-validation.service';
+import { SessionTrialCatchUpService } from './session-trial-catch-up.service';
+import {
+  AttendanceReviewData,
+  AttendanceReviewInput,
+  pickAttendanceReviewInput,
+  pickSessionReviewInput,
+  SessionReviewInput,
+  SessionValidationService,
+} from './session-validation.service';
 import { SessionScheduleRulesService } from './session-schedule-rules.service';
 import { computeTrainingManagerSessionSnapshot } from '../training-manager/training-manager.utils';
 import { createMemoizedTaxDeductionResolver } from '../payroll/deduction-rates';
@@ -65,6 +76,11 @@ export function shouldEnforceDeclaredSchedule(
 export class SessionCreateService {
   private readonly activeSessionCreations = new Set<string>();
 
+  /** Đồng bộ video sau khi lưu link recording (Optional: spec dựng service bằng `new`). */
+  @Optional()
+  @Inject(ProtectedVideoService)
+  private readonly protectedVideos?: ProtectedVideoService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly staffOperationsAccess: StaffOperationsAccessService,
@@ -75,6 +91,7 @@ export class SessionCreateService {
     private readonly sessionSnapshotService: SessionSnapshotService,
     private readonly sessionScheduleRulesService: SessionScheduleRulesService,
     private readonly actionHistoryService: ActionHistoryService,
+    private readonly sessionTrialCatchUpService: SessionTrialCatchUpService,
   ) {}
 
   async createSession(data: SessionCreateDto, actor?: ActionHistoryActor) {
@@ -95,6 +112,8 @@ export class SessionCreateService {
         },
         { required: true },
       );
+      const sessionReview =
+        this.sessionValidationService.resolveSessionReviewFields(data);
       const classPricing = await this.prisma.class.findUnique({
         where: { id: data.classId },
         select: { pricingMode: true },
@@ -178,6 +197,10 @@ export class SessionCreateService {
           let resolvedAttendanceInput: NonNullable<
             SessionCreateDto['attendance']
           >;
+          const attendanceReviewByStudentId = new Map<
+            string,
+            AttendanceReviewData
+          >();
 
           if (isNoAttendanceClass) {
             // Auto-generate attendance: present for all active students
@@ -199,10 +222,15 @@ export class SessionCreateService {
               attendanceInput,
               { required: true },
             );
-            this.sessionValidationService.validateAttendanceNotes(
-              attendanceInput,
-              { required: true },
-            );
+            for (const attendanceItem of attendanceInput) {
+              attendanceReviewByStudentId.set(
+                attendanceItem.studentId,
+                this.sessionValidationService.resolveAttendanceReview(
+                  attendanceItem,
+                  sessionReview,
+                ),
+              );
+            }
             resolvedAttendanceInput = attendanceInput;
           }
 
@@ -401,6 +429,18 @@ export class SessionCreateService {
           if (isOneTimeClass) {
             await lockOneTimeClassCharges(tx, data.classId);
           }
+          await this.sessionTrialCatchUpService.assertTrialAttendanceAllowed(
+            tx,
+            {
+              classId: data.classId,
+              isOneTimeClass,
+              sessionDate,
+              sessionStartTime: sessionStartTime ?? null,
+              trialStudentIds: resolvedAttendanceInput
+                .filter((item) => item.status === AttendanceStatus.trial)
+                .map((item) => item.studentId),
+            },
+          );
           const oneTimeAlreadyChargedStudentIds = isOneTimeClass
             ? await findOneTimeChargedStudentIds(tx, {
                 classId: data.classId,
@@ -538,6 +578,7 @@ export class SessionCreateService {
                 studentId: attendanceItem.studentId,
                 status: attendanceItem.status,
                 notes: attendanceItem.notes,
+                ...attendanceReviewByStudentId.get(attendanceItem.studentId),
                 customerCareCoef: attendanceItem.customerCareCoef,
                 customerCareStaffId: attendanceItem.customerCareStaffId,
                 customerCarePaymentStatus: attendanceItem.customerCareStaffId
@@ -593,6 +634,7 @@ export class SessionCreateService {
               lessonContent: data.lessonContent ?? null,
               homework: data.homework ?? null,
               tutorial: data.tutorial ?? null,
+              ...sessionReview,
               recordingUrl: data.recordingUrl ? data.recordingUrl.trim() : null,
               teacherPaymentStatus: data.teacherPaymentStatus ?? undefined,
               trainingManagerStaffId:
@@ -629,6 +671,14 @@ export class SessionCreateService {
             ),
           );
 
+          await this.sessionTrialCatchUpService.reconcile(
+            tx,
+            createdSession.attendance.map((attendanceItem) => ({
+              studentId: attendanceItem.studentId,
+              classId: data.classId,
+            })),
+          );
+
           if (actor) {
             const afterValue =
               await this.sessionSnapshotService.getSessionAuditSnapshot(
@@ -659,6 +709,7 @@ export class SessionCreateService {
         },
       );
 
+      this.protectedVideos?.track(createdSession.recordingUrl);
       return createdSession;
     } finally {
       this.activeSessionCreations.delete(lockKey);
@@ -703,12 +754,14 @@ export class SessionCreateService {
       tutorial: string;
       recordingUrl?: string | null;
       coefficient?: number;
-      attendance?: Array<{
-        studentId: string;
-        status: (typeof AttendanceStatus)[keyof typeof AttendanceStatus];
-        notes?: string | null;
-      }>;
-    },
+      attendance?: Array<
+        AttendanceReviewInput & {
+          studentId: string;
+          status: (typeof AttendanceStatus)[keyof typeof AttendanceStatus];
+          notes?: string | null;
+        }
+      >;
+    } & SessionReviewInput,
     auditActor?: ActionHistoryActor,
   ) {
     const actor = await this.staffOperationsAccess.resolveActor(
@@ -740,6 +793,7 @@ export class SessionCreateService {
         classId,
         teacherId,
         date: data.date,
+        // Dạy thử (coefficient = 0): mọi role staff-ops (gia sư, trợ lí, …) đều bật được.
         coefficient: data.coefficient,
         startTime: data.startTime,
         endTime: data.endTime,
@@ -747,11 +801,13 @@ export class SessionCreateService {
         lessonContent: data.lessonContent,
         homework: data.homework,
         tutorial: data.tutorial,
+        ...pickSessionReviewInput(data),
         recordingUrl: data.recordingUrl ?? null,
         attendance: (data.attendance ?? []).map((attendanceItem) => ({
           studentId: attendanceItem.studentId,
           status: attendanceItem.status,
           notes: attendanceItem.notes ?? null,
+          ...pickAttendanceReviewInput(attendanceItem),
         })),
       },
       auditActor,

@@ -30,7 +30,7 @@ Với **mỗi khoá khớp pack**:
 | --- | --- |
 | `course_difficulty_levels` | 4 mức: Nhận biết, Thông hiểu, Vận dụng, Vận dụng cao |
 | `modules` | 5 chuyên đề nội dung + 1 chuyên đề `Ôn tập & Đề tổng hợp` |
-| `questions` | 30 câu (25 `single_choice` + 5 `essay`), HTML TipTap, LaTeX `$…$` |
+| `questions` | 30 câu (25 `single_choice` + 5 `essay`), HTML TipTap, LaTeX `$…$`. Script đọc `LMS_PROFILE` và chỉ seed loại câu hồ sơ cho phép — `LMS_PROFILE=it` bỏ 5 câu `essay` (đề chỉ còn các câu còn lại; đề toàn tự luận thành rỗng). |
 | `lessons` (`kind = practice`) | 12 đề (xem bảng dưới) |
 | `question_links` | 83 liên kết câu ↔ đề, kèm `order` |
 

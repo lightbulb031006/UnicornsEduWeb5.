@@ -1,4 +1,7 @@
-import type { StaffFixedSalaryRoleRow } from "@/dtos/fixed-salary-settings.dto";
+import type {
+  FixedSalaryCloseCandidate,
+  StaffFixedSalaryRoleRow,
+} from "@/dtos/fixed-salary-settings.dto";
 import { parseMoneyInput } from "@/lib/money-input.helpers";
 
 export const fixedSalaryInputClassName =
@@ -175,4 +178,43 @@ export function buildRolePolicySaveFeedback(
     type: "error",
     message: `Chưa lưu được mức lương (${amountMessage}) và % vận hành (${rateMessage}).`,
   };
+}
+
+function foldVietnameseSearchText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .trim();
+}
+
+export function isFixedSalaryCandidateFullyClosed(
+  candidate: Pick<FixedSalaryCloseCandidate, "closedRoleCount" | "roles">,
+): boolean {
+  return candidate.closedRoleCount >= candidate.roles.length;
+}
+
+/** Lọc theo tên, không phân biệt hoa thường và dấu tiếng Việt. */
+export function filterFixedSalaryCloseCandidates<
+  T extends Pick<FixedSalaryCloseCandidate, "staffFullName">,
+>(candidates: T[], search: string): T[] {
+  const needle = foldVietnameseSearchText(search);
+  if (!needle) return candidates;
+  return candidates.filter((candidate) =>
+    foldVietnameseSearchText(candidate.staffFullName).includes(needle),
+  );
+}
+
+/** Nhân sự chưa chốt hoặc chốt dở: đích của nút «Chốt tất cả người chưa chốt». */
+export function getUnclosedFixedSalaryStaffIds(
+  candidates: Pick<
+    FixedSalaryCloseCandidate,
+    "staffId" | "closedRoleCount" | "roles"
+  >[],
+): string[] {
+  return candidates
+    .filter((candidate) => !isFixedSalaryCandidateFullyClosed(candidate))
+    .map((candidate) => candidate.staffId);
 }

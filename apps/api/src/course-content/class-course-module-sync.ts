@@ -5,22 +5,33 @@ import { appendClassTimelineContentItems } from 'src/class-timeline/append-timel
 type Tx = Prisma.TransactionClient;
 
 /**
- * Đưa mọi tiết lý thuyết (chưa lưu trữ) của một chuyên đề vào nội dung lớp:
- * tạo `ClassContentItem` + dòng timeline cho tiết còn thiếu, theo thứ tự tiết.
- * Item đã có (kể cả đang ẩn) giữ nguyên. Idempotent; tiết thực hành không bị đụng tới.
+ * Thêm cả chuyên đề (chốt một lần): đưa mọi tiết lý thuyết + thực hành **đang có**
+ * (chưa lưu trữ) của chuyên đề vào lớp — tạo `ClassContentItem` + dòng timeline cho
+ * tiết còn thiếu, lý thuyết trước rồi thực hành, mỗi loại theo thứ tự tiết. Tiết
+ * thực hành thành lần giao với `openAt`/`closeAt` truyền vào. Item đã có (kể cả
+ * đang ẩn hoặc đã gỡ — đưa về bằng `restoreClassModuleItems`) giữ nguyên. Idempotent.
  * Trả ID item vừa tạo.
  */
-export async function syncClassModuleTheoryLessons(
+export async function syncClassModuleLessons(
   tx: Tx,
-  input: { classId: string; moduleId: string },
+  input: {
+    classId: string;
+    moduleId: string;
+    openAt: Date;
+    closeAt: Date | null;
+  },
 ): Promise<string[]> {
-  const { classId, moduleId } = input;
-  const lessons = await tx.lesson.findMany({
-    where: { moduleId, kind: LessonKind.theory, archivedAt: null },
+  const { classId, moduleId, openAt, closeAt } = input;
+  const ordered = await tx.lesson.findMany({
+    where: { moduleId, archivedAt: null },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    select: { id: true },
+    select: { id: true, kind: true },
   });
-  if (lessons.length === 0) return [];
+  if (ordered.length === 0) return [];
+  const lessons = [
+    ...ordered.filter((lesson) => lesson.kind !== LessonKind.practice),
+    ...ordered.filter((lesson) => lesson.kind === LessonKind.practice),
+  ];
 
   const existing = await tx.classContentItem.findMany({
     where: { classId, lessonId: { in: lessons.map((lesson) => lesson.id) } },
@@ -46,6 +57,9 @@ export async function syncClassModuleTheoryLessons(
           kind: 'lesson',
           sortOrder: baseSort + idx,
           createdAt: new Date(baseMs + idx),
+          ...(lesson.kind === LessonKind.practice
+            ? { openAt, closeAt, shuffleQuestions: true }
+            : {}),
         },
         select: { id: true },
       });
@@ -58,80 +72,141 @@ export async function syncClassModuleTheoryLessons(
 }
 
 /**
- * Gỡ chuyên đề: ẩn mềm mọi item đang hiện của chuyên đề trong lớp (lý thuyết lẫn lần giao
- * thực hành) cùng dòng timeline, lý do `module_removed`. Attempt/điểm giữ nguyên.
+ * Gỡ khỏi lớp (một tiết hoặc cả chuyên đề): đánh dấu `removedAt` mọi item **còn trong lớp**
+ * khớp `where`. Item đang hiện bị ẩn kèm (lý do `module_removed`) cùng dòng timeline để mọi
+ * truy vấn `hiddenAt` phía học sinh vẫn đúng; item đang Ẩn tay giữ `manual` để thêm lại vẫn ẩn.
+ * Attempt/điểm/lượt xem giữ nguyên. Trả ID item đã gỡ.
  */
-export async function hideClassModuleItems(
+export async function removeClassContentItems(
   tx: Tx,
   input: {
     classId: string;
-    moduleId: string;
-    hiddenAt: Date;
+    where: Prisma.ClassContentItemWhereInput;
+    removedAt: Date;
     hiddenByStaffId: string | null;
   },
 ): Promise<string[]> {
-  const { classId, moduleId, hiddenAt, hiddenByStaffId } = input;
+  const { classId, where, removedAt, hiddenByStaffId } = input;
   const items = await tx.classContentItem.findMany({
-    where: { classId, hiddenAt: null, lesson: { moduleId } },
-    select: { id: true },
+    where: { ...where, classId, removedAt: null },
+    select: { id: true, hiddenAt: true },
   });
   const itemIds = items.map((item) => item.id);
   if (itemIds.length === 0) return [];
+  const visibleIds = items
+    .filter((item) => item.hiddenAt === null)
+    .map((item) => item.id);
   await tx.classContentItem.updateMany({
     where: { id: { in: itemIds } },
-    data: {
-      hiddenAt,
-      hiddenByStaffId,
-      hiddenReason: ClassContentHiddenReason.module_removed,
-    },
+    data: { removedAt },
   });
-  await tx.classTimelineItem.updateMany({
-    where: { classContentItemId: { in: itemIds } },
-    data: { hiddenAt, hiddenByStaffId },
-  });
+  if (visibleIds.length > 0) {
+    await tx.classContentItem.updateMany({
+      where: { id: { in: visibleIds } },
+      data: {
+        hiddenAt: removedAt,
+        hiddenByStaffId,
+        hiddenReason: ClassContentHiddenReason.module_removed,
+      },
+    });
+    await tx.classTimelineItem.updateMany({
+      where: { classContentItemId: { in: visibleIds } },
+      data: { hiddenAt: removedAt, hiddenByStaffId },
+    });
+  }
   return itemIds;
 }
 
 /**
- * Thêm lại chuyên đề: chỉ hiện lại item bị ẩn **do gỡ chuyên đề**. Item gia sư tự ẩn
- * (`manual`) và tiết đã lưu trữ giữ nguyên.
+ * Thêm lại tiết/chuyên đề: đưa item đã gỡ khớp `where` về lớp (xoá `removedAt`). Chỉ item
+ * bị ẩn **do gỡ** hiện lại; item từng Ẩn tay (`manual`) vẫn ẩn. Tiết đã lưu trữ bỏ qua.
+ * Trả ID item đã đưa về.
  */
-export async function restoreClassModuleItems(
+export async function restoreRemovedClassContentItems(
   tx: Tx,
-  input: { classId: string; moduleId: string },
+  input: { classId: string; where: Prisma.ClassContentItemWhereInput },
 ): Promise<string[]> {
-  const { classId, moduleId } = input;
+  const { classId, where } = input;
   const items = await tx.classContentItem.findMany({
     where: {
+      ...where,
       classId,
-      hiddenReason: ClassContentHiddenReason.module_removed,
-      lesson: { moduleId, archivedAt: null },
+      removedAt: { not: null },
+      NOT: { lesson: { is: { archivedAt: { not: null } } } },
     },
-    select: { id: true },
+    select: { id: true, hiddenReason: true },
   });
   const itemIds = items.map((item) => item.id);
   if (itemIds.length === 0) return [];
+  const unhideIds = items
+    .filter(
+      (item) => item.hiddenReason === ClassContentHiddenReason.module_removed,
+    )
+    .map((item) => item.id);
   await tx.classContentItem.updateMany({
     where: { id: { in: itemIds } },
-    data: { hiddenAt: null, hiddenByStaffId: null, hiddenReason: null },
+    data: { removedAt: null },
   });
-  await tx.classTimelineItem.updateMany({
-    where: { classContentItemId: { in: itemIds } },
-    data: { hiddenAt: null, hiddenByStaffId: null },
-  });
+  if (unhideIds.length > 0) {
+    await tx.classContentItem.updateMany({
+      where: { id: { in: unhideIds } },
+      data: { hiddenAt: null, hiddenByStaffId: null, hiddenReason: null },
+    });
+    await tx.classTimelineItem.updateMany({
+      where: { classContentItemId: { in: unhideIds } },
+      data: { hiddenAt: null, hiddenByStaffId: null },
+    });
+  }
   return itemIds;
 }
 
-/** Tiết lý thuyết mới vào chuyên đề → có mặt trên mọi lớp đã thêm chuyên đề đó. */
-export async function syncNewTheoryLessonToClasses(
+/** Gỡ cả chuyên đề: gỡ mọi item còn trong lớp của chuyên đề (lý thuyết lẫn lần giao). */
+export function removeClassModuleItems(
   tx: Tx,
+  input: {
+    classId: string;
+    moduleId: string;
+    removedAt: Date;
+    hiddenByStaffId: string | null;
+  },
+): Promise<string[]> {
+  const { moduleId, ...rest } = input;
+  return removeClassContentItems(tx, {
+    ...rest,
+    where: { lesson: { is: { moduleId } } },
+  });
+}
+
+/** Thêm lại chuyên đề: đưa về mọi item đã gỡ của chuyên đề. */
+export function restoreClassModuleItems(
+  tx: Tx,
+  input: { classId: string; moduleId: string },
+): Promise<string[]> {
+  return restoreRemovedClassContentItems(tx, {
+    classId: input.classId,
+    where: { lesson: { is: { moduleId: input.moduleId } } },
+  });
+}
+
+/**
+ * Bảo đảm lớp có dòng thứ tự nhóm cho chuyên đề. Chuyên đề mới vào lớp đứng đầu
+ * danh sách nhóm (`sortOrder = min − 1`); dòng đã có giữ nguyên vị trí.
+ */
+export async function ensureClassModuleGroupOnTop(
+  tx: Tx,
+  classId: string,
   moduleId: string,
 ): Promise<void> {
-  const classModules = await tx.classModule.findMany({
-    where: { moduleId },
-    select: { classId: true },
+  const existing = await tx.classModule.findUnique({
+    where: { classId_moduleId: { classId, moduleId } },
+    select: { id: true },
   });
-  for (const { classId } of classModules) {
-    await syncClassModuleTheoryLessons(tx, { classId, moduleId });
-  }
+  if (existing) return;
+  const min = await tx.classModule.aggregate({
+    where: { classId },
+    _min: { sortOrder: true },
+  });
+  await tx.classModule.create({
+    data: { classId, moduleId, sortOrder: (min._min.sortOrder ?? 1) - 1 },
+  });
 }

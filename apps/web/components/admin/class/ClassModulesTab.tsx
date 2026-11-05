@@ -4,17 +4,21 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Layers, Plus } from "lucide-react";
 import { classKeys } from "@/lib/query-keys";
-import type { TheoryProgressTarget } from "@/dtos/class-content.dto";
+import type {
+  ClassContentRemovalTarget,
+  TheoryProgressTarget,
+} from "@/dtos/class-content.dto";
 import ClassContentManager from "@/components/admin/ClassContentManager";
 import ClassModulesDialog from "@/components/admin/ClassModulesDialog";
 import ClassModuleGroups from "@/components/admin/class/ClassModuleGroups";
 import TheoryProgressDialog from "@/components/admin/class/TheoryProgressDialog";
+import RemoveClassContentItemDialog from "@/components/admin/class/RemoveClassContentItemDialog";
 
 const TOOLBAR_BUTTON_CLASS =
   "inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-bg-secondary";
 
 /**
- * Tab **Chuyên đề** trang lớp admin/staff: thêm/gỡ chuyên đề, giao tiết thực hành,
+ * Tab **Chuyên đề** trang lớp admin/staff: thêm/gỡ chuyên đề, thêm/gỡ lẻ tiết,
  * nhóm nội dung theo thứ tự của lớp (kéo-thả khi `canManageContent`).
  */
 export default function ClassModulesTab({
@@ -23,9 +27,9 @@ export default function ClassModulesTab({
   practiceActionsBasePath,
 }: {
   classId: string;
-  /** Thêm/gỡ chuyên đề, giao tiết thực hành, sắp thứ tự, xem tiến độ lý thuyết. */
+  /** Thêm/gỡ chuyên đề, thêm/gỡ lẻ tiết, sắp thứ tự, xem tiến độ lý thuyết. */
   canManageContent: boolean;
-  /** Có thì hiện nút Thống kê / Chấm bài cho tiết thực hành. */
+  /** Có thì hiện nút Kết quả / Chấm bài cho tiết thực hành. */
   practiceActionsBasePath?: string | null;
 }) {
   const queryClient = useQueryClient();
@@ -37,6 +41,8 @@ export default function ClassModulesTab({
   } | null>(null);
   const [theoryProgressItem, setTheoryProgressItem] =
     useState<TheoryProgressTarget | null>(null);
+  const [removeItem, setRemoveItem] =
+    useState<ClassContentRemovalTarget | null>(null);
 
   return (
     <div className="space-y-3">
@@ -56,7 +62,7 @@ export default function ClassModulesTab({
             className={TOOLBAR_BUTTON_CLASS}
           >
             <Plus className="size-3.5" />
-            Tiết thực hành
+            Thêm tiết
           </button>
         </div>
       ) : null}
@@ -69,11 +75,13 @@ export default function ClassModulesTab({
         onOpenTheoryProgress={
           canManageContent ? setTheoryProgressItem : undefined
         }
+        onRemoveItem={canManageContent ? setRemoveItem : undefined}
       />
 
       <ClassContentManager
         classId={classId}
         canManage={canManageContent}
+        practiceActionsBasePath={practiceActionsBasePath}
         addOnly
         addOpen={practiceAddOpen}
         onAddOpenChange={setPracticeAddOpen}
@@ -90,6 +98,14 @@ export default function ClassModulesTab({
         <ClassModulesDialog
           classId={classId}
           onClose={() => setModulesOpen(false)}
+        />
+      ) : null}
+
+      {canManageContent ? (
+        <RemoveClassContentItemDialog
+          classId={classId}
+          target={removeItem}
+          onClose={() => setRemoveItem(null)}
         />
       ) : null}
 

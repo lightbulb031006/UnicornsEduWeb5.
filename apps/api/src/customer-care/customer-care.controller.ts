@@ -44,11 +44,11 @@ export class CustomerCareController {
   @ApiOperation({
     summary: 'Students missing drop-out reason for the logged-in CSKH',
     description:
-      'Học sinh CSKH đang đăng nhập phụ trách, nghỉ trong tháng 9/2026 (`status = inactive`) mà chưa có lý do nghỉ. Người không có role customer_care nhận danh sách rỗng.',
+      'Học sinh CSKH đang đăng nhập phụ trách, nghỉ từ 01/09/2026 trở đi (`status = inactive`) mà chưa có lý do nghỉ. Người không có role customer_care nhận danh sách rỗng.',
   })
   @ApiResponse({
     status: 200,
-    description: 'Danh sách học sinh cần điền bù lý do nghỉ.',
+    description: 'Danh sách học sinh cần điền lý do nghỉ.',
   })
   async getMyMissingDropOutReasons(
     @CurrentUser() user: JwtPayload,

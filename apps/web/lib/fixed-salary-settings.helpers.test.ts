@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { StaffFixedSalaryRoleRow } from "@/dtos/fixed-salary-settings.dto";
+import type {
+  FixedSalaryCloseCandidate,
+  StaffFixedSalaryRoleRow,
+} from "@/dtos/fixed-salary-settings.dto";
 import {
   FIXED_SALARY_STAFF_ROLES,
   isFixedSalaryStaffRole,
@@ -9,6 +12,9 @@ import {
   formatDisabledRoleOverrideWarningLine,
   LOCKED_FIXED_SALARY_MONTH_NOTE,
   buildRolePolicySaveFeedback,
+  filterFixedSalaryCloseCandidates,
+  getUnclosedFixedSalaryStaffIds,
+  isFixedSalaryCandidateFullyClosed,
 } from "./fixed-salary-settings.helpers";
 
 const ROLE_LABELS = { assistant: "Trợ lí", communication: "Truyền thông" };
@@ -151,5 +157,46 @@ describe("buildRolePolicySaveFeedback", () => {
       type: "error",
       message: "Chưa lưu được mức lương (lương lỗi) và % vận hành (% lỗi).",
     });
+  });
+});
+
+describe("fixed salary close candidates helpers", () => {
+  const candidates = [
+    {
+      staffId: "a",
+      staffFullName: "Nguyễn Văn An",
+      closedRoleCount: 2,
+      roles: [{}, {}],
+    },
+    {
+      staffId: "b",
+      staffFullName: "Trần Thị Bình",
+      closedRoleCount: 1,
+      roles: [{}, {}],
+    },
+    {
+      staffId: "c",
+      staffFullName: "Đỗ Chi",
+      closedRoleCount: 0,
+      roles: [{}],
+    },
+  ] as unknown as FixedSalaryCloseCandidate[];
+
+  it("filters by name ignoring case and Vietnamese diacritics", () => {
+    expect(
+      filterFixedSalaryCloseCandidates(candidates, "binh").map((c) => c.staffId),
+    ).toEqual(["b"]);
+    expect(
+      filterFixedSalaryCloseCandidates(candidates, "do chi").map(
+        (c) => c.staffId,
+      ),
+    ).toEqual(["c"]);
+    expect(filterFixedSalaryCloseCandidates(candidates, "  ")).toHaveLength(3);
+  });
+
+  it("treats partially closed staff as not closed", () => {
+    expect(isFixedSalaryCandidateFullyClosed(candidates[0])).toBe(true);
+    expect(isFixedSalaryCandidateFullyClosed(candidates[1])).toBe(false);
+    expect(getUnclosedFixedSalaryStaffIds(candidates)).toEqual(["b", "c"]);
   });
 });

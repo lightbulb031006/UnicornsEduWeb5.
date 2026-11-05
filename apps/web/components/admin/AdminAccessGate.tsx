@@ -1,9 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { notFound, usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
+import {
+  isGiftedLessonPlanRoute,
+  useGiftedLessonPlanEnabled,
+} from "@/lib/gifted-lesson-plan";
 import {
   canAccessAdminShellRoute,
   resolveAdminShellAccess,
@@ -12,7 +16,7 @@ import {
 } from "@/lib/admin-shell-access";
 import {
   isRestrictedByEmailVerification,
-  OPEN_EMAIL_VERIFICATION_MODAL_EVENT,
+  openEmailVerificationModal,
 } from "@/lib/email-verification-access";
 import { LESSON_PLAN_LABEL } from "@/lib/staff.constants";
 
@@ -24,6 +28,7 @@ export default function AdminAccessGate({
   const pathname = usePathname();
   const { replace } = useRouter();
   const { user, isAuthReady } = useAuth();
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
 
   const access = resolveAdminShellAccess(user);
   const restrictedByEmailVerification = isRestrictedByEmailVerification(user);
@@ -33,7 +38,7 @@ export default function AdminAccessGate({
 
   useEffect(() => {
     if (isAuthReady && restrictedByEmailVerification) {
-      window.dispatchEvent(new Event(OPEN_EMAIL_VERIFICATION_MODAL_EVENT));
+      openEmailVerificationModal({ kind: "status" });
       replace("/");
       return;
     }
@@ -48,6 +53,11 @@ export default function AdminAccessGate({
     restrictedByEmailVerification,
     replace,
   ]);
+
+  // Giáo án học sinh giỏi chỉ có trên IT — JP/ENG trả 404.
+  if (giftedLessonPlanEnabled === false && isGiftedLessonPlanRoute(pathname)) {
+    notFound();
+  }
 
   if (!isAuthReady) {
     return (

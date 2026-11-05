@@ -101,7 +101,7 @@ export class SessionController {
   @ApiOperation({
     summary: 'Cập nhật session',
     description:
-      'Nếu payload có startTime/endTime thì cả hai phải có và giờ kết thúc phải sau giờ bắt đầu. Buổi paid/deposit từ chối đổi giờ.',
+      'Nếu payload có startTime/endTime thì cả hai phải có và giờ kết thúc phải sau giờ bắt đầu. Buổi paid/deposit từ chối đổi giờ. Không bắt buộc nhập đủ Nhận xét buổi học (nội dung, BTVN, tutorial, tiến độ, buổi sau, nhận xét từng học sinh, lý do nghỉ phép) — field trống lưu null; kiểm tra định dạng/khoảng giá trị vẫn áp dụng.',
   })
   @ApiParam({ name: 'id', description: 'ID session' })
   @ApiBody({ type: SessionUpdateDto, description: 'Session update payload' })
@@ -113,6 +113,8 @@ export class SessionController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() data: SessionUpdateDto,
   ) {
+    // Route chỉ mở cho admin/trợ lí/kế toán → được lưu khi Nhận xét buổi học còn trống
+    // field bắt buộc. Gia sư sửa buổi qua staff-ops vẫn bị kiểm tra đủ.
     return this.sessionService.updateSession(
       { ...data, id },
       {
@@ -120,6 +122,7 @@ export class SessionController {
         userEmail: user.email,
         roleType: user.roleType,
       },
+      { skipRequired: true },
     );
   }
 
@@ -333,6 +336,33 @@ export class SessionController {
       sessions,
       resolveAccountantFinanceView(user.roleType, req.resolvedStaffRoles ?? []),
     );
+  }
+
+  @Get('/class/:classId/next-ordinal')
+  @Roles(UserRole.admin)
+  @AllowStaffRolesOnAdminRoutes(
+    StaffRole.assistant,
+    StaffRole.accountant_income,
+    StaffRole.accountant_expense,
+  )
+  @ApiOperation({
+    summary: 'Số thứ tự buổi nếu tạo buổi mới tại ngày/giờ cho trước',
+  })
+  @ApiParam({
+    name: 'classId',
+    description: 'ID lớp học',
+    example: 'UNICL-b2c3d4e5f6',
+  })
+  @ApiQuery({ name: 'date', required: true, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'startTime', required: false, description: 'HH:mm' })
+  @ApiResponse({ status: 200, description: '{ ordinal: number }' })
+  @ApiResponse({ status: 400, description: 'date/startTime không hợp lệ.' })
+  async getNextSessionOrdinal(
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+    @Query('date') date: string,
+    @Query('startTime') startTime?: string,
+  ) {
+    return this.sessionService.getNextSessionOrdinal(classId, date, startTime);
   }
 
   @Get('/class/:classId/missed-teaching-alerts')

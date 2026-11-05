@@ -60,6 +60,7 @@ type SupportedRoleType = Extract<
   | "communication"
   | "technical"
   | "training"
+  | "sale"
   | "accountant"
   | "accountant_income"
   | "accountant_expense"
@@ -121,6 +122,16 @@ const ROLE_THEMES: Record<SupportedRoleType, RoleTheme> = {
     activeRowClassName:
       "border-secondary/15 bg-secondary/5 hover:bg-secondary/8",
     popupGlowClassName: "bg-secondary/10",
+  },
+  sale: {
+    listGradientClassName: "bg-bg-surface",
+    listGlowTopClassName: "bg-success/12",
+    listGlowBottomClassName: "bg-warning/10",
+    selectionBadgeClassName: "border-success/15 bg-success/8 text-success",
+    activeCardClassName:
+      "border-success/35 bg-success/5 shadow-[0_20px_36px_-26px_color-mix(in_srgb,var(--ue-success)_40%,transparent)]",
+    activeRowClassName: "border-success/15 bg-success/5 hover:bg-success/8",
+    popupGlowClassName: "bg-success/10",
   },
   accountant: {
     listGradientClassName: "bg-bg-surface",
@@ -197,6 +208,10 @@ function formatDateTime(iso?: string | null) {
 
 function resolveStaffName(item: ExtraAllowanceListItem) {
   return item.staff?.fullName?.trim() || "Nhân sự chưa xác định";
+}
+
+function resolveStudentName(item: ExtraAllowanceListItem) {
+  return item.student?.fullName?.trim() || "Học sinh đã xoá";
 }
 
 function resolveNote(note: string | null | undefined) {
@@ -300,6 +315,7 @@ export default function ExtraAllowanceRoleDetailPage({
   const canManageAllowance = canManageAdminExtraAllowance(adminShellAccess);
   const canCreateAllowance = canManageAllowance;
   const canDeleteAllowance = canManageAllowance;
+  const showStudentColumn = roleType === "sale";
 
   const {
     data,
@@ -602,6 +618,7 @@ export default function ExtraAllowanceRoleDetailPage({
         status: payload.status,
         note: payload.note,
         roleType: payload.roleType,
+        studentId: payload.studentId,
       });
     } catch {
       // toast lỗi đã xử lý trong onError
@@ -1003,6 +1020,13 @@ export default function ExtraAllowanceRoleDetailPage({
                             <p className="mt-3 text-2xl font-semibold tabular-nums text-text-primary">
                               {formatCurrency(allowance.amount)}
                             </p>
+                            {showStudentColumn ? (
+                              <p
+                                className={`mt-2 text-sm font-medium ${allowance.student ? "text-text-primary" : "italic text-text-muted"}`}
+                              >
+                                Học sinh: {resolveStudentName(allowance)}
+                              </p>
+                            ) : null}
                             <p className="mt-3 break-words text-sm leading-6 text-text-secondary">
                               {resolveNote(allowance.note)}
                             </p>
@@ -1041,7 +1065,7 @@ export default function ExtraAllowanceRoleDetailPage({
                             />
                           </th>
                           <th className="px-2.5 py-2.5" scope="col">
-                            Nhân sự
+                            {showStudentColumn ? "Học sinh" : "Nhân sự"}
                           </th>
                           <th className="px-2.5 py-2.5" scope="col">
                             Tháng
@@ -1086,9 +1110,17 @@ export default function ExtraAllowanceRoleDetailPage({
                                 />
                               </td>
                               <td className="px-2.5 py-2.5 align-top">
-                                <p className="text-sm font-semibold text-text-primary">
-                                  {resolveStaffName(allowance)}
-                                </p>
+                                {showStudentColumn ? (
+                                  <p
+                                    className={`text-sm font-semibold ${allowance.student ? "text-text-primary" : "italic text-text-muted"}`}
+                                  >
+                                    {resolveStudentName(allowance)}
+                                  </p>
+                                ) : (
+                                  <p className="text-sm font-semibold text-text-primary">
+                                    {resolveStaffName(allowance)}
+                                  </p>
+                                )}
                               </td>
                               <td className="px-2.5 py-2.5 align-top text-sm text-text-secondary">
                                 {formatMonthKeyLabel(allowance.month)}

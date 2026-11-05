@@ -605,9 +605,9 @@ export class AuthController {
   @Post('student/login')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({
-    summary: 'Initiate student login',
+    summary: 'Student login',
     description:
-      'Validates credentials and sends a magic link to the student email. Returns a requestId for polling.',
+      'Validates credentials and, when the email is verified, replaces any inactive device with the current one and sets auth cookies directly (no login magic link).',
   })
   @ApiBody({
     type: UserAuthDto,
@@ -615,7 +615,12 @@ export class AuthController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Login request created, verification email sent.',
+    description: 'Logged in, auth cookies set. Body: `{ message }`.',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      '`NOT_STUDENT_ACCOUNT`, or `EMAIL_NOT_VERIFIED` — an email-verification mail is sent on the same click and `maskedEmail` is included when sending succeeded.',
   })
   @ApiResponse({ status: 401, description: 'Invalid credentials.' })
   @ApiResponse({
@@ -623,7 +628,11 @@ export class AuthController {
     description: 'Student already has an active device.',
   })
   @ApiResponse({ status: 429, description: 'Too many requests.' })
-  async studentLogin(@Body() body: UserAuthDto, @Req() req: Request) {
+  async studentLogin(
+    @Body() body: UserAuthDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const deviceInfo = {
       userAgent: req.headers['user-agent'],
       acceptLanguage: req.headers['accept-language'],
@@ -633,13 +642,17 @@ export class AuthController {
       req.socket.remoteAddress ||
       undefined;
 
-    return this.authService.studentLoginInit(
+    const rememberMe = body.rememberMe ?? false;
+    const tokenPair = await this.authService.studentLoginInit(
       body.accountHandle,
       body.password,
       deviceInfo,
       ipAddress,
       readProxyPublicOrigin(req),
+      rememberMe,
     );
+    this.setAuthCookies(res, tokenPair, rememberMe);
+    return { message: 'Đăng nhập thành công' };
   }
 
   @Public()
@@ -732,20 +745,25 @@ export class AuthController {
     return { message: 'Đăng nhập thành công' };
   }
 
+  @Public()
   @Post('student/logout')
   @HttpCode(HttpStatus.OK)
   @ApiCookieAuth('access_token')
+  @ApiCookieAuth('refresh_token')
   @ApiOperation({
     summary: 'Student self-logout',
-    description: 'Removes the current device and invalidates the session.',
+    description:
+      'Public and idempotent (works with an expired access token). If the auth cookies match an existing UserDevice, removes every device of that student; always clears auth cookies.',
   })
   @ApiResponse({ status: 200, description: 'Logged out successfully.' })
   async studentLogout(
-    @Req() req: RequestWithResolvedAuthContext,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const userId = await this.getAuthenticatedUserIdFromCookies(req);
-    await this.authService.studentSelfLogout(userId);
+    await this.authService.studentSelfLogout({
+      refreshToken: readCookie(req, 'refresh_token'),
+      accessToken: readCookie(req, 'access_token'),
+    });
 
     const authCookieOptions = this.getAuthCookieOptions();
     res.clearCookie('access_token', authCookieOptions);
@@ -783,12 +801,23 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const rememberMe = true;
-    const tokenPair = await this.authService.issueTokenPairForUser(
-      req.user.id,
-      req.user.accountHandle,
-      req.user.roleType,
-      rememberMe,
-    );
+    const tokenPair =
+      req.user.roleType === UserRole.student
+        ? await this.authService.issueStudentGoogleSession(req.user)
+        : await this.authService.issueTokenPairForUser(
+            req.user.id,
+            req.user.accountHandle,
+            req.user.roleType,
+            rememberMe,
+          );
+    if (!tokenPair) {
+      return res.redirect(
+        this.buildFrontendRedirectUrl(
+          '/auth/login',
+          new URLSearchParams({ error: 'device_blocked' }),
+        ),
+      );
+    }
     this.setAuthCookies(res, tokenPair, rememberMe);
 
     const redirectUrl = req.user.passwordHash

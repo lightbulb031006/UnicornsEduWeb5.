@@ -327,7 +327,7 @@ describe('GoogleCalendarService', () => {
           conferenceDataVersion: 1,
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           requestBody: expect.objectContaining({
-            summary: '[Unicorns Class] Tutor One',
+            summary: '[Uni Class] Tutor One',
             attendees: [{ email: 'Tutor@One.Example' }],
           }),
         }),

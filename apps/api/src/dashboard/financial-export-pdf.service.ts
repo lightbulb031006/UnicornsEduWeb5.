@@ -195,7 +195,7 @@ export class FinancialExportPdfService {
   </style>
 </head>
 <body>
-  <h1>Báo cáo tài chính Unicorns Edu</h1>
+  <h1>Báo cáo tài chính UniEdu</h1>
   <p class="meta">Kỳ: <strong>${escapeHtml(payload.period.monthLabel)}</strong> · Xuất lúc ${escapeHtml(generatedAt)}</p>
 
   <h2>Tóm tắt</h2>

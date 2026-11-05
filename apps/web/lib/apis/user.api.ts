@@ -1,4 +1,5 @@
 import type {
+  AdminSetUserPasswordPayload,
   CreateStudentUserPayload,
   CreateUserPayload,
   CreateUserResponse,
@@ -60,6 +61,19 @@ export async function createStudentUser(
 /** Cập nhật user (roleType, status, ...). */
 export async function updateUser(data: UpdateUserPayload): Promise<UserDetailWithStaff> {
   const response = await api.patch<UserDetailWithStaff>("/users", data);
+  return response.data;
+}
+
+/** Admin/trợ lí đặt mật khẩu mới cho user (thu hồi mọi phiên đăng nhập). */
+export async function setUserPassword(
+  id: string,
+  data: AdminSetUserPasswordPayload,
+): Promise<{ message: string }> {
+  const safeId = encodeURIComponent(id);
+  const response = await api.patch<{ message: string }>(
+    `/users/${safeId}/password`,
+    data,
+  );
   return response.data;
 }
 

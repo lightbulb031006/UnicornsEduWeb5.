@@ -1,0 +1,160 @@
+# deploy/data-stack/docker-compose.yml
+#
+# Supabase tối giản self-host cho 3 instance IT / ENG / JP trên cùng VPS:
+#   - 1 Postgres server, 3 database: uniedu_it, uniedu_eng, uniedu_jp
+#   - 3 Supabase Storage API (file backend), mỗi instance một container + volume
+#
+# Mỗi instance có một network riêng `uniedu-data-<id>`. Postgres gắn cả 3 với alias `db`;
+# storage của instance chỉ gắn network của nó với alias `storage`. Compose app
+# (`docker-compose.prod.yml`) cho `api` + `nginx` join `${DATA_NETWORK}`, nên mọi instance
+# dùng chung hostname `db` / `storage` mà vẫn cô lập storage giữa các instance.
+#
+# Chạy trên VPS từ /root/uniedu-data (copy thư mục này lên), xem
+# docs/ops/vps-local-supabase.md.
+name: uniedu-data
+
+x-storage-common: &storage-common
+  image: supabase/storage-api:v1.74.0
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 15s
+
+x-storage-env: &storage-env
+  STORAGE_BACKEND: file
+  FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+  FILE_SIZE_LIMIT: "52428800"
+  TENANT_ID: stub
+  REGION: local
+  GLOBAL_S3_BUCKET: stub
+  ENABLE_IMAGE_TRANSFORMATION: "false"
+  REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+  # Superuser chạy migration của storage + tạo role anon/authenticated/service_role.
+  DB_INSTALL_ROLES: "true"
+  DB_SUPER_USER: postgres
+  DATABASE_MAX_CONNECTIONS: "5"
+  NODE_OPTIONS: --max-old-space-size=192
+
+services:
+  db:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # Chỉ đọc bởi initdb/10-uniedu-databases.sh lần khởi tạo đầu tiên.
+      IT_DB_PASSWORD: ${IT_DB_PASSWORD:?set IT_DB_PASSWORD}
+      ENG_DB_PASSWORD: ${ENG_DB_PASSWORD:?set ENG_DB_PASSWORD}
+      JP_DB_PASSWORD: ${JP_DB_PASSWORD:?set JP_DB_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=100
+      - -c
+      - wal_compression=on
+    volumes:
+      - ./volumes/db:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+      - ./backups:/backups
+    ports:
+      # Chỉ loopback — psql/pg_dump từ host VPS. Không mở ra ngoài.
+      - "127.0.0.1:54322:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    shm_size: 256mb
+    networks:
+      it:
+        aliases: [db]
+      eng:
+        aliases: [db]
+      jp:
+        aliases: [db]
+      admin: {}
+
+  storage-it:
+    <<: *storage-common
+    environment:
+      <<: *storage-env
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/uniedu_it
+      AUTH_JWT_SECRET: ${IT_STORAGE_JWT_SECRET:?set IT_STORAGE_JWT_SECRET}
+      ANON_KEY: ${IT_STORAGE_ANON_KEY:?set IT_STORAGE_ANON_KEY}
+      SERVICE_KEY: ${IT_STORAGE_SERVICE_KEY:?set IT_STORAGE_SERVICE_KEY}
+      STORAGE_PUBLIC_URL: ${IT_PUBLIC_URL}/storage/v1
+    volumes:
+      - ./volumes/storage-it:/var/lib/storage
+    ports:
+      - "127.0.0.1:55001:5000"
+    networks:
+      it:
+        aliases: [storage]
+      admin: {}
+
+  storage-eng:
+    <<: *storage-common
+    environment:
+      <<: *storage-env
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/uniedu_eng
+      AUTH_JWT_SECRET: ${ENG_STORAGE_JWT_SECRET:?set ENG_STORAGE_JWT_SECRET}
+      ANON_KEY: ${ENG_STORAGE_ANON_KEY:?set ENG_STORAGE_ANON_KEY}
+      SERVICE_KEY: ${ENG_STORAGE_SERVICE_KEY:?set ENG_STORAGE_SERVICE_KEY}
+      STORAGE_PUBLIC_URL: ${ENG_PUBLIC_URL}/storage/v1
+    volumes:
+      - ./volumes/storage-eng:/var/lib/storage
+    ports:
+      - "127.0.0.1:55002:5000"
+    networks:
+      eng:
+        aliases: [storage]
+      admin: {}
+
+  storage-jp:
+    <<: *storage-common
+    environment:
+      <<: *storage-env
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/uniedu_jp
+      AUTH_JWT_SECRET: ${JP_STORAGE_JWT_SECRET:?set JP_STORAGE_JWT_SECRET}
+      ANON_KEY: ${JP_STORAGE_ANON_KEY:?set JP_STORAGE_ANON_KEY}
+      SERVICE_KEY: ${JP_STORAGE_SERVICE_KEY:?set JP_STORAGE_SERVICE_KEY}
+      STORAGE_PUBLIC_URL: ${JP_PUBLIC_URL}/storage/v1
+    volumes:
+      - ./volumes/storage-jp:/var/lib/storage
+    ports:
+      - "127.0.0.1:55003:5000"
+    networks:
+      jp:
+        aliases: [storage]
+      admin: {}
+
+# Network instance: internal (không gateway) → container app join vào vẫn đi Internet qua
+# app-net của nó. `admin` là bridge thường, chỉ để publish port loopback cho ops.
+networks:
+  it:
+    name: uniedu-data-it
+    internal: true
+  eng:
+    name: uniedu-data-eng
+    internal: true
+  jp:
+    name: uniedu-data-jp
+    internal: true
+  admin:
+    name: uniedu-data-admin
+    driver_opts:
+      com.docker.network.driver.mtu: "1280"

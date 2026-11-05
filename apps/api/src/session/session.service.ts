@@ -9,16 +9,13 @@ import {
   SessionUpdateDto,
   UpdateMissedTeachingExplanationDto,
 } from '../dtos/session.dto';
-import {
-  AttendanceStatus,
-  SessionPaymentStatus,
-  UserRole,
-} from '../../generated/enums';
+import { SessionPaymentStatus, UserRole } from '../../generated/enums';
 import { ActionHistoryActor } from '../action-history/action-history.service';
 import { SessionCreateService } from './session-create.service';
 import { SessionDeleteService } from './session-delete.service';
 import { SessionReportingService } from './session-reporting.service';
 import { SessionUpdateService } from './session-update.service';
+import { ReviewValidationOptions } from './session-validation.service';
 import { SessionScheduleRulesService } from './session-schedule-rules.service';
 import { MissedTeachingExplanationService } from './missed-teaching-explanation.service';
 import { StaffOperationsAccessService } from '../staff-ops/staff-operations-access.service';
@@ -57,22 +54,7 @@ export class SessionService {
     userId: string,
     roleType: UserRole,
     classId: string,
-    data: {
-      date: string;
-      startTime?: string;
-      endTime?: string;
-      notes?: string | null;
-      lessonContent: string;
-      homework: string;
-      tutorial: string;
-      recordingUrl?: string | null;
-      coefficient?: number;
-      attendance?: Array<{
-        studentId: string;
-        status: (typeof AttendanceStatus)[keyof typeof AttendanceStatus];
-        notes?: string | null;
-      }>;
-    },
+    data: Parameters<SessionCreateService['createSessionForStaff']>[3],
     actor?: ActionHistoryActor,
   ) {
     return this.sessionCreateService.createSessionForStaff(
@@ -84,8 +66,12 @@ export class SessionService {
     );
   }
 
-  updateSession(data: SessionUpdateDto, actor?: ActionHistoryActor) {
-    return this.sessionUpdateService.updateSession(data, actor);
+  updateSession(
+    data: SessionUpdateDto,
+    actor?: ActionHistoryActor,
+    reviewOptions?: ReviewValidationOptions,
+  ) {
+    return this.sessionUpdateService.updateSession(data, actor, reviewOptions);
   }
 
   updateSessionPaymentStatuses(
@@ -104,21 +90,7 @@ export class SessionService {
     userId: string,
     roleType: UserRole,
     sessionId: string,
-    data: {
-      date?: string;
-      startTime?: string;
-      endTime?: string;
-      notes?: string | null;
-      lessonContent?: string;
-      homework?: string;
-      tutorial?: string;
-      coefficient?: number;
-      attendance?: Array<{
-        studentId: string;
-        status: NonNullable<SessionUpdateDto['attendance']>[number]['status'];
-        notes?: string | null;
-      }>;
-    },
+    data: Parameters<SessionUpdateService['updateSessionForStaff']>[3],
     actor?: ActionHistoryActor,
   ) {
     return this.sessionUpdateService.updateSessionForStaff(
@@ -155,6 +127,30 @@ export class SessionService {
       classId,
       month,
       year,
+    );
+  }
+
+  getNextSessionOrdinal(classId: string, date: string, startTime?: string) {
+    return this.sessionReportingService.getNextSessionOrdinal(
+      classId,
+      date,
+      startTime,
+    );
+  }
+
+  getNextSessionOrdinalForStaff(
+    userId: string,
+    roleType: UserRole,
+    classId: string,
+    date: string,
+    startTime?: string,
+  ) {
+    return this.sessionReportingService.getNextSessionOrdinalForStaff(
+      userId,
+      roleType,
+      classId,
+      date,
+      startTime,
     );
   }
 

@@ -1,30 +1,40 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Fragment, useCallback, useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { useDebounce } from "use-debounce";
-import { runBackgroundSave } from "@/lib/mutation-feedback";
-import { practiceLessonQuestionKeys, questionKeys } from "@/lib/query-keys";
+import { AlertTriangle, ChevronDown, ChevronUp, Headphones, Layers, Plus, Trash2 } from "lucide-react";
+import { practiceLessonQuestionKeys, sharedMaterialKeys } from "@/lib/query-keys";
 import * as classApi from "@/lib/apis/class.api";
-import * as questionApi from "@/lib/apis/question.api";
-import { useCourseModules } from "@/lib/hooks/useCourseModules";
-import { useCourseDifficultyLevels } from "@/lib/hooks/useCourseDifficultyLevels";
-import MathContent from "@/components/ui/MathContent";
-import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import * as sharedMaterialApi from "@/lib/apis/shared-material.api";
+import { useAppConfig } from "@/lib/hooks/useAppConfig";
+import { PrintExamButton } from "@/components/practice/PrintExamButton";
+import {
+  buildExamLayout,
+  itExamBreakdown,
+  orderExamQuestions,
+} from "@/lib/exam-layout";
+import { moveUnit, practiceUnits, segmentsByUnit } from "@/lib/practice-units";
+import { getMutationErrorMessage } from "@/lib/mutation-feedback";
+import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  ResponsiveActionFooter,
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-} from "@/components/ui/ResponsiveDialog";
-import {
-  useConfirmDialog,
-  type ConfirmRequest,
-} from "@/components/ui/ConfirmDialog";
-import type { QuestionLink } from "@/dtos/course-content.dto";
-import { QuestionTypeDto } from "@/dtos/question.dto";
-import QuestionFormDialog from "@/components/admin/question/QuestionFormDialog";
+import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ElectiveGroupSettings } from "@/components/admin/ElectiveGroupSettings";
+import { AddPracticeQuestionDialog } from "@/components/admin/practice-lesson/AddPracticeQuestionDialog";
+import { ExamStructureSummary } from "@/components/admin/practice-lesson/ExamStructureSummary";
+import { PracticeQuestionLinkItem } from "@/components/admin/practice-lesson/PracticeQuestionLinkItem";
+import SetHeaderPreview from "@/components/admin/question-bank/SetHeaderPreview";
+import type {
+  QuestionLink,
+  UpdateCourseLessonPayload,
+} from "@/dtos/course-content.dto";
+
+type ViewMode = "full" | "compact";
+
+const PART_TITLES: Record<string, string> = {
+  "PHẦN I": "Phần I · Trắc nghiệm nhiều phương án",
+  "PHẦN II": "Phần II · Trắc nghiệm Đúng/Sai",
+};
 
 // ─────────────────────────────────────────────────────────────
 // Hooks
@@ -52,33 +62,47 @@ function usePracticeLessonQuestions(lessonId: string) {
   });
 
   const invalidate = useCallback(async () => {
-    await queryClient.invalidateQueries({
-      queryKey: practiceLessonQuestionKeys.list(lessonId),
-    });
-    await queryClient.invalidateQueries({
-      queryKey: practiceLessonQuestionKeys.summary(lessonId),
-    });
-    await queryClient.invalidateQueries({
-      queryKey: practiceLessonQuestionKeys.isAssigned(lessonId),
-    });
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: practiceLessonQuestionKeys.list(lessonId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: practiceLessonQuestionKeys.summary(lessonId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: practiceLessonQuestionKeys.isAssigned(lessonId),
+      }),
+    ]);
   }, [queryClient, lessonId]);
 
   return { links, summary, assigned: assigned ?? false, isLoading, invalidate };
 }
 
-function useQuestionBank(
-  courseId: string,
-  filters: { moduleId?: string; difficultyLevelId?: string; search?: string },
-) {
-  return useQuery({
-    queryKey: questionKeys.list({
-      courseId,
-      ...filters,
-      take: 100,
-    }),
-    queryFn: () =>
-      questionApi.getQuestions({ courseId, ...filters }, 0, 100),
-    enabled: Boolean(courseId),
+/** Đổi thứ tự câu, cập nhật cache trước (optimistic) rồi lưu cả danh sách. */
+function useReorderQuestions(lessonId: string) {
+  const queryClient = useQueryClient();
+  const listKey = practiceLessonQuestionKeys.list(lessonId);
+
+  return useMutation({
+    mutationFn: (ordered: QuestionLink[]) =>
+      classApi.reorderPracticeLessonQuestions(
+        lessonId,
+        ordered.map((l) => l.id),
+      ),
+    onMutate: async (ordered) => {
+      await queryClient.cancelQueries({ queryKey: listKey });
+      const previous = queryClient.getQueryData<QuestionLink[]>(listKey);
+      queryClient.setQueryData<QuestionLink[]>(
+        listKey,
+        ordered.map((link, order) => ({ ...link, order })),
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(listKey, context.previous);
+      toast.error("Không thể đổi thứ tự câu.");
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: listKey }),
   });
 }
 
@@ -86,102 +110,479 @@ function useQuestionBank(
 // Component
 // ─────────────────────────────────────────────────────────────
 
+function SectionHeader({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2 border-b border-border-default pb-1.5 pt-2">
+      <h4 className="text-sm font-semibold text-text-primary">{title}</h4>
+      <span className="shrink-0 text-xs text-text-muted">{count} câu</span>
+    </div>
+  );
+}
+
+const SET_ICON_BUTTON =
+  "inline-flex size-11 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-40 sm:size-8";
+
+/**
+ * Khung Bộ câu hỏi trong tiết: nền xanh bọc thanh tên bộ (đổi chỗ / gỡ cả
+ * bộ), phần đầu bộ và các câu của bộ — nhìn là biết câu nào thuộc bộ.
+ */
+function SetUnitCard({
+  title,
+  count,
+  hasAudio,
+  preview,
+  canEdit,
+  canMoveUp,
+  canMoveDown,
+  onMove,
+  onRemove,
+  children,
+}: {
+  title: string;
+  count: number;
+  hasAudio: boolean;
+  /** Phần đầu bộ (chế độ Đầy đủ); null = chỉ thanh tên bộ. */
+  preview: ReactNode;
+  canEdit: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (direction: -1 | 1) => void;
+  onRemove: () => void;
+  /** Các câu của bộ (mỗi câu một `<li>`). */
+  children: ReactNode;
+}) {
+  return (
+    <li className="list-none space-y-2 rounded-lg border border-info/30 bg-info/5 p-2">
+      <div className="flex items-center gap-2 px-1">
+        <Layers className="size-4 shrink-0 text-info" aria-hidden />
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">
+          Bộ: {title}
+          <span className="ml-1.5 text-xs font-normal text-text-muted">
+            {count} câu
+          </span>
+        </p>
+        {hasAudio ? (
+          <Headphones
+            className="size-4 shrink-0 text-text-muted"
+            aria-label="Bộ có audio"
+          />
+        ) : null}
+        {canEdit ? (
+          <div className="flex shrink-0 items-center">
+            <button
+              type="button"
+              className={SET_ICON_BUTTON}
+              disabled={!canMoveUp}
+              onClick={() => onMove(-1)}
+              aria-label={`Đưa bộ ${title} lên trên`}
+            >
+              <ChevronUp className="size-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              className={SET_ICON_BUTTON}
+              disabled={!canMoveDown}
+              onClick={() => onMove(1)}
+              aria-label={`Đưa bộ ${title} xuống dưới`}
+            >
+              <ChevronDown className="size-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              className={`${SET_ICON_BUTTON} hover:bg-error/10 hover:text-error`}
+              onClick={onRemove}
+              aria-label={`Gỡ bộ ${title} khỏi đề`}
+            >
+              <Trash2 className="size-4" aria-hidden />
+            </button>
+          </div>
+        ) : null}
+      </div>
+      {preview}
+      <ul className="space-y-2">{children}</ul>
+    </li>
+  );
+}
+
+function ViewModeToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode;
+  onChange: (mode: ViewMode) => void;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Chế độ xem câu hỏi"
+      className="inline-flex rounded-md border border-border-default bg-bg-primary p-0.5"
+    >
+      {(
+        [
+          ["full", "Đầy đủ"],
+          ["compact", "Gọn"],
+        ] as const
+      ).map(([mode, label]) => (
+        <button
+          key={mode}
+          type="button"
+          role="radio"
+          aria-checked={value === mode}
+          onClick={() => onChange(mode)}
+          className={cn(
+            "min-h-8 rounded px-3 text-xs font-medium transition-colors",
+            value === mode
+              ? "bg-bg-surface text-text-primary shadow-xs"
+              : "text-text-secondary hover:text-text-primary",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function PracticeLessonQuestionsCard({
   lessonId,
   courseId,
   canEdit,
+  electiveGroupNames,
+  onUpdateLesson,
 }: {
   lessonId: string;
   courseId: string;
   canEdit: boolean;
+  /** Tên hai nhóm tự chọn (chỉ hồ sơ có nhóm tự chọn — IT). */
+  electiveGroupNames?: { elective1Name?: string | null; elective2Name?: string | null };
+  /** Lưu tên nhóm tự chọn vào tiết thực hành. Thiếu → ẩn ô tên nhóm. */
+  onUpdateLesson?: (
+    patch: Pick<UpdateCourseLessonPayload, "elective1Name" | "elective2Name">,
+  ) => void;
 }) {
   const { links, summary, assigned, isLoading, invalidate } =
     usePracticeLessonQuestions(lessonId);
+  const reorder = useReorderQuestions(lessonId);
+  const { data: appConfig } = useAppConfig();
+  const hasElectives = appConfig?.electiveGroups ?? false;
+  const isAbsolute = appConfig?.scoring === "absolute_it";
+  const weighted = appConfig?.questionWeights ?? false;
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("full");
   const { confirm, dialog } = useConfirmDialog();
+  const removeSet = useMutation({
+    mutationFn: (setId: string) =>
+      classApi.removePracticeLessonQuestionSet(lessonId, setId),
+    onSuccess: async () => {
+      toast.success("Đã gỡ bộ khỏi đề.");
+      await invalidate();
+    },
+    onError: (error) =>
+      toast.error(getMutationErrorMessage(error, "Không thể gỡ bộ khỏi đề.")),
+  });
+
+  // Phần đầu bộ (văn bản, audio) — cùng key với ngân hàng câu hỏi.
+  const { data: sets = [] } = useQuery({
+    queryKey: sharedMaterialKeys.course(courseId),
+    queryFn: () => sharedMaterialApi.getSharedMaterials(courseId),
+    enabled: links.some((link) => link.question.sharedMaterial),
+  });
 
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-border-default bg-bg-surface p-4">
-        <Skeleton className="h-4 w-40" />
-        <Skeleton className="mt-1 h-3 w-56" />
-        <div
-          className="mt-3 space-y-2"
-          role="status"
-          aria-label="Đang tải danh sách câu hỏi"
-        >
-          <Skeleton className="h-14 w-full" />
-          <Skeleton className="h-14 w-full" />
-          <Skeleton className="h-14 w-full" />
+      <div className="space-y-3" role="status" aria-label="Đang tải danh sách câu hỏi">
+        <Skeleton className="h-5 w-48" />
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
         </div>
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-32 w-full" />
       </div>
     );
   }
 
+  // Cùng thứ tự và cách đánh số học sinh thấy trong Bài làm; Bộ câu hỏi là
+  // một mục liền, đổi chỗ / gỡ theo cả bộ.
+  const units = practiceUnits(
+    orderExamQuestions(
+      links.map((link) => ({ ...link, type: link.question.type })),
+    ),
+  );
+  const ordered = units.flatMap((unit) => unit.links);
+  const setsById = new Map(sets.map((set) => [set.id, set]));
+  const unitIndexOf = new Map(
+    units.flatMap((unit, i) => unit.links.map((link) => [link.id, i] as const)),
+  );
+  const layout = buildExamLayout(
+    ordered,
+    isAbsolute ? "absolute_it" : "equal_100",
+    {
+      elective_1: electiveGroupNames?.elective1Name ?? null,
+      elective_2: electiveGroupNames?.elective2Name ?? null,
+    },
+  );
+  const breakdown = itExamBreakdown(ordered);
+  // Vị trí trống trong phần đầu bộ hiện số câu trên màn này (khớp nhãn "Câu n").
+  const gapNumbers = new Map(
+    layout.map((view) => [view.question.questionId, view.number] as const),
+  );
+  const showElectives =
+    hasElectives && breakdown.elective1 + breakdown.elective2 > 0;
+  // Nhóm sắp xếp: chỉ đổi chỗ trong cùng Phần/nhóm, vì vị trí giữa các nhóm do loại câu + slot quyết định.
+  const groupOf = (link: QuestionLink) =>
+    link.question.type === "true_false_group" ? `II-${link.slot}` : "I";
+  const partCounts: Record<string, number> = {
+    "PHẦN I": breakdown.part1,
+    "PHẦN II":
+      breakdown.required2 + breakdown.elective1 + breakdown.elective2,
+  };
+  const groupCounts: Record<string, number> = {
+    elective_1: breakdown.elective1,
+    elective_2: breakdown.elective2,
+  };
+
+  const confirmAssigned = async () => {
+    if (assigned) {
+      const ok = await confirm({
+        title: "Đề đã giao cho lớp",
+        description:
+          "Đổi thứ tự câu sẽ ảnh hưởng đến lần giao đang chạy. Tiếp tục?",
+        confirmLabel: "Tiếp tục",
+        variant: "destructive",
+      });
+      if (!ok) return false;
+    }
+    return true;
+  };
+
+  const move = async (unitIndex: number, direction: -1 | 1) => {
+    if (!(await confirmAssigned())) return;
+    const byId = new Map(links.map((link) => [link.id, link]));
+    reorder.mutate(
+      moveUnit(units, unitIndex, direction).map((link) => byId.get(link.id)!),
+    );
+  };
+  // Mục kề cùng Phần/nhóm (IT) mới đổi chỗ được.
+  const canMoveUnit = (unitIndex: number, direction: -1 | 1) => {
+    const neighbor = units[unitIndex + direction];
+    return (
+      !reorder.isPending &&
+      neighbor !== undefined &&
+      groupOf(neighbor.links[0]) === groupOf(units[unitIndex].links[0])
+    );
+  };
+
+  const requestRemoveSet = async (setId: string, title: string) => {
+    const ok = await confirm({
+      title: "Gỡ bộ khỏi đề",
+      description: assigned
+        ? `Gỡ mọi câu của bộ "${title}" khỏi đề. Đề đã giao cho lớp — lượt làm bắt đầu sau sẽ không còn bộ này.`
+        : `Gỡ mọi câu của bộ "${title}" khỏi đề. Câu vẫn còn trong ngân hàng.`,
+      confirmLabel: "Gỡ bộ",
+      variant: "destructive",
+    });
+    if (ok) removeSet.mutate(setId);
+  };
+
+
+  type View = (typeof layout)[number];
+  const renderHeaders = (view: View) => (
+    <>
+      {view.partHeader ? (
+        <li className="list-none">
+          <SectionHeader
+            title={PART_TITLES[view.partHeader] ?? view.partHeader}
+            count={partCounts[view.partHeader] ?? 0}
+          />
+        </li>
+      ) : null}
+      {view.groupHeader ? (
+        <li className="list-none pt-1">
+          <div className="flex items-baseline justify-between gap-2 rounded-md bg-info/10 px-3 py-1.5">
+            <p className="text-xs font-semibold text-info">{view.groupHeader}</p>
+            <span className="shrink-0 text-[11px] text-text-muted">
+              {groupCounts[view.question.slot] ?? 0} câu
+            </span>
+          </div>
+        </li>
+      ) : null}
+    </>
+  );
+  const renderItem = (view: View) => {
+    const unitIndex = unitIndexOf.get(view.question.id)!;
+    return (
+      <PracticeQuestionLinkItem
+        key={view.question.id}
+        link={view.question}
+        label={`Câu ${view.number}`}
+        lessonId={lessonId}
+        courseId={courseId}
+        canEdit={canEdit}
+        assigned={assigned}
+        hasElectives={hasElectives}
+        isAbsolute={isAbsolute}
+        weighted={weighted}
+        compact={viewMode === "compact"}
+        canMoveUp={canMoveUnit(unitIndex, -1)}
+        canMoveDown={canMoveUnit(unitIndex, 1)}
+        onMove={(direction) => void move(unitIndex, direction)}
+        confirm={confirm}
+        onSaved={invalidate}
+      />
+    );
+  };
+  const renderView = (view: View) => (
+    <Fragment key={view.question.id}>
+      {renderHeaders(view)}
+      {renderItem(view)}
+    </Fragment>
+  );
+
   return (
-    <div className="rounded-lg border border-border-default bg-bg-surface p-4">
+    <div className="space-y-4">
       {assigned ? (
-        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <svg className="mt-0.5 size-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-text-primary">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden />
           <span>
             Đề này đã được giao cho lớp. Việc sửa câu hỏi sẽ ảnh hưởng đến các lần giao đang chạy.
           </span>
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-text-primary">
-            Ngân hàng câu hỏi
+          <h3 className="text-base font-semibold text-text-primary">
+            Câu hỏi trong đề
           </h3>
-          {summary ? (
-            <p className="mt-0.5 text-xs text-text-secondary">
-              {summary.totalQuestions} câu hỏi · Tổng điểm: {summary.totalPoints}
-            </p>
+          <p className="mt-0.5 text-xs text-text-secondary">
+            {summary?.totalQuestions ?? links.length} câu hỏi
+            {isAbsolute || !summary
+              ? ""
+              : weighted
+                ? ` · Tổng trọng số: ${summary.totalWeight}`
+                : ` · Tổng điểm: ${summary.totalPoints}`}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {links.length > 0 ? (
+            <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          ) : null}
+          {appConfig?.examPrint ? (
+            <PrintExamButton
+              target={{ kind: "lesson", lessonId }}
+              disabled={links.length === 0}
+            />
+          ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => setShowAddDialog(true)}
+              className="ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-text-inverse hover:bg-primary-hover"
+            >
+              <Plus className="size-4" aria-hidden />
+              Thêm câu hỏi
+            </button>
           ) : null}
         </div>
-        {canEdit ? (
-          <button
-            type="button"
-            onClick={() => setShowAddDialog(true)}
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-text-inverse hover:bg-primary-hover"
-          >
-            <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Thêm câu hỏi
-          </button>
-        ) : null}
       </div>
 
-      {links.length === 0 ? (
-        <p className="mt-3 rounded-lg border border-dashed border-border-default p-4 text-center text-sm text-text-secondary">
-          Chưa có câu hỏi nào. Bấm &quot;Thêm câu hỏi&quot; để bắt đầu.
+      {isAbsolute && links.length > 0 ? (
+        <ExamStructureSummary
+          breakdown={breakdown}
+          formWarning={summary?.formWarning}
+          showElectives={showElectives}
+        />
+      ) : summary?.formWarning ? (
+        <p
+          role="alert"
+          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-text-primary"
+        >
+          {summary.formWarning}
         </p>
-      ) : (
-        <ul className="mt-3 space-y-2">
-          {links.map((link) => (
-            <QuestionLinkItem
-              key={link.id}
-              link={link}
-              lessonId={lessonId}
-              courseId={courseId}
+      ) : null}
+
+      {hasElectives && onUpdateLesson ? (
+        <details className="group rounded-lg border border-border-default bg-bg-primary px-3 py-2" open={showElectives}>
+          <summary className="cursor-pointer text-xs font-medium text-text-secondary">
+            Tên nhóm tự chọn
+            <span className="ml-1 font-normal text-text-muted">
+              (hiện trên đề học sinh)
+            </span>
+          </summary>
+          <div className="mt-2">
+            <ElectiveGroupSettings
+              elective1Name={electiveGroupNames?.elective1Name}
+              elective2Name={electiveGroupNames?.elective2Name}
+              formWarning={null}
               canEdit={canEdit}
-              assigned={assigned}
-              confirm={confirm}
-              onSaved={invalidate}
+              onSave={onUpdateLesson}
             />
-          ))}
+          </div>
+        </details>
+      ) : null}
+
+      {links.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border-default p-6 text-center">
+          <p className="text-sm text-text-secondary">Chưa có câu hỏi nào trong đề.</p>
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => setShowAddDialog(true)}
+              className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border-default px-3 text-sm font-medium text-text-primary hover:bg-bg-tertiary"
+            >
+              <Plus className="size-4" aria-hidden />
+              Thêm từ ngân hàng
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {segmentsByUnit(layout, (view) => unitIndexOf.get(view.question.id)!).map(
+            ({ unitIndex, items }) => {
+              const unit = units[unitIndex];
+              const set = unit.setId ? setsById.get(unit.setId) : undefined;
+              if (!unit.setId) return items.map(renderView);
+              const [first, ...rest] = items;
+              const setTitle =
+                first.question.question.sharedMaterial?.title ?? "Bộ câu hỏi";
+              return (
+                <Fragment key={unit.setId}>
+                  {/* Tiêu đề phần / nhóm của câu đầu bộ đứng ngoài khung bộ. */}
+                  {renderHeaders(first)}
+                  <SetUnitCard
+                    title={setTitle}
+                    count={unit.links.length}
+                    hasAudio={Boolean(set?.audio)}
+                    preview={
+                      viewMode === "full" && set ? (
+                        <SetHeaderPreview set={set} gapNumbers={gapNumbers} />
+                      ) : null
+                    }
+                    canEdit={canEdit}
+                    canMoveUp={canMoveUnit(unitIndex, -1)}
+                    canMoveDown={canMoveUnit(unitIndex, 1)}
+                    onMove={(direction) => void move(unitIndex, direction)}
+                    onRemove={() => void requestRemoveSet(unit.setId!, setTitle)}
+                  >
+                    {renderItem(first)}
+                    {rest.map(renderView)}
+                  </SetUnitCard>
+                </Fragment>
+              );
+            },
+          )}
         </ul>
       )}
 
       {showAddDialog ? (
-        <AddQuestionDialog
+        <AddPracticeQuestionDialog
           lessonId={lessonId}
           courseId={courseId}
           existingLinkQuestionIds={links.map((l) => l.questionId)}
+          existingSetIds={units.flatMap((unit) => (unit.setId ? [unit.setId] : []))}
           assigned={assigned}
           onClose={() => setShowAddDialog(false)}
           onAdded={invalidate}
@@ -189,439 +590,5 @@ export function PracticeLessonQuestionsCard({
       ) : null}
       {dialog}
     </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Question link item (inline edit)
-// ─────────────────────────────────────────────────────────────
-
-function QuestionLinkItem({
-  link,
-  lessonId,
-  courseId,
-  canEdit,
-  assigned,
-  confirm,
-  onSaved,
-}: {
-  link: QuestionLink;
-  lessonId: string;
-  courseId: string;
-  canEdit: boolean;
-  assigned: boolean;
-  confirm: (opts: ConfirmRequest) => Promise<boolean>;
-  onSaved: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [showQuestionForm, setShowQuestionForm] = useState(false);
-  const [pointsDraft, setPointsDraft] = useState(
-    () => link.points?.toString() ?? "",
-  );
-
-  /**
-   * Sửa câu hỏi là sửa **bản gốc trong ngân hàng**: mọi đề khác dùng chung câu
-   * này đổi theo. Bài đã nộp không đổi — chấm điểm đọc snapshot trong
-   * `attempt_answers` (ADR `2026-09-07-attempt-exam-snapshot`).
-   */
-  const openQuestionForm = async () => {
-    if (assigned) {
-      const ok = await confirm({
-        title: "Đề đã giao cho lớp",
-        description:
-          "Sửa câu hỏi sẽ đổi cả bản gốc trong ngân hàng và mọi đề khác đang dùng câu này. Bài học sinh đã nộp giữ nguyên nội dung cũ. Tiếp tục?",
-        confirmLabel: "Tiếp tục",
-        variant: "destructive",
-      });
-      if (!ok) return;
-    }
-    setShowQuestionForm(true);
-  };
-
-  const savePoints = async () => {
-    const points = pointsDraft === "" ? null : parseInt(pointsDraft, 10);
-    if (points !== null && (isNaN(points) || points < 0)) {
-      toast.error("Điểm phải là số nguyên >= 0");
-      return;
-    }
-    if (assigned) {
-      const ok = await confirm({
-        title: "Đề đã giao cho lớp",
-        description:
-          "Thay đổi điểm sẽ ảnh hưởng đến lần giao đang chạy. Tiếp tục?",
-        confirmLabel: "Tiếp tục",
-        variant: "destructive",
-      });
-      if (!ok) return;
-    }
-    setEditing(false);
-    runBackgroundSave({
-      loadingMessage: "Đang lưu...",
-      successMessage: "Đã cập nhật.",
-      errorMessage: "Không thể cập nhật.",
-      action: () =>
-        classApi.updatePracticeLessonQuestion(lessonId, link.id, { points }),
-      onSuccess: onSaved,
-    });
-  };
-
-  const remove = async () => {
-    const ok = await confirm({
-      title: "Xóa câu hỏi khỏi đề?",
-      description: assigned
-        ? "Đề này đã được giao cho lớp. Xóa câu hỏi sẽ ảnh hưởng đến lần giao đang chạy. Xóa câu hỏi này khỏi đề?"
-        : "Xóa câu hỏi này khỏi đề?",
-      confirmLabel: "Xóa",
-      variant: "destructive",
-    });
-    if (!ok) return;
-    runBackgroundSave({
-      loadingMessage: "Đang xóa...",
-      successMessage: "Đã xóa.",
-      errorMessage: "Không thể xóa.",
-      action: () => classApi.removePracticeLessonQuestion(lessonId, link.id),
-      onSuccess: onSaved,
-    });
-  };
-
-  const isChoice = link.question.type === QuestionTypeDto.single_choice;
-  const typeLabel = isChoice ? "Trắc nghiệm" : "Tự luận";
-  const options = Array.isArray(link.question.options)
-    ? link.question.options
-    : [];
-  const solution = isChoice
-    ? link.question.explanation
-    : link.question.answerGuide;
-
-  return (
-    <li className="rounded-md border border-border-default/60 bg-bg-primary px-3 py-2.5">
-      <div className="flex items-start gap-2">
-        <span className="mt-0.5 shrink-0 text-xs font-medium text-text-muted">
-          #{(link.order ?? 0) + 1}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm text-text-primary">
-            <MathContent content={link.question.content} />
-          </div>
-
-          {isChoice && options.length > 0 ? (
-            <ol className="mt-2 space-y-1">
-              {options.map((option, index) => {
-                const correct = index === link.question.correctIndex;
-                return (
-                  <li
-                    key={index}
-                    className={`flex items-start gap-2 rounded-md px-2 py-1 text-sm ${
-                      correct
-                        ? "bg-success/10 text-text-primary"
-                        : "text-text-secondary"
-                    }`}
-                  >
-                    <span
-                      className={`mt-0.5 shrink-0 text-xs font-semibold ${
-                        correct ? "text-success" : "text-text-muted"
-                      }`}
-                    >
-                      {String.fromCharCode(65 + index)}.
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <MathContent content={option} />
-                    </div>
-                    {correct ? (
-                      <span className="shrink-0 text-xs font-medium text-success">
-                        Đáp án
-                      </span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ol>
-          ) : null}
-
-          {solution ? (
-            <details className="mt-2 rounded-md border border-border-default/60 bg-bg-surface px-2 py-1.5">
-              <summary className="cursor-pointer text-xs font-medium text-text-secondary">
-                {isChoice ? "Lời giải" : "Barem / ý cần có"}
-              </summary>
-              <div className="mt-1.5 text-sm text-text-secondary">
-                <MathContent content={solution} />
-              </div>
-            </details>
-          ) : null}
-
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">
-              {typeLabel}
-            </span>
-            {editing ? (
-              <span className="inline-flex items-center gap-1">
-                <input
-                  type="number"
-                  min={0}
-                  value={pointsDraft}
-                  onChange={(e) => setPointsDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void savePoints();
-                    if (e.key === "Escape") setEditing(false);
-                  }}
-                  className="w-16 rounded border border-border-default bg-bg-surface px-1.5 py-0.5 text-xs text-text-primary focus:border-border-focus focus:outline-none"
-                  aria-label="Điểm của câu hỏi"
-                  placeholder="điểm"
-                />
-                <button
-                  type="button"
-                  onClick={() => void savePoints()}
-                  className="rounded px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10"
-                >
-                  Lưu
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditing(false)}
-                  className="rounded px-1.5 py-0.5 text-xs text-text-secondary hover:bg-bg-tertiary"
-                >
-                  Hủy
-                </button>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setPointsDraft(link.points?.toString() ?? "");
-                  setEditing(true);
-                }}
-                className="rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary hover:bg-primary/10 hover:text-primary"
-              >
-                {link.points != null ? `${link.points} điểm` : "Chưa đặt điểm"}
-              </button>
-            )}
-          </div>
-        </div>
-        {canEdit ? (
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={() => void openQuestionForm()}
-              className="rounded p-1 text-text-muted hover:bg-primary/10 hover:text-primary"
-              aria-label="Sửa câu hỏi trong ngân hàng"
-              title="Sửa câu hỏi trong ngân hàng"
-            >
-              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => void remove()}
-              className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"
-              aria-label="Xóa câu hỏi khỏi đề"
-              title="Xóa câu hỏi khỏi đề"
-            >
-              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      {showQuestionForm ? (
-        <QuestionFormDialog
-          question={link.question}
-          courseId={courseId}
-          onClose={() => setShowQuestionForm(false)}
-          onSaved={() => {
-            setShowQuestionForm(false);
-            onSaved();
-          }}
-        />
-      ) : null}
-    </li>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Add question dialog
-// ─────────────────────────────────────────────────────────────
-
-function AddQuestionDialog({
-  lessonId,
-  courseId,
-  existingLinkQuestionIds,
-  assigned,
-  onClose,
-  onAdded,
-}: {
-  lessonId: string;
-  courseId: string;
-  existingLinkQuestionIds: string[];
-  assigned: boolean;
-  onClose: () => void;
-  onAdded: () => void;
-}) {
-  const [moduleFilter, setModuleFilter] = useState("");
-  const [difficultyFilter, setDifficultyFilter] = useState("");
-  const [search, setSearch] = useState("");
-  const [debouncedSearch] = useDebounce(search.trim(), 300);
-
-  const { data: modules = [] } = useCourseModules(courseId);
-  const { data: difficultyLevels = [] } = useCourseDifficultyLevels(courseId);
-
-  const { data: questions = [], isLoading: isBankLoading } = useQuestionBank(courseId, {
-    moduleId: moduleFilter || undefined,
-    difficultyLevelId: difficultyFilter || undefined,
-    search: debouncedSearch || undefined,
-  });
-
-  // Set: tra cứu O(1) thay vì quét lại danh sách câu đã gắn cho từng câu hỏi.
-  // Không useMemo: prop này là mảng mới mỗi render nên memo không giữ được cache.
-  const existingLinkQuestionIdSet = new Set(existingLinkQuestionIds);
-  const available = questions.filter(
-    (q) => !existingLinkQuestionIdSet.has(q.id),
-  );
-
-  const addMutation = useMutation({
-    mutationFn: (questionId: string) =>
-      classApi.addPracticeLessonQuestion(lessonId, { questionId }),
-    onSuccess: () => {
-      toast.success("Đã thêm câu hỏi.");
-      onAdded();
-    },
-    onError: () => toast.error("Không thể thêm câu hỏi."),
-  });
-
-  return (
-    <ResponsiveDialog
-      size="2xl"
-      labelledBy="add-practice-question-title"
-      onBackdropClick={onClose}
-    >
-        <div className="flex items-center justify-between border-b border-border-default px-4 py-3">
-          <h3
-            id="add-practice-question-title"
-            className="text-sm font-semibold text-text-primary"
-          >
-            Thêm câu hỏi từ ngân hàng
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-text-muted hover:bg-bg-tertiary"
-            aria-label="Đóng"
-          >
-            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Filters */}
-        <div className="border-b border-border-default px-4 py-2.5">
-          {assigned ? (
-            <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              <svg className="mt-0.5 size-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>
-                Đề này đã được giao cho lớp. Thêm câu hỏi sẽ ảnh hưởng đến các lần giao đang chạy.
-              </span>
-            </div>
-          ) : null}
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              aria-label="Tìm nội dung câu hỏi"
-              placeholder="Tìm nội dung câu hỏi..."
-              className="min-w-0 flex-1 rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-sm text-text-primary focus:border-border-focus focus:outline-none"
-            />
-            <div className="flex gap-2">
-              <UpgradedSelect
-                value={moduleFilter}
-                onValueChange={setModuleFilter}
-                placeholder="Chuyên đề"
-                options={modules.map((ch) => ({
-                  value: ch.id,
-                  label: ch.title,
-                }))}
-                buttonClassName="w-40"
-              />
-              <UpgradedSelect
-                value={difficultyFilter}
-                onValueChange={setDifficultyFilter}
-                placeholder="Mức khó"
-                options={difficultyLevels.map((dl) => ({
-                  value: dl.id,
-                  label: dl.name,
-                }))}
-                buttonClassName="w-36"
-              />
-            </div>
-          </div>
-        </div>
-
-        <ResponsiveDialogBody className="px-4 py-2">
-          {isBankLoading ? (
-            <div
-              className="space-y-2 py-2"
-              role="status"
-              aria-label="Đang tải câu hỏi"
-            >
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-14 w-full" />
-            </div>
-          ) : available.length === 0 ? (
-            <p className="py-6 text-center text-sm text-text-secondary">
-              {questions.length === 0
-                ? "Không có câu hỏi nào trong ngân hàng."
-                : "Tất cả câu hỏi đã được thêm."}
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {available.map((q) => (
-                <li
-                  key={q.id}
-                  className="flex items-start gap-3 rounded-md border border-border-default/60 bg-bg-primary px-3 py-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="line-clamp-2 text-sm text-text-primary">
-                      <MathContent content={q.content} />
-                    </div>
-                    <div className="mt-1 flex items-center gap-2">
-                      <span className="rounded bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">
-                        {q.type === "single_choice" ? "Trắc nghiệm" : "Tự luận"}
-                      </span>
-                      {q.options && Array.isArray(q.options) ? (
-                        <span className="text-[10px] text-text-muted">
-                          {q.options.length} đáp án
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={addMutation.isPending}
-                    onClick={() => addMutation.mutate(q.id)}
-                    className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-text-inverse hover:bg-primary-hover disabled:opacity-60"
-                  >
-                    {addMutation.isPending ? "Đang lưu…" : "Thêm"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </ResponsiveDialogBody>
-
-        <ResponsiveActionFooter className="min-[380px]:grid-cols-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md border border-border-default px-3 py-2 text-sm font-medium text-text-secondary hover:bg-bg-tertiary"
-          >
-            Đóng
-          </button>
-        </ResponsiveActionFooter>
-    </ResponsiveDialog>
   );
 }

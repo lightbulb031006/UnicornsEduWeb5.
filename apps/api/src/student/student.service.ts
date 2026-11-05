@@ -87,6 +87,7 @@ import {
 import { MailService } from 'src/mail/mail.service';
 import { NotificationService } from 'src/notification/notification.service';
 import { AuthIdentityCacheService } from 'src/auth/auth-identity-cache.service';
+import { MANUAL_TOP_UP_NOTE_PREFIX } from 'src/common/manual-top-up-note';
 
 const RECENT_TOP_UP_DAYS = 21;
 const RECENT_TOP_UP_THRESHOLD = 300_000;
@@ -471,7 +472,6 @@ export class StudentService {
       dropOutDate: student.dropOutDate,
       dropOutReason: student.dropOutReason,
       customerSource: student.customerSource,
-      customerSourceNote: student.customerSourceNote,
       customerCare: student.customerCareServices
         ? {
             staff: {
@@ -934,61 +934,6 @@ export class StudentService {
     return assignment?.staffId ?? null;
   }
 
-  private resolveCustomerSourceWrite(
-    source: StudentCustomerSource,
-    note: string | null | undefined,
-  ): {
-    customerSource: StudentCustomerSource;
-    customerSourceNote: string | null;
-  } {
-    if (source !== StudentCustomerSource.other) {
-      return { customerSource: source, customerSourceNote: null };
-    }
-
-    const normalized = note?.trim() ?? '';
-    if (!normalized) {
-      throw new BadRequestException(
-        'Chú thích nguồn là bắt buộc khi chọn Khác.',
-      );
-    }
-
-    return { customerSource: source, customerSourceNote: normalized };
-  }
-
-  private resolveCustomerSourceUpdate(
-    dto: UpdateStudentBodyDto,
-    current: {
-      customerSource: StudentCustomerSource | null;
-      customerSourceNote: string | null;
-    },
-  ): {
-    customerSource?: StudentCustomerSource;
-    customerSourceNote?: string | null;
-  } {
-    if (
-      dto.customer_source === undefined &&
-      dto.customer_source_note === undefined
-    ) {
-      return {};
-    }
-
-    if (dto.customer_source !== undefined) {
-      return this.resolveCustomerSourceWrite(
-        dto.customer_source,
-        dto.customer_source_note,
-      );
-    }
-
-    if (current.customerSource !== StudentCustomerSource.other) {
-      throw new BadRequestException('Chú thích nguồn chỉ dùng khi chọn Khác.');
-    }
-
-    return this.resolveCustomerSourceWrite(
-      StudentCustomerSource.other,
-      dto.customer_source_note,
-    );
-  }
-
   /**
    * Lý do nghỉ học cần lưu khi học sinh ở trạng thái nghỉ sau thao tác. Chuyển
    * sang nghỉ học bắt buộc có lý do; học sinh đã nghỉ thì chỉ cập nhật khi có
@@ -1314,9 +1259,12 @@ export class StudentService {
       ...(genderFilter ? { gender: genderFilter } : {}),
       ...(trimmedClassName
         ? {
+            // Chỉ khớp lớp đang học: còn trên roster và lớp chưa kết thúc.
             studentClasses: {
               some: {
+                status: StudentClassStatus.active,
                 class: {
+                  status: ClassStatus.running,
                   name: {
                     contains: trimmedClassName,
                     mode: 'insensitive' as const,
@@ -2632,7 +2580,9 @@ export class StudentService {
 
     const updateData = {
       ...this.buildUpdateData(dto),
-      ...this.resolveCustomerSourceUpdate(dto, student),
+      ...(dto.customer_source !== undefined
+        ? { customerSource: dto.customer_source }
+        : {}),
       ...this.resolveDropOutReasonWrite({
         currentStatus: student.status,
         nextStatus: dto.status,
@@ -2780,7 +2730,7 @@ export class StudentService {
       data.amount,
       {
         allowNegativeBalance: true,
-        topupNotePrefix: 'Nạp tiền thủ công từ trang chi tiết học sinh.',
+        topupNotePrefix: MANUAL_TOP_UP_NOTE_PREFIX,
         withdrawNotePrefix:
           'Điều chỉnh giảm số dư thủ công từ trang chi tiết học sinh.',
         auditDescription: 'Điều chỉnh số dư học sinh',
@@ -2848,8 +2798,18 @@ export class StudentService {
     const classIdsToRemove = existingMemberships
       .map((membership) => membership.classId)
       .filter((classId) => !requestedClassIds.has(classId));
-    const classIdsToActivate = classIds.filter((classId) =>
-      existingClassIds.has(classId),
+    // Chỉ kích hoạt lại membership đã gỡ mềm; membership đang active giữ nguyên
+    // (không reset học phí riêng mỗi lần lưu danh sách lớp).
+    const activeClassIds = new Set(
+      existingMemberships
+        .filter(
+          (membership) => membership.status === StudentClassStatus.active,
+        )
+        .map((membership) => membership.classId),
+    );
+    const classIdsToActivate = classIds.filter(
+      (classId) =>
+        existingClassIds.has(classId) && !activeClassIds.has(classId),
     );
     const classIdsToAdd = classIds.filter(
       (classId) => !existingClassIds.has(classId),
@@ -3029,18 +2989,12 @@ export class StudentService {
       throw new BadRequestException('Student full name is required.');
     }
 
-    const customerSource = this.resolveCustomerSourceWrite(
-      data.customer_source,
-      data.customer_source_note,
-    );
-
     return this.withEntityIdRetry(() =>
       this.createStudentOnce(
         data,
         auditActor,
         user,
         trimmedFullName,
-        customerSource,
       ),
     );
   }
@@ -3055,18 +3009,13 @@ export class StudentService {
       roleType: UserRole;
     },
     trimmedFullName: string,
-    customerSource: {
-      customerSource: StudentCustomerSource;
-      customerSourceNote: string | null;
-    },
   ) {
     return this.prisma.$transaction(async (tx) => {
       const createdStudent = await tx.studentInfo.create({
         data: {
           id: generateStudentId(),
           fullName: trimmedFullName,
-          customerSource: customerSource.customerSource,
-          customerSourceNote: customerSource.customerSourceNote,
+          customerSource: data.customer_source,
           email: normalizeOptionalText(data.email) ?? user.email,
           school: normalizeOptionalText(data.school),
           province:

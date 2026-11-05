@@ -9,9 +9,10 @@ import { MoneyInput } from "@/components/ui/MoneyInput";
 import type { ClassDetail, ClassPricingMode, ClassStatus, UpdateClassBasicInfoPayload } from "@/dtos/class.dto";
 import CourseSelect from "@/components/shared/class/CourseSelect";
 import * as classApi from "@/lib/apis/class.api";
-import { runBackgroundSave } from "@/lib/mutation-feedback";
+import { runBackgroundSave, toastWarnings } from "@/lib/mutation-feedback";
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
 import {
+  buildEndClassConfirmMessage,
   compactTuitionPerSessionLine,
   computeStudentTuitionPerSessionFromPackage,
   maxAllowanceInputInitialFromServer,
@@ -58,12 +59,6 @@ const STATUS_OPTIONS: { value: ClassStatus; label: string }[] = [
   { value: "running", label: "Đang chạy" },
   { value: "ended", label: "Đã kết thúc" },
 ];
-
-const END_CLASS_CONFIRM_MESSAGE =
-  "Kết thúc lớp? Điều kiện: mọi buổi đã thanh toán trợ cấp gia sư. Hệ thống sẽ gỡ gia sư khỏi lớp, đóng roster học sinh, xóa lịch cố định và lịch bù tương lai.";
-
-const DEFAULT_END_CLASS_BLOCK_REASON =
-  "Thanh toán hết trợ cấp gia sư cho mọi buổi để kết thúc lớp.";
 
 function parseOptionalInt(value: string): number | undefined {
   const trimmed = value.trim();
@@ -159,22 +154,10 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
     ),
   );
 
-  const canEndClass = classDetail.endClassEligibility?.canEnd ?? false;
-  const endClassBlockReason =
-    classDetail.endClassEligibility?.blockReason ?? DEFAULT_END_CLASS_BLOCK_REASON;
   const willEndClass = classDetail.status === "running" && status === "ended";
 
   const handleStatusChange = (nextValue: string) => {
-    const nextStatus = nextValue as ClassStatus;
-    if (
-      nextStatus === "ended" &&
-      classDetail.status === "running" &&
-      !canEndClass
-    ) {
-      toast.error(endClassBlockReason);
-      return;
-    }
-    setStatus(nextStatus);
+    setStatus(nextValue as ClassStatus);
   };
 
   const invalidateClassQueries = async () => {
@@ -259,11 +242,9 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
     };
 
     if (willEndClass) {
-      if (!canEndClass) {
-        toast.error(endClassBlockReason);
-        return;
-      }
-      const confirmed = window.confirm(END_CLASS_CONFIRM_MESSAGE);
+      const confirmed = window.confirm(
+        buildEndClassConfirmMessage(classDetail.endClassEligibility?.unpaidSessionCount),
+      );
       if (!confirmed) return;
       const reason = window.prompt("Lý do (không bắt buộc)") ?? undefined;
       const shouldUpdateBasicInfo = basicInfoFieldsChanged(classDetail, basicInfoWithoutStatus);
@@ -285,9 +266,14 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
           if (shouldUpdateBasicInfo) {
             await classApi.updateClassBasicInfo(classDetail.id, basicInfoWithoutStatus);
           }
-          await classApi.endClass(classDetail.id, { reason });
+          return classApi.endClass(classDetail.id, { reason });
         },
-        onSuccess: invalidateClassQueries,
+        onSuccess: async (result) => {
+          toastWarnings(result.calendarSyncWarnings);
+          await invalidateClassQueries();
+        },
+        // Bước trước có thể đã lưu (basic-info/pricing) hoặc DB đã đổi trước khi lỗi.
+        onError: invalidateClassQueries,
       });
       return;
     }
@@ -443,9 +429,6 @@ function EditClassBasicInfoDialog({ onClose, classDetail }: Omit<Props, "open">)
                   options={STATUS_OPTIONS}
                   buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
-                {classDetail.status === "running" && !canEndClass ? (
-                  <p className="text-xs text-warning">{endClassBlockReason}</p>
-                ) : null}
                 {willEndClass ? (
                   <p className="text-xs text-text-muted">
                     Lưu sẽ gọi kết thúc lớp: gỡ gia sư, đóng roster, xóa lịch cố định và lịch bù tương lai.

@@ -65,7 +65,7 @@ function getAllowAssistantOnAdminRoute(
 }
 
 describe('RBAC route metadata', () => {
-  it.each(['createUser', 'updateUser', 'deleteUser'])(
+  it.each(['createUser', 'updateUser', 'setUserPassword', 'deleteUser'])(
     'allows assistant on UserController.%s',
     (methodName) => {
       expect(getAllowedStaffRoles(UserController, methodName)).toEqual([

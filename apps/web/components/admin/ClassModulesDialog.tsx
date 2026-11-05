@@ -11,6 +11,7 @@ import {
   ResponsiveDialogBody,
 } from "@/components/ui/ResponsiveDialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import RemovalImpactDescription from "@/components/admin/class/RemovalImpactDescription";
 import type { ClassModuleDto } from "@/dtos/course-content.dto";
 import * as classApi from "@/lib/apis/class.api";
 import { getMutationErrorMessage } from "@/lib/mutation-feedback";
@@ -25,8 +26,9 @@ type ClassModulesDialogProps = {
 };
 
 /**
- * Thêm/gỡ Chuyên đề của khoá vào lớp. Thêm chuyên đề kéo mọi tiết lý thuyết của nó và
- * đưa nhóm lên đầu; tiết thực hành vẫn giao từng tiết. Gỡ = coi như chưa từng thêm.
+ * Thêm/gỡ Chuyên đề của khoá vào lớp. Thêm chuyên đề chép một lần mọi tiết đang có
+ * (lý thuyết + lần giao thực hành) và đưa nhóm lên đầu. Lớp đã có một phần tiết thì
+ * **Thêm đủ** bổ sung tiết còn thiếu. Gỡ = mọi tiết của chuyên đề rời lớp (khác Ẩn).
  */
 export default function ClassModulesDialog({
   classId,
@@ -48,17 +50,20 @@ export default function ClassModulesDialog({
     void queryClient.invalidateQueries({
       queryKey: classTimelineKeys.list(classId),
     });
-    void queryClient.invalidateQueries({ queryKey: ["class-content", classId] });
+    void queryClient.invalidateQueries({
+      queryKey: ["class-content", classId],
+    });
     void queryClient.invalidateQueries({
       queryKey: classKeys.courseLessons(classId),
     });
   };
 
   const addMutation = useMutation({
-    mutationFn: (moduleId: string) => classApi.addClassModule(classId, moduleId),
+    mutationFn: (moduleId: string) =>
+      classApi.addClassModule(classId, moduleId),
     onSuccess: (modules) => {
       applyModules(modules);
-      toast.success("Đã thêm chuyên đề vào lớp.");
+      toast.success("Đã thêm tiết của chuyên đề vào lớp.");
     },
     onError: (error) =>
       toast.error(getMutationErrorMessage(error, "Không thêm được chuyên đề.")),
@@ -107,9 +112,9 @@ export default function ClassModulesDialog({
               Chuyên đề của lớp
             </h2>
             <p id={descriptionId} className="mt-0.5 text-xs text-text-muted">
-              Thêm chuyên đề để đưa mọi tiết lý thuyết của nó vào lớp; tiết lý
-              thuyết thêm vào chuyên đề sau này cũng tự hiện. Tiết thực hành giao
-              từng tiết.
+              Thêm chuyên đề đưa mọi tiết đang có của nó vào lớp; tiết thực hành
+              mở bài ngay, hạn theo hạn xem nội dung của lớp. Tiết khoá thêm vào
+              chuyên đề sau này không tự hiện.
             </p>
           </div>
           <button
@@ -161,9 +166,14 @@ export default function ClassModulesDialog({
         title={`Gỡ chuyên đề “${removeTarget?.title ?? ""}” khỏi lớp?`}
         description={
           <RemovalImpactDescription
+            intro="Nhóm chuyên đề và mọi tiết của nó (kể cả tiết đang Ẩn) biến mất khỏi lớp ở mọi phía. Bài làm, điểm và lượt xem giữ nguyên; thêm lại chuyên đề sẽ hiện lại, tiết từng Ẩn vẫn ẩn."
+            subject="Chuyên đề"
+            afterRemoval="Sau khi gỡ, trang Chấm bài của các tiết này không còn lối vào cho tới khi thêm lại chuyên đề."
             loading={removalImpactQuery.isLoading}
             failed={removalImpactQuery.isError}
-            ungradedEssayCount={removalImpactQuery.data?.ungradedEssayCount ?? 0}
+            ungradedEssayCount={
+              removalImpactQuery.data?.ungradedEssayCount ?? 0
+            }
             inProgressStudentCount={
               removalImpactQuery.data?.inProgressStudentCount ?? 0
             }
@@ -180,50 +190,6 @@ export default function ClassModulesDialog({
   );
 }
 
-/** Nội dung xác nhận gỡ; nằm trong `<p>` của AlertDialog nên chỉ dùng `<span>`. */
-function RemovalImpactDescription({
-  loading,
-  failed,
-  ungradedEssayCount,
-  inProgressStudentCount,
-}: {
-  loading: boolean;
-  failed: boolean;
-  ungradedEssayCount: number;
-  inProgressStudentCount: number;
-}) {
-  const warnings = [
-    ungradedEssayCount > 0
-      ? `${ungradedEssayCount} câu tự luận chưa chấm`
-      : null,
-    inProgressStudentCount > 0
-      ? `${inProgressStudentCount} học sinh đang làm dở`
-      : null,
-  ].filter(Boolean);
-
-  return (
-    <span className="block space-y-2">
-      <span className="block">
-        Nhóm chuyên đề biến mất khỏi lớp: tiết lý thuyết và tiết thực hành đã giao
-        đều ẩn với học sinh. Bài làm, điểm và lượt xem giữ nguyên; thêm lại chuyên
-        đề sẽ hiện lại.
-      </span>
-      {loading ? (
-        <span className="block text-text-muted">Đang kiểm tra bài làm...</span>
-      ) : failed ? (
-        <span className="block text-text-muted">
-          Không kiểm tra được bài làm dở / chưa chấm.
-        </span>
-      ) : warnings.length > 0 ? (
-        <span className="block rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 font-medium text-text-primary">
-          Chuyên đề còn {warnings.join(" và ")}. Sau khi gỡ, trang Chấm bài của
-          các tiết này không còn lối vào cho tới khi thêm lại chuyên đề.
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
 function ClassModuleRow({
   module,
   disabled,
@@ -237,6 +203,21 @@ function ClassModuleRow({
   onAdd: () => void;
   onRemove: () => void;
 }) {
+  const missing =
+    module.theoryLessonCount +
+    module.practiceLessonCount -
+    module.inClassLessonCount;
+  const addButton = (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onAdd}
+      className={`${rowButtonClass} border-border-default bg-bg-surface text-text-primary hover:bg-bg-secondary`}
+    >
+      <Plus className="size-3.5" aria-hidden />
+      {adding ? "Đang thêm..." : module.added ? "Thêm đủ" : "Thêm"}
+    </button>
+  );
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border-default bg-bg-surface p-3 sm:p-3.5">
       <Layers className="size-4 shrink-0 text-text-muted" aria-hidden />
@@ -250,28 +231,24 @@ function ClassModuleRow({
         <p className="mt-0.5 text-xs text-text-muted">
           {module.theoryLessonCount} tiết lý thuyết ·{" "}
           {module.practiceLessonCount} tiết thực hành
+          {module.added && missing > 0 ? ` · lớp còn thiếu ${missing}` : ""}
         </p>
       </div>
       {module.added ? (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onRemove}
-          className={`${rowButtonClass} border-error/40 bg-bg-surface text-error hover:bg-error/5`}
-        >
-          <Minus className="size-3.5" aria-hidden />
-          Gỡ
-        </button>
+        <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
+          {missing > 0 ? addButton : null}
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onRemove}
+            className={`${rowButtonClass} border-error/40 bg-bg-surface text-error hover:bg-error/5`}
+          >
+            <Minus className="size-3.5" aria-hidden />
+            Gỡ
+          </button>
+        </div>
       ) : (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onAdd}
-          className={`${rowButtonClass} border-border-default bg-bg-surface text-text-primary hover:bg-bg-secondary`}
-        >
-          <Plus className="size-3.5" aria-hidden />
-          {adding ? "Đang thêm..." : "Thêm"}
-        </button>
+        addButton
       )}
     </div>
   );

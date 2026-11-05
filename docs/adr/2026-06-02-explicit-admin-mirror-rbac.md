@@ -11,6 +11,7 @@ Assistant is the default admin-mirror role on `@Roles(admin)` routes unless the 
 - `staff.assistant` should be able to use nearly all admin and staff-mirror operations.
 - `@AllowAssistantOnAdminRoutes(false)` marks the exceptions that remain full-admin only.
 - The current exceptions are admin dashboard aggregate routes and the direct-topup approval/queue/manual wallet-credit flows for student wallets. Assistant may still create a top-up request for admin approval and may withdraw/reduce student balance directly, but may not apply a positive manual wallet credit.
+- Notification moderation is a partial exception: assistant sees every published notification on the management screen (other people's drafts stay private) and may delete notifications authored by staff, but may not delete notifications authored by admin. Like admin, assistant may never edit or re-push someone else's notification (see CONTEXT.md "Người tạo thông báo").
 
 ## Consequences
 

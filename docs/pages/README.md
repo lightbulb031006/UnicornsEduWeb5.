@@ -1,4 +1,4 @@
-# Unicorns Edu 5.0 – Page Plans
+# UniEdu 5.0 – Page Plans
 
 Page-level specs for `apps/web`, aligned with [Workplan](../Workplan.md) and [UI-Schema](../UI-Schema.md).
 

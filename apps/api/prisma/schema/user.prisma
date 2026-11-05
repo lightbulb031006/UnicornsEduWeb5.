@@ -26,11 +26,11 @@ model User {
   regulationsUpdated                      Regulation[]                      @relation("RegulationUpdatedBy")
   studentWalletSepayOrdersCreated         StudentWalletSepayOrder[]         @relation("StudentWalletSepayOrdersCreatedBy")
   studentWalletDirectTopUpRequestsCreated StudentWalletDirectTopUpRequest[] @relation("StudentWalletDirectTopUpRequestsRequestedBy")
-  lessonsCreated                         Lesson[]                         @relation("LessonCreatedBy")
-  lessonsUpdated                         Lesson[]                         @relation("LessonUpdatedBy")
-  staffInfo                              StaffInfo?
+  lessonsCreated                          Lesson[]                          @relation("LessonCreatedBy")
+  lessonsUpdated                          Lesson[]                          @relation("LessonUpdatedBy")
+  staffInfo                               StaffInfo?
   studentInfo                             StudentInfo?
-  userDevices                            UserDevice[]
+  userDevices                             UserDevice[]
   loginRequests                           LoginRequest[]
 
   @@index([email])

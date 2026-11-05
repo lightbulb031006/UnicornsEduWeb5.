@@ -166,6 +166,13 @@ export class AchievementDto {
   @ApiProperty({ example: 0 })
   sortOrder: number;
 
+  @ApiProperty({
+    example: true,
+    description:
+      'Thành tích nổi bật (tích sao) — tối đa 1 / nhân sự, luôn đứng đầu. Luôn false với thành tích học sinh.',
+  })
+  isHighlight: boolean;
+
   @ApiProperty()
   createdAt: Date;
 

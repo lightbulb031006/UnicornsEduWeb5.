@@ -21,6 +21,7 @@ import {
 } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import {
+  CloseFixedSalaryMonthDto,
   StaffFixedSalaryOverridesQueryDto,
   StaffFixedSalaryPayablesQueryDto,
   UpsertRoleFixedSalaryDefaultsDto,
@@ -213,18 +214,38 @@ export class FixedSalarySettingsController {
     return this.fixedSalaryCloseService.listPayables(query.month);
   }
 
+  @Get('close-candidates')
+  @ApiOperation({
+    summary: 'List staff for the per-person fixed-salary close dialog',
+    description:
+      'Current Asia/Ho_Chi_Minh month. One item per staff that has an existing payable this month or an eligible fixed-salary role (active staff, applied amount > 0, never teacher). Each role is `closed` (frozen payable amounts) or `unclosed` (projected amounts from current config). Does not generate rows.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'month + items[] with staffId, staffFullName, totalGrossAmount, closedRoleCount, roles[].',
+  })
+  async listCloseCandidates() {
+    return this.fixedSalaryCloseService.listCloseCandidates();
+  }
+
   @Post('close-month')
   @ApiOperation({
     summary: 'Close the current month’s fixed salaries',
     description:
-      'Generate pending lương cứng payables for the current Asia/Ho_Chi_Minh month. One row per (active staff, current fixed-salary role) with applied amount > 0. Teacher is skipped even if leftover config exists. Snapshots gross, operating %, tax %, deduction amounts, and net using calculateDeductionAmounts (operating on gross, then tax on remainder). Idempotent: unique (staff, role, month) at the database; reruns skip existing rows without changing them. Manual close always runs this path. The day-28 cron uses a separate automatic entry that skips the whole month when any payable already exists.',
+      'Generate pending lương cứng payables for the current Asia/Ho_Chi_Minh month. One row per (active staff, current fixed-salary role) with applied amount > 0. Teacher is skipped even if leftover config exists. Optional `staffIds` limits the close to those staff (per-person close); omit it to close every eligible staff. Snapshots gross, operating %, tax %, deduction amounts, and net using calculateDeductionAmounts (operating on gross, then tax on remainder). Idempotent: unique (staff, role, month) at the database; reruns skip existing rows without changing them. The day-28 cron runs the same all-staff path, so it fills in staff not yet closed.',
   })
+  @ApiBody({ type: CloseFixedSalaryMonthDto, required: false })
   @ApiResponse({
     status: 201,
     description:
       'Close result: createdCount, skippedCount (already existed), and the full payable list for the month.',
   })
-  async closeCurrentMonth() {
-    return this.fixedSalaryCloseService.closeCurrentMonth();
+  @ApiResponse({
+    status: 400,
+    description: 'staffIds is not a non-empty string array.',
+  })
+  async closeCurrentMonth(@Body() data: CloseFixedSalaryMonthDto = {}) {
+    return this.fixedSalaryCloseService.closeCurrentMonth(data?.staffIds);
   }
 }

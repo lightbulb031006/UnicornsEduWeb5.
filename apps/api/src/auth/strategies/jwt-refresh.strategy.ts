@@ -60,7 +60,6 @@ export class JwtRefreshStrategy extends PassportStrategy(
       refreshToken,
       userId: payload.id,
       deviceId: payload.deviceId,
-      roleType: payload.roleType,
     });
 
     if (!device) {

@@ -99,17 +99,19 @@ export interface CustomerCareBulkPaymentStatusUpdateResultDto {
   updatedCount: number;
 }
 
-/** Học sinh nghỉ trong tháng điền bù mà chưa có lý do nghỉ. */
+/** Học sinh nghỉ từ mốc nhắc mà còn thiếu lý do nghỉ. */
 export interface CustomerCareMissingDropOutReasonDto {
   studentId: string;
   fullName: string;
   /** Ngày nghỉ học, dạng `YYYY-MM-DD`. */
   dropOutDate: string;
+  /** Lý do hiện có (để điền sẵn); null khi còn thiếu. */
+  dropOutReason: string | null;
 }
 
 export interface CustomerCareMissingDropOutReasonListDto {
-  /** Tháng cần điền bù lý do nghỉ, dạng `YYYY-MM`. */
-  monthKey: string;
+  /** Mốc ngày nghỉ bắt đầu nhắc, dạng `YYYY-MM-DD`. */
+  since: string;
   items: CustomerCareMissingDropOutReasonDto[];
 }
 

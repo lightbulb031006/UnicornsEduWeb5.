@@ -13,7 +13,11 @@ import { DROP_OUT_REASON_REMINDER_DISMISS_KEY } from "@/lib/login-scoped-dismiss
 import { getMutationErrorMessage } from "@/lib/mutation-feedback";
 import { validateBackfilledDropOutReason } from "@/lib/student-drop-out-reason";
 
-const MISSING_REASONS_QUERY_KEY = ["customer-care", "me", "missing-drop-out-reasons"] as const;
+const MISSING_REASONS_QUERY_KEY = [
+  "customer-care",
+  "me",
+  "missing-drop-out-reasons",
+] as const;
 
 /** Giá trị chỉ đọc một lần lúc mount nên không cần subscribe thật. */
 const subscribeNoop = () => () => {};
@@ -23,23 +27,26 @@ function formatIsoDate(value: string): string {
   return year && month && day ? `${day}/${month}/${year}` : value;
 }
 
-function formatMonthKey(monthKey: string): string {
-  const [year, month] = monthKey.split("-");
-  return year && month ? `${Number(month)}/${year}` : monthKey;
-}
-
-function DropOutReasonReminderRow({ item }: { item: CustomerCareMissingDropOutReason }) {
+function DropOutReasonReminderRow({
+  item,
+}: {
+  item: CustomerCareMissingDropOutReason;
+}) {
   const queryClient = useQueryClient();
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(item.dropOutReason ?? "");
 
   const saveMutation = useMutation({
-    mutationFn: (dropOutReason: string) =>
-      studentApi.updateStudentById(item.studentId, { drop_out_reason: dropOutReason }),
+    mutationFn: (nextReason: string) =>
+      studentApi.updateStudentById(item.studentId, {
+        drop_out_reason: nextReason,
+      }),
     onSuccess: async () => {
       toast.success("Đã lưu lý do nghỉ.");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: MISSING_REASONS_QUERY_KEY }),
-        queryClient.invalidateQueries({ queryKey: ["student", "detail", item.studentId] }),
+        queryClient.invalidateQueries({
+          queryKey: ["student", "detail", item.studentId],
+        }),
       ]);
     },
     onError: (error) => {
@@ -63,8 +70,12 @@ function DropOutReasonReminderRow({ item }: { item: CustomerCareMissingDropOutRe
     <li className="rounded-lg border border-border-default bg-bg-secondary/40 p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-text-primary">{item.fullName}</p>
-          <p className="text-xs text-text-muted">Nghỉ ngày {formatIsoDate(item.dropOutDate)}</p>
+          <p className="break-words text-sm font-semibold text-text-primary">
+            {item.fullName}
+          </p>
+          <p className="text-xs text-text-muted">
+            Nghỉ ngày {formatIsoDate(item.dropOutDate)}
+          </p>
         </div>
         <Link
           href={`/staff/students/${encodeURIComponent(item.studentId)}`}
@@ -74,41 +85,46 @@ function DropOutReasonReminderRow({ item }: { item: CustomerCareMissingDropOutRe
           Xem hồ sơ
         </Link>
       </div>
-      <form onSubmit={handleSubmit} className="mt-2 flex flex-col gap-2 sm:flex-row">
-        <label htmlFor={inputId} className="sr-only">
-          Lý do nghỉ của {item.fullName}
-        </label>
-        <input
-          id={inputId}
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          maxLength={STUDENT_DROP_OUT_REASON_MAX_LENGTH}
-          placeholder="Lý do nghỉ học"
-          disabled={saveMutation.isPending}
-          className="min-w-0 flex-1 rounded-md border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
-        />
-        <button
-          type="submit"
-          disabled={saveMutation.isPending}
-          className="rounded-md bg-primary px-3 py-2 text-xs font-semibold text-text-inverse transition hover:opacity-90 disabled:opacity-60"
-        >
-          {saveMutation.isPending ? "Đang lưu…" : "Lưu"}
-        </button>
+      <form onSubmit={handleSubmit} className="mt-2 flex flex-col gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <label htmlFor={inputId} className="sr-only">
+            Lý do nghỉ của {item.fullName}
+          </label>
+          <input
+            id={inputId}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            maxLength={STUDENT_DROP_OUT_REASON_MAX_LENGTH}
+            placeholder="Lý do nghỉ học"
+            disabled={saveMutation.isPending}
+            className="min-w-0 flex-1 rounded-md border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
+          />
+          <button
+            type="submit"
+            disabled={saveMutation.isPending}
+            className="rounded-md bg-primary px-3 py-2 text-xs font-semibold text-text-inverse transition hover:opacity-90 disabled:opacity-60"
+          >
+            {saveMutation.isPending ? "Đang lưu…" : "Lưu"}
+          </button>
+        </div>
       </form>
     </li>
   );
 }
 
 /**
- * Nhắc CSKH điền bù lý do nghỉ cho học sinh mình phụ trách đã nghỉ trong tháng
- * điền bù (lý do chỉ bắt buộc từ 10/2026). Panel nổi không có backdrop nên không
- * chặn thao tác khác; "Để sau" ẩn tới hết phiên (sessionStorage, xoá khi đăng xuất).
+ * Nhắc CSKH điền lý do nghỉ cho học sinh mình phụ trách đã nghỉ từ 01/09/2026
+ * mà còn thiếu lý do. Áp dụng cả nhân sự kiêm nhiều role có
+ * CSKH. Panel nổi không có backdrop nên không chặn thao tác khác; "Đóng" ẩn tới
+ * hết phiên đăng nhập (sessionStorage, xoá khi đăng xuất).
  */
 export default function DropOutReasonReminder() {
   // Server snapshot luôn là false để HTML server và lần hydrate đầu khớp nhau.
   const dismissedThisSession = useSyncExternalStore(
     subscribeNoop,
-    () => window.sessionStorage.getItem(DROP_OUT_REASON_REMINDER_DISMISS_KEY) === "1",
+    () =>
+      window.sessionStorage.getItem(DROP_OUT_REASON_REMINDER_DISMISS_KEY) ===
+      "1",
     () => false,
   );
   const [dismissedLocally, setDismissedLocally] = useState(false);
@@ -120,7 +136,8 @@ export default function DropOutReasonReminder() {
     staleTime: 60_000,
   });
   const isCustomerCare = Boolean(
-    fullProfile?.staffInfo?.id && fullProfile.staffInfo.roles?.includes("customer_care"),
+    fullProfile?.staffInfo?.id &&
+    fullProfile.staffInfo.roles?.includes("customer_care"),
   );
   const isDismissed = dismissedThisSession || dismissedLocally;
 
@@ -142,8 +159,6 @@ export default function DropOutReasonReminder() {
     setDismissedLocally(true);
   };
 
-  const monthLabel = formatMonthKey(missingReasonsQuery.data?.monthKey ?? "");
-
   return (
     <section
       role="dialog"
@@ -152,11 +167,15 @@ export default function DropOutReasonReminder() {
       className="fixed inset-x-3 bottom-3 z-50 flex max-h-[60vh] flex-col overflow-hidden rounded-2xl border border-warning/40 bg-bg-surface shadow-2xl sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-[26rem]"
     >
       <header className="border-b border-border-default bg-warning/10 px-4 py-3">
-        <h2 id="drop-out-reason-reminder-title" className="text-sm font-semibold text-text-primary">
-          Còn {items.length} học sinh nghỉ tháng {monthLabel} chưa có lý do
+        <h2
+          id="drop-out-reason-reminder-title"
+          className="text-sm font-semibold text-text-primary"
+        >
+          Còn {items.length} học sinh nghỉ chưa có lý do
         </h2>
         <p className="mt-1 text-xs text-text-secondary">
-          Điền lý do nghỉ cho từng học sinh bạn phụ trách. Lưu xong học sinh tự biến khỏi danh sách.
+          Ghi lý do nghỉ cho từng học sinh bạn phụ trách. Lưu xong học sinh tự
+          biến khỏi danh sách.
         </p>
       </header>
 
@@ -172,7 +191,7 @@ export default function DropOutReasonReminder() {
           onClick={handleDismiss}
           className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:bg-bg-secondary"
         >
-          Để sau
+          Đóng
         </button>
       </footer>
     </section>

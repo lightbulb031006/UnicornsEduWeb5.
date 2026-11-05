@@ -13,6 +13,7 @@ import type {
   ExtraAllowanceBaseFields,
   ExtraAllowanceRoleType,
   ExtraAllowanceStatus,
+  ExtraAllowanceStudentSummary,
   ExtraAllowanceUpsertMode,
 } from "@/dtos/extra-allowance.dto";
 import type { StaffOption } from "@/dtos/staff.dto";
@@ -22,6 +23,9 @@ import {
   getExtraAllowanceRoleLabel,
   getExtraAllowanceStatusLabel,
 } from "./extraAllowancePresentation";
+import SaleStudentPicker, {
+  type SaleStudentPickerSource,
+} from "./SaleStudentPicker";
 import {
   moneyInputInitialFromNumber,
   parseMoneyInput,
@@ -34,6 +38,8 @@ export interface ExtraAllowanceFormSubmitPayload {
   status: ExtraAllowanceStatus;
   note?: string;
   roleType: ExtraAllowanceRoleType;
+  /** Chỉ có khi roleType = sale. */
+  studentId?: string;
 }
 
 type Props = {
@@ -52,6 +58,11 @@ type Props = {
   lockStatusToPending?: boolean;
   onSubmit: (payload: ExtraAllowanceFormSubmitPayload) => Promise<void> | void;
   isSubmitting?: boolean;
+  /** Nguồn tìm học sinh cho Trợ cấp sale. */
+  studentOptionsSource?: SaleStudentPickerSource;
+  /** Hiện nút xoá ở footer (mode edit); trang cha tự hỏi xác nhận. */
+  onDelete?: () => void;
+  isDeleting?: boolean;
 };
 
 function getPopupTitle(mode: ExtraAllowanceUpsertMode): string {
@@ -126,6 +137,9 @@ export default function ExtraAllowanceFormPopup({
   lockStatusToPending = false,
   onSubmit,
   isSubmitting = false,
+  studentOptionsSource = "admin",
+  onDelete,
+  isDeleting = false,
 }: Props) {
   const isContextLocked = Boolean(lockedContext);
   const effectiveLockedRoleType = lockedContext?.roleType ?? lockedRoleType;
@@ -146,6 +160,13 @@ export default function ExtraAllowanceFormPopup({
     getInitialAmountInput(initialData),
   );
   const [note, setNote] = useState(() => getInitialNote(initialData));
+  const [selectedStudent, setSelectedStudent] =
+    useState<ExtraAllowanceStudentSummary | null>(
+      () => initialData?.student ?? null,
+    );
+  const isSaleAllowance = roleType === "sale";
+  const isOrphanSaleAllowance =
+    isSaleAllowance && mode === "edit" && !initialData?.student && !selectedStudent;
   const [debouncedStaffSearch] = useDebounce(staffSearchInput.trim(), 250);
   const staffSearchRef = useRef<HTMLDivElement | null>(null);
 
@@ -212,6 +233,16 @@ export default function ExtraAllowanceFormPopup({
       return;
     }
 
+    if (isSaleAllowance && !selectedStudent) {
+      toast.error("Trợ cấp sale phải chọn học sinh.");
+      return;
+    }
+
+    if (isSaleAllowance && !note.trim()) {
+      toast.error("Trợ cấp sale phải có ghi chú.");
+      return;
+    }
+
     await onSubmit({
       staffId: selectedStaff.id,
       month: trimmedMonth,
@@ -219,6 +250,7 @@ export default function ExtraAllowanceFormPopup({
       status: effectiveLockedStatus ?? status,
       note: note.trim() || undefined,
       roleType,
+      studentId: isSaleAllowance ? selectedStudent?.id : undefined,
     });
   };
 
@@ -264,25 +296,24 @@ export default function ExtraAllowanceFormPopup({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <MonthInput
+            name="extra_allowance_month"
+            aria-label="Tháng"
+            autoComplete="off"
+            value={month}
+            onChange={(event) => setMonth(event.target.value)}
+            required
+          />
+
           <div className="grid gap-3 sm:grid-cols-2">
-            {isContextLocked && lockedContext ? (
-              <div className="rounded-xl border border-border-default bg-bg-secondary/45 px-3 py-2.5 sm:col-span-2">
-                <p className="text-xs font-medium text-text-muted">Nhân sự</p>
-                <p className="mt-1 truncate text-sm font-semibold text-text-primary">
-                  {lockedContext.staff.fullName}
-                </p>
-                <p className="mt-1 truncate text-xs text-text-muted">
-                  {formatStaffRoleSummary(lockedContext.staff.roles)}
-                </p>
-              </div>
-            ) : (
+            {isContextLocked ? null : (
               <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
                 <span>Nhân sự</span>
                 <div className="space-y-2">
                   {selectedStaff ? (
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-text-primary">
+                        <p className="break-words text-sm font-semibold text-text-primary">
                           {selectedStaff.fullName}
                         </p>
                         <p className="truncate text-xs text-text-muted">
@@ -438,18 +469,6 @@ export default function ExtraAllowanceFormPopup({
               </label>
             )}
 
-            <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              <span>Tháng</span>
-              <MonthInput
-                name="extra_allowance_month"
-                autoComplete="off"
-                value={month}
-                onChange={(event) => setMonth(event.target.value)}
-                className="min-h-11 rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                required
-              />
-            </label>
-
             <div className="flex flex-col gap-1 text-sm text-text-secondary">
               <span>Trạng thái</span>
               {effectiveLockedStatus ? (
@@ -485,8 +504,30 @@ export default function ExtraAllowanceFormPopup({
               />
             </label>
 
+            {isSaleAllowance ? (
+              <div className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                <span>
+                  Học sinh <span className="text-error">*</span>
+                </span>
+                {isOrphanSaleAllowance ? (
+                  <p className="text-xs text-warning">
+                    Học sinh cũ đã bị xoá. Chọn học sinh khác để lưu thay đổi.
+                  </p>
+                ) : null}
+                <SaleStudentPicker
+                  source={studentOptionsSource}
+                  value={selectedStudent}
+                  onChange={setSelectedStudent}
+                  enabled={open}
+                />
+              </div>
+            ) : null}
+
             <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-              <span>Ghi chú</span>
+              <span>
+                Ghi chú
+                {isSaleAllowance ? <span className="text-error"> *</span> : null}
+              </span>
               <textarea
                 name="extra_allowance_note"
                 autoComplete="off"
@@ -500,6 +541,16 @@ export default function ExtraAllowanceFormPopup({
           </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-border-default pt-4">
+            {onDelete ? (
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={isSubmitting || isDeleting}
+                className="mr-auto rounded-md border border-error/30 bg-error/8 px-4 py-2 text-sm font-medium text-error transition-colors duration-200 hover:bg-error/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-60"
+              >
+                {isDeleting ? "Đang xoá…" : "Xoá"}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onClose}

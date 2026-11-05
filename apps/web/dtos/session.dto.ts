@@ -1,5 +1,43 @@
 export type SessionPaymentStatus = "paid" | "unpaid" | "deposit" | string;
-export type SessionAttendanceStatus = "present" | "excused" | "absent";
+/** `trial` = Học thử: không trừ ví, không tính sĩ số trợ cấp; thu bù gấp đôi ở buổi học/phép kế tiếp cùng lớp. */
+export type SessionAttendanceStatus = "present" | "excused" | "absent" | "trial";
+
+/** Tiến độ buổi. Null trên buổi = buổi legacy (nhận xét tự do trong `notes`). */
+export type SessionProgressStatus = "completed" | "partial" | "not_completed";
+
+/** Chất lượng BTVN buổi trước của một học sinh. */
+export type HomeworkQuality = "passed" | "needs_revision" | "failed";
+
+/** Phần chung của Nhận xét buổi học có cấu trúc. */
+export interface SessionReviewFields {
+  progressStatus?: SessionProgressStatus | null;
+  /** Plain text, mỗi dòng 1 ý. */
+  progressDone?: string | null;
+  /** Plain text, mỗi dòng 1 ý, kèm lý do. */
+  progressRemaining?: string | null;
+  hasInClassTest?: boolean;
+  inClassTestContent?: string | null;
+  inClassTestTotal?: number | null;
+  /** ISO 8601 có offset. */
+  homeworkDueAt?: string | null;
+  nextSessionPlan?: string | null;
+  hasRetest?: boolean;
+  retestContent?: string | null;
+}
+
+/** Phần từng học sinh của Nhận xét buổi học có cấu trúc. */
+export interface AttendanceReviewFields {
+  testCorrectCount?: number | null;
+  testComment?: string | null;
+  strengths?: string | null;
+  improvements?: string | null;
+  homeworkQuality?: HomeworkQuality | null;
+  homeworkComment?: string | null;
+}
+
+export interface SessionNextOrdinalResponse {
+  ordinal: number;
+}
 
 export interface SessionClassRef {
   id: string;
@@ -11,7 +49,7 @@ export interface SessionTeacherRef {
   fullName?: string | null;
 }
 
-export interface SessionAttendanceItem {
+export interface SessionAttendanceItem extends AttendanceReviewFields {
   studentId: string;
   status: SessionAttendanceStatus;
   notes?: string | null;
@@ -81,7 +119,7 @@ export interface MissedTeachingExplanationRecord {
   explainedByName?: string | null;
 }
 
-export interface SessionCreatePayload {
+export interface SessionCreatePayload extends SessionReviewFields {
   classId: string;
   teacherId: string;
   date: string;
@@ -102,7 +140,7 @@ export interface SessionCreatePayload {
   attendance?: SessionAttendanceItem[];
 }
 
-export interface SessionUpdatePayload {
+export interface SessionUpdatePayload extends SessionReviewFields {
   id?: string;
   classId?: string;
   teacherId?: string;
@@ -131,7 +169,7 @@ export interface SessionBulkPaymentStatusUpdateResult {
   updatedCount: number;
 }
 
-export interface SessionAttendanceRecord {
+export interface SessionAttendanceRecord extends AttendanceReviewFields {
   studentId: string;
   status: SessionAttendanceStatus;
   notes?: string | null;
@@ -139,8 +177,10 @@ export interface SessionAttendanceRecord {
   student?: { fullName?: string | null } | null;
 }
 
-export interface SessionItem {
+export interface SessionItem extends SessionReviewFields {
   id: string;
+  /** Số thứ tự buổi trong lớp (suy ra từ ngày + giờ, tính cả buổi bù). */
+  ordinal?: number | null;
   classId: string;
   teacherId: string;
   date: string;

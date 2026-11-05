@@ -1,13 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { notFound, usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
+import {
+  isGiftedLessonPlanRoute,
+  useGiftedLessonPlanEnabled,
+} from "@/lib/gifted-lesson-plan";
 import { resolveStaffShellRouteAccess } from "@/lib/staff-shell-access";
 import {
   isRestrictedByEmailVerification,
-  OPEN_EMAIL_VERIFICATION_MODAL_EVENT,
+  openEmailVerificationModal,
 } from "@/lib/email-verification-access";
 
 export default function StaffAccessGate({
@@ -18,6 +22,7 @@ export default function StaffAccessGate({
   const pathname = usePathname();
   const { replace } = useRouter();
   const { user, isAuthReady } = useAuth();
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
   const restrictedByEmailVerification = isRestrictedByEmailVerification(user);
 
   const routeAccess = resolveStaffShellRouteAccess(user, pathname);
@@ -35,6 +40,7 @@ export default function StaffAccessGate({
     isAccountantSelfRoute,
     isCommunicationSelfRoute,
     isTechnicalSelfRoute,
+    isSaleSelfRoute,
     isLessonPlanLegacyRoute,
     isStaffLessonPlansTaskDetailRoute,
     isLessonPlanManageDetailsRoute,
@@ -76,7 +82,8 @@ export default function StaffAccessGate({
                     : isAssistantSelfRoute ||
                         isAccountantSelfRoute ||
                         isCommunicationSelfRoute ||
-                        isTechnicalSelfRoute
+                        isTechnicalSelfRoute ||
+                        isSaleSelfRoute
                       ? "Allowance Locked"
                       : isLessonPlanLegacyRoute ||
                           isStaffLessonPlansTaskDetailRoute ||
@@ -120,6 +127,8 @@ export default function StaffAccessGate({
                             ? "Tài khoản này không dùng được màn trợ cấp truyền thông cá nhân."
                             : isTechnicalSelfRoute
                               ? "Tài khoản này không dùng được màn trợ cấp kỹ thuật cá nhân."
+                              : isSaleSelfRoute
+                              ? "Tài khoản này không dùng được màn trợ cấp sale cá nhân."
                               : isLessonPlanLegacyRoute
                                 ? "Tài khoản này không dùng được route giáo án cũ."
                                 : isStaffLessonPlansTaskDetailRoute
@@ -131,7 +140,7 @@ export default function StaffAccessGate({
                                       ? "Tài khoản này không dùng được màn lesson output cá nhân."
                                       : "Tài khoản này không dùng được màn vận hành lớp học.";
   const lockedDescription = isStaffNotificationManageRoute
-    ? "Route `/staff/notification/manage` mở cho admin, trợ lí, giáo án, trưởng giáo án, kế toán thu, kế toán chi, truyền thông, kỹ thuật và đào tạo. Gia sư và CSKH chỉ nhận thông báo qua `/staff/notification`."
+    ? "Route `/staff/notification/manage` mở cho admin, trợ lí, giáo án, trưởng giáo án, kế toán, kế toán thu, kế toán chi, truyền thông, kỹ thuật, đào tạo và sale. Gia sư và CSKH chỉ nhận thông báo qua `/staff/notification`."
     : isRootStaffProfileRoute || isNotesSubjectRoute
       ? "Route `/staff` hiện là hồ sơ của chính nhân sự đang đăng nhập. Nó chỉ mở khi tài khoản có liên kết staff record hợp lệ."
       : isStaffNotificationRoute
@@ -164,6 +173,8 @@ export default function StaffAccessGate({
                             ? "Màn này chỉ mở khi hồ sơ nhân sự hiện tại có role `communication`. Nó hiển thị trợ cấp của chính bạn và cho phép tự khai báo/chỉnh sửa theo policy hiện tại."
                             : isTechnicalSelfRoute
                               ? "Màn này chỉ mở khi hồ sơ nhân sự hiện tại có role `technical`. Nó hiển thị trợ cấp của chính bạn và cho phép tự khai báo/chỉnh sửa theo policy hiện tại."
+                              : isSaleSelfRoute
+                              ? "Màn này chỉ mở khi hồ sơ nhân sự hiện tại có role `sale`. Mỗi khoản trợ cấp gắn một học sinh và có ghi chú; sửa/xoá được khi chưa thanh toán."
                               : isLessonPlanLegacyRoute
                                 ? "Các route legacy `/staff/lesson-plan-tasks*` đã được gộp vào `/staff/lesson-plans`. Workspace mới mở cho `admin`, `staff.assistant`, `staff.lesson_plan_head`, `staff.lesson_plan`, và `staff.accountant_expense`, nhưng mỗi role chỉ thấy đúng các tab và route detail được backend cho phép."
                                 : isStaffLessonPlansTaskDetailRoute
@@ -177,7 +188,7 @@ export default function StaffAccessGate({
 
   useEffect(() => {
     if (isAuthReady && restrictedByEmailVerification) {
-      window.dispatchEvent(new Event(OPEN_EMAIL_VERIFICATION_MODAL_EVENT));
+      openEmailVerificationModal({ kind: "status" });
       replace("/");
       return;
     }
@@ -192,6 +203,11 @@ export default function StaffAccessGate({
     restrictedByEmailVerification,
     replace,
   ]);
+
+  // Giáo án học sinh giỏi chỉ có trên IT — JP/ENG trả 404.
+  if (giftedLessonPlanEnabled === false && isGiftedLessonPlanRoute(pathname)) {
+    notFound();
+  }
 
   if (!isAuthReady) {
     return (

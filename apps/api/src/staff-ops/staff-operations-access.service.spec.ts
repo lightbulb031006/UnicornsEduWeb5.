@@ -23,6 +23,9 @@ describe('StaffOperationsAccessService', () => {
       findUnique: jest.fn(),
       findMany: jest.fn(),
     },
+    class: {
+      findFirst: jest.fn(),
+    },
   };
 
   let service: StaffOperationsAccessService;
@@ -240,5 +243,86 @@ describe('StaffOperationsAccessService', () => {
         'class-1',
       ),
     ).resolves.toBe('customer_care');
+  });
+
+  describe('resolveClassTeacherManagerScope', () => {
+    it('gives admin users full scope without a staff lookup', async () => {
+      await expect(
+        service.resolveClassTeacherManagerScope(
+          'admin-user',
+          UserRole.admin,
+          'class-1',
+        ),
+      ).resolves.toEqual({ lockedTeacherId: null });
+      expect(mockPrisma.staffInfo.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('gives assistant staff full scope', async () => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue({
+        id: 'staff-assistant',
+        roles: [StaffRole.assistant],
+      });
+
+      await expect(
+        service.resolveClassTeacherManagerScope(
+          'user-1',
+          UserRole.staff,
+          'class-1',
+        ),
+      ).resolves.toEqual({ lockedTeacherId: null });
+      expect(mockPrisma.class.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('locks the training manager own teacher row on managed classes', async () => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue({
+        id: 'staff-training',
+        roles: [StaffRole.training, StaffRole.teacher],
+      });
+      mockPrisma.class.findFirst.mockResolvedValue({ id: 'class-1' });
+
+      await expect(
+        service.resolveClassTeacherManagerScope(
+          'user-1',
+          UserRole.staff,
+          'class-1',
+        ),
+      ).resolves.toEqual({ lockedTeacherId: 'staff-training' });
+      expect(mockPrisma.class.findFirst).toHaveBeenCalledWith({
+        where: { id: 'class-1', trainingManagerStaffId: 'staff-training' },
+        select: { id: true },
+      });
+    });
+
+    it('rejects training staff on classes they do not manage', async () => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue({
+        id: 'staff-training',
+        roles: [StaffRole.training],
+      });
+      mockPrisma.class.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.resolveClassTeacherManagerScope(
+          'user-1',
+          UserRole.staff,
+          'class-2',
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects plain teachers', async () => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue({
+        id: 'staff-teacher',
+        roles: [StaffRole.teacher],
+      });
+
+      await expect(
+        service.resolveClassTeacherManagerScope(
+          'user-1',
+          UserRole.staff,
+          'class-1',
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.class.findFirst).not.toHaveBeenCalled();
+    });
   });
 });

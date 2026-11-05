@@ -129,6 +129,7 @@ export class ExamLibraryService extends CourseContentSupportService {
         moduleId: dto.moduleId,
         classId: null,
         title: dto.title,
+        durationMinutes: dto.durationMinutes,
       },
       actor,
     );

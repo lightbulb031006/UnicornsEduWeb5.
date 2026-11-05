@@ -116,32 +116,47 @@ interface FinancialDetailModalContentProps {
   detail?: AdminDashboardFinancialDetail;
   isLoading: boolean;
   error: unknown;
+  /** Lọc sẵn theo 1+ nguồn khi mở (vd. Bonus = thưởng + phạt). */
+  initialSourceKeys?: string[];
 }
 
-function FinancialDetailModalContent({ rowLabel, detail, isLoading, error }: FinancialDetailModalContentProps) {
-  const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
+function FinancialDetailModalContent({
+  rowLabel,
+  detail,
+  isLoading,
+  error,
+  initialSourceKeys,
+}: FinancialDetailModalContentProps) {
+  const [selectedSourceKeys, setSelectedSourceKeys] = useState<string[] | null>(null);
 
   // Reset ngay trong render: effect sẽ hiện 1 frame với filter của dòng trước.
   const detailIdentity = `${detail?.rowKey ?? ""}|${detail?.title ?? ""}`;
-  const [prevDetailIdentity, setPrevDetailIdentity] = useState(detailIdentity);
+  const [prevDetailIdentity, setPrevDetailIdentity] = useState("");
   if (prevDetailIdentity !== detailIdentity) {
     setPrevDetailIdentity(detailIdentity);
-    setSelectedSourceKey(null);
+    const available = (initialSourceKeys ?? []).filter((key) =>
+      detail?.sources.some((source) => source.key === key),
+    );
+    setSelectedSourceKeys(available.length > 0 ? available : null);
   }
 
   const filteredItems = useMemo(() => {
     if (!detail) return [];
-    if (!selectedSourceKey) return detail.items;
+    if (!selectedSourceKeys) return detail.items;
 
     return detail.items
       .map((item) => {
-        const { amount, note } = getAmountForSource(item, selectedSourceKey, detail.rowKey);
+        let amount = 0;
+        let note: string | null = null;
+        for (const key of selectedSourceKeys) {
+          const part = getAmountForSource(item, key, detail.rowKey);
+          amount += part.amount;
+          note = note ?? part.note;
+        }
         return { ...item, amount, note };
       })
       .filter((item) => item.amount !== 0);
-  }, [detail, selectedSourceKey]);
-
-  const showSourceNote = Boolean(detail?.items.some((item) => "sourceNote" in item));
+  }, [detail, selectedSourceKeys]);
 
   if (isLoading) {
     return <AdminDashboardFinancialDetailSkeleton />;
@@ -177,7 +192,7 @@ function FinancialDetailModalContent({ rowLabel, detail, isLoading, error }: Fin
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {detail.sources.map((source) => {
-              const isSelected = selectedSourceKey === source.key;
+              const isSelected = selectedSourceKeys?.includes(source.key) ?? false;
               const accent = getFinancialSourceAccentClasses(source.tone);
 
               const interactiveBorderClass = isSelected
@@ -192,7 +207,11 @@ function FinancialDetailModalContent({ rowLabel, detail, isLoading, error }: Fin
                 <button
                   key={source.key}
                   type="button"
-                  onClick={() => setSelectedSourceKey((prev) => (prev === source.key ? null : source.key))}
+                  onClick={() =>
+                    setSelectedSourceKeys((prev) =>
+                      prev?.length === 1 && prev[0] === source.key ? null : [source.key],
+                    )
+                  }
                   className={`rounded-xl border p-4 shadow-sm text-left transition-all duration-200 hover:scale-[1.01] active:scale-[0.995] select-none ${accent.card} ${interactiveBorderClass} w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -220,17 +239,20 @@ function FinancialDetailModalContent({ rowLabel, detail, isLoading, error }: Fin
             <DashboardIcon path="M4 7h16M4 12h16M4 17h10" />
             <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-text-primary">Chi tiết đóng góp</h3>
           </div>
-          {selectedSourceKey && (
+          {selectedSourceKeys && (
             <div className="flex items-center gap-2">
               <span className="text-xs text-text-secondary">
                 Đang lọc theo:{" "}
                 <span className="font-semibold text-primary">
-                  {detail.sources.find((s) => s.key === selectedSourceKey)?.label}
+                  {detail.sources
+                    .filter((s) => selectedSourceKeys.includes(s.key))
+                    .map((s) => s.label)
+                    .join(" + ")}
                 </span>
               </span>
               <button
                 type="button"
-                onClick={() => setSelectedSourceKey(null)}
+                onClick={() => setSelectedSourceKeys(null)}
                 className="text-xs font-semibold text-primary hover:text-primary-hover hover:underline"
               >
                 Xoá bộ lọc
@@ -260,11 +282,6 @@ function FinancialDetailModalContent({ rowLabel, detail, isLoading, error }: Fin
                       {item.note}
                     </p>
                   ) : null}
-                  {showSourceNote ? (
-                    <p className="mt-2 text-sm leading-6 text-text-secondary">
-                      Chú thích: {item.sourceNote?.trim() || "—"}
-                    </p>
-                  ) : null}
                 </article>
               ))}
             </div>
@@ -277,7 +294,6 @@ function FinancialDetailModalContent({ rowLabel, detail, isLoading, error }: Fin
                     <TableHead className="min-w-[180px]">Nguồn</TableHead>
                     <TableHead className="min-w-[180px] text-right">Giá trị</TableHead>
                     <TableHead className="min-w-[260px]">Ghi chú</TableHead>
-                    {showSourceNote ? <TableHead className="min-w-[220px]">Chú thích</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -289,9 +305,6 @@ function FinancialDetailModalContent({ rowLabel, detail, isLoading, error }: Fin
                         {formatCurrency(item.amount)}
                       </TableCell>
                       <TableCell className="align-top text-text-secondary">{item.note ?? "—"}</TableCell>
-                      {showSourceNote ? (
-                        <TableCell className="align-top text-text-secondary">{item.sourceNote?.trim() || "—"}</TableCell>
-                      ) : null}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -300,7 +313,7 @@ function FinancialDetailModalContent({ rowLabel, detail, isLoading, error }: Fin
           </>
         ) : (
           <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary/35 px-4 py-6 text-sm text-text-secondary">
-            {selectedSourceKey ? "Không có khoản đóng góp nào phù hợp với bộ lọc." : detail.emptyState}
+            {selectedSourceKeys ? "Không có khoản đóng góp nào phù hợp với bộ lọc." : detail.emptyState}
           </div>
         )}
       </section>
@@ -321,6 +334,8 @@ interface FinancialDetailModalProps {
   year?: string;
   dateFrom?: string;
   dateTo?: string;
+  /** Single-detail mode: lọc sẵn theo các `sources[].key` khi mở. */
+  initialSourceKeys?: string[];
 }
 
 function TabbedFinancialDetailBody({
@@ -398,6 +413,7 @@ export function FinancialDetailModal({
   year,
   dateFrom,
   dateTo,
+  initialSourceKeys,
 }: FinancialDetailModalProps) {
   const dialogTitleId = useId();
   const isTabbed = Boolean(tabs && tabs.length > 0);
@@ -438,7 +454,13 @@ export function FinancialDetailModal({
               <TabbedFinancialDetailBody rowLabel={rowLabel} tabs={tabs!} month={month} year={year} dateFrom={dateFrom} dateTo={dateTo} />
             ) : (
               <div className="max-h-[72vh] overflow-auto px-4 py-4 sm:px-5">
-                <FinancialDetailModalContent rowLabel={rowLabel} detail={detail} isLoading={isLoading} error={error} />
+                <FinancialDetailModalContent
+                  rowLabel={rowLabel}
+                  detail={detail}
+                  isLoading={isLoading}
+                  error={error}
+                  initialSourceKeys={initialSourceKeys}
+                />
               </div>
             )}
           </div>

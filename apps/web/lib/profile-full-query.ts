@@ -1,6 +1,6 @@
 import * as authApi from "@/lib/apis/auth.api";
 
-/** Cache hồ sơ đầy đủ dùng chung cho trang `/user-profile` và popup hồ sơ. */
+/** Cache hồ sơ đầy đủ dùng chung cho trang `/user-profile` và shell (avatar/tên). */
 export const PROFILE_FULL_QUERY_KEY = ["profile", "full"] as const;
 
 /** Cache hồ sơ đầy đủ mà các shell (avatar/tên) và gate đọc; editor ghi đè sau mỗi lần lưu. */

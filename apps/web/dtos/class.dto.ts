@@ -190,9 +190,8 @@ export interface ClassStudent {
 export interface ClassEndEligibility {
     canEnd: boolean;
     sessionCount: number;
+    /** Buổi chưa thanh toán trợ cấp gia sư — chỉ để cảnh báo, không chặn kết thúc lớp. */
     unpaidSessionCount: number;
-    blockReason?: string | null;
-    canEndClass?: boolean;
 }
 
 export interface ClassDetail extends ClassListItem {
@@ -283,6 +282,12 @@ export interface ClassStatusActionPayload {
     reason?: string;
 }
 
+/** Response `POST /class/:id/end` và `.../stop-teaching`. */
+export interface ClassStatusActionResponse extends ClassDetail {
+    /** Lỗi dọn Google Calendar sau khi DB đã lưu — thao tác vẫn thành công. */
+    calendarSyncWarnings?: string[];
+}
+
 export interface ClassTeacherPayload {
     teacher_id: string;
     custom_allowance?: number | null;
@@ -303,9 +308,12 @@ export interface UpdateClassSchedulePayload {
 /** Payload for PATCH /class/:id/students */
 export interface UpdateClassStudentItemPayload {
     id: string;
-    custom_tuition_per_session?: number;
-    custom_tuition_package_total?: number;
-    custom_tuition_package_session?: number;
+    /** null = kế thừa lớp; 0 = miễn phí. */
+    custom_tuition_per_session?: number | null;
+    /** null = kế thừa lớp; 0 = miễn phí. */
+    custom_tuition_package_total?: number | null;
+    /** null = kế thừa lớp; 0 = miễn phí. */
+    custom_tuition_package_session?: number | null;
 }
 
 /** Payload for PATCH /class/:id/students */
@@ -316,9 +324,12 @@ export interface UpdateClassStudentsPayload {
 /** Payload for PATCH /class/:id/student-tuition */
 export interface UpdateClassStudentTuitionPayload {
     student_id: string;
-    custom_tuition_per_session?: number;
-    custom_tuition_package_total?: number;
-    custom_tuition_package_session?: number;
+    /** null = kế thừa lớp; 0 = miễn phí. */
+    custom_tuition_per_session?: number | null;
+    /** null = kế thừa lớp; 0 = miễn phí. */
+    custom_tuition_package_total?: number | null;
+    /** null = kế thừa lớp; 0 = miễn phí. */
+    custom_tuition_package_session?: number | null;
 }
 
 export interface ClassListItemDto {

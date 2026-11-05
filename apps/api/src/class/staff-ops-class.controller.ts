@@ -10,7 +10,10 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ParseClassIdPipe } from 'src/common/pipes/parse-entity-id.pipe';
+import {
+  ParseClassIdPipe,
+  ParseStaffIdPipe,
+} from 'src/common/pipes/parse-entity-id.pipe';
 import {
   ApiBody,
   ApiCookieAuth,
@@ -27,8 +30,11 @@ import {
 } from 'src/auth/decorators/current-user.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
+  AddClassTeacherDto,
+  ClassStatusActionDto,
   CreateStaffOpsClassDto,
   UpdateClassScheduleDto,
+  UpdateClassTeacherPayDto,
 } from 'src/dtos/class.dto';
 import {
   CreateClassSurveyDto,
@@ -137,6 +143,13 @@ export class StaffOpsClassController {
     required: false,
     description: 'Filter by course id (see GET /courses)',
   })
+  @ApiQuery({
+    name: 'scope',
+    required: false,
+    enum: ['managed'],
+    description:
+      'Ban Đào Tạo kiêm gia sư: `managed` chỉ trả lớp mình quản lý (mặc định trả lớp mình dạy hoặc quản lý). Role khác bỏ qua.',
+  })
   @ApiResponse({ status: 200, description: 'Paginated class list.' })
   async getClasses(
     @CurrentUser() user: JwtPayload,
@@ -144,12 +157,14 @@ export class StaffOpsClassController {
     @Query('search') search?: string,
     @Query('status') status?: string,
     @Query('courseId') courseId?: string,
+    @Query('scope') scope?: string,
   ) {
     return this.classService.getClassesForStaff(user.id, user.roleType, {
       ...query,
       search,
       status,
       courseId,
+      scope,
     });
   }
 
@@ -311,6 +326,147 @@ export class StaffOpsClassController {
         roleType: user.roleType,
       },
     );
+  }
+
+  @Patch(':id/teacher-pay')
+  @ApiOperation({
+    summary: 'Update teacher pay of a class (training manager)',
+    description:
+      'Quản lý lớp (Ban Đào Tạo), trợ lí hoặc admin chỉnh trợ cấp/hs, trần trợ cấp, scale mặc định của lớp và trợ cấp/scale/% vận hành của gia sư đã có trong lớp. ' +
+      'Không nhận học phí hay thông tin lớp khác. Quản lý lớp không được sửa dòng của chính mình (403). ' +
+      'Chỉ áp dụng cho buổi tạo sau khi lưu.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiBody({ type: UpdateClassTeacherPayDto })
+  @ApiResponse({ status: 200, description: 'Class detail (staff view).' })
+  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Không phải quản lý lớp, hoặc sửa dòng của chính mình.',
+  })
+  @ApiResponse({ status: 404, description: 'Class not found.' })
+  async updateClassTeacherPay(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseClassIdPipe()) id: string,
+    @Body() dto: UpdateClassTeacherPayDto,
+  ) {
+    const scope =
+      await this.staffOperationsAccess.resolveClassTeacherManagerScope(
+        user.id,
+        user.roleType,
+        id,
+      );
+    await this.classService.updateClassTeacherPay(id, dto, scope, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+    return this.classService.getClassByIdForStaff(user.id, user.roleType, id);
+  }
+
+  @Post(':id/teachers')
+  @ApiOperation({
+    summary: 'Add a teacher to a class (training manager)',
+    description:
+      'Thêm 1 gia sư (staff role `teacher`, đang active) mà không đụng gia sư khác. Gia sư từng nghỉ dạy lớp này được mở lại với lương reset về mặc định lớp. ' +
+      'Gia sư mới tự thêm khung giờ của mình qua PATCH :id/schedule.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiBody({ type: AddClassTeacherDto })
+  @ApiResponse({ status: 201, description: 'Class detail (staff view).' })
+  @ApiResponse({
+    status: 400,
+    description: 'Lớp đã kết thúc hoặc gia sư không active.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Không phải quản lý lớp, hoặc tự thêm chính mình.',
+  })
+  @ApiResponse({ status: 404, description: 'Class or teacher not found.' })
+  @ApiResponse({ status: 409, description: 'Gia sư đã ở trong lớp.' })
+  async addClassTeacher(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseClassIdPipe()) id: string,
+    @Body() dto: AddClassTeacherDto,
+  ) {
+    const { lockedTeacherId } =
+      await this.staffOperationsAccess.resolveClassTeacherManagerScope(
+        user.id,
+        user.roleType,
+        id,
+      );
+    if (lockedTeacherId && dto.teacher_id === lockedTeacherId) {
+      throw new ForbiddenException(
+        'Quản lý lớp không được tự thêm chính mình làm gia sư.',
+      );
+    }
+    await this.classService.addClassTeacher(id, dto.teacher_id, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+    return this.classService.getClassByIdForStaff(user.id, user.roleType, id);
+  }
+
+  @Post(':id/teachers/:teacherId/stop-teaching')
+  @ApiOperation({
+    summary: 'Mark a teacher as stopped teaching (training manager)',
+    description:
+      'Chuyển phân công gia sư sang nghỉ dạy, xoá khung giờ cố định và buổi bù tương lai của gia sư đó. Quản lý lớp không được cho chính mình nghỉ (403).',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiParam({ name: 'teacherId', description: 'Staff id of the teacher' })
+  @ApiBody({ type: ClassStatusActionDto, required: false })
+  @ApiResponse({
+    status: 201,
+    description:
+      'Class detail (staff view) + `calendarSyncWarnings: string[]` (Google Calendar cleanup errors after commit).',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Lớp đã kết thúc hoặc gia sư đã nghỉ.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Không phải quản lý lớp, hoặc cho chính mình nghỉ.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Class or teacher assignment not found.',
+  })
+  async stopClassTeacher(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseClassIdPipe()) id: string,
+    @Param('teacherId', new ParseStaffIdPipe()) teacherId: string,
+    @Body() dto: ClassStatusActionDto,
+  ) {
+    const { lockedTeacherId } =
+      await this.staffOperationsAccess.resolveClassTeacherManagerScope(
+        user.id,
+        user.roleType,
+        id,
+      );
+    if (lockedTeacherId && teacherId === lockedTeacherId) {
+      throw new ForbiddenException(
+        'Quản lý lớp không được tự cho chính mình nghỉ dạy.',
+      );
+    }
+    const { calendarSyncWarnings } = await this.classService.stopClassTeacher(
+      id,
+      teacherId,
+      dto ?? {},
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+    const classDetail = await this.classService.getClassByIdForStaff(
+      user.id,
+      user.roleType,
+      id,
+    );
+    return { ...classDetail, calendarSyncWarnings };
   }
 
   @Patch(':id/schedule')

@@ -8,7 +8,7 @@ import { ArrowLeft } from "lucide-react";
 import StaffAchievementsDialog, {
   StaffAchievementsButton,
 } from "@/components/shared/achievement/StaffAchievementsDialog";
-import TutorContactLines from "@/components/staff/tutors/TutorContactLines";
+import TutorClassChips from "@/components/staff/tutors/TutorClassChips";
 import TutorIdentity from "@/components/staff/tutors/TutorIdentity";
 import TutorPager from "@/components/staff/tutors/TutorPager";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -62,7 +62,6 @@ export default function StaffTutorDetailPage() {
         <>
           <section className="flex flex-col gap-3 rounded-xl border border-border-default bg-bg-surface p-4">
             <TutorIdentity tutor={tutor} size="lg" />
-            <TutorContactLines tutor={tutor} />
             <StaffAchievementsButton
               count={tutor.achievementCount}
               onOpen={() => setShowAchievements(true)}
@@ -75,7 +74,7 @@ export default function StaffTutorDetailPage() {
               title="Lớp đang dạy"
               classes={tutor.currentClasses}
             />
-            <TutorClassList title="Lớp đã dạy" classes={tutor.pastClasses} />
+            <TutorClassList title="Lớp đã nghỉ" classes={tutor.pastClasses} />
           </div>
 
           <TutorSessionHistory
@@ -109,20 +108,7 @@ function TutorClassList({
       <h2 className="mb-2 text-sm font-semibold text-text-primary">
         {title} ({classes.length})
       </h2>
-      {classes.length === 0 ? (
-        <p className="text-sm text-text-muted">Chưa có lớp.</p>
-      ) : (
-        <ul className="flex flex-wrap gap-2">
-          {classes.map((item) => (
-            <li
-              key={item.id}
-              className="rounded-full bg-bg-secondary px-3 py-1 text-xs text-text-primary"
-            >
-              {item.name}
-            </li>
-          ))}
-        </ul>
-      )}
+      <TutorClassChips classes={classes} emptyLabel="Chưa có lớp." />
     </section>
   );
 }

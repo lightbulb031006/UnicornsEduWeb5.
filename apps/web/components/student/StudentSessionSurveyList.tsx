@@ -102,7 +102,7 @@ export default function StudentSessionSurveyList({
       <div className="space-y-3">
         {visibleItems.map((item, idx) => {
           const isSession = item.type === "session";
-          const hasRecording = isSession && Boolean(item.data.recordingUrl);
+          const hasRecording = isSession && Boolean(item.data.hasRecording);
           const title = isSession
             ? item.data.lessonContent
               ? stripHtml(item.data.lessonContent).slice(0, 100)

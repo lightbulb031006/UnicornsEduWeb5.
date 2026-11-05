@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClassContentItemDto } from "@/dtos/class-content.dto";
 import {
+  buildModuleTocSections,
   isLockedModuleItem,
   moduleCardItems,
   moduleCardKey,
@@ -24,10 +25,13 @@ const item = (
   kindLabel: "",
   source: "course",
   openAt: null,
+  closeAt: null,
   durationMinutes: null,
+  shuffleQuestions: true,
   isOpen,
   hiddenAt: null,
   hiddenByStaffId: null,
+  hiddenReason: null,
 });
 
 describe("student-module-cards", () => {
@@ -70,5 +74,48 @@ describe("student-module-cards", () => {
     expect(moduleItemHref("c1", group.practiceItems[0])).toBe(
       "/student/classes/c1/assignments/p1",
     );
+  });
+
+  it("groups the table of contents by module and renumbers from 1 in each", () => {
+    const base = { added: true };
+    const sections = buildModuleTocSections([
+      {
+        ...base,
+        moduleId: "m1",
+        title: "Đồ thị",
+        theoryItems: [item("a", "theory"), item("b", "theory")],
+        practiceItems: [item("c", "practice", false)],
+      },
+      {
+        ...base,
+        moduleId: "m2",
+        title: "Trống",
+        theoryItems: [],
+        practiceItems: [],
+      },
+      {
+        ...base,
+        moduleId: "m3",
+        title: "Quy hoạch động",
+        theoryItems: [item("d", "theory")],
+        practiceItems: [],
+      },
+    ]);
+
+    // Chuyên đề chưa có tiết vẫn có mục để cuộn tới thẻ.
+    expect(sections.map(({ id, title }) => [id, title])).toEqual([
+      ["module:m1", "Đồ thị"],
+      ["module:m2", "Trống"],
+      ["module:m3", "Quy hoạch động"],
+    ]);
+    expect(
+      sections[0].entries.map(({ id, index, locked }) => [id, index, locked]),
+    ).toEqual([
+      ["a", 1, false],
+      ["b", 2, false],
+      ["c", 3, true],
+    ]);
+    expect(sections[1].entries).toEqual([]);
+    expect(sections[2].entries[0]).toMatchObject({ id: "d", index: 1 });
   });
 });

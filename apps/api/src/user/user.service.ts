@@ -1010,14 +1010,40 @@ export class UserService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        staffInfo: true,
+        staffInfo: {
+          include: {
+            _count: { select: { achievements: true } },
+            achievements: {
+              where: { isHighlight: true },
+              select: { id: true },
+              take: 1,
+            },
+          },
+        },
         studentInfo: true,
       },
     });
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
-    const profile = await this.attachProfileMediaUrls(this.sanitizeUser(user));
+    const {
+      _count: staffCounts,
+      achievements: highlightAchievements,
+      ...staffInfo
+    } = user.staffInfo ?? { _count: null, achievements: [] };
+    const profile = await this.attachProfileMediaUrls(
+      this.sanitizeUser({
+        ...user,
+        // Gate hồ sơ gia sư: bắt buộc >= 1 thành tích và có thành tích nổi bật.
+        staffInfo: user.staffInfo
+          ? {
+              ...staffInfo,
+              achievementCount: staffCounts?.achievements ?? 0,
+              hasHighlightAchievement: highlightAchievements.length > 0,
+            }
+          : null,
+      }),
+    );
     const dataConsentAcceptedAt =
       profile.dataProcessingConsentAcceptedAt ?? null;
     const dataConsentVersion = profile.dataProcessingConsentVersion ?? null;

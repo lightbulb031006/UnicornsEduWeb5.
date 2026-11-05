@@ -14,6 +14,7 @@ import type {
   TrainingTutorDetailDto,
   TrainingTutorListQueryDto,
   TrainingTutorPageDto,
+  TrainingTutorListItemDto,
   TrainingTutorSessionDto,
   TrainingTutorSummaryDto,
 } from 'src/dtos/training-tutor.dto';
@@ -41,8 +42,6 @@ const TUTOR_SUMMARY_SELECT = {
       first_name: true,
       last_name: true,
       accountHandle: true,
-      email: true,
-      phone: true,
       avatarPath: true,
     },
   },
@@ -52,6 +51,37 @@ const TUTOR_SUMMARY_SELECT = {
 type TutorSummaryRow = Prisma.StaffInfoGetPayload<{
   select: typeof TUTOR_SUMMARY_SELECT;
 }>;
+
+/** Phân công lớp của gia sư, mới nhất trước; dùng chia Lớp đang dạy / Lớp đã nghỉ. */
+const TUTOR_CLASS_ASSIGNMENTS_SELECT = {
+  select: {
+    status: true,
+    class: { select: { id: true, name: true, status: true } },
+  },
+  orderBy: { createdAt: 'desc' },
+} satisfies Prisma.StaffInfo$classTeachersArgs;
+
+type TutorClassAssignment = {
+  status: string | null;
+  class: { id: string; name: string; status: ClassStatus };
+};
+
+/**
+ * Đang dạy: phân công còn active (null coi như active) trên lớp đang chạy.
+ * Đã nghỉ: mọi lớp còn lại gia sư từng được phân công, không phân biệt lý do.
+ */
+export function splitTutorClasses(assignments: TutorClassAssignment[]) {
+  const currentClasses: TrainingTutorClassDto[] = [];
+  const pastClasses: TrainingTutorClassDto[] = [];
+  for (const assignment of assignments) {
+    const target = { id: assignment.class.id, name: assignment.class.name };
+    const isCurrent =
+      (assignment.status === null || assignment.status === 'active') &&
+      assignment.class.status === ClassStatus.running;
+    (isCurrent ? currentClasses : pastClasses).push(target);
+  }
+  return { currentClasses, pastClasses };
+}
 
 const TUTOR_WHERE = {
   roles: { has: StaffRole.teacher },
@@ -96,7 +126,7 @@ export class TrainingTutorService {
   async listTutors(
     viewer: TrainingTutorViewer,
     query: TrainingTutorListQueryDto,
-  ): Promise<TrainingTutorPageDto<TrainingTutorSummaryDto>> {
+  ): Promise<TrainingTutorPageDto<TrainingTutorListItemDto>> {
     await this.assertTrainingViewer(viewer);
     const { page, limit, skip } = clampPaging(query);
     const where: Prisma.StaffInfoWhereInput = {
@@ -109,7 +139,10 @@ export class TrainingTutorService {
       this.prisma.staffInfo.count({ where }),
       this.prisma.staffInfo.findMany({
         where,
-        select: TUTOR_SUMMARY_SELECT,
+        select: {
+          ...TUTOR_SUMMARY_SELECT,
+          classTeachers: TUTOR_CLASS_ASSIGNMENTS_SELECT,
+        },
         orderBy: [{ status: 'asc' }, { user: { first_name: 'asc' } }],
         skip,
         take: limit,
@@ -117,7 +150,13 @@ export class TrainingTutorService {
     ]);
 
     return {
-      data: await Promise.all(rows.map((row) => this.toSummary(row))),
+      data: await Promise.all(
+        rows.map(async (row) => ({
+          ...(await this.toSummary(row)),
+          currentClasses: splitTutorClasses(row.classTeachers ?? [])
+            .currentClasses,
+        })),
+      ),
       meta: { total, page, limit },
     };
   }
@@ -132,28 +171,15 @@ export class TrainingTutorService {
       where: { ...TUTOR_WHERE, id: staffId },
       select: {
         ...TUTOR_SUMMARY_SELECT,
-        classTeachers: {
-          select: {
-            status: true,
-            class: { select: { id: true, name: true, status: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-        },
+        classTeachers: TUTOR_CLASS_ASSIGNMENTS_SELECT,
         _count: { select: { achievements: true, sessions: true } },
       },
     });
     if (!row) throw new NotFoundException('Không tìm thấy gia sư.');
 
-    const currentClasses: TrainingTutorClassDto[] = [];
-    const pastClasses: TrainingTutorClassDto[] = [];
-    for (const assignment of row.classTeachers) {
-      const target = { id: assignment.class.id, name: assignment.class.name };
-      // Đang dạy: phân công còn active (null coi như active) trên lớp đang chạy.
-      const isCurrent =
-        (assignment.status === null || assignment.status === 'active') &&
-        assignment.class.status === ClassStatus.running;
-      (isCurrent ? currentClasses : pastClasses).push(target);
-    }
+    const { currentClasses, pastClasses } = splitTutorClasses(
+      row.classTeachers,
+    );
 
     return {
       ...(await this.toSummary(row)),
@@ -216,8 +242,6 @@ export class TrainingTutorService {
       id: row.id,
       fullName: getPreferredUserFullName(user) ?? '',
       status: row.status,
-      email: user?.email ?? null,
-      phone: user?.phone ?? null,
       avatarUrl: await createSignedStorageUrl({
         bucket: AVATAR_STORAGE_BUCKET,
         path: user?.avatarPath,

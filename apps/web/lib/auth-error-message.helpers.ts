@@ -72,10 +72,13 @@ export function getLoginErrorToastMessage(error: unknown): string {
     return serverMsg ?? "Tài khoản không có quyền đăng nhập.";
   }
 
+  if (status === 409) {
+    return serverMsg ?? "Tài khoản đang đăng nhập ở thiết bị khác. Vui lòng đăng xuất thiết bị cũ hoặc liên hệ quản trị viên.";
+  }
   if (status === 429) {
     return (
       serverMsg ??
-      "Too many requests. Bạn thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại."
+      "Bạn thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại."
     );
   }
 

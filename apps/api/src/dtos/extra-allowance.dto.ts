@@ -15,7 +15,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
-import { IsStaffId } from '../common/entity-id.validators';
+import { IsStaffId, IsStudentId } from '../common/entity-id.validators';
 
 const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -65,6 +65,15 @@ export class CreateExtraAllowanceDto {
   })
   @IsEnum(StaffRole)
   roleType: StaffRole;
+
+  @ApiPropertyOptional({
+    description:
+      'Học sinh (khách hàng) của Trợ cấp sale. Bắt buộc khi roleType = sale (kèm note); role khác không được gửi.',
+    example: 'UNIST-a1b2c3d4e5',
+  })
+  @IsOptional()
+  @IsStudentId()
+  studentId?: string;
 }
 
 export class UpdateExtraAllowanceDto extends PartialType(
@@ -102,10 +111,11 @@ export interface ExtraAllowanceBulkStatusUpdateResult {
   updatedCount: number;
 }
 
-const SELF_MANAGED_EXTRA_ALLOWANCE_ROLES = [
+export const SELF_MANAGED_EXTRA_ALLOWANCE_ROLES = [
   StaffRole.communication,
   StaffRole.technical,
   StaffRole.training,
+  StaffRole.sale,
 ] as const;
 
 /** Self-service: supported staff roles create their own pending allowance. */
@@ -141,9 +151,18 @@ export class CreateMyStaffExtraAllowanceDto {
   @IsString()
   @MaxLength(1000)
   note?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Học sinh (khách hàng) của Trợ cấp sale. Bắt buộc khi roleType = sale (kèm note); role khác không được gửi.',
+    example: 'UNIST-a1b2c3d4e5',
+  })
+  @IsOptional()
+  @IsStudentId()
+  studentId?: string;
 }
 
-/** Self-service: supported staff roles may edit their own allowance details, but not payment status. */
+/** Self-service: supported staff roles may edit their own unpaid allowance details, but not payment status. */
 export class UpdateMyStaffExtraAllowanceDto extends PartialType(
   CreateMyStaffExtraAllowanceDto,
 ) {
@@ -159,4 +178,13 @@ export class UpdateMyStaffExtraAllowanceDto extends PartialType(
   @IsEnum(StaffRole)
   @IsIn(SELF_MANAGED_EXTRA_ALLOWANCE_ROLES)
   roleType: StaffRole;
+}
+
+export interface SaleStudentOptionDto {
+  id: string;
+  fullName: string;
+  birthYear: number | null;
+  school: string | null;
+  /** `inactive` = học sinh nghỉ học. */
+  status: string;
 }

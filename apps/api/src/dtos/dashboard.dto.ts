@@ -1,3 +1,4 @@
+import type { StudentCustomerSource } from 'generated/enums';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
@@ -10,10 +11,7 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
-import {
-  STUDENT_CUSTOMER_SOURCE_VALUES,
-  UNASSIGNED_CUSTOMER_SOURCE_KEY,
-} from './student.dto';
+import { STUDENT_CUSTOMER_SOURCE_VALUES } from './student.dto';
 
 export const ADMIN_DASHBOARD_FINANCIAL_DETAIL_ROW_KEYS = [
   'topup',
@@ -28,10 +26,8 @@ export const ADMIN_DASHBOARD_FINANCIAL_DETAIL_ROW_KEYS = [
   'customer-source',
 ] as const;
 
-export const ADMIN_DASHBOARD_CUSTOMER_SOURCE_KEYS = [
-  ...STUDENT_CUSTOMER_SOURCE_VALUES,
-  UNASSIGNED_CUSTOMER_SOURCE_KEY,
-] as const;
+export const ADMIN_DASHBOARD_CUSTOMER_SOURCE_KEYS =
+  STUDENT_CUSTOMER_SOURCE_VALUES;
 
 export type AdminDashboardFinancialDetailRowKeyDto =
   (typeof ADMIN_DASHBOARD_FINANCIAL_DETAIL_ROW_KEYS)[number];
@@ -213,6 +209,7 @@ export class GetAdminStudentBalanceDetailsQueryDto {
 export const ADMIN_DASHBOARD_STUDENT_CHURN_TYPES = [
   'new',
   'dropped',
+  'trial_dropped',
   'active',
 ] as const;
 
@@ -222,7 +219,7 @@ export type AdminDashboardStudentChurnTypeDto =
 export class GetAdminStudentChurnDetailsQueryDto {
   @ApiProperty({
     description:
-      'Churn type: new (enrolled in period) or dropped (left in period).',
+      'Churn type: new (enrolled in period), dropped (Học sinh cũ nghỉ in period), trial_dropped (Học sinh thử nghỉ in period) or active (snapshot).',
     enum: ADMIN_DASHBOARD_STUDENT_CHURN_TYPES,
     example: 'new',
   })
@@ -372,8 +369,10 @@ export interface AdminDashboardSummaryDto {
   activeStudents: number;
   /** All StudentInfo (toàn hệ thống, không lọc theo CSKH) có createdAt rơi trong kỳ đang chọn. */
   newStudentsThisMonth: number;
-  /** All StudentInfo (toàn hệ thống, không lọc theo CSKH) có dropOutDate rơi trong kỳ đang chọn. */
+  /** Học sinh cũ nghỉ (toàn hệ thống): dropOutDate rơi trong kỳ, đã nạp ví thành công và học ≥2 buổi. */
   droppedStudentsThisMonth: number;
+  /** Học sinh thử nghỉ (toàn hệ thống): dropOutDate rơi trong kỳ, không đủ điều kiện cũ nghỉ. */
+  trialDroppedStudentsThisMonth: number;
   monthlyTopupTotal: number;
   totalLearnedTuition: number;
   monthlyRevenue: number;
@@ -623,6 +622,8 @@ export interface AdminDashboardStudentChurnItemDto {
   studentName: string;
   className: string;
   eventDate: string;
+  /** Chỉ có ở `dropped` / `trial_dropped`: lý do nghỉ trên hồ sơ, `null` khi chưa điền. */
+  dropOutReason?: string | null;
 }
 
 /** Một khoá học (phân loại lớp) đang có lớp `running`. */
@@ -659,8 +660,6 @@ export interface AdminDashboardFinancialDetailItemDto {
   secondaryLabel: string | null;
   amount: number;
   note: string | null;
-  /** Chú thích nguồn thực tế. Chỉ có trên dòng Khác. */
-  sourceNote?: string | null;
   /**
    * Số tiền theo `sources[].key` (có dấu, phạt âm). Có trên Chi phí nhân sự và
    * Trợ cấp chờ thanh toán; FE dùng để lọc theo thẻ nguồn.
@@ -1101,4 +1100,111 @@ export interface StaffDashboardDto {
   accountant?: StaffDashboardAccountantSectionDto;
   accountantExpense?: StaffDashboardExpenseSectionDto;
   training?: StaffDashboardTrainingSectionDto;
+}
+
+export class GetAdminMonthlyReportQueryDto {
+  @ApiProperty({ description: 'Report month in 01-12 format.', example: '09' })
+  @Matches(/^(0[1-9]|1[0-2])$/, { message: 'month must use 01-12 format.' })
+  month: string;
+
+  @ApiProperty({ description: 'Report year in YYYY format.', example: '2026' })
+  @Matches(/^\d{4}$/, { message: 'year must use YYYY format.' })
+  year: string;
+}
+
+export interface MonthlyReportKpiDto {
+  /** Tổng nạp ví hợp lệ (QR completed + nạp thẳng approved) trong tháng. */
+  totalTopUpInMonth: number;
+  topUpTransactionCount: number;
+  /** Học sinh đang học tại lúc xem (snapshot). */
+  activeStudents: number;
+  newStudents: number;
+  /** Học sinh cũ nghỉ trong tháng. */
+  droppedStudents: number;
+  /** Học sinh thử nghỉ trong tháng (không trừ vào tăng ròng). */
+  trialDroppedStudents: number;
+  netChange: number;
+  /** Số học sinh nghỉ sớm thuộc nhóm cũ nghỉ; phần còn lại là thử nghỉ. */
+  earlyDropOldCount: number;
+  newStillActive: number;
+}
+
+export interface MonthlyReportCourseDto {
+  courseId: string;
+  courseName: string;
+}
+
+export interface MonthlyReportMatrixCellDto {
+  customerSource: StudentCustomerSource;
+  /** `null` = Chưa xếp lớp. */
+  courseId: string | null;
+  /** Học sinh mới có lớp đầu tiên thuộc khoá của ô. */
+  newCount: number;
+  /** Tổng nghỉ sớm (cũ nghỉ + thử nghỉ). */
+  earlyDropCount: number;
+  earlyDropOldCount: number;
+  /** Số học sinh mới có doanh thu > 0 ở khoá của ô trong tháng. */
+  earningCount: number;
+  /**
+   * Doanh thu mới: Học phí đã học trong tháng (attendance present/excused,
+   * gồm thu bù học thử và gói bán một lần) của học sinh mới cùng nguồn, tính
+   * theo khoá của lớp có buổi — học sinh đổi sang lớp khoá khác thì doanh thu
+   * nằm ở ô khoá mới (ô có thể có doanh thu mà `newCount = 0`).
+   */
+  revenue: number;
+}
+
+export interface MonthlyReportCustomerCareRowDto {
+  /** `null` = học sinh chưa có CSKH phụ trách. */
+  staffId: string | null;
+  staffName: string;
+  activeStudents: number;
+  newStudents: number;
+  droppedStudents: number;
+  netChange: number;
+  earlyDropCount: number;
+  earlyDropOldCount: number;
+  totalTopUpInMonth: number;
+  topUpTransactionCount: number;
+}
+
+export interface MonthlyReportNewStudentDto {
+  studentId: string;
+  fullName: string;
+  customerCareStaffName: string | null;
+  className: string | null;
+  courseId: string | null;
+  courseName: string | null;
+  customerSource: StudentCustomerSource;
+  firstTopUpAt: string;
+  totalTopUp: number;
+  /** Doanh thu mới của học sinh trong tháng (Học phí đã học, mọi khoá). */
+  revenueInMonth: number;
+  /** Nghỉ sớm: học sinh mới của tháng mà hiện đang nghỉ. */
+  isEarlyDrop: boolean;
+  /** `old` = cũ nghỉ, `trial` = thử nghỉ; `null` khi chưa nghỉ. */
+  earlyDropKind: 'old' | 'trial' | null;
+  dropOutDate: string | null;
+}
+
+export interface MonthlyReportDroppedStudentDto {
+  studentId: string;
+  fullName: string;
+  customerCareStaffName: string | null;
+  className: string | null;
+  dropOutDate: string;
+  dropOutReason: string | null;
+}
+
+export interface AdminMonthlyReportDto {
+  month: string;
+  year: string;
+  generatedAt: string;
+  kpi: MonthlyReportKpiDto;
+  /** Chỉ các khoá có ít nhất một học sinh mới, theo tên. */
+  courses: MonthlyReportCourseDto[];
+  matrix: MonthlyReportMatrixCellDto[];
+  customerCare: MonthlyReportCustomerCareRowDto[];
+  newStudents: MonthlyReportNewStudentDto[];
+  droppedStudents: MonthlyReportDroppedStudentDto[];
 }

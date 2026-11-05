@@ -13,6 +13,8 @@ import { Switch } from "@/components/ui/switch";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { courseKeys, classKeys, authKeys } from "@/lib/query-keys";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
+import { ROW_LINK_INTERACTION_CLASS } from "@/lib/row-link";
+import { useRowLink } from "@/hooks/use-row-link";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import { resolveCourseWorkspaceCapabilities } from "@/lib/course-workspace-access";
 import { CourseListSkeleton } from "@/components/course-workspace/CourseWorkspaceSkeletons";
@@ -32,6 +34,7 @@ export default function CourseListWorkspace({
   routeBase: CourseWorkspaceRouteBase;
 }) {
   const queryClient = useQueryClient();
+  const rowLink = useRowLink();
   const [formOpen, setFormOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const { confirm, dialog } = useConfirmDialog();
@@ -199,7 +202,8 @@ export default function CourseListWorkspace({
               {courses.map((course) => (
                 <li
                   key={course.id}
-                  className="flex flex-col gap-3 rounded-lg border border-border-default bg-bg-surface p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4"
+                  {...rowLink(capabilities.detailHref(course.id), `Xem khoá ${course.name}`)}
+                  className={`flex flex-col gap-3 rounded-lg border border-border-default bg-bg-surface p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4 ${ROW_LINK_INTERACTION_CLASS}`}
                 >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">

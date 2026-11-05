@@ -1,6 +1,6 @@
-# Google Calendar Integration – Unicorns Edu (apps/api)
+# Google Calendar Integration – UniEdu (apps/api)
 
-Tài liệu này mô tả hành vi Google Calendar hiện tại trong hệ thống Unicorns Edu.
+Tài liệu này mô tả hành vi Google Calendar hiện tại trong hệ thống UniEdu.
 
 ---
 
@@ -171,7 +171,7 @@ Kể từ 2026-05-07, **nguồn authoritative cho Google Meet link là `staff_in
 **Quy tắc:**
 
 - Khi gia sư đã có `google_meet_link` trong `staff_info`, link đó được tái sử dụng cho mọi lịch học và buổi bù mà gia sư phụ trách.
-- Khi gia sư chưa có `google_meet_link`, backend tự tạo link thật qua Google Calendar API (helper `GoogleCalendarService.generateTutorMeetLink()`) bằng setup event có title `[Unicorns Class] {tên gia sư}` và lưu link mới vào `staff_info.google_meet_link`. Link này được reuse cho tất cả các buổi sau.
+- Khi gia sư chưa có `google_meet_link`, backend tự tạo link thật qua Google Calendar API (helper `GoogleCalendarService.generateTutorMeetLink()`) bằng setup event có title `[Uni Class] {tên gia sư}` và lưu link mới vào `staff_info.google_meet_link`. Link này được reuse cho tất cả các buổi sau.
 - Regenerate thủ công: gọi `POST /staff/:id/regenerate-meet-link` (mọi staff role đều được phép). Backend tạo link mới, cập nhật `staff_info.google_meet_link`, rồi backfill link vào các entry `class_schedule_entries` (slot active) và `makeup_schedule_events` mà gia sư đó phụ trách.
 - Chiến lược tương thích: aggregate calendar feed ưu tiên `staff_info.google_meet_link` của gia sư phụ trách trước `entry.meetLink`, nên dữ liệu cũ sẽ hiển thị link cố định của staff ngay khi staff đã có link.
 

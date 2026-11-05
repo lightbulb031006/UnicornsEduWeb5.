@@ -18,71 +18,7 @@ import "react-circular-progressbar/dist/styles.css";
 import { getUniojReport, getUniojReportPdfBlob } from "@/lib/apis/unioj.api";
 import { uniojKeys } from "@/lib/query-keys";
 import type { UniojReportDto } from "@/dtos/unioj.dto";
-
-// Mock data following the screenshots closely in case the student profile is not linked on UNIOJ
-const OJ_MOCK_REPORT: UniojReportDto = {
-  student: {
-    username: "demo",
-    displayName: "Dữ liệu mẫu UNIOJ",
-    pdfUrl: "",
-  },
-  stats: {
-    thisWeekCount: 4,
-    thisWeekDiff: -4,
-    activeDaysCount: 18,
-    bestDayCount: 29,
-    totalSolved: 147,
-    currentLevel: "Cấp 3",
-    currentLevelName: "Level 3 - Thuật toán cao cấp",
-    totalPoints: 81.5,
-    acRate: 54.4,
-    totalSubmissions: 283,
-    startedAt: "Tháng 5 20, 2026",
-  },
-  dailyProgress: [
-    { date: "20/05", solvedCumulative: 10, solvedDaily: 10 },
-    { date: "23/05", solvedCumulative: 60, solvedDaily: 28 },
-    { date: "26/05", solvedCumulative: 75, solvedDaily: 15 },
-    { date: "29/05", solvedCumulative: 98, solvedDaily: 10 },
-    { date: "01/06", solvedCumulative: 120, solvedDaily: 9 },
-    { date: "04/06", solvedCumulative: 125, solvedDaily: 0 },
-    { date: "07/06", solvedCumulative: 127, solvedDaily: 2 },
-    { date: "10/06", solvedCumulative: 135, solvedDaily: 6 },
-    { date: "13/06", solvedCumulative: 137, solvedDaily: 2 },
-    { date: "16/06", solvedCumulative: 140, solvedDaily: 1 },
-    { date: "19/06", solvedCumulative: 145, solvedDaily: 2 },
-    { date: "22/06", solvedCumulative: 147, solvedDaily: 1 },
-  ],
-  roadmapLevels: [
-    { levelCode: 0, levelName: "Level 0 - Làm quen với Lập trình", progress: 1, solvedCount: 5, totalCount: 341, contestsCount: 9, modulesCount: 9 },
-    { levelCode: 1, levelName: "Level 1 - Thuật toán cơ bản", progress: 45, solvedCount: 202, totalCount: 445, contestsCount: 13, modulesCount: 13 },
-    { levelCode: 2, levelName: "Level 2 - Thuật toán quan trọng", progress: 37, solvedCount: 104, totalCount: 280, contestsCount: 8, modulesCount: 8 },
-    { levelCode: 3, levelName: "Level 3 - Thuật toán cao cấp", progress: 4, solvedCount: 23, totalCount: 530, contestsCount: 17, modulesCount: 17 },
-    { levelCode: 4, levelName: "Level 4 - Ôn HSGQG, Đội Dự Tuyển HSGQG", progress: 0, solvedCount: 2, totalCount: 413, contestsCount: 13, modulesCount: 13 },
-    { levelCode: 5, levelName: "Level 5 - HSGQT, Khu vực ASIAN , TST, VOI, ..", progress: 0, solvedCount: 0, totalCount: 87, contestsCount: 3, modulesCount: 3 },
-    { levelCode: 98, levelName: "Tuyển tập đề sưu tầm", progress: 5, solvedCount: 23, totalCount: 455, contestsCount: 64, modulesCount: 64 },
-    { levelCode: 99, levelName: "Bài khảo sát định kì", progress: 4, solvedCount: 4, totalCount: 83, contestsCount: 21, modulesCount: 21 },
-  ],
-  roadmapModules: [
-    // Level 0
-    { levelCode: 0, levelName: "Cấp 0", moduleName: "Level 0 - Luyện tập tổng hợp", solvedCount: 2, totalCount: 164, progress: 1, status: "Đang thi" },
-    { levelCode: 0, levelName: "Cấp 0", moduleName: "Level 0: Mảng - Array", solvedCount: 2, totalCount: 28, progress: 7, status: "Đang thi" },
-    { levelCode: 0, levelName: "Cấp 0", moduleName: "LEVEL 0 - TỔNG HỢP CẤP TỐC", solvedCount: 1, totalCount: 90, progress: 1, status: "Đang thi" },
-    // Level 1
-    { levelCode: 1, levelName: "Cấp 1", moduleName: "Level 1 - Luyện tập tổng hợp", solvedCount: 77, totalCount: 239, progress: 32, status: "Đang thi" },
-    { levelCode: 1, levelName: "Cấp 1", moduleName: "Level 1: Đệ quy", solvedCount: 3, totalCount: 3, progress: 100, status: "Đã Hoàn Thành" },
-    { levelCode: 1, levelName: "Cấp 1", moduleName: "Level 1: Brute Force - Backtracking", solvedCount: 4, totalCount: 17, progress: 23, status: "Đang thi" },
-    { levelCode: 1, levelName: "Cấp 1", moduleName: "Level 1: Map", solvedCount: 6, totalCount: 6, progress: 100, status: "Đã Hoàn Thành" },
-    { levelCode: 1, levelName: "Cấp 1", moduleName: "Level 1 : Sortings, Coutings", solvedCount: 15, totalCount: 17, progress: 88, status: "Đang thi" },
-    { levelCode: 1, levelName: "Cấp 1", moduleName: "Level 1: Greedy", solvedCount: 9, totalCount: 21, progress: 42, status: "Đang thi" },
-    // Level 2
-    { levelCode: 2, levelName: "Cấp 2", moduleName: "Level 2: Quy hoạch động cơ bản", solvedCount: 50, totalCount: 120, progress: 41, status: "Đang thi" },
-    { levelCode: 2, levelName: "Cấp 2", moduleName: "Level 2: Đồ thị cơ bản", solvedCount: 54, totalCount: 160, progress: 33, status: "Đang thi" },
-    // Level 3
-    { levelCode: 3, levelName: "Cấp 3", moduleName: "Level 3: Cấu trúc dữ liệu nâng cao", solvedCount: 10, totalCount: 250, progress: 4, status: "Đang thi" },
-    { levelCode: 3, levelName: "Cấp 3", moduleName: "Level 3: Thuật toán đồ thị nâng cao", solvedCount: 13, totalCount: 280, progress: 4, status: "Đang thi" },
-  ],
-};
+import { useAppConfig } from "@/lib/hooks/useAppConfig";
 
 type Props = {
   studentName: string;
@@ -91,32 +27,26 @@ type Props = {
 export default function OjProgressSection({ studentName }: Props) {
   const [days, setDays] = useState<number>(90);
   const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
-  const [useDemoData, setUseDemoData] = useState<boolean>(false);
   const [pdfObjectUrl, setPdfObjectUrl] = useState<string>("");
 
   // Fetch OJ report using React Query
+  // UNIOJ chỉ có trên instance IT; JP/ENG không gọi API.
+  const { data: appConfig } = useAppConfig();
+  const isItProfile = appConfig?.profile === "it";
+
   const {
-    data,
+    data: reportData,
     isLoading,
     isError,
-    error,
   } = useQuery<UniojReportDto>({
     queryKey: uniojKeys.report(studentName, days),
     queryFn: () => getUniojReport(studentName, days),
-    enabled: Boolean(studentName) && !useDemoData,
+    enabled: isItProfile && Boolean(studentName),
     retry: false,
     staleTime: 5 * 60_000,
   });
 
-  // Decide if we should render demo/mock data
-  const reportData = useMemo(() => {
-    if (useDemoData || isError || !studentName) {
-      return OJ_MOCK_REPORT;
-    }
-    return data;
-  }, [data, useDemoData, isError, studentName]);
-
-  const shouldLoadPdf = Boolean(data) && Boolean(studentName) && !useDemoData && !isError;
+  const shouldLoadPdf = Boolean(reportData) && Boolean(studentName);
 
   const {
     data: pdfBlob,
@@ -152,7 +82,7 @@ export default function OjProgressSection({ studentName }: Props) {
   }, [reportData, selectedLevel]);
 
   const pdfFileName = `unioj-report-${reportData?.student.username || studentName || "student"}.pdf`;
-  const canUsePdf = Boolean(pdfObjectUrl) && !useDemoData && !isError && !isPdfError;
+  const canUsePdf = Boolean(pdfObjectUrl) && !isPdfError;
 
   const handleDownloadPdf = () => {
     if (!pdfObjectUrl) return;
@@ -173,14 +103,11 @@ export default function OjProgressSection({ studentName }: Props) {
     }
   };
 
-  const is404Error = useMemo(() => {
-    if (useDemoData) return false;
-    const errStatus = (error as { response?: { status?: number } })?.response?.status;
-    return errStatus === 404;
-  }, [error, useDemoData]);
-
   // Loading skeleton state
-  if (isLoading && !useDemoData) {
+  // Không phải IT, chưa có profile UNIOJ (404) hoặc lỗi → ẩn hẳn, không hiện dòng lỗi.
+  if (!isItProfile || !studentName || isError) return null;
+
+  if (isLoading) {
     return (
       <div className="mt-6 rounded-[1.5rem] border border-border-default bg-bg-surface p-6 shadow-sm animate-pulse">
         <div className="h-6 w-48 rounded bg-bg-secondary mb-4" />
@@ -190,51 +117,6 @@ export default function OjProgressSection({ studentName }: Props) {
           <div className="h-24 rounded-2xl bg-bg-secondary" />
         </div>
         <div className="h-64 rounded-2xl bg-bg-secondary" />
-      </div>
-    );
-  }
-
-  // If there's a 404 error, show a custom status banner and offer to show demo data or contact support
-  if (is404Error && !useDemoData) {
-    return (
-      <div className="mt-6 rounded-[1.5rem] border border-border-default bg-bg-surface p-6 shadow-sm">
-        <div className="flex flex-col items-center justify-center py-6 text-center">
-          <div className="flex size-12 items-center justify-center rounded-full bg-warning/15 text-warning mb-3">
-            <svg className="size-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-          <h3 className="text-base font-semibold text-text-primary">Chưa có dữ liệu OJ</h3>
-          <p className="mt-1 text-sm text-text-muted max-w-md">
-            Học sinh <strong>{studentName}</strong> chưa liên kết tài khoản hoặc chưa có lịch sử làm bài trên hệ thống UNIOJ.
-          </p>
-          <div className="mt-4 flex gap-3">
-            <button
-              onClick={() => setUseDemoData(true)}
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-text-inverse transition-colors hover:bg-primary-hover"
-            >
-              Xem dữ liệu mẫu (Demo)
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // General error (non-404)
-  if (isError && !useDemoData) {
-    return (
-      <div className="mt-6 rounded-[1.5rem] border border-error/20 bg-error/5 p-6 shadow-sm">
-        <h3 className="text-sm font-semibold text-error">Lỗi đồng bộ dữ liệu UNIOJ</h3>
-        <p className="mt-1 text-xs text-text-secondary">
-          {error?.message || "Không thể kết nối đến máy chủ UNIOJ để tải tiến độ học tập."}
-        </p>
-        <button
-          onClick={() => setUseDemoData(true)}
-          className="mt-3 inline-flex h-8 items-center justify-center rounded-lg bg-bg-surface border border-border-default px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-bg-secondary"
-        >
-          Xem dữ liệu mẫu (Demo)
-        </button>
       </div>
     );
   }
@@ -262,20 +144,11 @@ export default function OjProgressSection({ studentName }: Props) {
             Tiến độ học tập Online Judge (UNIOJ)
           </h2>
           <p className="text-xs text-text-muted mt-1">
-            Đồng bộ từ tài khoản UNIOJ của học sinh {useDemoData && <span className="text-warning font-bold">(DỮ LIỆU DEMO)</span>}
+            Đồng bộ từ tài khoản UNIOJ của học sinh
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {useDemoData && (
-            <button
-              onClick={() => setUseDemoData(false)}
-              className="inline-flex h-9 items-center justify-center rounded-xl border border-warning/30 bg-warning/10 px-3 text-xs font-semibold text-warning hover:bg-warning/20 transition-colors"
-            >
-              Quay lại dữ liệu thật
-            </button>
-          )}
-
           <button
             onClick={handleDownloadPdf}
             disabled={!canUsePdf || isPdfLoading}

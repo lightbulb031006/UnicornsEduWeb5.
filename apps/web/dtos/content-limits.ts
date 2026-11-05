@@ -11,6 +11,7 @@ export const CONTENT_LIMITS = {
   sessionRichText: 20_000,
   url: 2_048,
   attendanceNotes: 500,
+  sessionReviewText: 2_000,
 } as const;
 
 export function isHttpUrl(value: string): boolean {

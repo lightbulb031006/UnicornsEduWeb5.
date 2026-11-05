@@ -32,6 +32,11 @@ export type AchievementDto = {
   imagePath: string | null;
   imageUrl: string | null;
   sortOrder: number;
+  /**
+   * Thành tích nổi bật (tích sao): tối đa 1 / nhân sự, luôn đứng đầu danh sách,
+   * là thành tích duy nhất landing hiển thị. Luôn false với thành tích học sinh.
+   */
+  isHighlight: boolean;
   createdAt: string;
   updatedAt: string;
 };

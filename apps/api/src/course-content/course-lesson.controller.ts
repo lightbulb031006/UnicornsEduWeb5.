@@ -27,6 +27,7 @@ import {
   LessonResponseDto,
   LessonUpdateDto,
 } from 'src/dtos/course-content.dto';
+import { redactLessonVideo } from 'src/protected-video/redact-video-url';
 import { CourseLessonService } from './course-lesson.service';
 import { COURSE_TREE_STAFF_ROLES } from './course-tree-roles';
 
@@ -86,10 +87,17 @@ export class CourseLessonController {
   @ApiParam({ name: 'moduleId', description: 'ID chuyên đề' })
   @ApiResponse({ status: 200, description: 'Danh sách tiết học.' })
   async getLessons(
+    @CurrentUser() user: JwtPayload,
     @Param('courseId') courseId: string,
     @Param('moduleId') moduleId: string,
   ): Promise<LessonResponseDto[]> {
-    return this.lessonService.getLessonsByCourseId(courseId, moduleId);
+    const lessons = await this.lessonService.getLessonsByCourseId(
+      courseId,
+      moduleId,
+    );
+    return user.roleType === UserRole.student
+      ? lessons.map(redactLessonVideo)
+      : lessons;
   }
 
   @Post('reorder')
@@ -135,11 +143,19 @@ export class CourseLessonController {
   @ApiResponse({ status: 200, description: 'Chi tiết tiết học.', type: Object })
   @ApiResponse({ status: 404, description: 'Tiết học không tồn tại.' })
   async getLesson(
+    @CurrentUser() user: JwtPayload,
     @Param('courseId') courseId: string,
     @Param('moduleId') moduleId: string,
     @Param('lessonId') lessonId: string,
   ): Promise<LessonResponseDto> {
-    return this.lessonService.getCourseLesson(courseId, moduleId, lessonId);
+    const lesson = await this.lessonService.getCourseLesson(
+      courseId,
+      moduleId,
+      lessonId,
+    );
+    return user.roleType === UserRole.student
+      ? redactLessonVideo(lesson)
+      : lesson;
   }
 
   @Patch(':lessonId')

@@ -76,20 +76,20 @@ export class CodeforcesService {
     return [
       {
         id: 'luyen-tap',
-        title: 'Hướng dẫn giải bài luyện tập codeforces Unicorns Edu',
+        title: 'Hướng dẫn giải bài luyện tập codeforces UniEdu',
         groupCode: luyenTap,
         websiteUrl: websiteLuyenTap.replace(/\/$/, ''),
       },
       {
         id: 'khao-sat',
-        title: 'Hướng dẫn giải bài Khảo sát Unicorns Edu Exam',
+        title: 'Hướng dẫn giải bài Khảo sát UniEdu Exam',
         groupCode: khaoSat,
         websiteUrl: websiteKhaoSat.replace(/\/$/, ''),
       },
       {
         id: 'thuc-chien',
         title:
-          'Hướng dẫn giải bài đề thực chiến đề thi Unicorns edu - Học Tin cùng Chuyên tin',
+          'Hướng dẫn giải bài đề thực chiến đề thi UniEdu - Học Tin cùng Chuyên tin',
         groupCode: thucChien,
         websiteUrl: websiteThucChien.replace(/\/$/, ''),
       },

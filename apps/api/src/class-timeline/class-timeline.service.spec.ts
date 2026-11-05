@@ -4,9 +4,13 @@ jest.mock('../prisma/prisma.service', () => ({
 
 jest.mock('../../generated/client', () => ({}));
 
+jest.mock('src/session/session-ordinal.util', () => ({
+  loadSessionOrdinals: jest.fn().mockResolvedValue(new Map()),
+}));
+
 import { ClassTimelineService } from './class-timeline.service';
 import { UserRole } from 'generated/enums';
-import { NOT_ARCHIVED_TIMELINE_ITEM } from 'src/course-content/archived-lesson-filter';
+import { PRESENT_TIMELINE_ITEM } from 'src/course-content/archived-lesson-filter';
 
 describe('ClassTimelineService — soft hide', () => {
   let service: ClassTimelineService;
@@ -38,7 +42,11 @@ describe('ClassTimelineService — soft hide', () => {
       resolveClassViewerActor: jest.fn().mockResolvedValue({}),
       resolveClassViewAccessMode: jest.fn().mockResolvedValue('admin'),
     };
-    service = new ClassTimelineService(mockPrisma as any, staffAccess as any);
+    service = new ClassTimelineService(
+      mockPrisma as any,
+      staffAccess as any,
+      {} as any,
+    );
   });
 
   it('staff list includes hidden content items', async () => {
@@ -66,7 +74,7 @@ describe('ClassTimelineService — soft hide', () => {
     expect(rows[0].hiddenAt).toBe('2026-09-07T00:00:00.000Z');
     expect(mockPrisma.classTimelineItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { classId: 'cls-1', ...NOT_ARCHIVED_TIMELINE_ITEM },
+        where: { classId: 'cls-1', ...PRESENT_TIMELINE_ITEM },
       }),
     );
   });

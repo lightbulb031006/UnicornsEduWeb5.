@@ -128,6 +128,12 @@ const PRESET_TARGET_TAGS: AudiencePresetTag[] = [
     kind: "staffRole",
     value: "technical",
   },
+  {
+    key: "@sale",
+    label: "@sale",
+    kind: "staffRole",
+    value: "sale",
+  },
 ];
 
 const INPUT_CLASS =
@@ -448,7 +454,7 @@ function NotificationListCard({
         </div>
 
         <div className="flex shrink-0 flex-wrap gap-2">
-          {isPublished ? (
+          {!item.canEdit ? null : isPublished ? (
             <button
               type="button"
               onClick={() => onRepush(item)}
@@ -483,16 +489,18 @@ function NotificationListCard({
               </button>
             </>
           )}
-          <button
-            type="button"
-            onClick={() => onDelete(item)}
-            disabled={disabled}
-            aria-label="Xóa thông báo"
-            title="Xóa thông báo"
-            className="inline-flex size-10 items-center justify-center rounded-xl border border-error/25 bg-error/10 text-error transition hover:bg-error/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-error/30 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <TrashIcon className="size-5" />
-          </button>
+          {item.canDelete ? (
+            <button
+              type="button"
+              onClick={() => onDelete(item)}
+              disabled={disabled}
+              aria-label="Xóa thông báo"
+              title="Xóa thông báo"
+              className="inline-flex size-10 items-center justify-center rounded-xl border border-error/25 bg-error/10 text-error transition hover:bg-error/15 focus:outline-none focus-visible:ring-2 focus-visible:ring-error/30 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <TrashIcon className="size-5" />
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -529,7 +537,10 @@ export default function NotificationManager() {
   const normalizedRecipientSearch = isAtSearch
     ? trimmedRecipientSearch.slice(1).trim()
     : trimmedRecipientSearch;
-  const [debouncedRecipientSearch] = useDebounce(normalizedRecipientSearch, 250);
+  const [debouncedRecipientSearch] = useDebounce(
+    normalizedRecipientSearch,
+    250,
+  );
   const canSearchUsers = normalizedRecipientSearch.length >= 2;
   const shouldSearchUsers = debouncedRecipientSearch.length >= 2;
   const isRecipientSearchDebouncing =
@@ -764,10 +775,7 @@ export default function NotificationManager() {
       if (tagLabel === "@all") {
         return { ...current, targetAll: false };
       }
-      if (
-        tagLabel === "@admin" ||
-        tagLabel === "@staff"
-      ) {
+      if (tagLabel === "@admin" || tagLabel === "@staff") {
         return {
           ...current,
           targetRoleTypes: current.targetRoleTypes.filter(
@@ -1113,7 +1121,8 @@ export default function NotificationManager() {
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-sm font-medium text-text-primary">
-                                  @{option.displayName ??
+                                  @
+                                  {option.displayName ??
                                     option.accountHandle ??
                                     option.email}
                                 </span>

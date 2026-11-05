@@ -63,6 +63,9 @@ type StaffProfileForAccess = {
   highSchool: string | null;
   bankAccount: string | null;
   bankQrLink: string | null;
+  _count?: { achievements: number };
+  /** Thành tích nổi bật (lấy tối đa 1 dòng `isHighlight`). */
+  achievements?: Array<{ id: string }>;
 };
 
 type StudentProfileForAccess = {
@@ -114,6 +117,21 @@ function isStaffProfileComplete(
     hasText(staff.highSchool) &&
     hasText(staff.bankAccount) &&
     hasText(staff.bankQrLink)
+  );
+}
+
+/**
+ * Gia sư (`teacher`) phải có ít nhất 1 thành tích và đã chọn thành tích nổi bật
+ * thì hồ sơ mới tính là đủ.
+ */
+export function hasRequiredStaffAchievements(
+  staffRoles: StaffRole[],
+  achievementCount: number,
+  hasHighlightAchievement: boolean,
+) {
+  return (
+    !staffRoles.includes(StaffRole.teacher) ||
+    (achievementCount > 0 && hasHighlightAchievement)
   );
 }
 
@@ -257,6 +275,12 @@ export class AuthAccessService {
             highSchool: true,
             bankAccount: true,
             bankQrLink: true,
+            _count: { select: { achievements: true } },
+            achievements: {
+              where: { isHighlight: true },
+              select: { id: true },
+              take: 1,
+            },
           },
         },
         studentInfo: { select: { id: true, status: true } },
@@ -324,6 +348,11 @@ export class AuthAccessService {
     const staffProfileComplete =
       hasStaffProfile &&
       isStaffProfileComplete(staffProfile, user.avatarPath) &&
+      hasRequiredStaffAchievements(
+        staffRoles,
+        staffProfile?._count?.achievements ?? 0,
+        (staffProfile?.achievements?.length ?? 0) > 0,
+      ) &&
       hasCurrentStaffDataConsent({
         dataProcessingConsentAcceptedAt:
           profileLinks?.dataProcessingConsentAcceptedAt ?? null,

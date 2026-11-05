@@ -190,7 +190,7 @@ export default function CalendarScheduleList({
                             </p>
                           ) : null}
                           {event.studentNames?.length ? (
-                            <p className="truncate text-xs text-text-secondary">
+                            <p className="break-words text-xs text-text-secondary">
                               Học sinh: {event.studentNames.join(", ")}
                             </p>
                           ) : null}

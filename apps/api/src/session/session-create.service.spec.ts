@@ -8,7 +8,13 @@ jest.mock('../payroll/lesson-plan-head-commission.util', () => ({
   syncLessonPlanHeadCommissions: jest.fn(),
 }));
 
-import { AttendanceStatus, StaffRole, UserRole } from '../../generated/enums';
+import {
+  AttendanceStatus,
+  HomeworkQuality,
+  SessionProgressStatus,
+  StaffRole,
+  UserRole,
+} from '../../generated/enums';
 import {
   SessionCreateService,
   shouldEnforceDeclaredSchedule,
@@ -54,8 +60,11 @@ describe('SessionCreateService', () => {
 
   const validationService = {
     validateAttendanceItems: jest.fn(),
-    validateAttendanceNotes: jest.fn(),
     validateSessionCommentFields: jest.fn(),
+    resolveSessionReviewFields: jest
+      .fn()
+      .mockReturnValue({ hasInClassTest: false, inClassTestTotal: null }),
+    resolveAttendanceReview: jest.fn().mockReturnValue({}),
     isTuitionChargeableStatus: jest.fn().mockReturnValue(true),
     resolveChargeableAttendanceTuitionFee: jest.fn(),
     resolveDefaultStudentTuitionPerSession: jest.fn(),
@@ -83,6 +92,10 @@ describe('SessionCreateService', () => {
     linkMakeupEventToSession: jest.fn(),
   };
 
+  const trialCatchUpService = {
+    assertTrialAttendanceAllowed: jest.fn(),
+    reconcile: jest.fn(),
+  };
   const actionHistoryService = {
     recordCreate: jest.fn(),
   };
@@ -128,6 +141,7 @@ describe('SessionCreateService', () => {
       snapshotService as never,
       scheduleRulesService as never,
       actionHistoryService as never,
+      trialCatchUpService as never,
     );
   });
 
@@ -222,7 +236,7 @@ describe('SessionCreateService', () => {
         date: '2026-03-20',
         startTime: '19:00:00',
         endTime: '20:30:00',
-        coefficient: 1.5,
+        coefficient: 0,
         notes: 'Buổi thử',
         lessonContent: '<p>Đã làm 2 bài LEVEL 2</p>',
         homework: '<p>Làm bài 3</p>',
@@ -251,7 +265,7 @@ describe('SessionCreateService', () => {
         classId: 'class-1',
         teacherId: 'teacher-1',
         date: '2026-03-20',
-        coefficient: 1.5,
+        coefficient: 0,
         startTime: '19:00:00',
         endTime: '20:30:00',
         notes: 'Buổi thử',
@@ -273,6 +287,30 @@ describe('SessionCreateService', () => {
       },
     );
     expect(createSessionSpy.mock.calls[0][0].allowanceAmount).toBeUndefined();
+  });
+
+  it('lets an assistant mark Dạy thử (coefficient 0) via staff-ops', async () => {
+    accessService.resolveActor.mockResolvedValue({
+      id: 'assistant-1',
+      roles: [StaffRole.assistant],
+    });
+    accessService.resolveSingleTeacherForClass.mockResolvedValue('teacher-1');
+    const createSessionSpy = jest
+      .spyOn(service, 'createSession')
+      .mockResolvedValue({ id: 'session-4' } as never);
+
+    await service.createSessionForStaff('user-2', UserRole.staff, 'class-1', {
+      date: '2026-10-10',
+      coefficient: 0,
+      lessonContent: '<p>Nội dung</p>',
+      homework: '<p>BTVN</p>',
+      tutorial: '<p>Tutorial</p>',
+    });
+
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ coefficient: 0 }),
+      undefined,
+    );
   });
 
   it('resolves the class teacher when admin creates a staff-ops session', async () => {
@@ -959,6 +997,10 @@ describe('SessionCreateService time requirements', () => {
       findUnique: jest.fn(),
     },
   };
+  const trialCatchUpService = {
+    assertTrialAttendanceAllowed: jest.fn(),
+    reconcile: jest.fn(),
+  };
   const noop = {
     resolveActor: jest.fn(),
     assertTeacherAssignedToClass: jest.fn(),
@@ -983,6 +1025,7 @@ describe('SessionCreateService time requirements', () => {
       noop as never,
       noop as never,
       noop as never,
+      trialCatchUpService as never,
     );
   }
 
@@ -993,11 +1036,17 @@ describe('SessionCreateService time requirements', () => {
     lessonContent: '<p>Nội dung</p>',
     homework: '<p>BTVN</p>',
     tutorial: '<p>Tutorial</p>',
+    progressStatus: SessionProgressStatus.completed,
+    nextSessionPlan: 'Bài tiếp theo',
     attendance: [
       {
         studentId: 'student-1',
         status: AttendanceStatus.present,
         notes: 'OK',
+        strengths: 'Tập trung',
+        improvements: 'Cẩn thận hơn',
+        homeworkQuality: HomeworkQuality.passed,
+        homeworkComment: 'Làm đủ',
       },
     ],
   };

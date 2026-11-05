@@ -97,6 +97,11 @@ describe('SessionUpdateService', () => {
       ledgerService as never,
       snapshotService as never,
       actionHistoryService as never,
+      {
+        assertTrialAttendanceAllowed: jest.fn(),
+        releaseBeforeDelete: jest.fn(),
+        reconcile: jest.fn(),
+      } as never,
     );
   });
 
@@ -127,7 +132,7 @@ describe('SessionUpdateService', () => {
       .mockResolvedValue({ id: 'session-1' } as never);
 
     await service.updateSessionForStaff('user-1', UserRole.staff, 'session-1', {
-      coefficient: 1.8,
+      coefficient: 0,
       attendance: [
         {
           studentId: 'student-1',
@@ -152,7 +157,7 @@ describe('SessionUpdateService', () => {
         startTime: undefined,
         endTime: undefined,
         notes: undefined,
-        coefficient: 1.8,
+        coefficient: 0,
         attendance: [
           {
             studentId: 'student-1',
@@ -168,6 +173,52 @@ describe('SessionUpdateService', () => {
           },
         ],
       },
+      undefined,
+    );
+  });
+
+  it('rejects a staff-ops Dạy thử change on a paid session', async () => {
+    mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'session-1',
+      classId: 'class-1',
+      coefficient: 1,
+      teacherPaymentStatus: 'paid',
+      attendance: [],
+    });
+    const updateSessionSpy = jest.spyOn(service, 'updateSession');
+
+    await expect(
+      service.updateSessionForStaff('user-1', UserRole.staff, 'session-1', {
+        coefficient: 0,
+      }),
+    ).rejects.toThrow(
+      'Không thể đổi Dạy thử của buổi đã thanh toán hoặc ghi cọc.',
+    );
+    expect(updateSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it('accepts an unchanged Dạy thử coefficient on a deposit session', async () => {
+    mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'session-1',
+      classId: 'class-1',
+      coefficient: 0,
+      teacherPaymentStatus: 'deposit',
+      attendance: [],
+    });
+    accessService.resolveActor.mockResolvedValue({
+      id: 'teacher-1',
+      roles: [StaffRole.teacher],
+    });
+    const updateSessionSpy = jest
+      .spyOn(service, 'updateSession')
+      .mockResolvedValue({ id: 'session-1' } as never);
+
+    await service.updateSessionForStaff('user-1', UserRole.staff, 'session-1', {
+      coefficient: 0,
+    });
+
+    expect(updateSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ coefficient: 0 }),
       undefined,
     );
   });

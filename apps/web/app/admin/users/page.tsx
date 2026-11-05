@@ -387,7 +387,7 @@ function AdminUsersPageContent() {
                             </span>
                           )}
                         </div>
-                        <span className="truncate">Tên: {getUserDisplayName(u) || "—"}</span>
+                        <span className="break-words">Tên: {getUserDisplayName(u) || "—"}</span>
                         <span className="truncate">Trạng thái: {userStatusLabel(u.status)}</span>
                       </div>
                       {(u.staffInfo?.id || u.studentInfo?.id) ? (
@@ -448,7 +448,7 @@ function AdminUsersPageContent() {
                         </td>
                         <td className="px-4 py-3 text-text-primary">
                           <span className="block truncate font-medium">{u.accountHandle}</span>
-                          <span className="mt-0.5 block truncate text-text-secondary">
+                          <span className="mt-0.5 block break-words text-text-secondary">
                             {getUserDisplayName(u) || "—"}
                           </span>
                         </td>

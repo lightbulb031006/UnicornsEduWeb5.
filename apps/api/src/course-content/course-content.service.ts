@@ -154,6 +154,16 @@ export class CourseContentService extends CourseContentSupportService {
     return this.quizzes.unlinkQuizQuestion(...args);
   }
 
+  addSetToQuiz(...args: Parameters<LessonQuizService['addSetToQuiz']>) {
+    return this.quizzes.addSetToQuiz(...args);
+  }
+
+  removeSetFromQuiz(
+    ...args: Parameters<LessonQuizService['removeSetFromQuiz']>
+  ) {
+    return this.quizzes.removeSetFromQuiz(...args);
+  }
+
   getLessonQuizzes(...args: Parameters<LessonQuizService['getLessonQuizzes']>) {
     return this.quizzes.getLessonQuizzes(...args);
   }
@@ -196,6 +206,18 @@ export class CourseContentService extends CourseContentSupportService {
     ...args: Parameters<PracticeQuestionLinkService['removeQuestionFromLesson']>
   ) {
     return this.questions.removeQuestionFromLesson(...args);
+  }
+
+  addSetToLesson(
+    ...args: Parameters<PracticeQuestionLinkService['addSetToLesson']>
+  ) {
+    return this.questions.addSetToLesson(...args);
+  }
+
+  removeSetFromLesson(
+    ...args: Parameters<PracticeQuestionLinkService['removeSetFromLesson']>
+  ) {
+    return this.questions.removeSetFromLesson(...args);
   }
 
   reorderQuestionLinks(
@@ -286,6 +308,18 @@ export class CourseContentService extends CourseContentSupportService {
     ...args: Parameters<ClassContentService['restoreClassContentItem']>
   ) {
     return this.content.restoreClassContentItem(...args);
+  }
+
+  removeClassContentItem(
+    ...args: Parameters<ClassContentService['removeClassContentItem']>
+  ) {
+    return this.content.removeClassContentItem(...args);
+  }
+
+  getClassContentItemRemovalImpact(
+    ...args: Parameters<ClassContentService['getClassContentItemRemovalImpact']>
+  ) {
+    return this.content.getClassContentItemRemovalImpact(...args);
   }
 
   updateClassContentSchedule(

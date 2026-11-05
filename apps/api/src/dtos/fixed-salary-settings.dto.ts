@@ -251,3 +251,17 @@ export class StaffFixedSalaryPayablesQueryDto {
   @IsString()
   month?: string;
 }
+
+export class CloseFixedSalaryMonthDto {
+  @ApiPropertyOptional({
+    description:
+      'Staff ids to close for the current month. Omit to close every eligible staff (same as the day-28 cron). Each staff only gets the eligible roles still missing a payable.',
+    type: [String],
+    example: ['UNISTAFF-0123456789'],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  staffIds?: string[];
+}

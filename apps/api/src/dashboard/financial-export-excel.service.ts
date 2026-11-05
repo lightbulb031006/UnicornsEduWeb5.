@@ -25,7 +25,7 @@ export class FinancialExportExcelService {
     payload: AdminDashboardFinancialExportDto,
   ): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Unicorns Edu';
+    workbook.creator = 'UniEdu';
     workbook.created = new Date();
 
     this.buildRevenueSheet(workbook, payload);
