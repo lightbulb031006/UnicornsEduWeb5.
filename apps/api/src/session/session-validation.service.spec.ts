@@ -35,7 +35,13 @@ describe('SessionValidationService', () => {
     (status) => {
       expect(() =>
         service.validateAttendanceItems(
-          [{ studentId: 'student-1', status, notes: '<p>' + 'x'.repeat(501) + '</p>' }],
+          [
+            {
+              studentId: 'student-1',
+              status,
+              notes: '<p>' + 'x'.repeat(501) + '</p>',
+            },
+          ],
           { required: true },
         ),
       ).toThrow('Ghi chú điểm danh tối đa 500 ký tự.');

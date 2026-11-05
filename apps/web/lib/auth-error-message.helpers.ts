@@ -1,4 +1,5 @@
 import { isAxiosError } from "axios";
+import { localizeErrorMessage } from "./api-error-message";
 
 export const GENERIC_LOGIN_ERROR_MESSAGE = "Đăng nhập thất bại.";
 
@@ -55,7 +56,11 @@ export function getLoginErrorToastMessage(error: unknown): string {
     return "Không kết nối được tới máy chủ. Kiểm tra kết nối mạng hoặc thử lại sau ít phút.";
   }
 
-  const serverMsg = nestMessageFromResponseData(error.response?.data);
+  const localized = localizeErrorMessage(
+    nestMessageFromResponseData(error.response?.data),
+    status,
+  );
+  const serverMsg = localized && !localized.isGeneric ? localized.message : null;
 
   if (status === 400) {
     return (
@@ -73,7 +78,10 @@ export function getLoginErrorToastMessage(error: unknown): string {
   }
 
   if (status === 409) {
-    return serverMsg ?? "Tài khoản đang đăng nhập ở thiết bị khác. Vui lòng đăng xuất thiết bị cũ hoặc liên hệ quản trị viên.";
+    return (
+      serverMsg ??
+      "Tài khoản đang đăng nhập ở thiết bị khác. Vui lòng đăng xuất thiết bị cũ hoặc liên hệ quản trị viên."
+    );
   }
   if (status === 429) {
     return (

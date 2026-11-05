@@ -6,6 +6,7 @@ Gộp 18 commit của `upstream/main` đến `dab3b08f` vào `main` Toán tại 
 
 - Thêm `LMS_PROFILE=math` vào môi trường API khi chạy bản mới. Hồ sơ Toán giữ trắc nghiệm một đáp án, tự luận, điểm thang 100 chia đều và mục Kiểm tra trong buổi. Giữ workspace Giáo án học sinh giỏi.
 - Giữ instance duy nhất `math`, cấu hình GHCR/Compose/nginx và kết nối Supabase được quản lý. Data stack self-host từ Tin là tài liệu và mã tham khảo cho IT/ENG/JP.
+- Upload ảnh nội dung câu hỏi cần bucket private `question-images` trên Supabase của Toán.
 - Giữ logo, biên lai và watermark Toán, nhãn Fanpage Toán, quyền thống kê buổi học và ngoại lệ kiểm tra lịch khi admin tạo buổi. Kết thúc lớp dùng hộp xác nhận có cảnh báo trợ cấp còn thiếu theo nghiệp vụ mới.
 - Đổi tên báo cáo UniOJ từ `8:6.txt` sang `8-6.txt` để Windows checkout được. Blob nội dung giữ nguyên.
 

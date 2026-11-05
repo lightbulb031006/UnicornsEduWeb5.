@@ -9,7 +9,10 @@ import {
   Section,
   Text,
 } from '@react-email/components';
-import { RECEIPT_CENTER_NAME, type TuitionReceiptEmailProps } from '../receipt.types';
+import {
+  RECEIPT_CENTER_NAME,
+  type TuitionReceiptEmailProps,
+} from '../receipt.types';
 import {
   EmailAmountHighlight,
   EmailLayout,
@@ -173,10 +176,7 @@ function ReceiptDocument({
         <Row>
           <Column style={{ width: '50%', verticalAlign: 'top' }}>
             <MetaBlock label="Mã biên lai" value={invoiceCode} />
-            <MetaBlock
-              label="Mã học viên"
-              value={studentCode?.trim() || '—'}
-            />
+            <MetaBlock label="Mã học viên" value={studentCode?.trim() || '—'} />
             <MetaBlock label="Học viên" value={studentName} />
           </Column>
           <Column style={{ width: '50%', verticalAlign: 'top' }}>
@@ -203,9 +203,7 @@ function ReceiptDocument({
               color: BLUE950,
             }}
           >
-            <span style={{ fontWeight: 700, color: BORDER }}>
-              Nội dung:
-            </span>{' '}
+            <span style={{ fontWeight: 700, color: BORDER }}>Nội dung:</span>{' '}
             {receiptSummary}
           </Text>
         </Section>
@@ -225,15 +223,12 @@ function ReceiptDocument({
         }}
       >
         <Text style={{ margin: 0 }}>
-          <span style={{ fontWeight: 700, color: BORDER }}>
-            Người nhận:
-          </span>{' '}
+          <span style={{ fontWeight: 700, color: BORDER }}>Người nhận:</span>{' '}
           <strong>{receiverName}</strong>
           {receiverBankName ? (
             <>
               {' '}
-              <span style={{ color: SLATE500 }}>·</span>{' '}
-              {receiverBankName}
+              <span style={{ color: SLATE500 }}>·</span> {receiverBankName}
             </>
           ) : null}
           {receiverBankAccount ? (
@@ -452,6 +447,37 @@ function ReceiptDocument({
         </tbody>
       </table>
     </Section>
+  );
+}
 
+function MetaBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <Row style={{ marginBottom: '8px' }}>
+      <Column>
+        <Text
+          style={{
+            margin: '0 0 2px',
+            fontSize: '9px',
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            color: SLATE500,
+          }}
+        >
+          {label}
+        </Text>
+        <Text
+          style={{
+            margin: 0,
+            fontSize: '12px',
+            fontWeight: 600,
+            color: BLUE950,
+            wordBreak: 'break-word',
+          }}
+        >
+          {value}
+        </Text>
+      </Column>
+    </Row>
   );
 }

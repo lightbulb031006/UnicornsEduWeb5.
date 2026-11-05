@@ -69,8 +69,16 @@ describe("getLoginErrorToastMessage", () => {
       "Mật khẩu cần ít nhất 6 ký tự",
     );
     expect(getLoginErrorToastMessage(axiosErrorWithStatus(429))).toContain(
-      "Too many requests",
+      "Bạn thao tác quá nhanh",
     );
+  });
+
+  it("localizes the server rate-limit message", () => {
+    expect(
+      getLoginErrorToastMessage(
+        axiosErrorWithStatus(429, { message: "Too Many Requests" }),
+      ),
+    ).toContain("Bạn thao tác quá nhanh");
   });
 
   // Hồi quy cho sự cố production: API trả 500 vì không kết nối được database,

@@ -212,7 +212,9 @@ describe('AchievementService', () => {
           updateMany: jest.fn((args: unknown) => args),
           delete: jest.fn().mockResolvedValue(undefined),
         },
-        $transaction: jest.fn().mockResolvedValue([]),
+        $transaction: jest
+          .fn<Promise<unknown[]>, [unknown[]]>()
+          .mockResolvedValue([]),
       };
       return {
         prisma,

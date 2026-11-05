@@ -13,6 +13,10 @@ Page-level specs for `apps/web`, aligned with [Workplan](../Workplan.md) and [UI
 
 ## Ma trận workspace/tenant access
 
+- Gia sư cần có thành tích nổi bật để qua bước hoàn thiện hồ sơ staff.
+- Role `sale` vào `/staff/sale-detail` và các màn tự phục vụ. Picker trợ cấp chỉ trả thông tin học sinh cần để chọn.
+- Quyền tạo và đẩy thông báo được kiểm tra riêng tại `/staff/notification/manage`. Danh sách role ở [spec staff](staff.md).
+
 > **Tenant hiện tại:** Prisma schema chưa có `tenant_id`/`workspace_id`; app đang single-tenant. Trong docs page, `workspace` nghĩa là phạm vi shell theo `effectiveRoleTypes`, linked profile, và `staffInfo.roles`, không phải tenant dữ liệu. `users.role_type` chỉ là role gốc/default; quyền runtime được resolve theo union của `role_type`, linked `staffInfo`, linked `studentInfo`, và `staffInfo.roles`.
 > **Multi-role policy:** `staffInfo.roles` cộng quyền theo union, không ưu tiên một role để loại role khác. User có `teacher + accountant_income + accountant_expense` giữ route giáo viên và nhận thêm cả route thu/chi. User có cả `accountant_income + accountant_expense` được xem full finance view nhưng vẫn không phải full admin; strict admin routes và các mutation role/user/deduction/direct-wallet approval vẫn chỉ dành cho admin đầy đủ.
 

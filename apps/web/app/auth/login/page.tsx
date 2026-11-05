@@ -25,7 +25,10 @@ import {
   buildLoginFallbackSession,
 } from "@/lib/post-login-session";
 import { getClientApiBaseUrl } from "@/lib/api-base-url";
-import { getLoginErrorToastMessage } from "@/lib/auth-error-message.helpers";
+import {
+  getLoginErrorToastMessage,
+  nestMessageFromResponseData,
+} from "@/lib/auth-error-message.helpers";
 import {
   EMAIL_VERIFICATION_RESEND_COOLDOWN_MS,
   openEmailVerificationModal,

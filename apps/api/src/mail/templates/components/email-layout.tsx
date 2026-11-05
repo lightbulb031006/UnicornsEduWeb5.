@@ -11,6 +11,7 @@ import {
   Section,
   Text,
 } from '@react-email/components';
+import { RECEIPT_CENTER_NAME } from '../../receipt.types';
 import type { CSSProperties, ReactNode } from 'react';
 
 /** Bảng màu khớp token `--ue-*` của apps/web (theme sáng). */
@@ -277,8 +278,8 @@ export function EmailLayout({
                   lineHeight: 1.6,
                 }}
               >
-                Cần hỗ trợ? Liên hệ trung tâm UniEdu qua kênh bạn vẫn trao
-                đổi hằng ngày.
+                Cần hỗ trợ? Liên hệ trung tâm UniEdu qua kênh bạn vẫn trao đổi
+                hằng ngày.
                 {siteUrl ? (
                   <>
                     {' '}
@@ -309,7 +310,7 @@ export function EmailLayout({
               textAlign: 'center',
             }}
           >
-            © {year} UniEdu · Học Tin cùng Chuyên tin
+            © {year} UniEdu · {RECEIPT_CENTER_NAME}
             <br />
             Email gửi tự động, vui lòng không trả lời thư này.
           </Text>
@@ -360,7 +361,7 @@ function BrandMark({ logoSrc }: { logoSrc: string | null }) {
                 lineHeight: '16px',
               }}
             >
-              Học Tin cùng Chuyên tin
+              {RECEIPT_CENTER_NAME}
             </Text>
           </td>
         </tr>

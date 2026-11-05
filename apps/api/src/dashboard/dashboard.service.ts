@@ -1011,7 +1011,8 @@ export class DashboardService {
    * (luôn 0 vì không có workspace sinh lesson output).
    */
   private withoutGiftedLessonCost<T extends { key: string }>(items: T[]): T[] {
-    if (this.lmsProfile.isIt || this.lmsProfile.config.profile === 'math') return items;
+    if (this.lmsProfile.isIt || this.lmsProfile.config.profile === 'math')
+      return items;
     return items.filter(
       (item) => item.key !== 'lessonCost' && item.key !== 'pending-lesson',
     );
@@ -5014,19 +5015,9 @@ export class DashboardService {
   async getAdminActionAlerts(
     query: GetAdminDashboardActionAlertsQueryDto,
   ): Promise<AdminDashboardActionAlertListDto> {
-    const period = resolveFinancialPeriod({
-      month: query.month,
-      year: query.year,
-    });
     const page = typeof query.page === 'number' ? query.page : 1;
     const limit = typeof query.limit === 'number' ? query.limit : 20;
     const offset = (page - 1) * limit;
-    const dashboardPeriod = {
-      monthStart: period.monthStart,
-      monthEnd: period.monthEnd,
-      fromMonthKey: period.fromMonthKey,
-      toMonthKeyExclusive: period.toMonthKeyExclusive,
-    };
 
     switch (query.group) {
       case 'expiring': {

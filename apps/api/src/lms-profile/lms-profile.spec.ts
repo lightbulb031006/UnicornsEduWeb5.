@@ -8,9 +8,7 @@ describe('loadLmsProfile', () => {
   });
 
   it.each([undefined, '', 'legacy'])('từ chối %p', (value) => {
-    expect(() => loadLmsProfile({ LMS_PROFILE: value })).toThrow(
-      /LMS_PROFILE/,
-    );
+    expect(() => loadLmsProfile({ LMS_PROFILE: value })).toThrow(/LMS_PROFILE/);
   });
 
   it('IT chấm điểm tuyệt đối, không có tự luận', () => {

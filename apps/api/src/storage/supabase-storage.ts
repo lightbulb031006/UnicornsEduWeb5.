@@ -3,7 +3,7 @@ import {
   BadRequestException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 export type UploadableFile = {
   buffer: Buffer;
@@ -28,35 +28,6 @@ type MulterFileFilterCallback = (
   error: Error | null,
   acceptFile: boolean,
 ) => void;
-
-type StorageError = { message: string };
-type SupabaseAdminClientLike = {
-  storage: {
-    getBucket(name: string): Promise<{
-      data: { public: boolean } | null;
-      error: StorageError | null;
-    }>;
-    from(bucket: string): {
-      download(path: string): Promise<{
-        data: { arrayBuffer(): Promise<ArrayBuffer> } | null;
-        error: StorageError | null;
-      }>;
-      createSignedUrl(
-        path: string,
-        expiresIn: number,
-      ): Promise<{
-        data: { signedUrl?: string } | null;
-        error: StorageError | null;
-      }>;
-      upload(
-        path: string,
-        body: Buffer,
-        options: { upsert: boolean; contentType: string },
-      ): Promise<{ error: StorageError | null }>;
-      remove(paths: string[]): Promise<{ error: StorageError | null }>;
-    };
-  };
-};
 
 /**
  * Đổi URL request từ origin public (`SUPABASE_URL`) sang origin nội bộ
@@ -100,7 +71,7 @@ function buildInternalFetch(
   };
 }
 
-export function tryGetSupabaseAdminClient(): SupabaseAdminClientLike | null {
+export function tryGetSupabaseAdminClient(): SupabaseClient | null {
   const supabaseUrl = process.env.SUPABASE_URL?.trim();
   const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   const supabaseInternalUrl = process.env.SUPABASE_INTERNAL_URL?.trim();
@@ -118,10 +89,10 @@ export function tryGetSupabaseAdminClient(): SupabaseAdminClientLike | null {
           },
         }
       : {}),
-  }) as unknown as SupabaseAdminClientLike;
+  });
 }
 
-export function getSupabaseAdminClient() {
+export function getSupabaseAdminClient(): SupabaseClient {
   const client = tryGetSupabaseAdminClient();
   if (!client) {
     throw new ServiceUnavailableException(
