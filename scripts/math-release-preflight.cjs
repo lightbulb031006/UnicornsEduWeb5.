@@ -84,15 +84,12 @@ async function main() {
         AND NOT EXISTS (SELECT 1 FROM public.student_info s WHERE s.user_id = u.id)
         AND NOT EXISTS (SELECT 1 FROM public.student_info s
           WHERE s.user_id IS NULL AND s.email IS NOT NULL AND lower(s.email) = lower(u.email))`);
-    if (pending.includes('20261025090000_reset_student_passwords')) {
-      const students = await client.query(`SELECT count(*)::int AS count
-        FROM public.users WHERE role_type = 'student'`);
-      const addsStudentAccounts = pending.includes('20260822150000_backfill_student_user_accounts')
-        && eligibleAccounts.rows[0].count > 0;
-      if (students.rows[0].count > 0 || addsStudentAccounts) {
-        throw new Error('Tin password reset would overwrite Math student credentials; rollout stopped');
-      }
-    }
+    // This migration is an intentional one-time Tin credential reset. Math must
+    // preserve its existing student credentials. The shell preflight records it
+    // as applied only after the private backup and isolated rehearsal succeed.
+    const skippedMigrations = pending.includes('20261025090000_reset_student_passwords')
+      ? ['20261025090000_reset_student_passwords']
+      : [];
     if (pending.includes('20261026100000_student_class_zero_tuition')) {
       const refund = await client.query(`SELECT
         EXISTS (SELECT 1 FROM public.users WHERE account_handle = $1) AND
@@ -117,6 +114,7 @@ async function main() {
       tinRepairIdCount: ids.length,
       tinRepairCollisions: collisions.rows[0].count,
       tinOneTimeCollisions,
+      skippedMigrations,
       counts: counts.rows[0],
       expectedCounts,
     };

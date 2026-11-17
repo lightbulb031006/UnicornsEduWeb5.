@@ -58,6 +58,20 @@ docker run --rm -i --network "container:${CHECK_CONTAINER}" \
   -e "DATABASE_URL=${CHECK_URL}" -e "DIRECT_URL=${CHECK_URL}" \
   --entrypoint node "${API_IMAGE}" - inspect \
   < "${REPO_ROOT}/scripts/math-release-preflight.cjs" > "${BACKUP_DIR}/before-rehearsal.json"
+jq -r '.skippedMigrations[]?' "${BACKUP_DIR}/before-rehearsal.json" \
+  > "${BACKUP_DIR}/math-skipped-migrations"
+while IFS= read -r migration; do
+  case "${migration}" in
+    20261025090000_reset_student_passwords) ;;
+    *) echo "Unsupported Math migration skip: ${migration}" >&2; exit 1 ;;
+  esac
+  echo "Rehearsing Math-safe skip for ${migration}..."
+  docker run --rm --network "container:${CHECK_CONTAINER}" --memory=512m \
+    -e "DATABASE_URL=${CHECK_URL}" -e "DIRECT_URL=${CHECK_URL}" \
+    --entrypoint sh "${API_IMAGE}" \
+    -c './node_modules/.bin/prisma migrate resolve --applied "$1" --schema=./prisma/schema/' \
+    sh "${migration}"
+done < "${BACKUP_DIR}/math-skipped-migrations"
 docker run --rm --network "container:${CHECK_CONTAINER}" --memory=512m \
   -e "DATABASE_URL=${CHECK_URL}" -e "DIRECT_URL=${CHECK_URL}" \
   -e NODE_OPTIONS=--max-old-space-size=384 --entrypoint sh "${API_IMAGE}" \
@@ -74,4 +88,17 @@ if [ "${BEFORE_COUNTS}" != "${AFTER_COUNTS}" ]; then
   exit 1
 fi
 test "$(jq -r '.pendingCount' "${BACKUP_DIR}/after-rehearsal.json")" = 0
-echo 'Math migration rehearsal passed; only predicted account/profile additions, financial records and wallet balance preserved.'
+
+# Only after the backup and rehearsal pass do we mutate production migration
+# metadata for explicitly allowlisted Tin-only data migrations. Their SQL never
+# runs on Math; the regular migrate-deploy step applies every remaining migration.
+while IFS= read -r migration; do
+  test -n "${migration}" || continue
+  echo "Recording Math-safe skip for ${migration} on production..."
+  docker compose -p "${COMPOSE_PROJECT_NAME:?}" -f docker-compose.prod.yml \
+    run --rm --no-deps -T api \
+    sh -c 'if [ -n "${DIRECT_URL:-}" ]; then export DATABASE_URL="$DIRECT_URL"; elif printf "%s" "$DATABASE_URL" | grep -q "pgbouncer=true"; then echo "DIRECT_URL is required when DATABASE_URL uses PgBouncer (pgbouncer=true)" >&2; exit 1; fi; ./node_modules/.bin/prisma migrate resolve --applied "$1" --schema=./prisma/schema/' \
+    sh "${migration}" </dev/null
+done < "${BACKUP_DIR}/math-skipped-migrations"
+
+echo 'Math migration rehearsal passed; predicted account/profile additions preserved, financial records and wallet balance unchanged, and allowlisted Tin-only migrations skipped safely.'

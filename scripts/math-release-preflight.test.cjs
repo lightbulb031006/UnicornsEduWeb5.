@@ -89,11 +89,19 @@ test('preserves the stop for pending legacy Tin student repairs', async () => {
   assert.match(error.message, /Tin repair IDs exist/);
 });
 
-test('stops the pending Tin password reset when Math has student accounts', async () => {
+test('reports the pending Tin password reset for a Math-safe metadata skip', async () => {
   const pending = ['20261025090000_reset_student_passwords'];
-  const { error } = await runPreflight({ pending, studentAccounts: 1 });
-  assert.match(error.message, /overwrite Math student credentials/);
-  assert.equal((await runPreflight({ pending })).error, undefined);
+  const { error, output, queries } = await runPreflight({ pending, studentAccounts: 1 });
+  assert.equal(error, undefined);
+  assert.deepEqual(Array.from(output[0].skippedMigrations), pending);
+  assert.equal(
+    queries.some(({ sql }) => sql.includes('FROM public.users WHERE role_type')),
+    false,
+  );
+
+  const applied = await runPreflight({ pending: [] });
+  assert.equal(applied.error, undefined);
+  assert.deepEqual(Array.from(applied.output[0].skippedMigrations), []);
 });
 
 test('stops the pending Tin refund when the target account and class exist', async () => {

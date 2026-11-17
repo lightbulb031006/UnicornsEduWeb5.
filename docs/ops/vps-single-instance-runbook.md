@@ -62,7 +62,7 @@ pull image, kiểm tra/sao lưu database Toán và chạy thử migration trên 
 chạy `prisma migrate deploy`, rồi recreate lần lượt `api` → `web` → `nginx`
 kèm healthcheck.
 
-Preflight chạy `scripts/math-release-preflight.sh`: backup schema public trong `/root/unicorns-math-predeploy-*` (quyền 700), giữ file dump/checksum và báo cáo số bản ghi; thông tin kết nối tạm được xoá. PostgreSQL kiểm thử không publish port và không có mạng ngoài. Nếu preflight thất bại, điều tra log/báo cáo trước khi triển khai tiếp; nginx đang chạy được giữ trong giai đoạn này. VPS cần truy cập image `postgres:<major>-alpine` khớp phiên bản database.
+Preflight chạy `scripts/math-release-preflight.sh`: backup schema public trong `/root/unicorns-math-predeploy-*` (quyền 700), giữ file dump/checksum và báo cáo số bản ghi; thông tin kết nối tạm được xoá. PostgreSQL kiểm thử không publish port và không có mạng ngoài. Migration Tin-only `20261025090000_reset_student_passwords` được đánh dấu đã áp dụng trên bản rehearsal; chỉ sau khi rehearsal và đối chiếu đạt, CD mới đánh dấu migration này đã áp dụng trên production để không chạy SQL reset mật khẩu học sinh Toán. Mọi migration khác tiếp tục qua `migrate deploy`. Nếu preflight thất bại, điều tra log/báo cáo trước khi triển khai tiếp; nginx đang chạy được giữ trong giai đoạn này. VPS cần truy cập image `postgres:<major>-alpine` khớp phiên bản database.
 
 ### Secrets / variables GitHub bắt buộc
 

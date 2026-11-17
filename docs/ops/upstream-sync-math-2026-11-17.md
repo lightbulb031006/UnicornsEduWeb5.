@@ -1,6 +1,6 @@
 # Đồng bộ Tin vào Toán ngày 17/11/2026
 
-Gộp 16 commit của `upstream/main`, từ sau `dab3b08f` đến `e3adf5ad`, vào `main` Toán tại máy. Lần đồng bộ này cập nhật mã nguồn local; chưa push GitHub, deploy VPS hoặc chạy migration production.
+Gộp 16 commit của `upstream/main`, từ sau `dab3b08f` đến `e3adf5ad`, vào `main` Toán tại máy và push merge commit `9aad725f` lên GitHub ngày 17/11.
 
 ## Backup
 
@@ -36,7 +36,14 @@ Gộp 16 commit của `upstream/main`, từ sau `dab3b08f` đến `e3adf5ad`, v�
 7. `20261116100000_derive_one_time_locked_per_session`: suy ra học phí/buổi từ gói đã chốt; cần đối chiếu digest học phí.
 8. `20261116120000_trial_teaching_warning_dismissals`: tạo bảng cảnh báo dạy thử.
 
-Preflight Toán hiện vẫn phải chặn các migration nguy hiểm đã ghi trong runbook 05/11. Trước release kế tiếp, mở rộng rehearsal/digest cho migration trợ cấp theo buổi, hai migration gói bán một lần và hai migration role; tuyệt đối không bỏ qua preflight.
+Preflight Toán vẫn chặn các migration nguy hiểm đã ghi trong runbook 05/11. Riêng `20261025090000_reset_student_passwords` là migration dữ liệu chỉ dành cho Tin: Math khóa cứng tên migration này, chạy `prisma migrate resolve --applied` trên database rehearsal, đối chiếu counts/digests, rồi mới ghi trạng thái đã áp dụng trên production sau khi backup đạt. SQL reset mật khẩu không chạy trên Math. Trước release kế tiếp, tiếp tục rehearsal/digest migration trợ cấp theo buổi, hai migration gói bán một lần và hai migration role; tuyệt đối không bỏ qua preflight.
+
+## Lần phát hành ngày 17/11
+
+- Workflow #22 build API/Web thành công cho `9aad725f`.
+- Deploy dừng trước khi chạy migration production với thông báo `Tin password reset would overwrite Math student credentials; rollout stopped`.
+- Production cũ tiếp tục phục vụ; không có container mới hoặc migration release nào được áp dụng trong lần chạy thất bại.
+- Hotfix cập nhật `math-release-preflight.cjs/.sh`: báo cáo `skippedMigrations`, resolve trên database rehearsal trước `migrate deploy`, chỉ resolve production sau khi backup + rehearsal + đối chiếu đạt.
 
 ## Dashboard production
 
@@ -54,5 +61,5 @@ Ngày 17/11, kiểm tra trực tiếp `GET /api/dashboard?month=11&year=2026&ale
 
 1. Đọc log API đúng thời điểm gọi `/dashboard` để xác định câu SQL/schema gây 500 hiện tại.
 2. Chạy read-only impact check trên database Toán cho 8 migration mới và các migration còn chờ từ 05/11.
-3. Cập nhật `scripts/math-release-preflight.*`, backup production và rehearsal toàn bộ migration trên PostgreSQL disposable.
+3. Xác minh `scripts/math-release-preflight.*` chỉ skip đúng migration reset mật khẩu Tin; backup production và rehearsal toàn bộ migration còn lại trên PostgreSQL disposable.
 4. Chỉ khi rehearsal/digest đạt mới push/deploy; sau deploy xác minh dashboard, đăng nhập, biên lai, Storage và role matrix Toán.
