@@ -9,6 +9,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # Math fork is a single-instance deployment. Keep this explicit so an
+      # older VPS .env cannot boot the API without the required subject profile.
+      LMS_PROFILE: "math"
       NODE_ENV: "production"
       PORT: "4000"
     expose:

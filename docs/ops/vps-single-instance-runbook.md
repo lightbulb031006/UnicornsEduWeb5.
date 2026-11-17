@@ -55,7 +55,7 @@ git push origin main
     └─ deploy      ──► SSH VPS → scripts/gha-deploy-remote.sh → instance `math`
 ```
 
-Trước lần phát hành bản đồng bộ 05/11/2026, cấu hình `LMS_PROFILE=math` trong môi trường API và xem [các migration cần xử lý](upstream-sync-math-2026-11-05.md).
+Compose production của fork một-instance ghim `LMS_PROFILE=math` trong service API, nên `.env` VPS cũ không thể làm API khởi động thiếu hồ sơ môn. Vẫn giữ `LMS_PROFILE=math` trong `.env` để cấu hình vận hành tự mô tả và xem [các migration cần xử lý](upstream-sync-math-2026-11-05.md) trước phát hành.
 
 Sau khi cấu hình đầy đủ, không cần thao tác tay trên VPS. Script deploy sẽ `git pull`, `docker login ghcr.io`,
 pull image, kiểm tra/sao lưu database Toán và chạy thử migration trên bản sao riêng,

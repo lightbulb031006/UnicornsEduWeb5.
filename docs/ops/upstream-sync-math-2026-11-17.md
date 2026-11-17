@@ -44,6 +44,7 @@ Preflight Toán vẫn chặn các migration nguy hiểm đã ghi trong runbook 0
 - Deploy dừng trước khi chạy migration production với thông báo `Tin password reset would overwrite Math student credentials; rollout stopped`.
 - Production cũ tiếp tục phục vụ; không có container mới hoặc migration release nào được áp dụng trong lần chạy thất bại.
 - Hotfix cập nhật `math-release-preflight.cjs/.sh`: báo cáo `skippedMigrations`, resolve trên database rehearsal trước `migrate deploy`, chỉ resolve production sau khi backup + rehearsal + đối chiếu đạt.
+- Workflow #23 đã backup, rehearsal và áp dụng 36 migration còn lại thành công; migration reset mật khẩu được resolve mà không chạy SQL, counts/digests tài chính giữ nguyên. API mới sau đó crash-loop vì `.env` VPS cũ thiếu `LMS_PROFILE`, nên Web/nginx chưa được thay. Hotfix tiếp theo ghim `LMS_PROFILE=math` trong Compose production của fork Toán.
 
 ## Dashboard production
 

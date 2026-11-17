@@ -35,10 +35,11 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 - Giữ validation ghi chú điểm danh theo độ dài văn bản thuần tối đa 500 ký tự sau khi gộp refactor session của Tin.
 - Dashboard Toán giữ dòng chi phí Giáo án học sinh giỏi thay vì bị lọc như JP/ENG.
 - Preflight Math không còn chạy migration Tin-only `20261025090000_reset_student_passwords`: sau khi backup và rehearsal đạt, CD đánh dấu migration đã áp dụng bằng `prisma migrate resolve`, giữ nguyên toàn bộ mật khẩu học sinh Toán; danh sách skip bị khóa cứng và migration khác vẫn chạy bình thường.
+- Compose production của fork Toán ghim `LMS_PROFILE=math` cho API, tránh VPS dùng `.env` cũ khiến container crash-loop ngay sau deploy.
 
 #### Operations
 
-- Thêm runbook đồng bộ [17/11/2026](ops/upstream-sync-math-2026-11-17.md), gồm backup, 8 migration mới, rủi ro dữ liệu và kết quả kiểm thử local. Lần deploy đầu của commit `9aad725f` dừng an toàn trước migration production vì phát hiện migration reset mật khẩu Tin; hotfix bổ sung đường skip có rehearsal để phát hành lại.
+- Thêm runbook đồng bộ [17/11/2026](ops/upstream-sync-math-2026-11-17.md), gồm backup, 8 migration mới, rủi ro dữ liệu và kết quả kiểm thử local. Lần deploy đầu của commit `9aad725f` dừng an toàn trước migration production vì phát hiện migration reset mật khẩu Tin; hotfix bổ sung đường skip có rehearsal. Lần deploy tiếp theo áp dụng migration an toàn nhưng API không khởi động vì `.env` VPS cũ thiếu `LMS_PROFILE`; Compose nay ghim profile Toán để phát hành lại.
 
 ### Mọi người thấy mọi khoá học, chỉ chặn nội dung (17/11)
 
