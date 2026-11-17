@@ -5,7 +5,19 @@ import type {
   UpdateMyStaffProfileDto,
   UpdateMyStudentProfileDto,
 } from "@/dtos/profile.dto";
-import { getStaffAchievementGap } from "@/lib/staff-achievement-requirement";
+import {
+  getStaffAchievementGap,
+  type StaffAchievementGap,
+} from "@/lib/staff-achievement-requirement";
+
+const STAFF_ACHIEVEMENT_GAP_MESSAGES: Record<
+  NonNullable<StaffAchievementGap>,
+  string
+> = {
+  achievement: "Gia sư cần có ít nhất 1 thành tích.",
+  highlight: "Gia sư cần bấm ngôi sao để chọn 1 thành tích nổi bật.",
+  highlightProof: "Tải ảnh minh chứng cho thành tích nổi bật.",
+};
 
 /**
  * Form hồ sơ của chính người dùng, lưu bằng một nút "Lưu" chung.
@@ -287,10 +299,7 @@ export function validateProfileForm(
     if (achievementGap) {
       add(ACHIEVEMENTS_FIELD_KEY, {
         kind: "missing",
-        message:
-          achievementGap === "achievement"
-            ? "Gia sư cần có ít nhất 1 thành tích."
-            : "Gia sư cần bấm ngôi sao để chọn 1 thành tích nổi bật.",
+        message: STAFF_ACHIEVEMENT_GAP_MESSAGES[achievementGap],
       });
     }
     if (!hasAcceptedDataConsent(profile)) {

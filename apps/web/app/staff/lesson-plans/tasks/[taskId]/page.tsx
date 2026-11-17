@@ -16,7 +16,7 @@ export default function StaffLessonTaskDetailPage() {
   });
   const {
     canAccessTaskDetail,
-    isAssistant,
+    canDeleteLessonWork,
     isAccountant,
     isAccountantExpense,
     participantMode,
@@ -38,7 +38,7 @@ export default function StaffLessonTaskDetailPage() {
         participantMode={participantMode}
         accountantMode={isAccountant}
         allowPaymentStatusEdit={workspacePolicy === "admin" || isAccountantExpense}
-        allowDelete={isAssistant}
+        allowDelete={canDeleteLessonWork}
       />
     </Suspense>
   );

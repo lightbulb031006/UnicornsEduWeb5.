@@ -1,5 +1,6 @@
 "use client";
 
+import { hasSaleCsHeadAccess } from "@/lib/sale-cs-head-access";
 import { useGiftedLessonPlanEnabled } from "@/lib/gifted-lesson-plan";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -30,6 +31,7 @@ import {
 } from "@/components/admin/dashboard/AdminDashboardSkeleton";
 import { DashboardIcon } from "@/components/admin/dashboard/DashboardIcon";
 import { CustomerSourceSection } from "@/components/admin/dashboard/CustomerSourceSection";
+import { StudentDemographicsSection } from "@/components/admin/dashboard/StudentDemographicsSection";
 import { ActiveClassBreakdownDialog } from "@/components/admin/dashboard/ActiveClassBreakdownDialog";
 import {
   FinancialDetailModal,
@@ -59,7 +61,6 @@ import {
   DASHBOARD_KPI_GRID,
   DASHBOARD_PERIOD_GRID,
   DASHBOARD_STATUS_GRID,
-  DASHBOARD_STATUS_TRAILING_SPAN,
 } from "@/components/admin/dashboard/overview/layout";
 import { StudentClassSection } from "@/components/admin/dashboard/overview/StudentClassSection";
 import {
@@ -81,7 +82,7 @@ import type {
 } from "@/dtos/dashboard.dto";
 import { toast } from "sonner";
 import { formatVnInteger } from "@/lib/formatters";
-import { ChartColumn, FileChartColumn, FileDown, FileSpreadsheet } from "lucide-react";
+import { ChartColumn, FileChartColumn, FileDown, FileSpreadsheet, Users } from "lucide-react";
 
 const toolbarButtonBaseClass =
   "inline-flex min-h-10 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto";
@@ -170,13 +171,13 @@ function AssistantDashboardRedirect({
           <div className="grid gap-6 px-5 py-6 sm:px-7 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)] lg:items-end">
             <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-primary/80">
-                Assistant Workspace
+                Trưởng phòng Sale & CSKH
               </p>
               <h1 className="mt-3 max-w-2xl text-2xl font-semibold tracking-[-0.03em] text-text-primary sm:text-3xl">
                 Đang mở hồ sơ nhân sự thay cho dashboard tổng hợp.
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-                Trợ lí dùng chung toàn bộ admin workspace, nhưng route dashboard sẽ tự chuyển sang
+                Dashboard tổng hợp chỉ dành cho Admin, nên route dashboard sẽ tự chuyển sang
                 trang chi tiết nhân sự của chính bạn để tránh hiển thị dashboard tổng hợp của admin.
               </p>
             </div>
@@ -231,7 +232,7 @@ export default function AdminDashboardTabPage() {
 
   const isAssistantStaff =
     profileData?.roleType === "staff" &&
-    (profileData.staffInfo?.roles ?? []).includes("assistant");
+    hasSaleCsHeadAccess(profileData.staffInfo?.roles);
   const assistantStaffId = profileData?.staffInfo?.id ?? "";
 
   const defaultPeriod = useMemo(() => {
@@ -490,6 +491,14 @@ export default function AdminDashboardTabPage() {
               <ChartColumn className="size-4 shrink-0" aria-hidden />
               Thống kê năm
             </Link>
+            <Link
+              href={buildAdminLikePath(routeBase, "student-statistics")}
+              className={toolbarSecondaryClass}
+              title="Thống kê học sinh theo khu vực, độ tuổi, khoá học, doanh thu và lợi nhuận (xuất PDF trong trang)"
+            >
+              <Users className="size-4 shrink-0" aria-hidden />
+              Thống kê theo học sinh
+            </Link>
             <button
               type="button"
               onClick={() => {
@@ -583,9 +592,8 @@ export default function AdminDashboardTabPage() {
   const studentChurn = isCurrentMonthComparison ? studentWindowQuery.data?.summary : summary;
   const studentNetChange =
     comparison && studentChurn
-      ? studentChurn.newStudentsThisMonth -
-        studentChurn.droppedStudentsThisMonth -
-        studentChurn.trialDroppedStudentsThisMonth
+      ? // Thử nghỉ chưa từng là học sinh thực sự của trung tâm → không trừ vào biến động.
+        studentChurn.newStudentsThisMonth - studentChurn.droppedStudentsThisMonth
       : null;
   // Giải thích badge delta: so cùng ngày tháng trước, kèm số hai kỳ để tự đối chiếu.
   const moneyHint = (name: string, pick: (value: AdminDashboardSummary) => number) =>
@@ -601,11 +609,11 @@ export default function AdminDashboardTabPage() {
   const studentHint =
     comparison && studentChurn ? (
       <KpiDeltaHint
-        summary={`Số học sinh đang học tăng/giảm bao nhiêu trong 1 tháng gần nhất (${comparison.studentWindowLabel}) = mới vào − cũ nghỉ − thử nghỉ.`}
+        summary={`Số học sinh đang học tăng/giảm bao nhiêu trong 1 tháng gần nhất (${comparison.studentWindowLabel}) = mới vào − cũ nghỉ (thử nghỉ không tính).`}
         rows={[
           { label: "Mới vào", value: `+${formatVnInteger(studentChurn.newStudentsThisMonth)}` },
           { label: "Cũ nghỉ", value: `−${formatVnInteger(studentChurn.droppedStudentsThisMonth)}` },
-          { label: "Thử nghỉ", value: `−${formatVnInteger(studentChurn.trialDroppedStudentsThisMonth)}` },
+          { label: "Thử nghỉ (không tính)", value: formatVnInteger(studentChurn.trialDroppedStudentsThisMonth) },
         ]}
       />
     ) : undefined;
@@ -753,12 +761,14 @@ export default function AdminDashboardTabPage() {
             onOpenChurn={setStudentChurnTab}
             onOpenClassBreakdown={() => setClassBreakdownOpen(true)}
           />
+
+          <StudentDemographicsSection dimmed={isMonthDashboardRefreshing} />
+
           {isRangeInitialLoading ? (
-            <CustomerSourceSectionSkeleton className={DASHBOARD_STATUS_TRAILING_SPAN} />
+            <CustomerSourceSectionSkeleton />
           ) : (
             <CustomerSourceSection
               rows={periodDashboard.customerSources ?? []}
-              className={DASHBOARD_STATUS_TRAILING_SPAN}
               dimmed={dimPeriodBlocks}
               onOpen={(row) => setFinancialSelection({ kind: "customer-source", sourceKey: row.key })}
             />

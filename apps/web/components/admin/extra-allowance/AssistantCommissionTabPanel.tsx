@@ -124,12 +124,11 @@ export default function AssistantCommissionTabPanel({
     staleTime: 60_000,
   });
   const staffRoles = fullProfile?.staffInfo?.roles ?? [];
+  // #271: trạng thái thanh toán hoa hồng trưởng phòng là việc trả lương → chỉ
+  // Admin và Kế toán chi (khớp backend; Trưởng phòng, Kế toán thu không sửa).
   const canEditPaymentStatus =
     fullProfile?.roleType === "admin" ||
-    staffRoles.includes("assistant") ||
-    staffRoles.includes("accountant_income") ||
     staffRoles.includes("accountant_expense") ||
-    staffRoles.includes("accountant") ||
     staffRoles.includes("admin");
 
   const {
@@ -733,7 +732,7 @@ export default function AssistantCommissionTabPanel({
   if (!assistantStaffId) {
     return (
       <div className="rounded-[1.5rem] border border-border-default bg-bg-surface px-4 py-6 text-sm text-text-muted shadow-sm">
-        Không tìm thấy hồ sơ trợ lí để hiển thị hoa hồng.
+        Không tìm thấy hồ sơ Trưởng phòng Sale & CSKH để hiển thị hoa hồng.
       </div>
     );
   }
@@ -742,9 +741,9 @@ export default function AssistantCommissionTabPanel({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-base font-medium text-text-primary">Hoa hồng</h2>
+          <h2 className="text-base font-medium text-text-primary">Hoa hồng trưởng phòng</h2>
           <p className="mt-1 text-sm text-text-muted">
-            Phần chia 3% học phí từ CSKH do trợ lí quản lý.
+            3% học phí từ nhóm CSKH do Trưởng phòng Sale & CSKH quản lí.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:items-end">

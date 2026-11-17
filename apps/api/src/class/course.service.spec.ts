@@ -10,7 +10,8 @@ describe('CourseService – lesson_plan_head scope', () => {
       update: jest.fn(),
       delete: jest.fn(),
     },
-    class: { count: jest.fn(), updateMany: jest.fn() },
+    class: { count: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
+    studentClass: { findMany: jest.fn(), updateMany: jest.fn() },
     attendance: { count: jest.fn() },
     courseLessonPlanMember: { findUnique: jest.fn() },
     $transaction: jest.fn(),
@@ -22,10 +23,10 @@ describe('CourseService – lesson_plan_head scope', () => {
     roles: ['lesson_plan_head'],
     isAdminUser: false,
   };
-  const assistant: CourseActor = {
-    userId: 'user-assistant',
-    staffId: 'UNISTAFF-assistant',
-    roles: ['assistant'],
+  const staffAdmin: CourseActor = {
+    userId: 'user-staff-admin',
+    staffId: 'UNISTAFF-staff-admin',
+    roles: ['admin'],
     isAdminUser: false,
   };
   const course = { id: 'course-x', name: 'Khoá X' };
@@ -40,6 +41,8 @@ describe('CourseService – lesson_plan_head scope', () => {
     prisma.course.update.mockResolvedValue(course);
     prisma.class.count.mockResolvedValue(0);
     prisma.attendance.count.mockResolvedValue(0);
+    prisma.class.findMany.mockResolvedValue([]);
+    prisma.studentClass.findMany.mockResolvedValue([]);
     prisma.$transaction.mockImplementation(
       (fn: (tx: typeof prisma) => unknown) => fn(prisma),
     );
@@ -56,7 +59,7 @@ describe('CourseService – lesson_plan_head scope', () => {
   });
 
   it('does not add managers to the team when they create a course', async () => {
-    await service.create(assistant, { name: 'Khoá mới' } as never);
+    await service.create(staffAdmin, { name: 'Khoá mới' } as never);
     expect(prisma.course.create).toHaveBeenCalledWith({
       data: {
         name: 'Khoá mới',
@@ -127,12 +130,31 @@ describe('CourseService – lesson_plan_head scope', () => {
       expect(prisma.class.updateMany).not.toHaveBeenCalled();
     });
 
-    it('chặn bật khi còn lớp chưa có tổng gói', async () => {
+    it('chặn bật khi còn lớp đang có học sinh mà chưa có tổng gói', async () => {
       prisma.class.count.mockResolvedValue(1);
       await expect(
         service.update(admin, course.id, { is_one_time: true } as never),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.course.update).not.toHaveBeenCalled();
+    });
+
+    it('lớp còn trống được để trống gói khi bật bán một lần (follow-up 13/11)', async () => {
+      await service.update(admin, course.id, { is_one_time: true } as never);
+      expect(prisma.class.count).toHaveBeenCalledWith({
+        where: {
+          courseId: course.id,
+          OR: [
+            { tuitionPackageTotal: { lte: 0 } },
+            {
+              tuitionPackageTotal: null,
+              students: {
+                some: { OR: [{ status: null }, { status: 'active' }] },
+              },
+            },
+          ],
+        },
+      });
+      expect(prisma.course.update).toHaveBeenCalled();
     });
 
     it('tắt luôn được và đưa lớp về per_session', async () => {
@@ -149,7 +171,38 @@ describe('CourseService – lesson_plan_head scope', () => {
       });
     });
 
-    it('không cho trưởng giáo án đổi cài đặt bán một lần', async () => {
+    it('16/11: bật thì chốt gói cho học sinh đang học của các lớp trong khoá', async () => {
+      prisma.class.findMany.mockResolvedValueOnce([{ id: 'UNICL-1' }]);
+      await service.update(admin, course.id, { is_one_time: true } as never);
+      expect(prisma.studentClass.findMany).toHaveBeenCalledWith({
+        where: {
+          classId: { in: ['UNICL-1'] },
+          OR: [{ status: null }, { status: 'active' }],
+        },
+        select: { classId: true, studentId: true },
+      });
+      expect(prisma.studentClass.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('16/11: tắt thì xoá học phí riêng của mọi học sinh trong các lớp của khoá', async () => {
+      prisma.course.findUnique.mockResolvedValue({
+        ...course,
+        isOneTime: true,
+      });
+      await service.update(admin, course.id, { is_one_time: false } as never);
+      expect(prisma.studentClass.updateMany).toHaveBeenCalledWith({
+        where: { class: { courseId: course.id } },
+        data: {
+          customStudentTuitionPerSession: null,
+          customTuitionPerBlock: null,
+          customTuitionPackageTotal: null,
+          customTuitionPackageSession: null,
+        },
+      });
+      expect(prisma.class.findMany).not.toHaveBeenCalled();
+    });
+
+    it('không cho trưởng ban Chuyên môn đổi cài đặt bán một lần', async () => {
       prisma.courseLessonPlanMember.findUnique.mockResolvedValue({ id: 'm1' });
       await expect(
         service.update(head, course.id, { is_one_time: true } as never),
@@ -165,6 +218,51 @@ describe('CourseService – lesson_plan_head scope', () => {
         is_one_time: false,
       } as never);
       expect(prisma.class.updateMany).not.toHaveBeenCalled();
+      expect(prisma.studentClass.updateMany).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('CourseService.list – mọi người thấy mọi khoá, cờ quyền vào nội dung', () => {
+  const courses = [
+    { id: 'course-a', name: 'A' },
+    { id: 'course-b', name: 'B' },
+  ];
+  const prisma = {
+    course: { findMany: jest.fn() },
+  };
+  let service: CourseService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.course.findMany.mockResolvedValue(courses);
+    service = new CourseService(
+      prisma as never,
+      new CourseAccessService(prisma as never),
+    );
+  });
+
+  it('returns every course with canAccessContent=true for a manager (null scope)', async () => {
+    await expect(service.list(false, null)).resolves.toEqual([
+      { id: 'course-a', name: 'A', canAccessContent: true },
+      { id: 'course-b', name: 'B', canAccessContent: true },
+    ]);
+  });
+
+  it('still returns every course but flags only assigned ones for the lesson-plan team', async () => {
+    await expect(service.list(false, ['course-b'])).resolves.toEqual([
+      { id: 'course-a', name: 'A', canAccessContent: false },
+      { id: 'course-b', name: 'B', canAccessContent: true },
+    ]);
+    const where = (
+      prisma.course.findMany.mock.calls[0] as [{ where: object }]
+    )[0].where;
+    expect(where).not.toHaveProperty('id');
+  });
+
+  it('returns every course with canAccessContent=false when no content scope (training, CSKH…)', async () => {
+    const result = await service.list(true, []);
+    expect(result).toHaveLength(2);
+    expect(result.every((c) => !c.canAccessContent)).toBe(true);
   });
 });

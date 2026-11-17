@@ -1,5 +1,6 @@
 "use client";
 
+import { hasSaleCsHeadAccess } from "@/lib/sale-cs-head-access";
 import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
@@ -54,7 +55,7 @@ export default function StaffNotesSubjectPage() {
   });
   const isAssistant =
     profile?.roleType === "staff" &&
-    (profile.staffInfo?.roles ?? []).includes("assistant");
+    hasSaleCsHeadAccess(profile.staffInfo?.roles);
   const filteredRegulations = useMemo(() => {
     const needle = normalizeSearchText(submittedSearch);
     if (!needle) return regulations;

@@ -58,3 +58,20 @@ export interface UpdateBonusPayload {
   status?: BonusPaymentStatus;
   note?: string;
 }
+
+/**
+ * Một khoản thưởng ở chế độ chỉ xem (hồ sơ nhân sự cho các trưởng —
+ * `/sale-cs-team/members/:id/bonuses`, `/training/tutors/:id/bonuses`).
+ */
+export interface StaffBonusView {
+  id: string;
+  workType: string;
+  amount: number;
+  status: BonusPaymentStatus;
+  note: string | null;
+  month: string;
+  /** `YYYY-MM-DD`. */
+  date: string;
+  /** ISO thời điểm tạo — chỉ nguồn Sale & CSKH trả. */
+  createdAt?: string;
+}

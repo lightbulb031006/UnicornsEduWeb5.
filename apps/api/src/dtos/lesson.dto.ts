@@ -166,7 +166,10 @@ export interface LessonWorkOutputItemDto extends LessonTaskOutputListItemDto {
   link: string | null;
   /** Link gốc (bài) — dùng fallback khi `link` trống */
   originalLink: string | null;
-  /** Chi phí trợ cấp của output, độc lập với `paymentStatus`. */
+  /**
+   * Chi phí trợ cấp của output, độc lập với `paymentStatus`. Công khai với mọi
+   * nhân sự giáo án (follow-up grill 13/11).
+   */
   cost: number;
 }
 
@@ -183,7 +186,11 @@ export interface LessonOutputStaffStatsSummaryDto {
   pendingOutputCount: number;
   completedOutputCount: number;
   cancelledOutputCount: number;
-  unpaidCostTotal: number;
+  /**
+   * Tổng chi phí output chưa thanh toán của nhân sự — thu nhập cá nhân (#270):
+   * `null` khi người xem không phải Admin, Kế toán chi hoặc chính người đó.
+   */
+  unpaidCostTotal: number | null;
 }
 
 export interface LessonOutputStaffStatsResponseDto {
@@ -227,6 +234,7 @@ export interface LessonOutputResponseDto {
   includesTheoryLecture: boolean;
   theoryLectureLinks: string[];
   tags: string[];
+  /** Chi phí output — công khai với mọi nhân sự giáo án (follow-up grill 13/11). */
   cost: number;
   date: string;
   contestUploaded: string | null;

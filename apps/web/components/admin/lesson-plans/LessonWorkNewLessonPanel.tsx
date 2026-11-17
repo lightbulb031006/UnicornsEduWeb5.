@@ -43,6 +43,8 @@ type Props = {
   hideStaffFields?: boolean;
   forceSharedLayout?: boolean;
   allowPaymentStatusEdit?: boolean;
+  /** #279: `false` = khoá bậc độ khó / level / hạng mục (Ban Chuyên môn thường). */
+  allowCostEdit?: boolean;
   openAfterCreate?: "popup" | "none";
 };
 
@@ -54,6 +56,7 @@ export default function LessonWorkNewLessonPanel({
   hideStaffFields = true,
   forceSharedLayout = true,
   allowPaymentStatusEdit = true,
+  allowCostEdit = true,
   openAfterCreate = "popup",
 }: Props) {
   const queryClient = useQueryClient();
@@ -275,6 +278,7 @@ export default function LessonWorkNewLessonPanel({
                 forceSharedLayout={forceSharedLayout}
                 allowTasklessOutput={requireTaskSelection ? false : allowTasklessOutput}
                 allowPaymentStatusEdit={allowPaymentStatusEdit}
+                allowCostEdit={allowCostEdit}
                 isSubmitting={createMutation.isPending}
                 onCancel={() => setOpen(false)}
                 onSubmit={async (payload) => {

@@ -105,6 +105,20 @@ model SurveyWarningDismissal {
   @@map("survey_warning_dismissals")
 }
 
+/// Admin / Kế toán chi bỏ qua **Cảnh báo chưa dạy thử** của một gia sư ở một lớp: từ đó cặp
+/// (gia sư, lớp) không nhắc lại với bất kỳ ai. Plain id (không FK cứng) như
+/// `SurveyWarningDismissal`; `dismissedByUserId` để truy vết.
+model TrialTeachingWarningDismissal {
+  id                String   @id @default(uuid())
+  staffId           String   @map("staff_id")
+  classId           String   @map("class_id")
+  dismissedByUserId String   @map("dismissed_by_user_id")
+  dismissedAt       DateTime @default(now()) @map("dismissed_at") @db.Timestamptz(6)
+
+  @@unique([staffId, classId])
+  @@map("trial_teaching_warning_dismissals")
+}
+
 model ActionHistory {
   id            String   @id @default(uuid())
   userId        String?  @map("user_id")

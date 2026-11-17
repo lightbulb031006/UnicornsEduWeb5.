@@ -43,7 +43,6 @@ import { SharedMaterialService } from './shared-material.service';
 @Controller('shared-materials')
 @Roles(UserRole.admin)
 @AllowStaffRolesOnAdminRoutes(
-  StaffRole.assistant,
   StaffRole.teacher,
   StaffRole.lesson_plan,
   StaffRole.lesson_plan_head,

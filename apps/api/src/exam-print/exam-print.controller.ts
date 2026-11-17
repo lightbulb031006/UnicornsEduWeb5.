@@ -75,14 +75,13 @@ export class LessonExamPrintController {
   @Get()
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
     StaffRole.lesson_plan,
     StaffRole.lesson_plan_head,
     StaffRole.teacher,
   )
   @ApiOperation({
     summary: 'Xuất PDF Đề in của tiết thực hành (cấp khoá)',
-    description: `${PDF_DESCRIPTION} Quyền như xem danh sách câu của tiết: admin/trợ lí hoặc đội giáo án của khoá. Thời gian làm bài lấy từ tiết.`,
+    description: `${PDF_DESCRIPTION} Quyền như xem danh sách câu của tiết: admin hoặc đội chuyên môn của khoá. Thời gian làm bài lấy từ tiết.`,
   })
   @ApiParam({ name: 'lessonId', description: 'ID tiết thực hành' })
   @ApiQuery(ANSWERS_QUERY)
@@ -94,7 +93,7 @@ export class LessonExamPrintController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Không thuộc đội giáo án của khoá.',
+    description: 'Không thuộc đội chuyên môn của khoá.',
   })
   @ApiResponse({
     status: 404,
@@ -127,7 +126,7 @@ export class StaffAssignmentExamPrintController {
   @Get()
   @ApiOperation({
     summary: 'Xuất PDF Đề in của lần giao (phía dạy)',
-    description: `${PDF_DESCRIPTION} Admin/trợ lí hoặc gia sư phụ trách lớp. Thời gian làm bài là thời gian hiệu lực của lần giao.`,
+    description: `${PDF_DESCRIPTION} Admin hoặc gia sư phụ trách lớp. Thời gian làm bài là thời gian hiệu lực của lần giao.`,
   })
   @ApiParam({ name: 'classId', description: 'Class ID' })
   @ApiParam({ name: 'assignmentId', description: 'class_content_items.id' })

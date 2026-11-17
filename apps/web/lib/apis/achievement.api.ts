@@ -16,6 +16,9 @@ function ownerBasePath(owner: AchievementOwnerRef): string {
   if (owner.kind === "staff" && owner.mode === "training") {
     return `/training/tutors/${encodeURIComponent(owner.staffId)}/achievements`;
   }
+  if (owner.kind === "staff" && owner.mode === "saleCsTeam") {
+    return `/sale-cs-team/members/${encodeURIComponent(owner.staffId)}/achievements`;
+  }
   if (owner.kind === "staff") {
     return `/staff/${encodeURIComponent(owner.staffId)}/achievements`;
   }
@@ -45,16 +48,16 @@ export async function createAchievement(
   file?: File,
 ): Promise<AchievementDto> {
   if (owner.kind === "staff") {
+    // Ảnh minh chứng luôn tuỳ chọn khi tạo; gate hồ sơ gia sư đòi ảnh ở dòng gắn sao.
     const staffPayload = payload as CreateStaffAchievementPayload;
-    if (!file) {
-      throw new Error("Thành tích nhân sự phải kèm ảnh minh chứng.");
-    }
     const formData = new FormData();
     formData.append("title", staffPayload.title);
     if (staffPayload.sortOrder != null) {
       formData.append("sortOrder", String(staffPayload.sortOrder));
     }
-    formData.append("image", file);
+    if (file) {
+      formData.append("image", file);
+    }
     const response = await api.post<AchievementDto>(
       ownerBasePath(owner),
       formData,
@@ -63,32 +66,7 @@ export async function createAchievement(
     return response.data;
   }
 
-  const studentPayload = payload as CreateStudentAchievementPayload;
-  if (file) {
-    const formData = new FormData();
-    formData.append("award", studentPayload.award);
-    formData.append("exam", studentPayload.exam);
-    formData.append("year", String(studentPayload.year));
-    formData.append("level", studentPayload.level);
-    if (studentPayload.courseLabel != null) {
-      formData.append("courseLabel", studentPayload.courseLabel);
-    }
-    if (studentPayload.sortOrder != null) {
-      formData.append("sortOrder", String(studentPayload.sortOrder));
-    }
-    formData.append("image", file);
-    const response = await api.post<AchievementDto>(
-      ownerBasePath(owner),
-      formData,
-      { headers: { "Content-Type": "multipart/form-data" } },
-    );
-    return response.data;
-  }
-
-  const response = await api.post<AchievementDto>(
-    ownerBasePath(owner),
-    studentPayload,
-  );
+  const response = await api.post<AchievementDto>(ownerBasePath(owner), payload);
   return response.data;
 }
 

@@ -4,6 +4,10 @@ import { ActionHistoryService } from '../action-history/action-history.service';
 import { AuthIdentityCacheService } from '../auth/auth-identity-cache.service';
 import { DEVICE_INACTIVITY_DAYS } from '../auth/user-device.service';
 import { UserRole } from 'generated/enums';
+import {
+  assertCanManageStudentAccount,
+  type StudentAccountScopeActor,
+} from '../common/student-account-scope';
 
 @Injectable()
 export class DeviceService {
@@ -14,7 +18,11 @@ export class DeviceService {
   ) {}
 
   /** `studentId` là id hồ sơ `student_info` (UNIST-*), không phải `users.id`. */
-  async getDevicesByStudentId(studentId: string) {
+  async getDevicesByStudentId(
+    studentId: string,
+    actor: StudentAccountScopeActor,
+  ) {
+    await assertCanManageStudentAccount(this.prisma, actor, studentId);
     // Trang này chỉ dành cho thiết bị học sinh — không lộ IP/thiết bị staff/admin.
     const student = await this.prisma.studentInfo.findUnique({
       where: { id: studentId },
@@ -56,15 +64,26 @@ export class DeviceService {
     });
   }
 
-  async getDeviceById(deviceId: string) {
+  async getDeviceById(deviceId: string, actor: StudentAccountScopeActor) {
     const device = await this.prisma.userDevice.findUnique({
       where: { id: deviceId },
-      include: { user: true },
+      include: {
+        user: {
+          select: { roleType: true, studentInfo: { select: { id: true } } },
+        },
+      },
     });
 
-    if (!device || device.user.roleType !== UserRole.student) {
+    const studentInfoId = device?.user.studentInfo?.id;
+    if (
+      !device ||
+      device.user.roleType !== UserRole.student ||
+      !studentInfoId
+    ) {
       throw new NotFoundException('Device not found');
     }
+
+    await assertCanManageStudentAccount(this.prisma, actor, studentInfoId);
 
     return device;
   }
@@ -78,7 +97,10 @@ export class DeviceService {
     },
     description?: string,
   ) {
-    const device = await this.getDeviceById(deviceId);
+    const device = await this.getDeviceById(deviceId, {
+      userId: actor.userId,
+      roleType: actor.roleType as UserRole,
+    });
 
     await this.prisma.$transaction(async (tx) => {
       const deviceSnapshot = {

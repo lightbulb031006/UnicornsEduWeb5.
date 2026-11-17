@@ -42,7 +42,7 @@ export class CreateCourseDto {
 
   @ApiPropertyOptional({
     description:
-      'Khoá bán một lần: mọi lớp của khoá trừ tổng gói ở buổi có mặt/nghỉ phép đầu tiên của từng học sinh. Chỉ admin/trợ lí đổi được. Chỉ bật được khi chưa lớp nào của khoá thu học phí; tắt không tính lại tiền.',
+      'Khoá bán một lần: mọi lớp của khoá trừ tổng gói ở buổi có mặt/nghỉ phép đầu tiên của từng học sinh. Chỉ admin đổi được. Chỉ bật được khi chưa lớp nào của khoá thu học phí; tắt không tính lại tiền.',
     example: false,
   })
   @IsOptional()
@@ -86,7 +86,7 @@ export class UpdateCourseDto {
 
   @ApiPropertyOptional({
     description:
-      'Khoá bán một lần: mọi lớp của khoá trừ tổng gói ở buổi có mặt/nghỉ phép đầu tiên của từng học sinh. Chỉ admin/trợ lí đổi được. Chỉ bật được khi chưa lớp nào của khoá thu học phí; tắt không tính lại tiền.',
+      'Khoá bán một lần: mọi lớp của khoá trừ tổng gói ở buổi có mặt/nghỉ phép đầu tiên của từng học sinh. Chỉ admin đổi được. Chỉ bật được khi chưa lớp nào của khoá thu học phí; tắt không tính lại tiền.',
     example: false,
   })
   @IsOptional()
@@ -170,7 +170,7 @@ export class ReorderCourseDifficultyLevelsDto {
 export class AssignCourseLessonPlanMembersDto {
   @ApiProperty({
     description:
-      'Danh sách staff id (nhân sự) của đội giáo án. Thay thế toàn bộ danh sách hiện tại của khoá.',
+      'Danh sách staff id (nhân sự) của đội chuyên môn. Thay thế toàn bộ danh sách hiện tại của khoá.',
     type: [String],
     example: ['UNISTAFF-c3d4e5f6a7'],
   })

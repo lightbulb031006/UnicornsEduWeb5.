@@ -1,5 +1,6 @@
 "use client";
 
+import { hasSaleCsHeadAccess } from "@/lib/sale-cs-head-access";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
@@ -328,17 +329,21 @@ export default function CustomerCareDetailPanels({
     staleTime: 60_000,
   });
   const staffRoles = fullProfile?.staffInfo?.roles ?? [];
+  // #267: thanh toán hoa hồng CSKH là trả lương → Trợ lí không còn quyền.
   const canEditCommissionPaymentStatus =
     fullProfile?.roleType === "admin" ||
-    staffRoles.includes("assistant") ||
-    staffRoles.includes("accountant_income") ||
     staffRoles.includes("accountant_expense") ||
-    staffRoles.includes("accountant") ||
     staffRoles.includes("admin");
   const canEditProfitPercent =
     fullProfile?.roleType === "admin" ||
     staffRoles.includes("admin") ||
-    staffRoles.includes("assistant");
+    hasSaleCsHeadAccess(staffRoles);
+  // #270: số tiền hoa hồng là thu nhập cá nhân, backend trả `null` cho Trưởng phòng
+  // → tab chỉ toàn «—», ẩn hẳn. Kiêm Admin / Kế toán chi hoặc xem chính mình thì vẫn thấy.
+  const showCommissionTab =
+    !hasSaleCsHeadAccess(staffRoles) ||
+    canEditCommissionPaymentStatus ||
+    fullProfile?.staffInfo?.id === staffId;
 
   const {
     data: studentListPages,
@@ -456,7 +461,7 @@ export default function CustomerCareDetailPanels({
       customerCareApi.getCustomerCareCommissions(staffId, {
         month: commissionMonthKey,
       }),
-    enabled: !!staffId && activeTab === "commissions" && canQueryCommissions,
+    enabled: !!staffId && showCommissionTab && activeTab === "commissions" && canQueryCommissions,
   });
 
   const commissions = commissionList?.data ?? [];
@@ -485,7 +490,7 @@ export default function CustomerCareDetailPanels({
           month: commissionMonthKey,
         }),
       enabled:
-        !!staffId && activeTab === "commissions" && canQueryCommissions,
+        !!staffId && showCommissionTab && activeTab === "commissions" && canQueryCommissions,
       staleTime: 30_000,
     })),
   });
@@ -1102,12 +1107,18 @@ export default function CustomerCareDetailPanels({
       <div
         className="mb-4 inline-flex w-full rounded-[1.35rem] border border-border-default bg-gradient-to-b from-bg-surface to-bg-secondary/90 p-1 shadow-sm sm:w-fit"
         role="tablist"
-        aria-label="Học sinh, Thanh Toán hoặc Hoa hồng"
+        aria-label={
+          showCommissionTab
+            ? "Học sinh, Thanh Toán hoặc Hoa hồng"
+            : "Học sinh hoặc Thanh Toán"
+        }
       >
-        <div className="relative grid w-full min-w-0 grid-cols-3 sm:min-w-[336px]">
+        <div
+          className={`relative grid w-full min-w-0 ${showCommissionTab ? "grid-cols-3 sm:min-w-[336px]" : "grid-cols-2 sm:min-w-[224px]"}`}
+        >
           <m.span
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 left-0 z-0 w-1/3 rounded-[1rem] bg-primary shadow-sm ring-1 ring-primary/10"
+            className={`pointer-events-none absolute inset-y-0 left-0 z-0 ${showCommissionTab ? "w-1/3" : "w-1/2"} rounded-[1rem] bg-primary shadow-sm ring-1 ring-primary/10`}
             animate={{ x: `${activeTabIndex * 100}%` }}
             transition={indicatorTransition}
           />
@@ -1140,20 +1151,22 @@ export default function CustomerCareDetailPanels({
           >
             Thanh Toán
           </button>
-          <button
-            id="customer-care-tab-commissions"
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "commissions"}
-            aria-controls="customer-care-panel-commissions"
-            onClick={() => setActiveTab("commissions")}
-            className={`relative z-10 min-h-11 cursor-pointer touch-manipulation rounded-[1rem] px-4 py-2.5 text-sm font-semibold transition-[color,opacity] duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface ${activeTab === "commissions"
-              ? "text-text-inverse"
-              : "text-text-muted hover:text-text-primary"
-              }`}
-          >
-            Hoa hồng
-          </button>
+          {showCommissionTab ? (
+            <button
+              id="customer-care-tab-commissions"
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "commissions"}
+              aria-controls="customer-care-panel-commissions"
+              onClick={() => setActiveTab("commissions")}
+              className={`relative z-10 min-h-11 cursor-pointer touch-manipulation rounded-[1rem] px-4 py-2.5 text-sm font-semibold transition-[color,opacity] duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface ${activeTab === "commissions"
+                ? "text-text-inverse"
+                : "text-text-muted hover:text-text-primary"
+                }`}
+            >
+              Hoa hồng
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -1804,6 +1817,14 @@ export default function CustomerCareDetailPanels({
             <div className="rounded-[1.5rem] border border-border-default bg-bg-surface p-6 text-center text-sm text-text-muted shadow-sm">
               {`Không có hoa hồng trong ${commissionMonthLabel}.`}
             </div>
+          )}
+          {commissionList?.amountsVisible === false && (
+            // #270: hoa hồng là thu nhập cá nhân — chỉ Admin, Kế toán chi, chính CSKH thấy số tiền.
+            <p className="text-xs text-text-muted">
+              Số tiền hoa hồng là thu nhập cá nhân, chỉ Admin, Kế toán chi và
+              chính nhân sự CSKH được xem. Bạn vẫn xem được danh sách và trạng
+              thái thanh toán.
+            </p>
           )}
           {!commissionsLoading && !commissionsError && commissions.length > 0 && (
             <div className="space-y-2">

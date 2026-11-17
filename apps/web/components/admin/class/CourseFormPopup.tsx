@@ -153,7 +153,7 @@ export default function CourseFormPopup({
                 <span className="block font-medium text-text-primary">Bán một lần</span>
                 <span className="block text-xs text-text-muted">
                   Học sinh bị trừ cả tổng gói ở buổi học đầu, các buổi sau không trừ.
-                  Mọi lớp của khoá phải có Tổng gói lớn hơn 0đ.
+                  Lớp còn trống được để trống Tổng gói; lớp có học sinh học phải có Tổng gói lớn hơn 0đ.
                 </span>
               </span>
               <Switch
@@ -165,14 +165,14 @@ export default function CourseFormPopup({
             </label>
             {!canChangeSaleMode ? (
               <p className="text-xs text-text-muted">
-                Chỉ admin hoặc trợ lí được đổi cài đặt này.
+                Chỉ admin được đổi cài đặt này.
               </p>
             ) : isEdit && isOneTime !== (course?.isOneTime ?? false) ? (
               <Alert variant="warning">
                 <AlertDescription>
                   {isOneTime
-                    ? "Mọi lớp của khoá chuyển sang bán một lần. Chỉ bật được khi chưa lớp nào thu học phí."
-                    : "Mọi lớp của khoá trở về tính theo buổi. Khoản đã trừ giữ nguyên, không tính lại."}
+                    ? "Mọi lớp của khoá chuyển sang bán một lần. Chỉ bật được khi chưa lớp nào thu học phí. Học sinh đang học chưa có gói riêng được chốt theo gói lớp hiện tại."
+                    : "Mọi lớp của khoá trở về tính theo buổi. Khoản đã trừ giữ nguyên, không tính lại. Học phí riêng (gói đã chốt) của mọi học sinh trong khoá bị xoá — các buổi sau thu theo học phí lớp."}
                 </AlertDescription>
               </Alert>
             ) : null}

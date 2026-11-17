@@ -42,7 +42,6 @@ const imageUploadInterceptor = FileInterceptor('file', {
 @Controller('question-images')
 @Roles(UserRole.admin)
 @AllowStaffRolesOnAdminRoutes(
-  StaffRole.assistant,
   StaffRole.teacher,
   StaffRole.lesson_plan,
   StaffRole.lesson_plan_head,

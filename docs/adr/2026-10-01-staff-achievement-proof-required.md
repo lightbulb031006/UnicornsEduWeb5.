@@ -1,6 +1,6 @@
 # ADR: Thành tích nhân sự tạo mới phải kèm ảnh; không gỡ ảnh đã có
 
-- **Status:** Accepted
+- **Status:** Accepted — quyết định 2 bị thay một phần bởi `docs/adr/2026-11-07-staff-achievement-proof-only-for-highlight.md` (chỉ thành tích nổi bật bắt buộc ảnh)
 - **Date:** 2026-10-01
 
 ## Context

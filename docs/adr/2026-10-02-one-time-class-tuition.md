@@ -26,3 +26,4 @@ Thêm `ClassPricingMode.one_time`. Lớp của hai khoá này dùng chế độ 
 - Tạo/sửa buổi của lớp `one_time` lấy `pg_advisory_xact_lock` theo lớp, để hai thao tác đồng thời không cùng thấy "chưa thu".
 - Gói học phí rỗng thì rơi về chuỗi giá theo buổi như lớp `per_session`.
 - Chi tiết học sinh hiện tổng gói; chi tiết lớp hiện khoản sẽ thu ở buổi kế tiếp (0đ nếu học sinh đã bị thu).
+- **Cập nhật 16/11 — chốt gói lúc vào lớp:** gói lớp lúc học sinh vào lớp được chép thành gói riêng (`student_classes.custom_tuition_package_*`), nên sửa gói lớp về sau không đổi gói của học sinh đang học. Học sinh vào lại đã bị thu → chốt đúng số đã thu. Khoá tắt bán một lần → xoá học phí riêng của học sinh trong khoá. Xem `docs/api/class-info-tuition.md` mục «Chốt gói lớp bán một lần».

@@ -18,8 +18,14 @@ import {
     StudentClassTuitionPopup,
     StudentDevicePopup,
 } from "@/components/admin/student";
-import { UserLinkedProfileLinks } from "@/components/admin/user";
+import {
+    SetAccountHandleDialog,
+    SetUserPasswordDialog,
+    UserLinkedProfileLinks,
+} from "@/components/admin/user";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import ParentReceiptEmailSwitch from "@/components/student/ParentReceiptEmailSwitch";
+import StudentEmailVerifiedSwitch from "@/components/student/StudentEmailVerifiedSwitch";
 import OjProgressSection from "@/components/student/OjProgressSection";
 import AchievementListEditor from "@/components/shared/achievement/AchievementListEditor";
 import StudentGalleryEditor from "@/components/shared/student-gallery/StudentGalleryEditor";
@@ -34,11 +40,13 @@ import {
 import { resolveStudentAdminCapabilities, resolveUserAdminCapabilities } from "@/lib/admin-shell-access";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import * as studentApi from "@/lib/apis/student.api";
+import * as userApi from "@/lib/apis/user.api";
 import { pickAvatarUrl } from "@/lib/avatar";
 import { formatCurrency } from "@/lib/class.helpers";
 import { cn } from "@/lib/utils";
 import { forceLogoutStudent } from "@/lib/apis/auth.api";
 import { formatVnDate } from "@/lib/formatters";
+import { getMutationErrorMessage } from "@/lib/mutation-feedback";
 
 const STATUS_LABELS: Record<StudentStatus, string> = {
     active: "Đang học",
@@ -113,6 +121,9 @@ export default function AdminStudentDetailPage() {
     const [balancePopupMode, setBalancePopupMode] = useState<"topup" | "withdraw" | null>(null);
     const [walletHistoryOpen, setWalletHistoryOpen] = useState(false);
     const [devicePopupOpen, setDevicePopupOpen] = useState(false);
+    const [forceLogoutConfirmOpen, setForceLogoutConfirmOpen] = useState(false);
+    const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+    const [accountHandleDialogOpen, setAccountHandleDialogOpen] = useState(false);
     const [editingPackageForClassId, setEditingPackageForClassId] = useState<string | null>(null);
     const queryClient = useQueryClient();
     const { data: fullProfile } = useQuery({
@@ -131,6 +142,7 @@ export default function AdminStudentDetailPage() {
         canDirectlyWithdrawWallet,
         canRequestDirectTopUp,
         canEditStudentClassTuition,
+        canViewWalletHistory,
     } = resolveStudentAdminCapabilities(fullProfile, routeBase);
     const { canManageUsers } = resolveUserAdminCapabilities(fullProfile, routeBase);
     const backLabel = isCustomerCareReadOnlyView
@@ -183,6 +195,36 @@ export default function AdminStudentDetailPage() {
         },
     });
 
+    // 16/11: Admin / Trưởng phòng Sale & CSKH / CSKH phụ trách xác thực email học sinh.
+    const emailVerifiedMutation = useMutation({
+        mutationFn: (verified: boolean) => studentApi.setStudentEmailVerified(id, verified),
+        onMutate: async (verified) => {
+            await queryClient.cancelQueries({ queryKey: ["student", "detail", id] });
+            const previous = queryClient.getQueryData<StudentDetail>(["student", "detail", id]);
+            if (previous) {
+                queryClient.setQueryData<StudentDetail>(["student", "detail", id], {
+                    ...previous,
+                    emailVerified: verified,
+                });
+            }
+            return { previous };
+        },
+        onError: (error: unknown, _verified, context) => {
+            if (context?.previous) {
+                queryClient.setQueryData(["student", "detail", id], context.previous);
+            }
+            toast.error(getMutationErrorMessage(error, "Không cập nhật được trạng thái xác thực email."));
+        },
+        onSuccess: async (result) => {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ["student", "detail", id] }),
+                // Popup Quản lý user (Admin) đọc cùng cờ từ GET /users/:id.
+                queryClient.invalidateQueries({ queryKey: ["user"] }),
+            ]);
+            toast.success(result.emailVerified ? "Đã xác thực email học sinh." : "Đã bỏ xác thực email học sinh.");
+        },
+    });
+
     const forceLogoutMutation = useMutation({
         mutationFn: () => {
             if (!student?.userId) {
@@ -191,6 +233,7 @@ export default function AdminStudentDetailPage() {
             return forceLogoutStudent(student.userId);
         },
         onSuccess: async () => {
+            setForceLogoutConfirmOpen(false);
             toast.success("Đã buộc đăng xuất học sinh.");
         },
         onError: (err: unknown) => {
@@ -440,7 +483,7 @@ export default function AdminStudentDetailPage() {
                     }
                     directBalanceChangeSuccessMessage={
                         balancePopupMode === "topup" && canRequestDirectTopUp && !canDirectlyAdjustWallet
-                            ? "Đã gửi yêu cầu nạp thẳng tới admin."
+                            ? "Đã gửi yêu cầu nạp thẳng, chờ Admin hoặc Trưởng phòng Sale & CSKH duyệt."
                             : undefined
                     }
                     directReasonLabel={
@@ -466,13 +509,13 @@ export default function AdminStudentDetailPage() {
                             description: canDirectlyAdjustWallet
                                 ? "QR SePay tĩnh để phụ huynh chuyển khoản, hoặc dùng Nạp thẳng khi admin cần ghi nhận thủ công."
                                 : canRequestDirectTopUp
-                                    ? "QR SePay tĩnh để phụ huynh chuyển khoản, hoặc gửi yêu cầu nạp thẳng tới admin khi cần ghi nhận thủ công."
+                                    ? "QR SePay tĩnh để phụ huynh chuyển khoản, hoặc gửi yêu cầu nạp thẳng (Admin hoặc Trưởng phòng Sale & CSKH duyệt) khi cần ghi nhận thủ công."
                                 : "QR SePay tĩnh để phụ huynh chuyển khoản. Webhook SePay sẽ tự động cập nhật ví sau khi ngân hàng xác nhận.",
                         },
                     }}
                 />
             ) : null}
-            {canManageStudent ? (
+            {canViewWalletHistory ? (
                 <StudentWalletHistoryPopup
                     open={walletHistoryOpen}
                     onClose={() => setWalletHistoryOpen(false)}
@@ -480,6 +523,36 @@ export default function AdminStudentDetailPage() {
                     studentName={student.fullName?.trim() || "Học sinh"}
                     currentBalance={student.accountBalance ?? 0}
                 />
+            ) : null}
+            {canManageStudent && student.userId ? (
+                <>
+                    <SetUserPasswordDialog
+                        userId={student.userId}
+                        displayName={student.fullName?.trim() || student.email || "Học sinh"}
+                        open={passwordDialogOpen}
+                        onClose={() => setPasswordDialogOpen(false)}
+                    />
+                    <SetAccountHandleDialog
+                        displayName={student.fullName?.trim() || student.email || "Học sinh"}
+                        currentHandle={student.accountHandle}
+                        open={accountHandleDialogOpen}
+                        onClose={() => setAccountHandleDialogOpen(false)}
+                        mutationFn={(accountHandle) =>
+                            userApi.setUserAccountHandle(student.userId as string, { accountHandle })
+                        }
+                        invalidateKeys={[["student", "detail", id], ["student", "list"]]}
+                    />
+                    <ConfirmDialog
+                        open={forceLogoutConfirmOpen}
+                        onOpenChange={setForceLogoutConfirmOpen}
+                        title="Buộc đăng xuất học sinh?"
+                        description="Mọi thiết bị đang đăng nhập của học sinh này sẽ bị ngắt kết nối."
+                        confirmLabel="Buộc đăng xuất"
+                        variant="destructive"
+                        confirmPending={forceLogoutMutation.isPending}
+                        onConfirm={() => forceLogoutMutation.mutate()}
+                    />
+                </>
             ) : null}
             {canManageStudent ? (
                 <StudentDevicePopup
@@ -591,14 +664,38 @@ export default function AdminStudentDetailPage() {
                                                 </svg>
                                             </button>
                                         ) : null}
-                                        {canManageUsers && student.userId ? (
+                                        {/* #267: Trợ lí giữ quyền đặt mật khẩu / đăng xuất thiết bị học sinh. */}
+                                        {canManageStudent && student.userId ? (
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    if (confirm("Buộc đăng xuất học sinh này? Thiết bị hiện tại sẽ bị ngắt kết nối.")) {
-                                                        forceLogoutMutation.mutate();
-                                                    }
-                                                }}
+                                                onClick={() => setPasswordDialogOpen(true)}
+                                                className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-muted transition hover:bg-bg-tertiary hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:size-8"
+                                                aria-label="Đặt mật khẩu học sinh"
+                                                title="Đặt mật khẩu"
+                                            >
+                                                <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 0 1 2 2m4 0a6 6 0 0 1-7.743 5.743L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.586a1 1 0 0 1 .293-.707l5.964-5.964A6 6 0 1 1 21 9Z" />
+                                                </svg>
+                                            </button>
+                                        ) : null}
+                                        {/* 16/11: đổi tên đăng nhập — cùng nhóm quyền đặt mật khẩu. */}
+                                        {canManageStudent && student.userId ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setAccountHandleDialogOpen(true)}
+                                                className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-muted transition hover:bg-bg-tertiary hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:size-8"
+                                                aria-label="Đổi tên đăng nhập học sinh"
+                                                title="Đổi tên đăng nhập"
+                                            >
+                                                <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 12a4 4 0 1 0-8 0 4 4 0 0 0 8 0Zm0 0v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-9 9m4.5-1.206a8.959 8.959 0 0 1-4.5 1.207" />
+                                                </svg>
+                                            </button>
+                                        ) : null}
+                                        {canManageStudent && student.userId ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => setForceLogoutConfirmOpen(true)}
                                                 disabled={forceLogoutMutation.isPending}
                                                 className="flex size-9 shrink-0 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-muted transition hover:bg-error/10 hover:text-error focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface sm:size-8 disabled:opacity-50"
                                                 aria-label="Buộc đăng xuất học sinh"
@@ -633,6 +730,14 @@ export default function AdminStudentDetailPage() {
                                             {GENDER_LABELS[normalizedGender]}
                                         </span>
                                         <StudentLevelBadge fullName={student.fullName} />
+                                        {canManageStudent && student.accountHandle ? (
+                                            <span
+                                                className="inline-flex max-w-full truncate rounded-full bg-bg-tertiary px-2.5 py-1 text-xs font-medium text-text-secondary ring-1 ring-border-default"
+                                                title="Tên đăng nhập"
+                                            >
+                                                @{student.accountHandle}
+                                            </span>
+                                        ) : null}
                                         {isCustomerCareReadOnlyView ? (
                                             <span className="inline-flex rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
                                                 CSKH
@@ -647,6 +752,15 @@ export default function AdminStudentDetailPage() {
                                                 showManageLink
                                             />
                                         </div>
+                                    ) : null}
+                                    {student.userId ? (
+                                        <StudentEmailVerifiedSwitch
+                                            className="mt-1 max-w-xl"
+                                            verified={student.emailVerified === true}
+                                            editable={canEditStudentProfile}
+                                            disabled={emailVerifiedMutation.isPending}
+                                            onToggle={(verified) => emailVerifiedMutation.mutate(verified)}
+                                        />
                                     ) : null}
                                 </div>
                                 <div className="mt-4 grid gap-2 sm:hidden">
@@ -676,7 +790,7 @@ export default function AdminStudentDetailPage() {
                                 balance={student.accountBalance ?? 0}
                                 onTopUp={canCreateWalletQr || canDirectlyAdjustWallet ? handleTopUp : undefined}
                                 onWithdraw={canDirectlyWithdrawWallet ? handleWithdraw : undefined}
-                                onOpenHistory={canManageStudent ? () => setWalletHistoryOpen(true) : undefined}
+                                onOpenHistory={canViewWalletHistory ? () => setWalletHistoryOpen(true) : undefined}
                             />
                             <StudentExamCard
                                 className="min-w-0"

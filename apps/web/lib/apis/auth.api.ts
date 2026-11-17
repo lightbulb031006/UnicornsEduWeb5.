@@ -8,6 +8,7 @@ import {
   SetupPasswordDto,
   StudentActivateDto,
   StudentActivateResponse,
+  StudentLoginDto,
   StudentLoginInitResponse,
   StudentLoginPollResponse,
   UserInfoDto,
@@ -446,7 +447,7 @@ export async function getMyStaffLessonOutputStats(params?: {
 // ─── Student single-device login ─────────────────────────────────────
 
 export async function studentLoginInit(
-  dto: LoginDto,
+  dto: StudentLoginDto,
 ): Promise<StudentLoginInitResponse> {
   const response = await api.post<StudentLoginInitResponse>(
     "/auth/student/login",

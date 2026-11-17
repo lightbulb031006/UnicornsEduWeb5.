@@ -317,6 +317,17 @@ export class UpdateStudentDto extends UpdateStudentBodyDto {
   id: string;
 }
 
+/** 16/11: bật/tắt cờ «Email đã xác thực» của tài khoản học sinh. */
+export class SetStudentEmailVerifiedDto {
+  @ApiProperty({
+    example: true,
+    description:
+      'true: học sinh đăng nhập được ngay, không cần mở link xác thực trong email.',
+  })
+  @IsBoolean()
+  email_verified: boolean;
+}
+
 export class UpdateStudentStatusDto {
   @ApiProperty({
     enum: StudentStatus,

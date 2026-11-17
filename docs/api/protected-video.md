@@ -38,7 +38,8 @@ Cả hai trả `ProtectedVideoPlaybackDto`:
 | `state` | Ý nghĩa | UI |
 |---|---|---|
 | `ready` | `masterUrl`, `expiresAt` (ISO) | Phát HLS |
-| `processing` | `progress`: % tổng của UNIOJ, chỉ tăng (tải về 0, chuyển mã 0→89, tải lên 90); `null` khi bằng 0 (xếp hàng / đang tải về) hoặc lỗi chờ staff thử lại | «Video đang xử lý» |
+| `processing` | `stage`: `queued` (chưa có dòng / `pending` / `queued`), `downloading`, `transcoding`, `uploading` (kể cả `ready` mà chưa có `videoId`). `progress`: % tổng của UNIOJ, chỉ tăng (tải về 0, chuyển mã 0→89, tải lên 90); `null` khi bằng 0. `queuePosition`/`queueTotal`: chỉ có khi `stage = queued` và UNIOJ báo, còn lại `null` | «Video đang xử lý» + thanh tiến trình + nhãn giai đoạn: «Đang xếp hàng (thứ X/Y)», «Đang tải video về», «Đang chuyển mã · N%», «Sắp xong · N%». Thanh không xác định khi `queued`/`downloading` |
+| `failed` | Đồng bộ UNIOJ lỗi (`status = failed`), chờ staff bấm **Thử lại** | «Video không xem được» — «Video gặp lỗi khi xử lý. Liên hệ gia sư hoặc trợ giảng của lớp nếu em cần xem video này.» |
 | `unavailable` | Link không phải YouTube hoặc server thiếu `UNIVIDEO_*` | «Video không khả dụng» |
 | `none` | Tiết/buổi không có video | Ẩn player |
 
@@ -64,12 +65,12 @@ Staff/admin vẫn nhận link gốc (xem trước bằng YouTube).
 
 ## Frontend
 
-- Học sinh: `apps/web/components/ui/ProtectedVideoPlayer.tsx` (TanStack Query xin playback, `staleTime: Infinity` vì mỗi lần gọi là token mới → player nạp lại; `processing` hỏi lại 30 giây) + `ProtectedHlsPlayer.tsx` (Video.js v10 `@videojs/react`, `HlsJsVideo`, nạp qua `next/dynamic` `ssr: false`). Engine báo lỗi cuối (Worker `403` khi token hết hạn) → nhớ vị trí, xin link mới, phát tiếp; tối đa 1 lần / 20 giây để không lặp vô hạn. Mở DevTools → gỡ player.
+- Học sinh: `apps/web/components/ui/ProtectedVideoPlayer.tsx` (TanStack Query xin playback, `staleTime: Infinity` vì mỗi lần gọi là token mới → player nạp lại; `processing` hỏi lại 15 giây, `failed` hỏi lại 60 giây để tự hồi phục khi staff bấm Thử lại; khung xử lý: `ProtectedVideoProcessingNotice.tsx` + `components/ui/progress.tsx` (Radix Progress, `value = null` → thanh chạy không xác định, tắt animation khi `prefers-reduced-motion`)) + `ProtectedHlsPlayer.tsx` (Video.js v10 `@videojs/react`, `HlsJsVideo`, nạp qua `next/dynamic` `ssr: false`). Engine báo lỗi cuối (Worker `403` khi token hết hạn) → nhớ vị trí, xin link mới, phát tiếp; tối đa 1 lần / 20 giây để không lặp vô hạn. Mở DevTools → gỡ player.
 - Staff: `apps/web/components/admin/ProtectedVideoSyncStatus.tsx` dưới ô link video (`TheoryLessonEditor`, `ClassContentManager`, form sửa buổi `SessionHistoryTable`): badge trạng thái của link **đã lưu** (hỏi lại 15 giây khi đang đồng bộ), nút **Thử lại** khi `failed`; ô nhập khác link đã lưu → nhắc «Lưu để bắt đầu đồng bộ».
 
 ## Endpoints staff
 
-Role `admin` + staff `assistant`, `teacher`.
+Role `admin` + staff `sale_customer_care_head`, `teacher`.
 
 ### `GET /protected-videos/status?url=<link YouTube>`
 
@@ -88,3 +89,10 @@ Role `admin` + staff `assistant`, `teacher`.
 1. Điền env, `pnpm db:migrate` — migration `20261023100000_protected_videos` tự backfill mọi link YouTube cũ thành `pending`.
 2. Cron gửi dần 20 link/phút (mới nhất trước); học sinh thấy «Video đang xử lý» tới khi `ready`.
 3. Theo dõi: `SELECT status, count(*) FROM protected_videos GROUP BY 1;`
+
+### Production (VPS multi-instance)
+
+- Env nằm trong `.env` sửa tay của **từng** thư mục deploy (`/root/UnicornsEdu`, `/root/UnicornsEduEng`, `/root/UnicornsEduJP` — xem `deploy/instances.json`); CI không ghi file này. Instance nào cũng phải có đủ 4 biến ở mục *Cấu hình*.
+- Thiếu `UNIVIDEO_EDGE_URL`/`UNIVIDEO_TOKEN_SECRET` mà có `UNIOJ_API_KEY` → đồng bộ vẫn chạy (`protected_videos` lên `ready`) nhưng playback trả `unavailable`, học sinh thấy «Video không khả dụng»; healthcheck vẫn xanh. Dấu hiệu: log api có `UNIVIDEO_EDGE_URL / UNIVIDEO_TOKEN_SECRET chưa cấu hình`.
+- Sửa `.env` xong phải tạo lại container (`docker compose -f docker-compose.prod.yml -p unicorns-<id> up -d --no-deps --force-recreate api`, export `COMPOSE_PROJECT_NAME`/`NGINX_PUBLISH` như `scripts/gha-deploy-instance-remote.sh`); `restart` không nạp lại `env_file`.
+- Sự cố 16/11/2026: cả 3 instance thiếu `UNIVIDEO_*` từ lúc lên tính năng (#236) → đã bổ sung, backup `.env.bak-20261116-133210`.

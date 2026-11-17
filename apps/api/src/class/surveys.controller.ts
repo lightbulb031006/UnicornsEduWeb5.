@@ -19,7 +19,6 @@ import {
 } from '@nestjs/swagger';
 import { ParseUUIDPipe } from '@nestjs/common';
 import { StaffRole, UserRole } from 'generated/enums';
-import { AllowAssistantOnAdminRoutes } from 'src/auth/decorators/allow-assistant-on-admin.decorator';
 import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
 import {
   CurrentUser,
@@ -56,7 +55,6 @@ const SURVEY_MANAGER_ROLES: StaffRole[] = [
 @Controller('surveys')
 @ApiTags('surveys')
 @ApiCookieAuth('access_token')
-@AllowAssistantOnAdminRoutes(false)
 @AllowStaffRolesOnAdminRoutes(...SURVEY_MANAGER_ROLES)
 @Roles(UserRole.admin)
 export class SurveysController {

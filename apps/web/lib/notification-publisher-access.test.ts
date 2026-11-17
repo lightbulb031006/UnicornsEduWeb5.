@@ -17,6 +17,12 @@ describe("canPublishNotifications", () => {
     expect(canPublishNotifications([role], false)).toBe(false);
   });
 
+  it("rejects the removed legacy accountant role (#266)", () => {
+    expect(canPublishNotifications(["accountant"], false)).toBe(false);
+    expect(canPublishNotifications(["accountant_income"], false)).toBe(true);
+    expect(canPublishNotifications(["accountant_expense"], false)).toBe(true);
+  });
+
   it("allows a teacher who also holds a publisher role", () => {
     expect(canPublishNotifications(["teacher", "communication"], false)).toBe(true);
   });

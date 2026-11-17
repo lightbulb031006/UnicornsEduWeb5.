@@ -1,3 +1,4 @@
+import { hasSaleCsHeadAccess } from "@/lib/sale-cs-head-access";
 import { Role, type UserInfoDto } from "@/dtos/Auth.dto";
 import type { FullProfileDto } from "@/dtos/profile.dto";
 
@@ -20,6 +21,17 @@ export type StaffLessonWorkspaceAccess = {
   canAccessManageDetails: boolean;
   workAccessMode: StaffLessonEndpointAccessMode | null;
   createOutputAccessMode: Exclude<StaffLessonEndpointAccessMode, "account"> | null;
+  /**
+   * #279: xoá đầu việc / sản phẩm và mọi tài liệu — Admin + Trưởng ban Chuyên môn.
+   * Người tạo tài liệu vẫn tự sửa/xoá tài liệu của mình (follow-up Nhóm 3).
+   */
+  canDeleteLessonWork: boolean;
+  /**
+   * Sửa bậc độ khó / level / hạng mục của output **người khác** — Admin + Trưởng ban
+   * Chuyên môn. Output của chính mình: tự khai khi chưa thanh toán
+   * (`lib/lesson-output-pricing-access.ts`).
+   */
+  canSetLessonOutputPricing: boolean;
   isAssistant: boolean;
   isAccountant: boolean;
   isAccountantExpense: boolean;
@@ -47,14 +59,15 @@ export function resolveStaffLessonWorkspace(
     profile?.roleType === "staff" ||
     effectiveRoleTypes.includes(Role.staff) ||
     (hasStaffProfile && profile?.roleType !== "guest");
-  const isAssistant = isStaff && staffRoles.includes("assistant");
+  const isAssistant = isStaff && hasSaleCsHeadAccess(staffRoles);
   const isLessonPlanHead = isStaff && staffRoles.includes("lesson_plan_head");
   const isLessonPlan = isStaff && staffRoles.includes("lesson_plan");
   const isAccountantExpense =
     isStaff && staffRoles.includes("accountant_expense");
   const isAccountant = isAccountantExpense;
 
-  const workspacePolicy: StaffLessonWorkspacePolicy | null = isAdmin || isAssistant
+  // #267: Trợ lí không còn quyền quản lý giáo án (backend lesson-management.guard).
+  const workspacePolicy: StaffLessonWorkspacePolicy | null = isAdmin
     ? "admin"
     : isLessonPlanHead
       ? "lesson_plan_head"
@@ -64,7 +77,7 @@ export function resolveStaffLessonWorkspace(
           ? "accountant"
           : null;
   const workAccessMode: StaffLessonEndpointAccessMode | null =
-    isAdmin || isAssistant || isLessonPlanHead
+    isAdmin || isLessonPlanHead
       ? "manage"
       : isAccountant
         ? "account"
@@ -75,7 +88,7 @@ export function resolveStaffLessonWorkspace(
     StaffLessonEndpointAccessMode,
     "account"
   > | null =
-    isAdmin || isAssistant || isLessonPlanHead
+    isAdmin || isLessonPlanHead
       ? "manage"
       : isLessonPlan
         ? "participant"
@@ -94,6 +107,10 @@ export function resolveStaffLessonWorkspace(
       workspacePolicy === "admin" || workspacePolicy === "lesson_plan_head",
     workAccessMode,
     createOutputAccessMode,
+    canDeleteLessonWork:
+      workspacePolicy === "admin" || workspacePolicy === "lesson_plan_head",
+    canSetLessonOutputPricing:
+      workspacePolicy === "admin" || workspacePolicy === "lesson_plan_head",
     isAssistant,
     isAccountant,
     isAccountantExpense,

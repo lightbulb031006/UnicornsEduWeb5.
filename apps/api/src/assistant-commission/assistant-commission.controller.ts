@@ -47,11 +47,14 @@ export class AssistantCommissionController {
 
   @Get('staff/:assistantStaffId/managed-customer-care')
   @ApiOperation({
-    summary: 'List customer-care staff managed by an assistant',
+    summary: 'List customer-care staff managed by a Sale & CSKH head',
     description:
-      'Returns CSKH staff assigned to the assistant with aggregated 3% tuition share totals.',
+      'Returns CSKH staff managed by the Sale & CSKH head (sale_customer_care_head) with aggregated head commission (hoa hồng trưởng phòng, 3% tuition) totals.',
   })
-  @ApiParam({ name: 'assistantStaffId', description: 'Assistant staff ID' })
+  @ApiParam({
+    name: 'assistantStaffId',
+    description: 'Sale & CSKH head staff ID',
+  })
   @ApiQuery({
     name: 'scope',
     required: false,
@@ -103,11 +106,14 @@ export class AssistantCommissionController {
     'staff/:assistantStaffId/managed-customer-care/:customerCareStaffId/students',
   )
   @ApiOperation({
-    summary: 'List students with assistant share under one managed CSKH',
+    summary: 'List students with head commission under one managed CSKH',
     description:
-      'Aggregates 3% tuition share by student for one customer-care staff managed by the assistant.',
+      'Aggregates 3% tuition share by student for one customer-care staff managed by the Sale & CSKH head.',
   })
-  @ApiParam({ name: 'assistantStaffId', description: 'Assistant staff ID' })
+  @ApiParam({
+    name: 'assistantStaffId',
+    description: 'Sale & CSKH head staff ID',
+  })
   @ApiParam({
     name: 'customerCareStaffId',
     description: 'Managed customer-care staff ID',
@@ -166,11 +172,14 @@ export class AssistantCommissionController {
     'staff/:assistantStaffId/managed-customer-care/:customerCareStaffId/students/:studentId/session-shares',
   )
   @ApiOperation({
-    summary: 'Session-level assistant share rows for one student',
+    summary: 'Session-level head commission rows for one student',
     description:
       'Returns attendance-level 3% tuition share rows for one student under a managed CSKH.',
   })
-  @ApiParam({ name: 'assistantStaffId', description: 'Assistant staff ID' })
+  @ApiParam({
+    name: 'assistantStaffId',
+    description: 'Sale & CSKH head staff ID',
+  })
   @ApiParam({
     name: 'customerCareStaffId',
     description: 'Managed customer-care staff ID',
@@ -190,7 +199,7 @@ export class AssistantCommissionController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Session-level assistant share rows.',
+    description: 'Session-level head commission rows.',
   })
   @ApiResponse({ status: 404, description: 'Staff or student not found.' })
   async getSessionSharesByStudent(
@@ -217,11 +226,14 @@ export class AssistantCommissionController {
 
   @Patch('staff/:assistantStaffId/payment-status/bulk')
   @ApiOperation({
-    summary: 'Bulk update assistant share payment status',
+    summary: 'Bulk update head commission payment status',
     description:
-      'Cập nhật trạng thái thanh toán phần chia trợ lí 3% cho các attendance đã chọn. Khi chuyển sang paid, backend snapshot % thuế hiện hành; khi đổi về pending, reset snapshot thuế về 0.',
+      'Cập nhật trạng thái thanh toán hoa hồng trưởng phòng (3%) cho các attendance đã chọn. Khi chuyển sang paid, backend snapshot % thuế hiện hành; khi đổi về pending, reset snapshot thuế về 0.',
   })
-  @ApiParam({ name: 'assistantStaffId', description: 'Assistant staff ID' })
+  @ApiParam({
+    name: 'assistantStaffId',
+    description: 'Sale & CSKH head staff ID',
+  })
   @ApiBody({
     description: 'Bulk payment status update payload',
     schema: {
@@ -241,13 +253,14 @@ export class AssistantCommissionController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Selected assistant share rows updated.',
+    description: 'Selected head commission rows updated.',
   })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({
     status: 404,
-    description: 'At least one attendance was not found for this assistant.',
+    description:
+      'At least one attendance was not found for this Sale & CSKH head.',
   })
   async bulkUpdatePaymentStatus(
     @CurrentUser() user: JwtPayload,

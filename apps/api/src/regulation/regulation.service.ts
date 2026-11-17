@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { RegulationAudience, StaffRole, UserRole } from 'generated/enums';
+import { hasTrainingAccess } from 'src/common/training-access';
 import type { JwtPayload } from 'src/auth/decorators/current-user.decorator';
 import {
   ActionHistoryActor,
@@ -20,16 +21,16 @@ import { PrismaService } from 'src/prisma/prisma.service';
 const STAFF_ROLE_AUDIENCE_MAP: Record<StaffRole, RegulationAudience> = {
   admin: RegulationAudience.staff_admin,
   teacher: RegulationAudience.staff_teacher,
-  assistant: RegulationAudience.staff_assistant,
+  sale_customer_care_head: RegulationAudience.staff_sale_customer_care_head,
   lesson_plan: RegulationAudience.staff_lesson_plan,
   lesson_plan_head: RegulationAudience.staff_lesson_plan_head,
-  accountant: RegulationAudience.staff_accountant,
   accountant_income: RegulationAudience.staff_accountant_income,
   accountant_expense: RegulationAudience.staff_accountant_expense,
   communication: RegulationAudience.staff_communication,
   technical: RegulationAudience.staff_technical,
   customer_care: RegulationAudience.staff_customer_care,
   training: RegulationAudience.staff_training,
+  training_head: RegulationAudience.staff_training_head,
   sale: RegulationAudience.staff_sale,
 };
 const REGULATION_AUTHOR_SELECT = {
@@ -273,12 +274,18 @@ export class RegulationService {
     const staffRoles = staff?.roles ?? [];
 
     return {
-      canManageAll: staffRoles.includes(StaffRole.assistant),
-      visibleAudiences: staffRoles
-        .map((role) => STAFF_ROLE_AUDIENCE_MAP[role])
-        .filter((audience): audience is RegulationAudience =>
-          Boolean(audience),
-        ),
+      // #267: quản lý quy định chỉ Admin.
+      canManageAll: staffRoles.includes(StaffRole.admin),
+      visibleAudiences: [
+        ...staffRoles.map((role) => STAFF_ROLE_AUDIENCE_MAP[role]),
+        // Trưởng ban Đào tạo có mọi quyền của Ban Đào Tạo, kể cả quy định gửi Đào Tạo.
+        ...(hasTrainingAccess(staffRoles)
+          ? [RegulationAudience.staff_training]
+          : []),
+      ].filter(
+        (audience, index, all): audience is RegulationAudience =>
+          Boolean(audience) && all.indexOf(audience) === index,
+      ),
     };
   }
 

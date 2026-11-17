@@ -1,11 +1,16 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  ActionHistoryService,
+  type ActionHistoryActor,
+} from '../action-history/action-history.service';
+import type { JwtPayload } from '../auth/decorators/current-user.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  assertStorageBucketsAvailable,
   createSignedStorageUrl,
   removeStorageObjects,
   uploadStorageObject,
@@ -33,6 +38,24 @@ import { deriveStudentAchievementTitle } from './achievement-landing.mapper';
 const ACHIEVEMENT_SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 export type AchievementOwnerKind = 'staff' | 'student';
+
+/** Entity type ghi `action_history` khi người khác sửa thành tích nhân sự. */
+export const STAFF_ACHIEVEMENT_AUDIT_ENTITY = 'staff_achievement';
+
+/**
+ * Ai đang sửa thành tích nhân sự (ADR 2026-11-11-staff-achievement-star-first):
+ * - `self`: nhân sự tự sửa hồ sơ mình — không gỡ được ảnh của dòng có sao,
+ *   không ghi lịch sử thao tác.
+ * - `other`: admin / trợ lí / Ban Đào Tạo sửa hồ sơ người khác — không ràng
+ *   buộc minh chứng, ghi lịch sử thao tác (trừ sắp xếp).
+ */
+export type StaffAchievementEditor =
+  | { kind: 'self' }
+  | { kind: 'other'; actor: ActionHistoryActor };
+
+export const SELF_STAFF_ACHIEVEMENT_EDITOR: StaffAchievementEditor = {
+  kind: 'self',
+};
 
 type StaffAchievementRow = {
   id: string;
@@ -68,7 +91,83 @@ type StudentAchievementRow = {
 
 @Injectable()
 export class AchievementService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly actionHistoryService: ActionHistoryService,
+  ) {}
+
+  /**
+   * Người sửa hồ sơ người khác (admin, trợ lí, Ban Đào Tạo). Hồ sơ của chính
+   * mình phải sửa ở trang hồ sơ cá nhân để gate minh chứng áp đúng → 403.
+   */
+  async resolveOtherStaffAchievementEditor(
+    user: Pick<JwtPayload, 'id' | 'email' | 'roleType'>,
+    staffId: string,
+  ): Promise<StaffAchievementEditor> {
+    const ownStaff = await this.prisma.staffInfo.findFirst({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+    if (ownStaff?.id === staffId) {
+      throw new ForbiddenException(
+        'Thành tích của chính mình sửa ở trang hồ sơ cá nhân.',
+      );
+    }
+    return {
+      kind: 'other',
+      actor: {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    };
+  }
+
+  private toStaffAuditSnapshot(row: StaffAchievementRow & { staffId: string }) {
+    return {
+      staffId: row.staffId,
+      title: row.title,
+      isHighlight: row.isHighlight,
+      hasImage: Boolean(row.imagePath),
+    };
+  }
+
+  /** Chỉ ghi khi người khác sửa; nhân sự tự sửa thì bỏ qua. */
+  private async auditStaffAchievement(
+    editor: StaffAchievementEditor,
+    params: {
+      actionType: 'create' | 'update' | 'delete';
+      achievementId: string;
+      description: string;
+      beforeValue?: unknown;
+      afterValue?: unknown;
+    },
+  ) {
+    if (editor.kind !== 'other') return;
+    const base = {
+      actor: editor.actor,
+      entityType: STAFF_ACHIEVEMENT_AUDIT_ENTITY,
+      entityId: params.achievementId,
+      description: params.description,
+    };
+    if (params.actionType === 'create') {
+      await this.actionHistoryService.recordCreate(this.prisma, {
+        ...base,
+        afterValue: params.afterValue,
+      });
+    } else if (params.actionType === 'delete') {
+      await this.actionHistoryService.recordDelete(this.prisma, {
+        ...base,
+        beforeValue: params.beforeValue,
+      });
+    } else {
+      await this.actionHistoryService.recordUpdate(this.prisma, {
+        ...base,
+        beforeValue: params.beforeValue,
+        afterValue: params.afterValue,
+      });
+    }
+  }
 
   private extensionForMime(mimetype: string): string {
     if (mimetype === 'image/png') return 'png';
@@ -90,7 +189,6 @@ export class AchievementService {
       bucket: ACHIEVEMENT_STORAGE_BUCKET,
       path: row.imagePath,
       expiresIn: ACHIEVEMENT_SIGNED_URL_TTL_SECONDS,
-      required: Boolean(row.imagePath),
     });
 
     return {
@@ -115,7 +213,6 @@ export class AchievementService {
       bucket: ACHIEVEMENT_STORAGE_BUCKET,
       path: row.imagePath,
       expiresIn: ACHIEVEMENT_SIGNED_URL_TTL_SECONDS,
-      required: Boolean(row.imagePath),
     });
 
     return {
@@ -231,47 +328,49 @@ export class AchievementService {
     return this.toStudentDtoList(rows);
   }
 
+  /**
+   * Ảnh minh chứng luôn tuỳ chọn, kể cả thành tích đầu tiên; hệ thống không tự
+   * gắn sao. Gate hồ sơ gia sư mới đòi dòng có sao phải có ảnh.
+   */
   async createStaffAchievement(
     staffId: string,
     dto: CreateAchievementDto,
     file: UploadableFile | undefined,
+    editor: StaffAchievementEditor,
   ) {
-    if (!file) {
-      throw new BadRequestException(
-        'Thành tích nhân sự phải kèm ảnh minh chứng.',
-      );
+    if (file) {
+      validateImageFile(file, 'Ảnh minh chứng');
     }
-    validateImageFile(file, 'Ảnh minh chứng');
     await this.assertStaffExists(staffId);
     const title = this.normalizeTitle(dto.title);
     const sortOrder = dto.sortOrder ?? (await this.nextStaffSortOrder(staffId));
-    // Thành tích đầu tiên của hồ sơ tự là nổi bật (không có gì để chọn).
-    const isHighlight =
-      (await this.prisma.staffAchievement.count({ where: { staffId } })) === 0;
 
-    const row = await this.prisma.staffAchievement.create({
-      data: { staffId, title, sortOrder, isHighlight },
+    let row = await this.prisma.staffAchievement.create({
+      data: { staffId, title, sortOrder },
     });
-    try {
-      return await this.uploadStaffAchievementImage(staffId, row.id, file);
-    } catch (error) {
-      await this.removeAchievementImages(
-        this.buildImageStoragePath('staff', staffId, row.id, file.mimetype),
-        buildAchievementWatermarkedPath('staff', staffId, row.id),
-      ).catch(() => undefined);
-      await this.prisma.staffAchievement
-        .delete({ where: { id: row.id } })
-        .catch(() => undefined);
-      throw error;
+    if (file) {
+      try {
+        row = await this.storeStaffAchievementImage(row, file);
+      } catch (error) {
+        await this.prisma.staffAchievement
+          .delete({ where: { id: row.id } })
+          .catch(() => undefined);
+        throw error;
+      }
     }
+    await this.auditStaffAchievement(editor, {
+      actionType: 'create',
+      achievementId: row.id,
+      description: 'Thêm thành tích nhân sự',
+      afterValue: this.toStaffAuditSnapshot(row),
+    });
+    return this.toStaffDto(row);
   }
 
   async createStudentAchievement(
     studentId: string,
     dto: CreateStudentAchievementDto,
-    file?: UploadableFile,
   ) {
-    validateImageFile(file, 'Ảnh minh chứng');
     await this.assertStudentExists(studentId);
     const fields = this.normalizeStudentFields(dto);
     const sortOrder =
@@ -280,22 +379,7 @@ export class AchievementService {
     const row = await this.prisma.studentAchievement.create({
       data: { studentId, ...fields, sortOrder },
     });
-    if (!file) {
-      return this.toStudentDto(row);
-    }
-
-    try {
-      return await this.uploadStudentAchievementImage(studentId, row.id, file);
-    } catch (error) {
-      await this.removeAchievementImages(
-        this.buildImageStoragePath('student', studentId, row.id, file.mimetype),
-        buildAchievementWatermarkedPath('student', studentId, row.id),
-      ).catch(() => undefined);
-      await this.prisma.studentAchievement
-        .delete({ where: { id: row.id } })
-        .catch(() => undefined);
-      throw error;
-    }
+    return this.toStudentDto(row);
   }
 
   private async nextStaffSortOrder(staffId: string) {
@@ -320,6 +404,7 @@ export class AchievementService {
     staffId: string,
     achievementId: string,
     dto: UpdateAchievementDto,
+    editor: StaffAchievementEditor,
   ) {
     const existing = await this.prisma.staffAchievement.findFirst({
       where: { id: achievementId, staffId },
@@ -340,6 +425,15 @@ export class AchievementService {
       where: { id: achievementId },
       data,
     });
+    if (data.title !== undefined && data.title !== existing.title) {
+      await this.auditStaffAchievement(editor, {
+        actionType: 'update',
+        achievementId,
+        description: 'Sửa tiêu đề thành tích nhân sự',
+        beforeValue: this.toStaffAuditSnapshot(existing),
+        afterValue: this.toStaffAuditSnapshot(row),
+      });
+    }
     return this.toStaffDto(row);
   }
 
@@ -389,7 +483,12 @@ export class AchievementService {
     return this.toStudentDto(row);
   }
 
-  async deleteStaffAchievement(staffId: string, achievementId: string) {
+  /** Xoá dòng có sao thì hồ sơ không còn sao cho tới khi chọn lại. */
+  async deleteStaffAchievement(
+    staffId: string,
+    achievementId: string,
+    editor: StaffAchievementEditor,
+  ) {
     const existing = await this.prisma.staffAchievement.findFirst({
       where: { id: achievementId, staffId },
     });
@@ -402,9 +501,12 @@ export class AchievementService {
       existing.imageWatermarkedPath,
     );
     await this.prisma.staffAchievement.delete({ where: { id: achievementId } });
-    if (existing.isHighlight) {
-      await this.highlightSoleRemainingStaffAchievement(staffId);
-    }
+    await this.auditStaffAchievement(editor, {
+      actionType: 'delete',
+      achievementId,
+      description: 'Xoá thành tích nhân sự',
+      beforeValue: this.toStaffAuditSnapshot(existing),
+    });
     return { ok: true as const };
   }
 
@@ -427,36 +529,26 @@ export class AchievementService {
   }
 
   /**
-   * Xoá thành tích nổi bật mà chỉ còn đúng một thành tích thì thành tích đó tự
-   * là nổi bật. Còn từ hai trở lên thì để trống — gia sư phải tự chọn lại.
-   */
-  private async highlightSoleRemainingStaffAchievement(staffId: string) {
-    const remaining = await this.prisma.staffAchievement.findMany({
-      where: { staffId },
-      select: { id: true },
-      take: 2,
-    });
-    if (remaining.length !== 1) return;
-    await this.prisma.staffAchievement.update({
-      where: { id: remaining[0].id },
-      data: { isHighlight: true },
-    });
-  }
-
-  /**
    * Đặt thành tích nổi bật: bỏ sao cũ, gắn sao mới và đưa nó lên đầu
-   * (sortOrder 0), các thành tích còn lại giữ thứ tự tương đối.
+   * (sortOrder 0), các thành tích còn lại giữ thứ tự tương đối. Dòng chưa có
+   * ảnh vẫn gắn sao được — chọn sao trước, minh chứng sau.
    */
-  async setStaffHighlightAchievement(staffId: string, achievementId: string) {
+  async setStaffHighlightAchievement(
+    staffId: string,
+    achievementId: string,
+    editor: StaffAchievementEditor,
+  ) {
     await this.assertStaffExists(staffId);
     const rows = await this.prisma.staffAchievement.findMany({
       where: { staffId },
       orderBy: STAFF_ACHIEVEMENT_ORDER_BY,
-      select: { id: true },
+      select: { id: true, title: true, isHighlight: true },
     });
-    if (!rows.some((row) => row.id === achievementId)) {
+    const target = rows.find((row) => row.id === achievementId);
+    if (!target) {
       throw new NotFoundException('Achievement not found.');
     }
+    const previous = rows.find((row) => row.isHighlight);
     const orderedIds = [
       achievementId,
       ...rows.map((row) => row.id).filter((id) => id !== achievementId),
@@ -479,6 +571,23 @@ export class AchievementService {
       ),
     ]);
 
+    if (!target.isHighlight) {
+      await this.auditStaffAchievement(editor, {
+        actionType: 'update',
+        achievementId,
+        description: 'Đổi thành tích nổi bật của nhân sự',
+        beforeValue: {
+          staffId,
+          highlightAchievementId: previous?.id ?? null,
+          title: previous?.title ?? null,
+        },
+        afterValue: {
+          staffId,
+          highlightAchievementId: achievementId,
+          title: target.title,
+        },
+      });
+    }
     return this.listStaffAchievements(staffId);
   }
 
@@ -571,6 +680,7 @@ export class AchievementService {
     staffId: string,
     achievementId: string,
     file: UploadableFile | undefined,
+    editor: StaffAchievementEditor,
   ) {
     if (!file) {
       throw new BadRequestException('Vui lòng chọn ảnh minh chứng để tải lên.');
@@ -584,30 +694,46 @@ export class AchievementService {
       throw new NotFoundException('Achievement not found.');
     }
 
+    const row = await this.storeStaffAchievementImage(existing, file);
+    await this.auditStaffAchievement(editor, {
+      actionType: 'update',
+      achievementId,
+      description: existing.imagePath
+        ? 'Thay ảnh minh chứng thành tích nhân sự'
+        : 'Tải ảnh minh chứng thành tích nhân sự',
+      beforeValue: this.toStaffAuditSnapshot(existing),
+      afterValue: this.toStaffAuditSnapshot(row),
+    });
+    return this.toStaffDto(row);
+  }
+
+  private async storeStaffAchievementImage(
+    existing: StaffAchievementRow & { staffId: string },
+    file: UploadableFile,
+  ) {
     const imagePath = this.buildImageStoragePath(
       'staff',
-      staffId,
-      achievementId,
+      existing.staffId,
+      existing.id,
       file.mimetype,
     );
     const imageWatermarkedPath = buildAchievementWatermarkedPath(
       'staff',
-      staffId,
-      achievementId,
+      existing.staffId,
+      existing.id,
     );
     await this.uploadImagePair({
       imagePath,
       imageWatermarkedPath,
       file,
       previousImagePath: existing.imagePath,
-      previousWatermarkedPath: existing.imageWatermarkedPath,
+      previousWatermarkedPath: existing.imageWatermarkedPath ?? null,
     });
 
-    const row = await this.prisma.staffAchievement.update({
-      where: { id: achievementId },
+    return this.prisma.staffAchievement.update({
+      where: { id: existing.id },
       data: { imagePath, imageWatermarkedPath },
     });
-    return this.toStaffDto(row);
   }
 
   async uploadStudentAchievementImage(
@@ -653,12 +779,46 @@ export class AchievementService {
     return this.toStudentDto(row);
   }
 
-  deleteStaffAchievementImage(staffId: string, achievementId: string): never {
-    void staffId;
-    void achievementId;
-    throw new BadRequestException(
-      'Không gỡ ảnh minh chứng của thành tích nhân sự. Hãy thay ảnh khác hoặc xoá cả thành tích.',
+  /**
+   * Nhân sự tự sửa không gỡ được ảnh của dòng có sao (chỉ thay). Người khác
+   * sửa thì gỡ được — gate của gia sư sẽ đòi tải lại.
+   */
+  async deleteStaffAchievementImage(
+    staffId: string,
+    achievementId: string,
+    editor: StaffAchievementEditor,
+  ) {
+    const existing = await this.prisma.staffAchievement.findFirst({
+      where: { id: achievementId, staffId },
+    });
+    if (!existing) {
+      throw new NotFoundException('Achievement not found.');
+    }
+    if (existing.isHighlight && editor.kind === 'self') {
+      throw new BadRequestException(
+        'Không gỡ ảnh minh chứng của thành tích nổi bật. Hãy thay ảnh khác hoặc đổi sao sang thành tích khác.',
+      );
+    }
+    if (!existing.imagePath && !existing.imageWatermarkedPath) {
+      return this.toStaffDto(existing);
+    }
+
+    await this.removeAchievementImages(
+      existing.imagePath,
+      existing.imageWatermarkedPath,
     );
+    const row = await this.prisma.staffAchievement.update({
+      where: { id: achievementId },
+      data: { imagePath: null, imageWatermarkedPath: null },
+    });
+    await this.auditStaffAchievement(editor, {
+      actionType: 'update',
+      achievementId,
+      description: 'Gỡ ảnh minh chứng thành tích nhân sự',
+      beforeValue: this.toStaffAuditSnapshot(existing),
+      afterValue: this.toStaffAuditSnapshot(row),
+    });
+    return this.toStaffDto(row);
   }
 
   async deleteStudentAchievementImage(
@@ -693,10 +853,6 @@ export class AchievementService {
     previousImagePath: string | null;
     previousWatermarkedPath: string | null;
   }) {
-    await assertStorageBucketsAvailable([
-      { name: ACHIEVEMENT_STORAGE_BUCKET, public: false },
-      { name: ACHIEVEMENT_PUBLIC_BUCKET, public: true },
-    ]);
     const watermarked = await bakeDiagonalWatermark(options.file.buffer);
 
     await uploadStorageObject({

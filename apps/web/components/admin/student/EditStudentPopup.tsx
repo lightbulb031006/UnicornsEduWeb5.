@@ -855,7 +855,7 @@ export default function EditStudentPopup({
                   </div>
                   {!canManageCustomerCareAssignment ? (
                     <span className="text-xs text-text-muted">
-                      Chỉ admin/trợ lí được đổi CSKH phụ trách và tỷ lệ lợi nhuận.
+                      Chỉ admin/Trưởng phòng Sale & CSKH được đổi CSKH phụ trách và tỷ lệ lợi nhuận.
                     </span>
                   ) : null}
                 </label>

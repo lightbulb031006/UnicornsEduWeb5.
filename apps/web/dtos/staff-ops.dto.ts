@@ -63,6 +63,8 @@ export interface StaffOpsSessionAttendancePayload
 }
 
 export interface StaffOpsCreateSessionPayload extends SessionReviewFields {
+  /** #275: Admin / Quản lý lớp chọn gia sư của lớp; gia sư thuần bỏ trống (BE gán chính mình). */
+  teacherId?: string;
   date: string;
   startTime?: string;
   endTime?: string;

@@ -21,7 +21,6 @@ import {
   AttemptStatus,
   LessonKind,
   QuestionType,
-  StaffRole,
   UserRole,
 } from 'generated/enums';
 
@@ -192,9 +191,9 @@ export class CourseContentSupportService {
       where: { classId, teacherId: staffInfo.id, status: 'active' },
     });
 
-    const isAssistant = staffInfo.roles.includes(StaffRole.assistant);
-
-    if (!isTeacher && !isAssistant) {
+    // #267: Trợ lí không còn truy cập nội dung lớp; chỉ giáo viên của lớp
+    // (hoặc Admin, đã xử lý phía trên).
+    if (!isTeacher) {
       throw new ForbiddenException('You do not have access to this class');
     }
   }

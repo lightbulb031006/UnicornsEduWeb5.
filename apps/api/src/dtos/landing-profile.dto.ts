@@ -9,7 +9,7 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { AchievementLevel } from 'generated/enums';
+import { AchievementLevel, StaffRole } from 'generated/enums';
 
 export class StaffLandingProfileQueryDto {
   @ApiPropertyOptional({
@@ -273,6 +273,13 @@ export class LandingStudentGalleryItemDto {
     description: 'Display order ascending (0 first).',
   })
   sortOrder: number;
+
+  @ApiProperty({
+    example: '2026-05-01T08:00:00.000Z',
+    description:
+      'Upload time (ISO 8601). Landing sorts feedback cards newest-first by this.',
+  })
+  createdAt: string;
 }
 
 export class StaffLandingProfileDto {
@@ -289,6 +296,15 @@ export class StaffLandingProfileDto {
       'Staff employment status. Landing CMS may label inactive as đã nghỉ; publish is still CMS-gated.',
   })
   status: 'active' | 'inactive';
+
+  @ApiProperty({
+    enum: StaffRole,
+    isArray: true,
+    example: ['teacher'],
+    description:
+      'Staff roles. Landing shows only `teacher` (gia sư) profiles; endpoint itself does not filter.',
+  })
+  roles: StaffRole[];
 
   @ApiProperty({
     nullable: true,

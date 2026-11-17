@@ -10,6 +10,8 @@ import {
   AdminDashboardStudentChurnItem,
   AdminDashboardStudentChurnType,
   AdminDashboardTopupHistoryItem,
+  AdminDashboardStudentDemographics,
+  StudentDemographicsQueryParams,
 } from "@/dtos/dashboard.dto";
 import { api } from "../client";
 
@@ -258,3 +260,53 @@ export async function downloadAdminDashboardFinancialExportExcel(params?: {
     params,
   );
 }
+
+function toStudentDemographicsParams(params: StudentDemographicsQueryParams = {}) {
+  const query: Record<string, string> = {};
+  if (params.status) query.status = params.status;
+  if (params.year) query.year = params.year;
+  if (params.year && params.month) query.month = params.month;
+  return query;
+}
+
+/** Thống kê học sinh theo tỉnh, năm sinh, khoá, doanh thu/lợi nhuận; lọc trạng thái + kỳ (tháng / năm). */
+export async function getAdminStudentDemographics(
+  params: StudentDemographicsQueryParams = {},
+): Promise<AdminDashboardStudentDemographics> {
+  const response = await api.get<AdminDashboardStudentDemographics>(
+    "/dashboard/student-demographics",
+    { params: toStudentDemographicsParams(params) },
+  );
+  return response.data;
+}
+
+/** Tải PDF thống kê học sinh (cùng bộ lọc với `getAdminStudentDemographics`). */
+export async function downloadAdminStudentDemographicsPdf(
+  params: StudentDemographicsQueryParams = {},
+): Promise<{
+  blob: Blob;
+  filename: string;
+}> {
+  const status = params.status;
+  const response = await api.get<Blob>("/dashboard/student-demographics/pdf", {
+    params: toStudentDemographicsParams(params),
+    responseType: "blob",
+  });
+
+  const contentDisposition = response.headers["content-disposition"] as string | undefined;
+  const filenameMatch = contentDisposition?.match(/filename="?([^"]+)"?/);
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const suffix =
+    status === "active"
+      ? "dang-hoc"
+      : status === "inactive"
+        ? "da-nghi"
+        : "toan-bo";
+  const filename =
+    filenameMatch?.[1] ??
+    `thong-ke-hoc-sinh-${suffix}${params.year ? `-${params.year}${params.month ? `-${params.month}` : ""}` : ""}-${dateStr}.pdf`;
+
+  return { blob: response.data, filename };
+}
+

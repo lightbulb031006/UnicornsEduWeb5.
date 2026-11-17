@@ -1,3 +1,4 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import {
   Body,
   Controller,
@@ -56,6 +57,8 @@ import {
   SearchAssignableStaffUsersDto,
   SearchStaffOptionsDto,
   UpdateStaffDto,
+  UpdateStaffTrainingRolesDto,
+  StaffTrainingRolesResultDto,
   UpdateStaffWithFixedSalaryOverridesDto,
   UpdateStaffStatusDto,
   PatchStaffClassTeacherOperatingDeductionDto,
@@ -72,12 +75,14 @@ import type { RequestWithResolvedAuthContext } from 'src/auth/auth-request-conte
 @Controller('staff')
 @ApiTags('staff')
 @ApiCookieAuth('access_token')
-@AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.accountant_expense)
+@AllowStaffRolesOnAdminRoutes(StaffRole.accountant_expense)
 @Roles(UserRole.admin)
 export class StaffController {
   constructor(private readonly staffService: StaffService) {}
 
   @Get('assignable-users')
+  // #270: trả email người dùng → chỉ Admin (tạo hồ sơ nhân sự cũng chỉ Admin).
+  @AllowStaffRolesOnAdminRoutes()
   @ApiOperation({
     summary: 'Search users by email for tutor assignment',
     description:
@@ -100,7 +105,7 @@ export class StaffController {
 
   @Get('customer-care-options')
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
+    SALE_CS_HEAD_ROLE,
     StaffRole.accountant_expense,
     StaffRole.customer_care,
   )
@@ -135,9 +140,9 @@ export class StaffController {
 
   @Get('assistant-options')
   @ApiOperation({
-    summary: 'Search assistant staff options',
+    summary: 'Search Sale & CSKH head staff options',
     description:
-      'Return staff options eligible for assistant manager assignment, filtered by full name.',
+      'Return staff with role sale_customer_care_head (Trưởng phòng Sale & CSKH) eligible to manage a CSKH staff, filtered by full name. Several heads may exist.',
   })
   @ApiQuery({
     name: 'search',
@@ -155,7 +160,7 @@ export class StaffController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Matching assistant staff options.',
+    description: 'Matching Sale & CSKH head staff options.',
   })
   async searchAssistantStaffOptions(@Query() query: SearchStaffOptionsDto) {
     return this.staffService.searchAssistantStaff(query);
@@ -165,7 +170,7 @@ export class StaffController {
   @ApiOperation({
     summary: 'Search staff options',
     description:
-      'Return lightweight staff options for admin selection controls.',
+      'Return lightweight staff options (id, fullName, status, roles — không có email/thông tin cá nhân) for admin selection controls. #274: Trưởng ban Đào tạo dùng để chọn gia sư khi tạo lớp.',
   })
   @ApiQuery({
     name: 'search',
@@ -185,6 +190,12 @@ export class StaffController {
     status: 200,
     description: 'Matching lightweight staff options.',
   })
+  @ApiResponse({ status: 403, description: 'Role không được tra nhân sự.' })
+  // #274: Trưởng ban Đào tạo chọn gia sư khi tạo lớp (giữ Kế toán chi cấp class).
+  @AllowStaffRolesOnAdminRoutes(
+    StaffRole.accountant_expense,
+    StaffRole.training_head,
+  )
   async searchStaffOptions(@Query() query: SearchStaffOptionsDto) {
     return this.staffService.searchStaffOptions(query);
   }
@@ -193,7 +204,7 @@ export class StaffController {
   @ApiOperation({
     summary: 'List staff',
     description:
-      'Get all staff records. Each row carries `achievementCount` (number of staff achievements) for the «Xem thành tích (n)» button.',
+      'Get all staff records. Each row carries `achievementCount` (number of staff achievements) for the «Xem thành tích (n)» button. #270: fields are redacted per viewer (`sensitiveView`): personal info (CCCD, phone, email, address, birth date, gender, ethnicity) only for Admin/self; bank + QR also for accountant_expense; income (`unpaidAmountTotal`) only Admin/accountant_expense/self — hidden fields are absent from the row.',
   })
   @ApiQuery({
     name: 'page',
@@ -268,7 +279,9 @@ export class StaffController {
     status: 200,
     description: 'Paginated staff list with data and meta.',
   })
+  @ApiResponse({ status: 403, description: 'Not allowed.' })
   async getStaff(
+    @CurrentUser() user: JwtPayload,
     @Query() query: PaginationQueryDto,
     @Query('search') search?: string,
     @Query('status') status?: string,
@@ -279,17 +292,54 @@ export class StaffController {
     @Query('highSchool') highSchool?: string,
     @Query('role') role?: string,
   ) {
-    return this.staffService.getStaff({
-      ...query,
-      search,
-      status,
-      classId,
-      className,
-      province,
-      university,
-      highSchool,
-      role,
-    });
+    return this.staffService.getStaff(
+      {
+        ...query,
+        search,
+        status,
+        classId,
+        className,
+        province,
+        university,
+        highSchool,
+        role,
+      },
+      { userId: user.id, roleType: user.roleType },
+    );
+  }
+
+  @Get('landing-tutors/count')
+  @Public()
+  @Roles()
+  @UseGuards(ApiKeyGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({
+    summary: 'Count landing tutors, including inactive teachers',
+  })
+  @ApiHeader({ name: LANDING_API_KEY_HEADER, required: true })
+  @ApiResponse({
+    status: 200,
+    description: 'Total teachers across all statuses.',
+  })
+  @ApiResponse({ status: 401, description: 'Missing or invalid API key.' })
+  async getLandingTutorCount() {
+    return this.staffService.getLandingTutorCount();
+  }
+
+  @Get('landing-tutors')
+  @Public()
+  @Roles()
+  @UseGuards(ApiKeyGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({
+    summary:
+      'List all landing tutors without pagination, including inactive teachers',
+  })
+  @ApiHeader({ name: LANDING_API_KEY_HEADER, required: true })
+  @ApiResponse({ status: 200, type: StaffLandingProfilesResponseDto })
+  @ApiResponse({ status: 401, description: 'Missing or invalid API key.' })
+  async getLandingTutors(): Promise<StaffLandingProfilesResponseDto> {
+    return this.staffService.getLandingProfiles({}, true);
   }
 
   @Get('landing-profiles')
@@ -350,7 +400,7 @@ export class StaffController {
   @ApiOperation({
     summary: 'Get staff income summary',
     description:
-      'Backend-authoritative net-first totals for staff detail. incomeStatsTotalNet is the top-card "Tổng nhận" monthly NET (monthlyIncomeTotals.total), while yearIncomeTotal remains the selected-year net rollup and totalReceivedNet keeps the current paid-year + unpaid-snapshot contract. Teacher allowance uses operating + tax on post-operating base; bonuses use tax only (no operating), at the current effective rate for the first matching staff role in priority order: teacher, customer_care, lesson_plan_head, lesson_plan, assistant, accountant, communication, technical. Gross/tax breakdown fields include bonus gross and bonus tax.',
+      'Backend-authoritative net-first totals for staff detail. incomeStatsTotalNet is the top-card "Tổng nhận" monthly NET (monthlyIncomeTotals.total), while yearIncomeTotal remains the selected-year net rollup and totalReceivedNet keeps the current paid-year + unpaid-snapshot contract. Teacher allowance uses operating + tax on post-operating base; bonuses use tax only (no operating), at the current effective rate for the first matching staff role in priority order: teacher, customer_care, lesson_plan_head, lesson_plan, assistant, accountant_income, accountant_expense, communication, technical. Gross/tax breakdown fields include bonus gross and bonus tax.',
   })
   @ApiParam({ name: 'id', description: 'Staff id' })
   @ApiQuery({
@@ -417,11 +467,16 @@ export class StaffController {
     @Param('payableId', new ParseUUIDPipe()) payableId: string,
     @Body() data: UpdateStaffFixedSalaryPayableDto,
   ) {
-    return this.staffService.updateStaffFixedSalaryPayable(id, payableId, data, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    return this.staffService.updateStaffFixedSalaryPayable(
+      id,
+      payableId,
+      data,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
   }
 
   @Get(':id/revenue-share')
@@ -479,7 +534,8 @@ export class StaffController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Staff payment preview.',
+    description:
+      'Staff payment preview. `trialTeachingWarnings`: [{ classId, className }] — lớp còn trợ cấp buổi chờ trả mà gia sư chưa có buổi Dạy thử (coefficient = 0) và chưa bị bỏ qua; chỉ cảnh báo, không chặn thanh toán.',
   })
   @ApiResponse({ status: 400, description: 'month/year invalid.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
@@ -488,6 +544,34 @@ export class StaffController {
     @Query() query: StaffPaymentMonthDto,
   ): Promise<StaffPaymentPreviewDto> {
     return this.staffService.getPaymentPreview(id, query);
+  }
+
+  @Post(':id/trial-teaching-warnings/:classId/dismiss')
+  @ApiOperation({
+    summary: 'Dismiss a trial-teaching warning (Cảnh báo chưa dạy thử)',
+    description:
+      'Bỏ qua cảnh báo «gia sư chưa có buổi dạy thử ở lớp» trong popup thanh toán (`trialTeachingWarnings` của GET /staff/:id/payment-preview). Lưu theo cặp (gia sư, lớp), dùng chung cho mọi người xem, không nhắc lại. Idempotent. Admin + Kế toán chi; Kế toán chi không bỏ qua cảnh báo của chính mình (#265).',
+  })
+  @ApiParam({ name: 'id', description: 'Staff id (gia sư)' })
+  @ApiParam({ name: 'classId', description: 'Class id' })
+  @ApiResponse({
+    status: 201,
+    description: '{ staffId, classId, dismissedAt }',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Kế toán chi bỏ qua cảnh báo của chính mình.',
+  })
+  @ApiResponse({ status: 404, description: 'Staff or class not found.' })
+  async dismissTrialTeachingWarning(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStaffIdPipe()) id: string,
+    @Param('classId', new ParseClassIdPipe()) classId: string,
+  ) {
+    return this.staffService.dismissTrialTeachingWarning(id, classId, {
+      userId: user.id,
+      roleType: user.roleType,
+    });
   }
 
   @Get(':id/survey-deadline-block-warnings')
@@ -641,7 +725,7 @@ export class StaffController {
   @ApiOperation({
     summary: 'Update operating deduction rate for a staff-class assignment',
     description:
-      'Updates operating deduction on session allowance for a staff-class assignment. Restricted to admin users and accountant_expense staff.',
+      'Updates operating deduction on session allowance for a staff-class assignment. Follow-up grill 13/11: Admin, Trưởng ban Đào tạo hoặc Quản lý lớp của lớp sửa; Kế toán chi chỉ xem (403) trừ khi kiêm một role trên (hợp quyền). Không sửa % của chính mình (#265).',
   })
   @ApiParam({ name: 'id', description: 'Staff id (teacher)' })
   @ApiParam({ name: 'classId', description: 'Class id' })
@@ -652,7 +736,11 @@ export class StaffController {
       'Full staff profile after update (same shape as GET /staff/:id).',
   })
   @ApiResponse({ status: 400, description: 'Validation error.' })
-  @ApiResponse({ status: 403, description: 'Not allowed.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Kế toán chi không kiêm Trưởng ban Đào tạo / Quản lý lớp của lớp, hoặc sửa % của chính mình.',
+  })
   @ApiResponse({
     status: 404,
     description: 'Staff or class–teacher row not found.',
@@ -686,32 +774,51 @@ export class StaffController {
   @ApiOperation({
     summary: 'Regenerate Google Meet link for a tutor',
     description:
-      'Generates a new Google Meet link for the specified staff member and saves it to staff_info.google_meet_link. Any authenticated admin or staff user can call this endpoint. Returns the new Meet link.',
+      'Generates a new Google Meet link for the specified staff member and saves it to staff_info.google_meet_link. #278: chỉ Admin, chính nhân sự, hoặc Trưởng ban Đào tạo đang hoạt động trên cấp dưới (nhân sự mang role Gia sư / Ban Chuyên môn / Đào tạo, không phải Admin hay role trưởng). Returns the new Meet link.',
   })
   @ApiParam({ name: 'id', description: 'Staff id' })
   @ApiResponse({
     status: 200,
     description: 'New Google Meet link generated and saved.',
   })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin, chính nhân sự hay Trưởng ban Đào tạo với cấp dưới.',
+  })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
-  async regenerateMeetLink(@Param('id', new ParseStaffIdPipe()) id: string) {
+  async regenerateMeetLink(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStaffIdPipe()) id: string,
+  ) {
+    await this.staffService.assertCanRegenerateMeetLink(id, {
+      userId: user.id,
+      roleType: user.roleType,
+    });
     return this.staffService.regenerateMeetLink(id);
   }
 
   @Get(':id')
   @ApiOperation({
     summary: 'Get staff by id',
-    description: 'Get a single staff record by id.',
+    description:
+      'Get a single staff record by id. #270: response carries `sensitiveView` { personal, bank, income }; fields the viewer may not see are absent — personal info (cccd*, ethnicity, gender, currentAddress, birthDate, user.email, user.phone) only Admin/self; bankAccount + bankQrLink also accountant_expense; income (classAllowance, monthlyStats) Admin/accountant_expense/self.',
   })
   @ApiParam({ name: 'id', description: 'Staff id' })
   @ApiResponse({ status: 200, description: 'Staff found.' })
+  @ApiResponse({ status: 403, description: 'Not allowed.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
-  async getStaffById(@Param('id', new ParseStaffIdPipe()) id: string) {
-    return this.staffService.getStaffById(id);
+  async getStaffById(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStaffIdPipe()) id: string,
+  ) {
+    return this.staffService.getStaffById(id, {
+      userId: user.id,
+      roleType: user.roleType,
+    });
   }
 
   @Post()
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Create staff',
     description: 'Create a new staff record.',
@@ -720,6 +827,8 @@ export class StaffController {
   @ApiResponse({ status: 201, description: 'Staff created.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'User not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async createStaff(
     @CurrentUser() user: JwtPayload,
     @Body() data: CreateStaffDto,
@@ -743,7 +852,6 @@ export class StaffController {
   }
 
   @Patch()
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update staff',
     description: 'Update a staff record.',
@@ -755,6 +863,8 @@ export class StaffController {
   @ApiResponse({ status: 200, description: 'Staff updated.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async updateStaff(
     @CurrentUser() user: JwtPayload,
     @Body() data: UpdateStaffDto,
@@ -778,7 +888,6 @@ export class StaffController {
   }
 
   @Patch(':id/with-fixed-salary-overrides')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update staff roles and fixed-salary overrides together',
     description:
@@ -800,6 +909,8 @@ export class StaffController {
       'Validation error, override for a role not in the payload roles list, or duplicate roleType.',
   })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async updateStaffWithFixedSalaryOverrides(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStaffIdPipe()) id: string,
@@ -824,8 +935,37 @@ export class StaffController {
     );
   }
 
+  @Patch(':id/training-roles')
+  @Roles(UserRole.staff)
+  @ApiOperation({
+    summary:
+      'Trưởng ban Đào tạo bật/tắt role gia sư / Ban Chuyên môn / Đào Tạo',
+    description:
+      'Chỉ staff active có role training_head. Body là trạng thái đích của 3 role teacher / lesson_plan / training; role khác của nhân sự giữ nguyên. 403 nếu body có role ngoài 3 role này, nếu target là Admin / mang role trưởng (admin, sale_customer_care_head, training_head, lesson_plan_head — #278), target là chính mình, hoặc target ngoài 3 nhóm (không mang teacher / lesson_plan / training) mà body không bật role nào (chỉ được bật role cho ứng viên). Role bị tắt: mức đè lương cứng / % vận hành của role đó bị xoá và ghi action_history; khoản đã chốt/đã trả không đổi; không cascade lớp dạy, quản lý lớp, đội chuyên môn. Response chỉ có id + roles, roles chỉ gồm teacher / lesson_plan / training (#278: không lộ role khác).',
+  })
+  @ApiParam({ name: 'id', description: 'Staff id của nhân sự được chỉnh' })
+  @ApiBody({ type: UpdateStaffTrainingRolesDto })
+  @ApiResponse({ status: 200, description: 'Roles sau khi lưu.' })
+  @ApiResponse({ status: 400, description: 'Bỏ hết role của nhân sự.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Trưởng ban, role ngoài phạm vi, target được bảo vệ, tự chỉnh, hoặc target ngoài 3 nhóm mà không bật role nào.',
+  })
+  @ApiResponse({ status: 404, description: 'Staff not found.' })
+  async updateStaffTrainingRoles(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStaffIdPipe()) id: string,
+    @Body() data: UpdateStaffTrainingRolesDto,
+  ): Promise<StaffTrainingRolesResultDto> {
+    return this.staffService.updateStaffTrainingRoles(id, data, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
   @Patch(':id/status')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update staff operational status',
     description:
@@ -839,6 +979,8 @@ export class StaffController {
   @ApiResponse({ status: 200, description: 'Staff status updated.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async updateStaffStatus(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStaffIdPipe()) id: string,
@@ -862,6 +1004,8 @@ export class StaffController {
   @ApiResponse({ status: 400, description: 'Staff has no linked user.' })
   @ApiResponse({ status: 403, description: 'Forbidden. Admin only.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
+  // #270: trả hồ sơ đầy đủ → chỉ Admin (không kế thừa staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async deleteStaffAvatar(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStaffIdPipe()) id: string,
@@ -874,7 +1018,6 @@ export class StaffController {
   }
 
   @Delete(':id')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Delete staff',
     description: 'Delete a staff record by id.',
@@ -882,6 +1025,8 @@ export class StaffController {
   @ApiParam({ name: 'id', description: 'Staff id' })
   @ApiResponse({ status: 200, description: 'Staff deleted.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async deleteStaff(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStaffIdPipe()) id: string,

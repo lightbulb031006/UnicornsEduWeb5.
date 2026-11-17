@@ -149,7 +149,9 @@ function PaymentPill({
   const statusLabel = LESSON_PAYMENT_STATUS_LABELS[paymentStatus];
   const recipient = staffDisplayName?.trim() || null;
   const pendingAmount =
-    paymentStatus === "pending" ? `${formatCurrency(cost)}đ` : null;
+    paymentStatus === "pending"
+      ? `${formatCurrency(cost)}đ`
+      : null;
   const fullLabel = [statusLabel, recipient, pendingAmount]
     .filter(Boolean)
     .join(" · ");
@@ -753,6 +755,7 @@ export default function LessonWorkTab({
           hideStaffFields
           forceSharedLayout
           allowPaymentStatusEdit={createAllowsPaymentStatusEdit}
+          allowCostEdit={createAccessMode !== null}
           openAfterCreate={createOpenAfterCreate}
         />
       ) : null}

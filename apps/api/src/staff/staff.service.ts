@@ -1,10 +1,16 @@
 import {
+  SALE_CS_HEAD_ROLE,
+  SALE_CS_HEAD_ROLE_LABEL,
+  hasSaleCsHeadAccess,
+} from 'src/common/sale-cs-head-access';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { resolveTrainingManagerIncomeRole } from 'src/common/training-access';
 import { GoogleCalendarService } from 'src/google-calendar/google-calendar.service';
 import { Prisma } from '../../generated/client';
 import {
@@ -57,8 +63,28 @@ import {
   UpdateStaffWithFixedSalaryOverridesDto,
   UpdateStaffStatusDto,
   PatchStaffClassTeacherOperatingDeductionDto,
+  UpdateStaffTrainingRolesDto,
+  StaffTrainingRolesResultDto,
 } from 'src/dtos/staff.dto';
+import {
+  isTrainingHeadSubordinate,
+  pickTrainingTeamRoles,
+  planTrainingHeadRoleChange,
+} from './training-head-role-policy';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { assertCanSetClassTeacherPay } from 'src/common/class-teacher-pay-access';
+import {
+  assertActorNotEditingOwnCompensation,
+  assertNotEditingOwnCompensation,
+  assertStaffCreateAllowed,
+  assertStaffRoleChangeAllowed,
+  resolveStaffPolicyActor,
+} from 'src/common/staff-role-policy';
+import {
+  computeStaffSensitiveView,
+  redactStaffRecordForView,
+  resolveStaffSensitiveView,
+} from 'src/common/staff-sensitive-view';
 import { buildNameSearchWhere } from './staff-name-search';
 import { FixedSalarySettingsService } from 'src/fixed-salary-settings/fixed-salary-settings.service';
 import {
@@ -93,13 +119,19 @@ import {
   commissionTuitionBasisVnd,
   isSelfManagedCustomerCareStaff,
 } from 'src/payroll/assistant-share.util';
-import { LESSON_PLAN_LABEL } from '../common/lesson-plan-label';
+import {
+  LESSON_PLAN_HEAD_ROLE_LABEL,
+  LESSON_PLAN_ROLE_LABEL,
+} from '../common/lesson-plan-label';
 import { findTeacherSurveyDeadlineBlocks } from '../class/survey-deadline-block';
+import { loadTrialTeachingWarnings } from './trial-teaching-warnings';
 import {
   FIRST_SESSION_SELECT,
   isSurveyRequiredFor,
 } from '../class/survey-requirement';
 import { normalizeCustomerCareProfitPercent } from '../customer-care/customer-care-profit-percent';
+import { isUniqueConstraintOn } from '../common/prisma-unique-error';
+import { releaseCustomerCareAssignmentsOnRoleRemovalInTx } from '../customer-care/customer-care-role-release';
 
 /** Prisma expects DateTime; normalize date-only string (YYYY-MM-DD) to Date. */
 function toDateOrNull(
@@ -140,6 +172,12 @@ function parseCommaSeparatedIds(raw?: string): string[] {
   ];
 }
 
+/** Người xem hồ sơ nhân sự (từ JWT) — dùng cho redact trường nhạy cảm (#270). */
+type StaffSensitiveViewer = {
+  userId?: string | null;
+  roleType?: string | null;
+};
+
 const STAFF_NAME_USER_SELECT = {
   first_name: true,
   last_name: true,
@@ -158,27 +196,27 @@ type StaffNameUserWithAvatar = StaffNameUser & {
 const STAFF_ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   teacher: 'Giáo viên',
-  assistant: 'Trợ lí',
-  lesson_plan: LESSON_PLAN_LABEL,
-  lesson_plan_head: 'Trưởng giáo án',
-  accountant: 'Kế toán',
+  [SALE_CS_HEAD_ROLE]: SALE_CS_HEAD_ROLE_LABEL,
+  lesson_plan: LESSON_PLAN_ROLE_LABEL,
+  lesson_plan_head: LESSON_PLAN_HEAD_ROLE_LABEL,
   accountant_income: 'Kế toán thu',
   accountant_expense: 'Kế toán chi',
   communication: 'Truyền thông',
   technical: 'Kỹ thuật',
   customer_care: 'CSKH',
   training: 'Đào Tạo',
+  training_head: 'Trưởng ban Đào tạo',
   sale: 'Sale',
 };
 
 const EXTRA_ALLOWANCE_BACKED_OTHER_ROLES = new Set<StaffRole>([
-  StaffRole.assistant,
-  StaffRole.accountant,
+  SALE_CS_HEAD_ROLE,
   StaffRole.accountant_income,
   StaffRole.accountant_expense,
   StaffRole.communication,
   StaffRole.technical,
   StaffRole.training,
+  StaffRole.training_head,
   StaffRole.sale,
 ]);
 
@@ -888,26 +926,8 @@ export class StaffService {
     });
   }
 
-  private isUniqueConstraintError(error: unknown) {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      (error as { code?: string }).code === 'P2002'
-    );
-  }
-
   private isCccdNumberUniqueConstraint(error: unknown) {
-    if (!this.isUniqueConstraintError(error)) {
-      return false;
-    }
-
-    const target = (error as { meta?: { target?: unknown } }).meta?.target;
-    if (Array.isArray(target)) {
-      return target.some((item) => String(item).includes('cccd_number'));
-    }
-
-    return typeof target === 'string' && target.includes('cccd_number');
+    return isUniqueConstraintOn(error, 'cccd_number');
   }
 
   private getStaffAuditSnapshot(db: StaffAuditClient, staffId: string) {
@@ -935,6 +955,7 @@ export class StaffService {
         classTeachers: {
           select: {
             customAllowance: true,
+            customAllowancePerSession: true,
             class: {
               select: {
                 id: true,
@@ -960,7 +981,7 @@ export class StaffService {
     hasExplicitManagedByField: boolean;
   }): string | null | undefined {
     const isDualRole =
-      params.nextRoles.includes(StaffRole.assistant) &&
+      hasSaleCsHeadAccess(params.nextRoles) &&
       params.nextRoles.includes(StaffRole.customer_care);
 
     if (isDualRole) {
@@ -976,7 +997,7 @@ export class StaffService {
         })
       ) {
         throw new BadRequestException(
-          'Trợ lí quản lí không được là chính nhân sự CSKH này.',
+          'Trưởng phòng quản lí không được là chính nhân sự CSKH này.',
         );
       }
       return managedBy;
@@ -1001,7 +1022,7 @@ export class StaffService {
   ): Prisma.AttendanceWhereInput {
     return {
       ...extra,
-      assistantManagerStaffId: staffId,
+      saleCsHeadStaffId: staffId,
       NOT: {
         customerCareStaffId: staffId,
       },
@@ -1144,7 +1165,7 @@ export class StaffService {
     const rows = await this.prisma.staffInfo.findMany({
       where: {
         roles: {
-          hasSome: [StaffRole.assistant],
+          hasSome: [SALE_CS_HEAD_ROLE],
         },
         status: StaffStatus.active,
         ...nameSearchWhere,
@@ -1279,6 +1300,8 @@ export class StaffService {
       highSchool?: string;
       role?: string;
     },
+    /** #270: người xem — quyết định trường nhạy cảm nào được trả về. */
+    viewer?: StaffSensitiveViewer,
   ) {
     const parsedPage = Number(query.page);
     const parsedLimit = Number(query.limit);
@@ -1418,14 +1441,18 @@ export class StaffService {
     const staffIds = data.map((staff) => staff.id);
     const unpaidTotalsByStaffId =
       await this.getUnpaidTotalsByStaffIds(staffIds);
+    const policyActor = await resolveStaffPolicyActor(this.prisma, viewer);
 
     const rows = await Promise.all(
       data.map(async ({ _count, ...staff }) => {
-        return {
-          ...(await this.attachStaffUserDisplayFields(staff)),
-          achievementCount: _count.achievements,
-          unpaidAmountTotal: unpaidTotalsByStaffId.get(staff.id) ?? 0,
-        };
+        return redactStaffRecordForView(
+          {
+            ...(await this.attachStaffUserDisplayFields(staff)),
+            achievementCount: _count.achievements,
+            unpaidAmountTotal: unpaidTotalsByStaffId.get(staff.id) ?? 0,
+          },
+          computeStaffSensitiveView(policyActor, staff.id),
+        );
       }),
     );
 
@@ -1439,8 +1466,19 @@ export class StaffService {
     };
   }
 
-  async getLandingProfiles(query: StaffLandingProfileQueryDto) {
-    // Landing sync intentionally ignores status + role (all staff rows).
+  async getLandingTutorCount() {
+    const total = await this.prisma.staffInfo.count({
+      where: { roles: { has: StaffRole.teacher } },
+    });
+    return { total };
+  }
+
+  async getLandingProfiles(
+    query: StaffLandingProfileQueryDto,
+    tutorsOnly = false,
+  ) {
+    // Landing sync intentionally ignores status + role (all staff rows);
+    // `roles` is returned so the landing site can show only tutors (`teacher`).
     const limit =
       typeof query.limit === 'number' && Number.isInteger(query.limit)
         ? Math.min(Math.max(query.limit, 1), 100)
@@ -1453,6 +1491,7 @@ export class StaffService {
     const ids = parseCommaSeparatedIds(query.ids);
 
     const where: Prisma.StaffInfoWhereInput = {
+      ...(tutorsOnly ? { roles: { has: StaffRole.teacher } } : {}),
       ...(ids.length > 0 ? { id: { in: ids } } : {}),
       ...buildNameSearchWhere(query.search),
     };
@@ -1461,8 +1500,7 @@ export class StaffService {
       this.prisma.staffInfo.count({ where }),
       this.prisma.staffInfo.findMany({
         where,
-        skip,
-        take: limit,
+        ...(tutorsOnly ? {} : { skip, take: limit }),
         orderBy: [
           { user: { first_name: 'asc' } },
           { user: { last_name: 'asc' } },
@@ -1473,6 +1511,7 @@ export class StaffService {
           // Deprecated: chỉ còn đọc cho CMS landing; API ghi đã bỏ field này.
           specialization: true,
           status: true,
+          roles: true,
           achievements: {
             // Thành tích nổi bật luôn đứng đầu (landing chỉ hiện thành tích này).
             orderBy: [
@@ -1505,6 +1544,7 @@ export class StaffService {
       id: staff.id,
       name: getPreferredUserFullName(staff.user) ?? '',
       status: staff.status,
+      roles: staff.roles,
       avatarUrl: createPublicStorageUrl({
         bucket: AVATAR_PUBLIC_BUCKET,
         path: staff.user?.avatarWatermarkedPath,
@@ -2108,6 +2148,7 @@ export class StaffService {
   private async getTrainingManagerAllPendingPreviewRecords(
     db: StaffPaymentClient,
     staffId: string,
+    incomeRole: StaffRole,
   ): Promise<StaffPaymentPreviewDraftRecord[]> {
     const rows = await db.session.findMany({
       where: {
@@ -2134,7 +2175,7 @@ export class StaffService {
 
     return rows.map((row) => ({
       id: row.id,
-      role: StaffRole.training,
+      role: incomeRole,
       sourceType: 'training_manager',
       sourceLabel: 'Trợ cấp quản lý lớp',
       label: row.class?.name?.trim() || 'Lớp chưa đặt tên',
@@ -2165,6 +2206,32 @@ export class StaffService {
       GROUP BY
         sessions.training_manager_payment_status,
         sessions.training_manager_tax_deduction_rate_percent
+    `);
+  }
+
+  /**
+   * Hoa hồng doanh thu Trưởng ban Chuyên môn (snapshot `lesson_plan_head_commission`) theo
+   * trạng thái thanh toán, lọc theo ngày buổi học. Không khấu trừ thuế (khớp payment
+   * preview: revenue_share có taxRatePercent = 0).
+   */
+  private async getRevenueShareRowsByPaymentStatus(params: {
+    staffId: string;
+    start: Date;
+    end: Date;
+  }): Promise<SourcePaymentTaxBucketRow[]> {
+    return this.prisma.$queryRaw<SourcePaymentTaxBucketRow[]>(Prisma.sql`
+      SELECT
+        lesson_plan_head_commission.payment_status::text AS "paymentStatus",
+        0 AS "taxRatePercent",
+        COALESCE(SUM(COALESCE(lesson_plan_head_commission.amount, 0)), 0) AS "grossAmount",
+        0 AS "operatingAmount"
+      FROM lesson_plan_head_commission
+      INNER JOIN attendance ON attendance.id = lesson_plan_head_commission.attendance_id
+      INNER JOIN sessions ON sessions.id = attendance.session_id
+      WHERE lesson_plan_head_commission.staff_id = ${params.staffId}
+        AND sessions.date >= ${params.start}
+        AND sessions.date < ${params.end}
+      GROUP BY lesson_plan_head_commission.payment_status
     `);
   }
 
@@ -2240,15 +2307,15 @@ export class StaffService {
           in: ['present', 'excused'],
         },
         OR: [
-          { assistantPaymentStatus: PaymentStatus.pending },
-          { assistantPaymentStatus: null },
+          { saleCsHeadPaymentStatus: PaymentStatus.pending },
+          { saleCsHeadPaymentStatus: null },
         ],
       }),
       select: {
         id: true,
         tuitionFee: true,
         payrollBasisTuitionFee: true,
-        assistantPaymentStatus: true,
+        saleCsHeadPaymentStatus: true,
         student: {
           select: {
             fullName: true,
@@ -2279,13 +2346,13 @@ export class StaffService {
 
       return {
         id: row.id,
-        role: StaffRole.assistant,
+        role: SALE_CS_HEAD_ROLE,
         sourceType: 'assistant_share',
-        sourceLabel: 'Phần chia trợ lí 3%',
+        sourceLabel: 'Hoa hồng trưởng phòng 3%',
         label: row.student.fullName?.trim() || 'Học sinh chưa đặt tên',
         secondaryLabel: row.session.class?.name?.trim() || 'Lớp chưa đặt tên',
         date: row.session.date.toISOString(),
-        currentStatus: row.assistantPaymentStatus ?? PaymentStatus.pending,
+        currentStatus: row.saleCsHeadPaymentStatus ?? PaymentStatus.pending,
         grossAmount,
         operatingAmount: 0,
       };
@@ -2455,6 +2522,9 @@ export class StaffService {
         'Cần gửi số tiền hoặc ghi chú để cập nhật lương cứng.',
       );
     }
+    await assertActorNotEditingOwnCompensation(this.prisma, auditActor, [
+      staffId,
+    ]);
 
     return this.prisma.$transaction(async (tx) => {
       const payable = await tx.staffFixedSalaryPayable.findFirst({
@@ -2653,15 +2723,15 @@ export class StaffService {
           },
         },
         OR: [
-          { assistantPaymentStatus: PaymentStatus.pending },
-          { assistantPaymentStatus: null },
+          { saleCsHeadPaymentStatus: PaymentStatus.pending },
+          { saleCsHeadPaymentStatus: null },
         ],
       }),
       select: {
         id: true,
         tuitionFee: true,
         payrollBasisTuitionFee: true,
-        assistantPaymentStatus: true,
+        saleCsHeadPaymentStatus: true,
         student: {
           select: {
             fullName: true,
@@ -2692,13 +2762,13 @@ export class StaffService {
 
       return {
         id: row.id,
-        role: StaffRole.assistant,
+        role: SALE_CS_HEAD_ROLE,
         sourceType: 'assistant_share',
-        sourceLabel: 'Phần chia trợ lí 3%',
+        sourceLabel: 'Hoa hồng trưởng phòng 3%',
         label: row.student.fullName?.trim() || 'Học sinh chưa đặt tên',
         secondaryLabel: row.session.class?.name?.trim() || 'Lớp chưa đặt tên',
         date: row.session.date.toISOString(),
-        currentStatus: row.assistantPaymentStatus ?? PaymentStatus.pending,
+        currentStatus: row.saleCsHeadPaymentStatus ?? PaymentStatus.pending,
         grossAmount,
         operatingAmount: 0,
       };
@@ -2890,13 +2960,13 @@ export class StaffService {
       StaffRole.customer_care,
       StaffRole.lesson_plan_head,
       StaffRole.lesson_plan,
-      StaffRole.assistant,
-      StaffRole.accountant,
+      SALE_CS_HEAD_ROLE,
       StaffRole.accountant_income,
       StaffRole.accountant_expense,
       StaffRole.communication,
       StaffRole.technical,
       StaffRole.training,
+      StaffRole.training_head,
       StaffRole.sale,
     ];
 
@@ -3050,8 +3120,9 @@ export class StaffService {
     staffId: string,
     roles: StaffRole[],
   ): Promise<StaffPaymentPreviewDraftRecord[]> {
-    const isAssistant = roles.includes(StaffRole.assistant);
+    const isAssistant = hasSaleCsHeadAccess(roles);
     const lessonRoleForOutputs = this.resolveLessonRoleForOutputs(roles);
+    const trainingManagerIncomeRole = resolveTrainingManagerIncomeRole(roles);
 
     const draftRecordGroups = await Promise.all([
       this.getTeacherSnapshotPaymentPreviewRecords(db, {
@@ -3070,8 +3141,12 @@ export class StaffService {
       isAssistant
         ? this.getAssistantAllPendingPreviewRecords(db, staffId)
         : Promise.resolve<StaffPaymentPreviewDraftRecord[]>([]),
-      roles.includes(StaffRole.training)
-        ? this.getTrainingManagerAllPendingPreviewRecords(db, staffId)
+      trainingManagerIncomeRole
+        ? this.getTrainingManagerAllPendingPreviewRecords(
+            db,
+            staffId,
+            trainingManagerIncomeRole,
+          )
         : Promise.resolve<StaffPaymentPreviewDraftRecord[]>([]),
       this.getExtraAllowanceAllPendingPreviewRecords(db, staffId),
       roles.includes(StaffRole.lesson_plan_head)
@@ -3089,6 +3164,7 @@ export class StaffService {
     isAssistant: boolean,
   ): Promise<StaffPaymentPreviewDraftRecord[]> {
     const lessonRoleForOutputs = this.resolveLessonRoleForOutputs(roles);
+    const trainingManagerIncomeRole = resolveTrainingManagerIncomeRole(roles);
 
     const draftRecordGroups = await Promise.all([
       roles.includes(StaffRole.customer_care)
@@ -3103,8 +3179,12 @@ export class StaffService {
       isAssistant
         ? this.getAssistantAllPendingPreviewRecords(db, staffId)
         : Promise.resolve<StaffPaymentPreviewDraftRecord[]>([]),
-      roles.includes(StaffRole.training)
-        ? this.getTrainingManagerAllPendingPreviewRecords(db, staffId)
+      trainingManagerIncomeRole
+        ? this.getTrainingManagerAllPendingPreviewRecords(
+            db,
+            staffId,
+            trainingManagerIncomeRole,
+          )
         : Promise.resolve<StaffPaymentPreviewDraftRecord[]>([]),
       this.getExtraAllowanceAllPendingPreviewRecords(db, staffId),
       roles.includes(StaffRole.lesson_plan_head)
@@ -3240,7 +3320,7 @@ export class StaffService {
     taxAsOfDate: string;
     staffRoles: StaffRole[];
     records: StaffPaymentPreviewRecord[];
-  }): StaffPaymentPreviewDto {
+  }): Omit<StaffPaymentPreviewDto, 'trialTeachingWarnings'> {
     const summary = makePaymentPreviewTotals();
     const sectionBuckets = new Map<string, StaffPaymentPreviewSectionBucket>();
     const roleOrder = new Map<string, number>();
@@ -3560,8 +3640,8 @@ export class StaffService {
         customerCareCoef: true,
         customerCarePaymentStatus: true,
         customerCareTaxDeductionRatePercent: true,
-        assistantPaymentStatus: true,
-        assistantTaxDeductionRatePercent: true,
+        saleCsHeadPaymentStatus: true,
+        saleCsHeadTaxDeductionRatePercent: true,
         student: {
           select: {
             id: true,
@@ -3598,13 +3678,63 @@ export class StaffService {
     const { staff, monthKey, taxAsOfDate, records } =
       await this.loadStaffPaymentPreviewRecords(this.prisma, id, query);
 
-    return this.buildStaffPaymentPreviewResponse({
-      staffId: id,
-      monthKey,
-      taxAsOfDate,
-      staffRoles: staff.roles,
-      records,
+    const trialTeachingWarnings = await loadTrialTeachingWarnings(
+      this.prisma,
+      id,
+      records
+        .filter((record) => record.sourceType === 'teacher_session')
+        .map((record) => ({
+          classId: record.classId ?? '',
+          className: record.label,
+        })),
+    );
+
+    return {
+      ...this.buildStaffPaymentPreviewResponse({
+        staffId: id,
+        monthKey,
+        taxAsOfDate,
+        staffRoles: staff.roles,
+        records,
+      }),
+      trialTeachingWarnings,
+    };
+  }
+
+  /**
+   * Bỏ qua Cảnh báo chưa dạy thử của gia sư ở một lớp — dùng chung cho mọi người xem, không
+   * hoàn tác trên UI. Kế toán chi không bỏ qua cảnh báo của chính mình (#265).
+   */
+  async dismissTrialTeachingWarning(
+    staffId: string,
+    classId: string,
+    actor: { userId: string; roleType?: string | null },
+  ): Promise<{ staffId: string; classId: string; dismissedAt: string }> {
+    await assertActorNotEditingOwnCompensation(this.prisma, actor, [staffId]);
+
+    const [staff, cls] = await Promise.all([
+      this.prisma.staffInfo.findUnique({
+        where: { id: staffId },
+        select: { id: true },
+      }),
+      this.prisma.class.findUnique({
+        where: { id: classId },
+        select: { id: true },
+      }),
+    ]);
+    if (!staff) throw new NotFoundException('Staff not found');
+    if (!cls) throw new NotFoundException('Không tìm thấy lớp.');
+
+    const row = await this.prisma.trialTeachingWarningDismissal.upsert({
+      where: { staffId_classId: { staffId, classId } },
+      create: { staffId, classId, dismissedByUserId: actor.userId },
+      update: {},
     });
+    return {
+      staffId: row.staffId,
+      classId: row.classId,
+      dismissedAt: row.dismissedAt.toISOString(),
+    };
   }
 
   private buildDepositPaymentPreviewResponse(params: {
@@ -3727,6 +3857,7 @@ export class StaffService {
     },
     auditActor?: ActionHistoryActor,
   ): Promise<StaffPayDepositSessionsResultDto> {
+    await assertActorNotEditingOwnCompensation(this.prisma, auditActor, [id]);
     await this.guardOverdueSurveyReports(id, data.confirmOverdueSurveyReports);
     return this.prisma.$transaction(async (tx) => {
       const sessionIds = Array.from(
@@ -3840,6 +3971,7 @@ export class StaffService {
     },
     auditActor?: ActionHistoryActor,
   ): Promise<StaffPayAllPaymentsResultDto> {
+    await assertActorNotEditingOwnCompensation(this.prisma, auditActor, [id]);
     await this.guardOverdueSurveyReports(id, query.confirmOverdueSurveyReports);
     return this.prisma.$transaction(async (tx) => {
       const { monthKey, records } = await this.loadStaffPaymentPreviewRecords(
@@ -3865,6 +3997,7 @@ export class StaffService {
     data: StaffPaySelectedPaymentsDto,
     auditActor?: ActionHistoryActor,
   ): Promise<StaffPayAllPaymentsResultDto> {
+    await assertActorNotEditingOwnCompensation(this.prisma, auditActor, [id]);
     await this.guardOverdueSurveyReports(id, data.confirmOverdueSurveyReports);
     return this.prisma.$transaction(async (tx) => {
       const { monthKey, records: previewRecords } =
@@ -3998,8 +4131,8 @@ export class StaffService {
           : 'Thanh toán hoa hồng CSKH đã chọn',
       assistant_share:
         auditScope === 'all'
-          ? 'Thanh toán toàn bộ phần chia trợ lí'
-          : 'Thanh toán phần chia trợ lí đã chọn',
+          ? 'Thanh toán toàn bộ hoa hồng trưởng phòng'
+          : 'Thanh toán hoa hồng trưởng phòng đã chọn',
       training_manager:
         auditScope === 'all'
           ? 'Thanh toán toàn bộ trợ cấp quản lý lớp'
@@ -4018,8 +4151,8 @@ export class StaffService {
           : 'Thanh toán khoản thưởng đã chọn',
       revenue_share:
         auditScope === 'all'
-          ? 'Thanh toán toàn bộ hoa hồng doanh thu Trưởng giáo án'
-          : 'Thanh toán hoa hồng doanh thu Trưởng giáo án đã chọn',
+          ? 'Thanh toán toàn bộ hoa hồng doanh thu Trưởng ban Chuyên môn'
+          : 'Thanh toán hoa hồng doanh thu Trưởng ban Chuyên môn đã chọn',
       fixed_salary:
         auditScope === 'all'
           ? 'Thanh toán toàn bộ lương cứng'
@@ -4107,13 +4240,13 @@ export class StaffService {
           },
         },
         data: {
-          assistantTaxDeductionRatePercent: assistantTaxRatePercent,
-          assistantPaymentStatus: PaymentStatus.paid,
+          saleCsHeadTaxDeductionRatePercent: assistantTaxRatePercent,
+          saleCsHeadPaymentStatus: PaymentStatus.paid,
         },
       });
       sourceResults.push({
         sourceType: 'assistant_share',
-        sourceLabel: 'Phần chia trợ lí 3%',
+        sourceLabel: 'Hoa hồng trưởng phòng 3%',
         updatedCount: updateResult.count,
       });
     }
@@ -4567,6 +4700,19 @@ export class StaffService {
         WHERE staff_fixed_salary_payables.status::text = 'pending'
         GROUP BY staff_fixed_salary_payables.staff_id
       ),
+      -- Hoa hồng Trưởng ban Chuyên môn: cùng điều kiện với payment preview
+      -- (getRevenueShareAllPendingPreviewRecords, chỉ khi còn role lesson_plan_head).
+      revenue_share_unpaid AS (
+        SELECT
+          lesson_plan_head_commission.staff_id AS staff_id,
+          COALESCE(SUM(lesson_plan_head_commission.amount), 0) AS amount
+        FROM lesson_plan_head_commission
+        INNER JOIN staff_info ON staff_info.id = lesson_plan_head_commission.staff_id
+        INNER JOIN target_staff ON target_staff.id = lesson_plan_head_commission.staff_id
+        WHERE lesson_plan_head_commission.payment_status::text = 'pending'
+          AND 'lesson_plan_head' = ANY(staff_info.roles::text[])
+        GROUP BY lesson_plan_head_commission.staff_id
+      ),
       all_unpaid AS (
         SELECT staff_id, amount FROM session_unpaid
         UNION ALL
@@ -4583,6 +4729,8 @@ export class StaffService {
         SELECT staff_id, amount FROM training_manager_unpaid
         UNION ALL
         SELECT staff_id, amount FROM fixed_salary_unpaid
+        UNION ALL
+        SELECT staff_id, amount FROM revenue_share_unpaid
       )
       SELECT
         target_staff.id AS "staffId",
@@ -4634,7 +4782,11 @@ export class StaffService {
       throw new NotFoundException('Staff not found');
     }
 
-    const isAssistant = staff.roles.includes(StaffRole.assistant);
+    const isAssistant = hasSaleCsHeadAccess(staff.roles);
+    const isLessonPlanHead = staff.roles.includes(StaffRole.lesson_plan_head);
+    const trainingManagerIncomeRole = resolveTrainingManagerIncomeRole(
+      staff.roles,
+    );
 
     const [
       monthlySessionSummaryRows,
@@ -4654,6 +4806,8 @@ export class StaffService {
       assistantShareYearRows,
       trainingManagerMonthlyRows,
       trainingManagerYearRows,
+      revenueShareMonthlyRows,
+      revenueShareYearRows,
       unpaidSnapshotTotalsByStaffId,
       bonusIncomeTaxRatePercent,
       allFixedSalaryPayables,
@@ -4763,15 +4917,29 @@ export class StaffService {
             end: range.yearEnd,
           })
         : Promise.resolve<SourcePaymentTaxBucketRow[]>([]),
-      staff.roles.includes(StaffRole.training)
+      trainingManagerIncomeRole
         ? this.getTrainingManagerRowsByPaymentStatus({
             staffId: id,
             start: range.start,
             end: range.end,
           })
         : Promise.resolve<SourcePaymentTaxBucketRow[]>([]),
-      staff.roles.includes(StaffRole.training)
+      trainingManagerIncomeRole
         ? this.getTrainingManagerRowsByPaymentStatus({
+            staffId: id,
+            start: range.yearStart,
+            end: range.yearEnd,
+          })
+        : Promise.resolve<SourcePaymentTaxBucketRow[]>([]),
+      isLessonPlanHead
+        ? this.getRevenueShareRowsByPaymentStatus({
+            staffId: id,
+            start: range.start,
+            end: range.end,
+          })
+        : Promise.resolve<SourcePaymentTaxBucketRow[]>([]),
+      isLessonPlanHead
+        ? this.getRevenueShareRowsByPaymentStatus({
             staffId: id,
             start: range.yearStart,
             end: range.yearEnd,
@@ -4836,6 +5004,11 @@ export class StaffService {
     const trainingManagerYearSummary = summarizeSourceBucketRows(
       trainingManagerYearRows,
     );
+    const revenueShareMonthlySummary = summarizeSourceBucketRows(
+      revenueShareMonthlyRows,
+    );
+    const revenueShareYearSummary =
+      summarizeSourceBucketRows(revenueShareYearRows);
 
     const sessionMonthlyTotals = sessionMonthlySummary.netTotals;
     const sessionMonthlyGrossTotals = sessionMonthlySummary.grossTotals;
@@ -4972,6 +5145,7 @@ export class StaffService {
       lessonOutputMonthlyTotals,
       assistantShareMonthlyTotals,
       trainingManagerMonthlyTotals,
+      revenueShareMonthlySummary.netTotals,
       fixedSalaryMonthlyTotals,
     ].reduce(mergeAmountSummary, makeAmountSummary());
     const snapshotUnpaidTotal = unpaidSnapshotTotalsByStaffId.get(id) ?? 0;
@@ -4984,6 +5158,7 @@ export class StaffService {
       lessonOutputMonthlyGrossTotals,
       assistantShareMonthlyGrossTotals,
       trainingManagerMonthlyGrossTotals,
+      revenueShareMonthlySummary.grossTotals,
       fixedSalaryMonthlyGrossTotals,
     ].reduce(mergeAmountSummary, makeAmountSummary());
 
@@ -4995,6 +5170,7 @@ export class StaffService {
       lessonOutputMonthlyTaxTotals,
       assistantShareMonthlyTaxTotals,
       trainingManagerMonthlyTaxTotals,
+      revenueShareMonthlySummary.taxTotals,
       fixedSalaryMonthlyTaxTotals,
     ].reduce(mergeAmountSummary, makeAmountSummary());
 
@@ -5047,6 +5223,7 @@ export class StaffService {
       lessonOutputYearTotal +
       assistantShareYearTotal +
       trainingManagerYearTotal +
+      revenueShareYearSummary.netTotals.total +
       fixedSalaryYearSummary.netTotals.total;
     const yearGrossIncomeTotal =
       sessionYearGrossTotal +
@@ -5056,6 +5233,7 @@ export class StaffService {
       lessonOutputYearGrossTotal +
       assistantShareYearGrossTotal +
       trainingManagerYearGrossTotal +
+      revenueShareYearSummary.grossTotals.total +
       fixedSalaryYearSummary.grossTotals.total;
     const yearTaxTotal =
       sessionYearTaxTotal +
@@ -5065,6 +5243,7 @@ export class StaffService {
       lessonOutputYearTaxTotal +
       assistantShareYearTaxTotal +
       trainingManagerYearTaxTotal +
+      revenueShareYearSummary.taxTotals.total +
       fixedSalaryYearSummary.taxTotals.total;
     const yearTotalDeductionTotal = yearTaxTotal + yearOperatingDeductionTotal;
 
@@ -5076,6 +5255,7 @@ export class StaffService {
       lessonOutputYearSummary.netTotals.paid +
       assistantShareYearSummary.netTotals.paid +
       trainingManagerYearSummary.netTotals.paid +
+      revenueShareYearSummary.netTotals.paid +
       fixedSalaryYearSummary.netTotals.paid;
 
     const totalReceivedNet = yearPaidNetTotal + snapshotUnpaidNetTotal;
@@ -5135,7 +5315,7 @@ export class StaffService {
     }
 
     if (isAssistant) {
-      const assistantSummary = otherRoleSummaryMap.get(StaffRole.assistant);
+      const assistantSummary = otherRoleSummaryMap.get(SALE_CS_HEAD_ROLE);
       if (assistantSummary) {
         assistantSummary.total += assistantShareMonthlyTotals.total;
         assistantSummary.paid += assistantShareMonthlyTotals.paid;
@@ -5143,12 +5323,25 @@ export class StaffService {
       }
     }
 
-    if (staff.roles.includes(StaffRole.training)) {
-      const trainingSummary = otherRoleSummaryMap.get(StaffRole.training);
+    if (trainingManagerIncomeRole) {
+      const trainingSummary = otherRoleSummaryMap.get(
+        trainingManagerIncomeRole,
+      );
       if (trainingSummary) {
         trainingSummary.total += trainingManagerMonthlyTotals.total;
         trainingSummary.paid += trainingManagerMonthlyTotals.paid;
         trainingSummary.unpaid += trainingManagerMonthlyTotals.unpaid;
+      }
+    }
+
+    if (isLessonPlanHead) {
+      const lessonPlanHeadSummary = otherRoleSummaryMap.get(
+        StaffRole.lesson_plan_head,
+      );
+      if (lessonPlanHeadSummary) {
+        lessonPlanHeadSummary.total +=
+          revenueShareMonthlySummary.netTotals.total;
+        lessonPlanHeadSummary.paid += revenueShareMonthlySummary.netTotals.paid;
       }
     }
 
@@ -5306,7 +5499,12 @@ export class StaffService {
     };
   }
 
-  async getStaffById(id: string) {
+  /**
+   * Hồ sơ nhân sự. `viewer` vắng (luồng nội bộ / route chỉ Admin) → đủ trường;
+   * có `viewer` → bỏ trường nhạy cảm theo `resolveStaffSensitiveView` (#270).
+   */
+  async getStaffById(id: string, viewer?: StaffSensitiveViewer) {
+    const view = await resolveStaffSensitiveView(this.prisma, viewer, id);
     const tx = await this.prisma.$transaction(async (tx) => {
       const staff = await tx.staffInfo.findUnique({
         where: {
@@ -5315,6 +5513,8 @@ export class StaffService {
         include: {
           user: {
             select: {
+              // Web dùng `user.id` cho đổi tên đăng nhập + link hồ sơ liên kết.
+              id: true,
               ...STAFF_NAME_USER_SELECT,
               province: true,
               phone: true,
@@ -5324,7 +5524,10 @@ export class StaffService {
           classTeachers: {
             select: {
               operatingDeductionRatePercent: true,
-              class: { select: { id: true, name: true } },
+              // Quản lý lớp từng dòng: web mở ô % vận hành cho người kiêm Quản lý lớp đó.
+              class: {
+                select: { id: true, name: true, trainingManagerStaffId: true },
+              },
             },
           },
           monthlyStats: {
@@ -5409,7 +5612,7 @@ export class StaffService {
       };
     });
 
-    return tx;
+    return redactStaffRecordForView(tx, view);
   }
 
   async getStaffRevenueShare(staffId: string, month: string, year: string) {
@@ -5476,18 +5679,16 @@ export class StaffService {
       auditActor?: ActionHistoryActor;
     },
   ) {
-    const canPatchOperatingDeduction =
-      actor.roleType === UserRole.admin ||
-      (actor.staffRoles ?? []).some(
-        (role) =>
-          role === StaffRole.admin || role === StaffRole.accountant_expense,
-      );
-
-    if (!canPatchOperatingDeduction) {
-      throw new ForbiddenException(
-        'Chỉ admin hoặc kế toán chi được chỉnh % khấu trừ vận hành theo lớp.',
-      );
-    }
+    // Follow-up grill 13/11: Kế toán chi chỉ xem lương gia sư theo lớp — sửa
+    // cần Admin / Trưởng ban Đào tạo / Quản lý lớp của lớp (hợp quyền).
+    await assertCanSetClassTeacherPay(
+      this.prisma,
+      { userId: actor.auditActor?.userId, roleType: actor.roleType },
+      classId,
+    );
+    await assertActorNotEditingOwnCompensation(this.prisma, actor.auditActor, [
+      staffId,
+    ]);
 
     const ratePercent = normalizePercent(dto.operating_deduction_rate_percent);
 
@@ -5544,7 +5745,7 @@ export class StaffService {
       }
     });
 
-    return this.getStaffById(staffId);
+    return this.getStaffById(staffId, actor.auditActor);
   }
 
   private async applyInactiveStaffOperationalSideEffects(
@@ -5757,6 +5958,21 @@ export class StaffService {
       throw new NotFoundException('Staff not found');
     }
 
+    const policyActor = await resolveStaffPolicyActor(this.prisma, auditActor);
+    const relinksUser =
+      data.user_id != null && data.user_id !== existingStaff.userId;
+    if (data.roles != null || relinksUser) {
+      // Gắn hồ sơ sang user khác = user đó nhận toàn bộ role của hồ sơ.
+      assertStaffRoleChangeAllowed(policyActor, {
+        targetStaffId: data.id,
+        previousRoles: relinksUser ? [] : (existingStaff.roles ?? []),
+        nextRoles: data.roles ?? existingStaff.roles ?? [],
+      });
+    }
+    if (options?.roleFixedSalaryOverrides) {
+      assertNotEditingOwnCompensation(policyActor, [data.id]);
+    }
+
     if (options?.roleFixedSalaryOverrides) {
       if (data.roles == null) {
         throw new BadRequestException(
@@ -5886,12 +6102,12 @@ export class StaffService {
           });
           if (!manager) {
             throw new BadRequestException(
-              'Trợ lí được chỉ định không tồn tại.',
+              'Trưởng phòng Sale & CSKH được chỉ định không tồn tại.',
             );
           }
-          if (!manager.roles.includes(StaffRole.assistant)) {
+          if (!hasSaleCsHeadAccess(manager.roles)) {
             throw new BadRequestException(
-              'Nhân sự được chỉ định phải có role trợ lí.',
+              'Nhân sự được chỉ định phải có role Trưởng phòng Sale & CSKH.',
             );
           }
           if (manager.status !== StaffStatus.active) {
@@ -5917,6 +6133,13 @@ export class StaffService {
         await tx.staffInfo.update({
           where: { id: data.id },
           data: payload as Prisma.StaffInfoUpdateArgs['data'],
+        });
+
+        // Follow-up 13/11 mục 2.1: tắt CSKH → học sinh mất Người chăm sóc ngay.
+        await releaseCustomerCareAssignmentsOnRoleRemovalInTx(tx, {
+          staffId: data.id,
+          previousRoles: existingStaff.roles,
+          nextRoles: data.roles ?? existingStaff.roles,
         });
 
         const afterValue =
@@ -5957,6 +6180,103 @@ export class StaffService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Trưởng ban Đào tạo bật/tắt role gia sư / Ban Chuyên môn / Đào Tạo của nhân sự
+   * khác (CONTEXT.md «Chỉnh role nhân sự (Trưởng ban Đào tạo)»). Role bị tắt
+   * mất mức đè lương cứng / % vận hành (xoá im lặng, ghi action_history); khoản
+   * đã chốt/đã trả giữ nguyên; không cascade lớp / quản lý lớp / đội khoá.
+   */
+  async updateStaffTrainingRoles(
+    targetStaffId: string,
+    data: UpdateStaffTrainingRolesDto,
+    auditActor: ActionHistoryActor & { userId: string },
+  ): Promise<StaffTrainingRolesResultDto> {
+    const actor = await this.prisma.staffInfo.findFirst({
+      where: { userId: auditActor.userId },
+      select: { id: true, roles: true, status: true },
+    });
+    if (
+      !actor ||
+      actor.status !== StaffStatus.active ||
+      !actor.roles.includes(StaffRole.training_head)
+    ) {
+      throw new ForbiddenException(
+        'Chỉ Trưởng ban Đào tạo được dùng chức năng này.',
+      );
+    }
+
+    const target = await this.prisma.staffInfo.findUnique({
+      where: { id: targetStaffId },
+      select: {
+        id: true,
+        roles: true,
+        userId: true,
+        user: {
+          select: {
+            first_name: true,
+            last_name: true,
+            accountHandle: true,
+            email: true,
+            roleType: true,
+          },
+        },
+      },
+    });
+    if (!target) {
+      throw new NotFoundException('Staff not found');
+    }
+
+    const plan = planTrainingHeadRoleChange({
+      actorStaffId: actor.id,
+      targetStaffId: target.id,
+      targetRoles: target.roles,
+      targetIsAdminAccount: target.user?.roleType === UserRole.admin,
+      requestedRoles: data.roles,
+    });
+    if (plan.added.length === 0 && plan.removed.length === 0) {
+      // #278: Trưởng ban chỉ thấy phần role thuộc ba nhóm.
+      return { id: target.id, roles: pickTrainingTeamRoles(target.roles) };
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.staffInfo.update({
+        where: { id: target.id },
+        data: { roles: plan.nextRoles },
+        select: { id: true },
+      });
+
+      // Trưởng ban Đào tạo không chạm customer_care (plan chỉ đổi 3 role), gọi
+      // để mọi đường ghi role đi chung một luật (follow-up 13/11 mục 2.1).
+      await releaseCustomerCareAssignmentsOnRoleRemovalInTx(tx, {
+        staffId: target.id,
+        previousRoles: target.roles,
+        nextRoles: plan.nextRoles,
+      });
+
+      await this.actionHistoryService.recordUpdate(tx, {
+        actor: auditActor,
+        entityType: 'staff',
+        entityId: target.id,
+        description: 'Trưởng ban Đào tạo chỉnh role nhân sự',
+        beforeValue: { roles: target.roles },
+        afterValue: { roles: plan.nextRoles },
+      });
+
+      if (plan.removed.length > 0) {
+        await this.fixedSalarySettingsService.syncStaffRoleOverridesInTx(tx, {
+          staffId: target.id,
+          nextRoles: plan.nextRoles,
+          items: [],
+          staff: target,
+          actor: auditActor,
+        });
+      }
+    });
+
+    this.invalidateStaffAuthIdentities(target.userId);
+    return { id: target.id, roles: pickTrainingTeamRoles(plan.nextRoles) };
   }
 
   async updateStaffWithFixedSalaryOverrides(
@@ -6037,6 +6357,18 @@ export class StaffService {
       throw new NotFoundException('User not found');
     }
 
+    const policyActor = await resolveStaffPolicyActor(this.prisma, auditActor);
+    assertStaffCreateAllowed(policyActor, {
+      revenueSharePercent: data.revenue_share_percent,
+      customerCareDefaultProfitPercent:
+        data.customer_care_default_profit_percent,
+    });
+    assertStaffRoleChangeAllowed(policyActor, {
+      targetStaffId: null,
+      previousRoles: [],
+      nextRoles: data.roles ?? [],
+    });
+
     const eligibility = this.getUserEligibilityForStaffAssignment(user);
     if (!eligibility.isEligible) {
       throw new BadRequestException(eligibility.ineligibleReason);
@@ -6056,7 +6388,7 @@ export class StaffService {
       const createdStaffId = await this.withEntityIdRetry(() =>
         this.prisma.$transaction(async (tx) => {
           const isDualRole =
-            data.roles.includes(StaffRole.assistant) &&
+            hasSaleCsHeadAccess(data.roles) &&
             data.roles.includes(StaffRole.customer_care);
           const managedByStaffId = isDualRole
             ? null
@@ -6067,9 +6399,9 @@ export class StaffService {
               where: { id: managedByStaffId },
               select: { roles: true, status: true },
             });
-            if (!manager || !manager.roles.includes(StaffRole.assistant)) {
+            if (!manager || !hasSaleCsHeadAccess(manager.roles)) {
               throw new BadRequestException(
-                'Nhân sự được chỉ định phải có role trợ lí.',
+                'Nhân sự được chỉ định phải có role Trưởng phòng Sale & CSKH.',
               );
             }
             if (manager.status !== StaffStatus.active) {
@@ -6178,8 +6510,52 @@ export class StaffService {
   }
 
   /**
+   * #278: tạo lại link Meet chỉ dành cho Admin, chính nhân sự, hoặc Trưởng ban
+   * Đào tạo đang hoạt động trên cấp dưới (`isTrainingHeadSubordinate`).
+   */
+  async assertCanRegenerateMeetLink(
+    staffId: string,
+    actor: { userId: string; roleType?: string | null },
+  ): Promise<void> {
+    if (actor.roleType === UserRole.admin) return;
+    const viewer = await this.prisma.staffInfo.findFirst({
+      where: { userId: actor.userId },
+      select: { id: true, roles: true, status: true },
+    });
+    if (viewer?.roles.includes(StaffRole.admin) || viewer?.id === staffId) {
+      return;
+    }
+    if (
+      viewer &&
+      viewer.status === StaffStatus.active &&
+      viewer.roles.includes(StaffRole.training_head)
+    ) {
+      const target = await this.prisma.staffInfo.findUnique({
+        where: { id: staffId },
+        select: { id: true, roles: true, user: { select: { roleType: true } } },
+      });
+      if (!target) {
+        throw new NotFoundException('Staff not found');
+      }
+      if (
+        isTrainingHeadSubordinate({
+          actorStaffId: viewer.id,
+          targetStaffId: target.id,
+          targetRoles: target.roles,
+          targetIsAdminAccount: target.user?.roleType === UserRole.admin,
+        })
+      ) {
+        return;
+      }
+    }
+    throw new ForbiddenException(
+      'Chỉ Admin, chính nhân sự hoặc Trưởng ban Đào tạo (với cấp dưới) được tạo lại link Meet.',
+    );
+  }
+
+  /**
    * Regenerates the Google Meet link for a tutor and saves it to `staff_info`.
-   * Any authenticated user can trigger this action (enforced at controller level).
+   * Quyền do `assertCanRegenerateMeetLink` kiểm (#278).
    */
   async regenerateMeetLink(
     staffId: string,

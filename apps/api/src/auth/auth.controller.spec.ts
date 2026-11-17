@@ -6,7 +6,7 @@ jest.mock('./user-device.service', () => ({
   UserDeviceService: class UserDeviceServiceMock {},
 }));
 
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { UserRole } from '../../generated/enums';
 import { AuthController } from './auth.controller';
 import {
@@ -302,5 +302,38 @@ describe('AuthController', () => {
     ).rejects.toThrow(
       new ForbiddenException(PUBLIC_REGISTRATION_DISABLED_MESSAGE),
     );
+  });
+  it('returns guest session with signedOutReason when the device was superseded', async () => {
+    authService.getSessionProfile.mockRejectedValueOnce(
+      new UnauthorizedException({
+        statusCode: 401,
+        error: 'DEVICE_SUPERSEDED',
+        message: 'kicked',
+      }),
+    );
+
+    await expect(
+      controller.getSession({
+        cookies: { refresh_token: 'kicked-refresh' },
+      } as never),
+    ).resolves.toMatchObject({
+      roleType: UserRole.guest,
+      signedOutReason: 'device_superseded',
+    });
+  });
+
+  it('returns plain guest session when the device simply expired', async () => {
+    authService.getSessionProfile.mockRejectedValueOnce(
+      new UnauthorizedException({
+        statusCode: 401,
+        error: 'NO_ACTIVE_DEVICE',
+        message: 'expired',
+      }),
+    );
+
+    const session = await controller.getSession({
+      cookies: { refresh_token: 'expired-refresh' },
+    } as never);
+    expect(session).not.toHaveProperty('signedOutReason');
   });
 });

@@ -150,47 +150,82 @@ describe('ProtectedVideoService', () => {
       expect(res.masterUrl).not.toContain(youtubeId);
     });
 
-    it('chưa ready / failed → processing, không fallback YouTube', async () => {
+    it('chưa ready → processing kèm giai đoạn; failed → failed, không fallback YouTube', async () => {
       prisma.protectedVideo.findUnique.mockResolvedValue(
         row({ status: ProtectedVideoStatus.transcoding, progress: 42 }),
       );
       await expect(makeService().issuePlayback(youtubeId)).resolves.toEqual({
         state: 'processing',
+        stage: 'transcoding',
         progress: 42,
+        queuePosition: null,
+        queueTotal: null,
       });
 
       prisma.protectedVideo.findUnique.mockResolvedValue(
         row({
           status: ProtectedVideoStatus.failed,
           errorCode: 'DOWNLOAD_FAILED',
+          progress: 30,
+        }),
+      );
+      await expect(makeService().issuePlayback(youtubeId)).resolves.toEqual({
+        state: 'failed',
+      });
+    });
+
+    it('xếp hàng: pending/queued → stage queued kèm vị trí hàng đợi', async () => {
+      prisma.protectedVideo.findUnique.mockResolvedValue(
+        row({
+          status: ProtectedVideoStatus.queued,
+          queuePosition: 3,
+          queueTotal: 12,
         }),
       );
       await expect(makeService().issuePlayback(youtubeId)).resolves.toEqual({
         state: 'processing',
+        stage: 'queued',
         progress: null,
+        queuePosition: 3,
+        queueTotal: 12,
+      });
+
+      prisma.protectedVideo.findUnique.mockResolvedValue(row());
+      await expect(makeService().issuePlayback(youtubeId)).resolves.toEqual({
+        state: 'processing',
+        stage: 'queued',
+        progress: null,
+        queuePosition: null,
+        queueTotal: null,
       });
     });
 
-    it('progress 0 (xếp hàng / tải về) → ẩn %, bước sau giữ % tổng', async () => {
-      for (const status of [
-        ProtectedVideoStatus.queued,
-        ProtectedVideoStatus.downloading,
-      ]) {
-        prisma.protectedVideo.findUnique.mockResolvedValue(
-          row({ status, progress: 0 }),
-        );
-        await expect(makeService().issuePlayback(youtubeId)).resolves.toEqual({
-          state: 'processing',
-          progress: null,
-        });
-      }
+    it('progress 0 (tải về) → ẩn %, bước sau giữ % tổng; vị trí hàng đợi chỉ khi xếp hàng', async () => {
+      prisma.protectedVideo.findUnique.mockResolvedValue(
+        row({
+          status: ProtectedVideoStatus.downloading,
+          progress: 0,
+          queuePosition: 1,
+          queueTotal: 5,
+        }),
+      );
+      await expect(makeService().issuePlayback(youtubeId)).resolves.toEqual({
+        state: 'processing',
+        stage: 'downloading',
+        progress: null,
+        queuePosition: null,
+        queueTotal: null,
+      });
 
       prisma.protectedVideo.findUnique.mockResolvedValue(
         row({ status: ProtectedVideoStatus.uploading, progress: 90 }),
       );
       await expect(makeService().issuePlayback(youtubeId)).resolves.toEqual({
         state: 'processing',
+        stage: 'uploading',
         progress: 90,
+        queuePosition: null,
+        queueTotal: null,
       });
     });
 

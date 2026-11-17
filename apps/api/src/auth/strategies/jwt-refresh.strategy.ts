@@ -4,10 +4,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import type { Request } from 'express';
 import { UserRole } from 'generated/enums';
-import {
-  NO_ACTIVE_DEVICE_ERROR,
-  UserDeviceService,
-} from '../user-device.service';
+import { UserDeviceService } from '../user-device.service';
 
 const REFRESH_TOKEN_COOKIE = 'refresh_token';
 
@@ -63,7 +60,12 @@ export class JwtRefreshStrategy extends PassportStrategy(
     });
 
     if (!device) {
-      throw new UnauthorizedException(NO_ACTIVE_DEVICE_ERROR);
+      throw new UnauthorizedException(
+        await this.userDeviceService.resolveNoLiveDeviceError(
+          payload.id,
+          payload.iat,
+        ),
+      );
     }
 
     return {

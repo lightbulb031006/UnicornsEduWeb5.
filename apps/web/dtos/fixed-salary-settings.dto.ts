@@ -2,14 +2,14 @@ export const FIXED_SALARY_STAFF_ROLES = [
   "admin",
   "lesson_plan",
   "lesson_plan_head",
-  "accountant",
   "accountant_income",
   "accountant_expense",
   "communication",
   "technical",
   "customer_care",
   "training",
-  "assistant",
+  "training_head",
+  "sale_customer_care_head",
   "sale",
 ] as const;
 

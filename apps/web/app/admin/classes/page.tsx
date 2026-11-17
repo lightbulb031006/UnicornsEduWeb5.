@@ -17,6 +17,7 @@ import {
   resolveAdminLikeRouteBase,
 } from "@/lib/admin-shell-paths";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
+import { resolveClassWriteAccess } from "@/lib/class-write-access";
 import { resolveCourseWorkspaceCapabilities } from "@/lib/course-workspace-access";
 import { authKeys, classKeys, uniojKeys } from "@/lib/query-keys";
 import { getClassesLevels } from "@/lib/apis/unioj.api";
@@ -99,12 +100,15 @@ type ClassListFetcher = (params: {
 type AdminClassesPageProps = {
   classListFetcher?: ClassListFetcher;
   forceReadOnlyList?: boolean;
+  /** #274: cho phép nút Thêm lớp dù danh sách read-only (Trưởng ban Đào tạo). */
+  allowCreateClass?: boolean;
   pageSubtitle?: string;
 };
 
 function AdminClassesPageContent({
   classListFetcher = classApi.getClasses,
   forceReadOnlyList = false,
+  allowCreateClass = false,
   pageSubtitle = "Theo dõi trạng thái và điều phối danh sách lớp nhanh hơn.",
 }: AdminClassesPageProps = {}) {
   const { push, replace } = useRouter();
@@ -131,13 +135,17 @@ function AdminClassesPageContent({
     retry: false,
     staleTime: 60_000,
   });
-  const { isAdmin, isAssistant, isAccountant } = resolveAdminShellAccess(fullProfile);
+  const { isAdmin, staffRoles, staffId } = resolveAdminShellAccess(fullProfile);
+  const classWriteAccess = resolveClassWriteAccess({ isAdmin, staffRoles, staffId });
   const canOpenAdminCourses = resolveCourseWorkspaceCapabilities(
     fullProfile,
     "/admin",
   ).canEnterWorkspace;
-  const canCreateClass = !forceReadOnlyList && (isAdmin || isAssistant);
-  const canDeleteClass = !forceReadOnlyList && !isAccountant;
+  // #274: POST /class cho Admin, Trưởng ban Đào tạo, Trưởng phòng Sale & CSKH
+  // (mỗi role chỉ thấy phần form của mình). DELETE /class chỉ Admin (#267).
+  const canCreateClass =
+    (!forceReadOnlyList || allowCreateClass) && classWriteAccess.canWriteClassInfo;
+  const canDeleteClass = !forceReadOnlyList && isAdmin;
 
   useEffect(() => {
     setSearchInput(search);
@@ -269,6 +277,10 @@ function AdminClassesPageContent({
   };
 
   const handleClassCreated = (classId: string) => {
+    // Danh sách read-only (Trưởng ban Đào tạo ở /staff) chỉ mở được lớp mình
+    // quản lý — ở lại danh sách thay vì điều hướng tới lớp có thể không xem được.
+    // (AddClassPopup đã invalidate danh sách lớp.)
+    if (forceReadOnlyList) return;
     push(buildAdminLikePath(routeBase, `classes/${classId}`));
   };
 
@@ -629,6 +641,7 @@ function AdminClassesPageContent({
           open={addPopupOpen}
           onClose={() => setAddPopupOpen(false)}
           onCreated={handleClassCreated}
+          access={classWriteAccess}
         />
       ) : null}
 

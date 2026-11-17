@@ -19,6 +19,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getFullProfile } from "@/lib/apis/auth.api";
 import * as classApi from "@/lib/apis/class.api";
 import * as sessionApi from "@/lib/apis/session.api";
+import * as staffOpsApi from "@/lib/apis/staff-ops.api";
 import * as surveysApi from "@/lib/apis/surveys.api";
 import { buildEndClassConfirmMessage, formatCurrency } from "@/lib/class.helpers";
 import {
@@ -28,6 +29,7 @@ import {
   ClassSurveyPanel,
   EditClassBasicInfoPopup,
   EditClassSchedulePopup,
+  EditClassTuitionPopup,
   EditClassStudentsPopup,
   EditClassTeacherCompensationPopup,
   EditClassTeachersPopup,
@@ -40,7 +42,6 @@ import {
 } from "@/components/admin/class";
 import AddSessionPopup from "@/components/admin/class/AddSessionPopup";
 import SessionHistoryTable from "@/components/admin/session/SessionHistoryTable";
-import { ClassSessionStatisticsButton } from "@/components/admin/session/SessionStatisticsPopup";
 import StudentClassTuitionPopup from "@/components/admin/student/StudentClassTuitionPopup";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
 import MonthNav from "@/components/admin/MonthNav";
@@ -61,13 +62,26 @@ import type {
   CreateClassSurveyPayload,
   UpdateClassSurveyPayload,
 } from "@/dtos/class-survey.dto";
-import { MissedTeachingAlert, SessionItem } from "@/dtos/session.dto";
+import {
+  MissedTeachingAlert,
+  SessionItem,
+  SessionUpdatePayload,
+} from "@/dtos/session.dto";
+import { toTrainingHeadSessionUpdatePayload } from "@/lib/training-head-session-policy";
 import {
   buildAdminLikePath,
   resolveAdminLikeRouteBase,
 } from "@/lib/admin-shell-paths";
+import { canSetClassTeacherPay } from "@/lib/class-teacher-pay-access";
 import { resolveAdminShellAccess } from "@/lib/admin-shell-access";
-import { resolveClassStudentCaretakerHref } from "@/lib/class-student-caretaker";
+import {
+  resolveClassWriteAccess,
+  TRAINING_HEAD_ROLE,
+} from "@/lib/class-write-access";
+import {
+  resolveClassStudentCaretakerHref,
+  resolveClassTeacherHref,
+} from "@/lib/class-student-caretaker";
 import { standardBlockCountFromClassSchedule } from "@/lib/class-pricing-mode";
 import { toastWarnings } from "@/lib/mutation-feedback";
 import { invalidateCalendarScopedQueries } from "@/lib/query-invalidation";
@@ -78,8 +92,16 @@ import {
 } from "@/lib/class-detail-tabs";
 import { useClassDetailTab } from "@/hooks/use-class-detail-tab";
 import { cn } from "@/lib/utils";
+import {
+  CLASS_TUITION_REQUIRED_MESSAGE,
+  needsClassTuitionBeforeFirstStudent,
+} from "@/lib/class-first-student-tuition";
 import ClassRosterCard from "@/components/shared/class/ClassRosterCard";
 import type { ClassScheduleGoogleCalendarResyncSummary } from "@/dtos/class-schedule.dto";
+import {
+  canDeleteSessionsAsHead,
+  canHeadDeleteSession,
+} from "@/lib/session-delete-access";
 
 const STATUS_LABELS: Record<ClassStatus, string> = {
   running: "Đang chạy",
@@ -156,9 +178,13 @@ export default function AdminClassDetailPage() {
   const pathname = usePathname();
   const routeBase = resolveAdminLikeRouteBase(pathname);
   const [basicInfoPopupOpen, setBasicInfoPopupOpen] = useState(false);
+  const [tuitionPopupOpen, setTuitionPopupOpen] = useState(false);
   const [teachersPopupOpen, setTeachersPopupOpen] = useState(false);
   const [schedulePopupOpen, setSchedulePopupOpen] = useState(false);
   const [studentsPopupOpen, setStudentsPopupOpen] = useState(false);
+  /** #273: popup Học phí lớp mở trước khi thêm học sinh đầu tiên. */
+  const [tuitionRequiredForFirstStudent, setTuitionRequiredForFirstStudent] =
+    useState(false);
   const [selectedTuitionStudent, setSelectedTuitionStudent] =
     useState<ClassStudent | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -175,11 +201,12 @@ export default function AdminClassDetailPage() {
     teacherId: string;
     teacherName: string;
   } | null>(null);
+  const [stopLearningTarget, setStopLearningTarget] =
+    useState<ClassStudent | null>(null);
   const [stopTeachingReason, setStopTeachingReason] = useState("");
-  const [stopLearningPendingStudentId, setStopLearningPendingStudentId] = useState<string | null>(null);
-  const [stopLearningTarget, setStopLearningTarget] = useState<ClassStudent | null>(null);
-  const [endClassOpen, setEndClassOpen] = useState(false);
+  const [endClassConfirmOpen, setEndClassConfirmOpen] = useState(false);
   const [endClassReason, setEndClassReason] = useState("");
+  const [stopLearningPendingStudentId, setStopLearningPendingStudentId] = useState<string | null>(null);
   const { data: fullProfile } = useQuery({
     queryKey: ["auth", "full-profile"],
     queryFn: getFullProfile,
@@ -188,40 +215,101 @@ export default function AdminClassDetailPage() {
   });
   const adminAccess = resolveAdminShellAccess(fullProfile);
   const { isAdmin, isAccountant } = adminAccess;
-  const isAssistant = adminAccess.isAssistant;
-  const isExpenseAccountantOnly =
-    adminAccess.isAccountantExpense &&
-    !adminAccess.isAccountantIncome &&
-    !isAdmin &&
-    !isAssistant;
+  /** Trưởng phòng Sale & CSKH (`isAssistant` trong admin shell). */
+  const isSaleCsHead = adminAccess.isAssistant;
+  /**
+   * Trưởng ban Đào tạo (#277) — `/staff/classes/:id` mở trang này cho lớp
+   * Trưởng ban không dạy / không quản lý (lớp mình dạy / quản lý vẫn dùng
+   * workspace staff để làm buổi, lịch).
+   */
+  const isTrainingHead =
+    !isAdmin && adminAccess.staffRoles.includes(TRAINING_HEAD_ROLE);
   const showClassOperationalMeta =
     adminAccess.isAdmin ||
-    adminAccess.isAssistant ||
+    isSaleCsHead ||
+    isTrainingHead ||
     adminAccess.isAccountant ||
     adminAccess.isCustomerCare;
-  const showClassTuitionMeta = !isExpenseAccountantOnly;
+  /**
+   * #272: Trưởng phòng chỉ xem Thông tin lớp, Học phí lớp, gia sư (không lương),
+   * lịch, học sinh và lịch bù. Khảo sát / cảnh báo thiếu buổi vẫn là route của
+   * Admin + kế toán nên không gọi để tránh 403. 15/11: lịch sử buổi mở riêng
+   * (`usesSaleCsHeadSessionView`).
+   */
+  const canViewClassOperations = isAdmin || isAccountant;
+  /**
+   * #277: Trưởng ban Đào tạo xem lịch sử buổi / khảo sát / cảnh báo thiếu buổi
+   * mọi lớp qua route staff-ops (backend đã che tiền buổi), chỉ đọc.
+   */
+  const usesStaffOpsClassOperations = !canViewClassOperations && isTrainingHead;
+  /** Khảo sát lớp + cảnh báo thiếu buổi: Admin, kế toán, Trưởng ban Đào tạo. */
+  const canViewClassSurveysAndAlerts =
+    canViewClassOperations || usesStaffOpsClassOperations;
+  /**
+   * 15/11: Trưởng phòng Sale & CSKH xem lịch sử buổi (route admin, backend che
+   * lương gia sư) để xoá buổi. Không có khảo sát / cảnh báo thiếu buổi.
+   */
+  const usesSaleCsHeadSessionView =
+    !canViewClassSurveysAndAlerts && isSaleCsHead;
+  const canViewSessionHistory =
+    canViewClassSurveysAndAlerts || usesSaleCsHeadSessionView;
+  /** 15/11: role trưởng xoá buổi chưa thanh toán / ghi cọc (Admin xoá mọi buổi). */
+  const canDeleteSessionsAsHeadRole =
+    !isAdmin && canDeleteSessionsAsHead(adminAccess.staffRoles);
+  /**
+   * Học phí lớp / học sinh: khớp `resolveAdminClassFinanceView` backend —
+   * Admin, Trưởng phòng, Kế toán thu. Kế toán chi và Trưởng ban Đào tạo không
+   * thấy (backend đã bỏ trường).
+   */
+  const showClassTuitionMeta =
+    isAdmin || isSaleCsHead || adminAccess.isAccountantIncome;
   const showStudentTuitionColumn = showClassTuitionMeta;
-  /** Admin / assistant / both accountants see wallet balance; training/teacher never use this page. */
-  const showStudentBalanceColumn = isAdmin || isAssistant || isAccountant;
+  /** Admin / TP Sale & CSKH / kế toán thấy số dư ví; gia sư không dùng trang này. */
+  const showStudentBalanceColumn = isAdmin || isSaleCsHead || isAccountant;
+  /**
+   * Lương gia sư: Admin, Kế toán chi, Trưởng ban Đào tạo (#274). Trưởng phòng
+   * không thấy (#272).
+   */
   const showTeacherCompensation =
-    adminAccess.isAdmin || adminAccess.isAssistant || adminAccess.isAccountantExpense;
-  const canEditClassBasicInfo = isAdmin || isAssistant;
-  const canEditTeacherRoster = isAdmin || isAssistant;
-  const canEditTeacherCompensation =
-    canEditTeacherRoster || adminAccess.isAccountantExpense;
-  /** POST /sessions allows admin + assistant on admin routes; keep CTA aligned with backend. */
-  const canCreateSession = isAdmin || isAssistant;
-  const canManageSurveys = adminAccess.isAdmin || adminAccess.isAssistant;
-  /** PATCH /class/:id/students allows admin + assistant; keep roster CTA aligned with backend. */
-  const canManageClassStudents = isAdmin || isAssistant;
+    isAdmin || adminAccess.isAccountantExpense || isTrainingHead;
+  /**
+   * Thông tin lớp (PATCH /class/:id/basic-info): Admin mọi trường; Trưởng
+   * phòng chỉ tên, khoá học, sĩ số (#274).
+   */
+  const classWriteAccess = resolveClassWriteAccess({
+    isAdmin,
+    staffRoles: adminAccess.staffRoles,
+    staffId: adminAccess.staffId,
+  });
+  const canEditClassInfo = isAdmin || isSaleCsHead || isTrainingHead;
+  /**
+   * Học phí lớp (PATCH /class/:id/tuition): Admin + Trưởng phòng. Sửa trong
+   * dialog Thông tin lớp; trang không còn card Học phí lớp (13/11).
+   */
+  const canEditClassTuition = isAdmin || isSaleCsHead;
+  const canEditTeacherRoster = isAdmin;
+  /** POST /sessions chỉ Admin trên route admin; giữ CTA khớp backend. */
+  const canCreateSession = isAdmin;
+  const canManageSurveys = isAdmin;
+  /** Thêm/bớt học sinh (PATCH /class/:id/students): Admin + Trưởng phòng (#273). */
+  const canManageClassStudents = isAdmin || isSaleCsHead;
+  /** Học phí riêng của học sinh: Admin, Trưởng phòng, Kế toán thu (#272). */
   const canManageStudentTuition =
     showStudentTuitionColumn &&
-    (isAdmin || isAssistant || adminAccess.isAccountantIncome);
+    (isAdmin || isSaleCsHead || adminAccess.isAccountantIncome);
   const showStudentActionColumn =
     canManageStudentTuition || canManageClassStudents;
   const canOpenClassStudentsPopup =
     canManageClassStudents || canManageStudentTuition;
-  const canOpenStudentDetails = true;
+  /**
+   * Hồ sơ học sinh `/staff/students/:id` bị gate chặn với Trưởng ban Đào tạo
+   * (chỉ kiêm Trưởng phòng / Kế toán thu / CSKH mới vào được).
+   */
+  const canOpenStudentDetails =
+    !isTrainingHead ||
+    isSaleCsHead ||
+    adminAccess.isAccountantIncome ||
+    adminAccess.isCustomerCare;
   const viewerStaffId = fullProfile?.staffInfo?.id ?? null;
   const resolveCaretakerHref = useCallback(
     (student: ClassStudent) =>
@@ -233,13 +321,39 @@ export default function AdminClassDetailPage() {
       }),
     [adminAccess, routeBase, viewerStaffId],
   );
-  const canManageMakeupSchedule = adminAccess.isAdmin || adminAccess.isAssistant;
-  const canEditSessionPaymentStatus =
-    isAdmin || isAssistant || adminAccess.isAccountantExpense || adminAccess.isAccountantIncome;
-  const canEditSessions = isAdmin || isAssistant;
+  /**
+   * Hồ sơ gia sư: Admin / Kế toán chi (trang đầy đủ), Trưởng ban Đào tạo (hồ
+   * sơ giới hạn); role khác card không bấm.
+   */
+  const resolveTeacherHref = (teacherId: string) =>
+    resolveClassTeacherHref({
+      routeBase,
+      teacherId,
+      access: adminAccess,
+      viewerIsTrainingHead: isTrainingHead,
+    });
+  const canManageMakeupSchedule = isAdmin;
+  // #275: `PUT /sessions/:id` + `payment-status/bulk` chỉ Admin + Kế toán chi.
+  const canEditSessionPaymentStatus = isAdmin || adminAccess.isAccountantExpense;
+  const canEditSessions = isAdmin;
   // Khớp quyền `PUT /sessions/:id`: được lưu khi Nhận xét buổi học còn trống field bắt buộc.
-  const canSkipRequiredSessionReview = isAdmin || isAssistant || isAccountant;
-  const canManageClassStatus = isAdmin || isAssistant;
+  const canSkipRequiredSessionReview = isAdmin || adminAccess.isAccountantExpense;
+  /**
+   * 16/11: Kế toán chi tick Dạy thử (hệ số 0/1) của buổi qua `PUT /sessions/:id`
+   * như Admin. Trưởng ban Đào tạo đi route staff-ops riêng.
+   */
+  const canToggleTrialTeaching =
+    canEditSessions || usesStaffOpsClassOperations || adminAccess.isAccountantExpense;
+  /** #265: Kế toán chi không đổi hệ số buổi do chính mình dạy (backend `403`). */
+  const canToggleTrialForSession = useCallback(
+    (session: { teacherId: string }) =>
+      isAdmin ||
+      !adminAccess.isAccountantExpense ||
+      !viewerStaffId ||
+      session.teacherId !== viewerStaffId,
+    [isAdmin, adminAccess.isAccountantExpense, viewerStaffId],
+  );
+  const canManageClassStatus = isAdmin;
 
   const [selectedYear, selectedMonthValue] = selectedMonth.split("-");
   const classDetailQueryKey = useMemo(() => classKeys.detail(id), [id]);
@@ -255,6 +369,21 @@ export default function AdminClassDetailPage() {
     enabled: !!id,
   });
 
+  /**
+   * Follow-up grill 13/11: Kế toán chi chỉ xem lương gia sư theo lớp; sửa khi
+   * kiêm Trưởng ban Đào tạo / Quản lý lớp của lớp này (hợp quyền, khớp backend).
+   */
+  const canEditTeacherCompensation =
+    canEditTeacherRoster ||
+    ((adminAccess.isAccountantExpense || isTrainingHead) &&
+      canSetClassTeacherPay({
+        isAdmin,
+        staffRoles: adminAccess.staffRoles,
+        viewerStaffId: fullProfile?.staffInfo?.id ?? null,
+        classTrainingManagerStaffId:
+          classDetail?.trainingManager?.id ?? classDetail?.trainingManagerStaffId ?? null,
+      }));
+
   const queryClient = useQueryClient();
   const missedAlertsQueryKey = useMemo(
     () => ["sessions", "class", id, "missed-teaching-alerts"] as const,
@@ -262,8 +391,11 @@ export default function AdminClassDetailPage() {
   );
   const { data: missedTeachingAlerts = [] } = useQuery<MissedTeachingAlert[]>({
     queryKey: missedAlertsQueryKey,
-    queryFn: () => sessionApi.getMissedTeachingAlertsByClassId(id, { days: 31 }),
-    enabled: !!id,
+    queryFn: () =>
+      (usesStaffOpsClassOperations
+        ? staffOpsApi.getMissedTeachingAlertsByClassId
+        : sessionApi.getMissedTeachingAlertsByClassId)(id, { days: 31 }),
+    enabled: !!id && canViewClassSurveysAndAlerts,
     placeholderData: keepPreviousData,
   });
 
@@ -276,11 +408,13 @@ export default function AdminClassDetailPage() {
   } = useQuery<SessionItem[]>({
     queryKey: ["sessions", "class", id, selectedYear, selectedMonthValue],
     queryFn: () =>
-      sessionApi.getSessionsByClassId(id, {
+      (usesStaffOpsClassOperations
+        ? staffOpsApi.getSessionsByClassId
+        : sessionApi.getSessionsByClassId)(id, {
         month: selectedMonthValue,
         year: selectedYear,
       }),
-    enabled: !!id && isSessionsTab,
+    enabled: !!id && isSessionsTab && canViewSessionHistory,
     placeholderData: keepPreviousData,
   });
   const {
@@ -291,11 +425,13 @@ export default function AdminClassDetailPage() {
   } = useQuery({
     queryKey: ["class", "surveys", id, selectedYear, selectedMonthValue],
     queryFn: () =>
-      classApi.getClassSurveys(id, {
+      (usesStaffOpsClassOperations
+        ? staffOpsApi.getClassSurveys
+        : classApi.getClassSurveys)(id, {
         month: selectedMonthValue,
         year: selectedYear,
       }),
-    enabled: !!id && isSessionsTab,
+    enabled: !!id && isSessionsTab && canViewClassSurveysAndAlerts,
     placeholderData: keepPreviousData,
   });
 
@@ -304,7 +440,7 @@ export default function AdminClassDetailPage() {
   const { data: availableSurveys = [], status: availableSurveysStatus } = useQuery({
     queryKey: ["surveys", "open-picker"],
     queryFn: () => surveysApi.getOpenSurveys(),
-    enabled: !!id && isSessionsTab,
+    enabled: !!id && isSessionsTab && canViewClassSurveysAndAlerts,
     staleTime: 60_000,
   });
 
@@ -428,6 +564,25 @@ export default function AdminClassDetailPage() {
   );
   const totalSessionTuition = classDetail?.sessionTuitionTotal ?? 0;
 
+  /**
+   * #273: lớp chưa có học sinh đang học + chưa có Học phí lớp → mở popup Học phí lớp
+   * trước, lưu xong mới mở popup thêm học sinh (backend vẫn chặn 400 nếu bỏ qua).
+   */
+  const openClassStudentsPopup = () => {
+    if (
+      classDetail &&
+      canManageClassStudents &&
+      canEditClassTuition &&
+      needsClassTuitionBeforeFirstStudent(classDetail, activeClassStudents.length)
+    ) {
+      toast.info(CLASS_TUITION_REQUIRED_MESSAGE);
+      setTuitionRequiredForFirstStudent(true);
+      setTuitionPopupOpen(true);
+      return;
+    }
+    setStudentsPopupOpen(true);
+  };
+
   const activeSurveyStudents = useMemo(
     () =>
       (classDetail?.students ?? [])
@@ -471,6 +626,19 @@ export default function AdminClassDetailPage() {
     [activeClassStudents],
   );
 
+  /**
+   * 14/11: Trưởng ban Đào tạo chỉnh tay trợ cấp, Dạy thử, Học thử từng học
+   * sinh qua `PATCH /staff-ops/sessions/:id/training-head` (form chỉ đọc phần còn lại).
+   */
+  const updateSessionAsTrainingHead = useCallback(
+    (sessionId: string, data: SessionUpdatePayload) =>
+      staffOpsApi.updateSessionAsTrainingHead(
+        sessionId,
+        toTrainingHeadSessionUpdatePayload(data),
+      ),
+    [],
+  );
+
   const getClassStudents = useCallback(
     async (classId: string) => {
       if (classId !== id) return [];
@@ -493,6 +661,7 @@ export default function AdminClassDetailPage() {
       });
     },
     onSuccess: async (_data, student) => {
+      setStopLearningTarget(null);
       toast.success(`Đã chuyển ${student.fullName} sang nghỉ học lớp này.`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: classDetailQueryKey }),
@@ -605,7 +774,12 @@ export default function AdminClassDetailPage() {
 
   const handleEndClass = () => {
     setEndClassReason("");
-    setEndClassOpen(true);
+    setEndClassConfirmOpen(true);
+  };
+
+  const handleConfirmEndClass = () => {
+    setEndClassConfirmOpen(false);
+    endClassMutation.mutate(endClassReason.trim() || undefined);
   };
   const handleStopTeaching = (teacherId: string) => {
     const teacherName =
@@ -638,45 +812,6 @@ export default function AdminClassDetailPage() {
       </button>
 
       <ConfirmDialog
-        open={endClassOpen}
-        onOpenChange={setEndClassOpen}
-        title="Kết thúc lớp?"
-        description={buildEndClassConfirmMessage(classDetail?.endClassEligibility?.unpaidSessionCount)}
-        confirmLabel="Kết thúc lớp"
-        variant="destructive"
-        confirmPending={endClassMutation.isPending}
-        onConfirm={() => {
-          endClassMutation.mutate(endClassReason.trim() || undefined);
-        }}
-      >
-        <label htmlFor="end-class-reason" className="text-xs font-medium text-text-secondary">
-          Lý do (không bắt buộc)
-        </label>
-        <textarea
-          id="end-class-reason"
-          name="endClassReason"
-          autoComplete="off"
-          value={endClassReason}
-          onChange={(event) => setEndClassReason(event.target.value)}
-          rows={3}
-          className="w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-        />
-      </ConfirmDialog>
-      <ConfirmDialog
-        open={stopLearningTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setStopLearningTarget(null);
-        }}
-        title="Cho học sinh nghỉ học lớp này?"
-        description={`Chuyển ${stopLearningTarget?.fullName ?? "học sinh"} sang danh sách học sinh đã nghỉ?`}
-        confirmLabel="Nghỉ học"
-        variant="destructive"
-        confirmPending={stopStudentLearningMutation.isPending}
-        onConfirm={() => {
-          if (stopLearningTarget) stopStudentLearningMutation.mutate(stopLearningTarget);
-        }}
-      />
-      <ConfirmDialog
         open={stopTeachingTarget !== null}
         onOpenChange={(open) => {
           if (!open) setStopTeachingTarget(null);
@@ -705,6 +840,56 @@ export default function AdminClassDetailPage() {
         </div>
       </ConfirmDialog>
 
+      <ConfirmDialog
+        open={stopLearningTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setStopLearningTarget(null);
+        }}
+        title="Cho học sinh nghỉ học lớp này?"
+        description={`Chuyển ${stopLearningTarget?.fullName ?? "học sinh"} sang danh sách học sinh đã nghỉ?`}
+        confirmLabel="Nghỉ học"
+        variant="destructive"
+        confirmPending={stopStudentLearningMutation.isPending}
+        onConfirm={() => {
+          if (stopLearningTarget) {
+            stopStudentLearningMutation.mutate(stopLearningTarget);
+          }
+        }}
+      />
+
+      {canManageClassStatus ? (
+        <ConfirmDialog
+          open={endClassConfirmOpen}
+          onOpenChange={setEndClassConfirmOpen}
+          title="Kết thúc lớp?"
+          description={
+            <span className="whitespace-pre-line">
+              {buildEndClassConfirmMessage(classDetail.endClassEligibility?.unpaidSessionCount)}
+            </span>
+          }
+          confirmLabel="Kết thúc lớp"
+          variant="destructive"
+          onConfirm={handleConfirmEndClass}
+          confirmPending={endClassMutation.isPending}
+        >
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="end-class-reason"
+              className="text-xs font-medium text-text-secondary"
+            >
+              Lý do (không bắt buộc)
+            </label>
+            <textarea
+              id="end-class-reason"
+              value={endClassReason}
+              onChange={(event) => setEndClassReason(event.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-border-default bg-bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-border-focus/30"
+            />
+          </div>
+        </ConfirmDialog>
+      ) : null}
+
       <ClassDetailHero
         classId={id}
         title={classDetail.name?.trim() || "Lớp học"}
@@ -722,16 +907,16 @@ export default function AdminClassDetailPage() {
           ) : undefined
         }
         actions={
-          canEditClassBasicInfo ||
+          canEditClassInfo ||
           (canManageClassStatus && classDetail.status === "running") ? (
             <>
-              {canEditClassBasicInfo ? (
+              {canEditClassInfo ? (
                 <button
                   type="button"
                   onClick={() => setBasicInfoPopupOpen(true)}
                   className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-muted transition hover:bg-bg-tertiary hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
-                  aria-label="Chỉnh sửa thông tin cơ bản lớp học"
-                  title="Chỉnh sửa thông tin cơ bản"
+                  aria-label="Chỉnh sửa thông tin lớp"
+                  title="Chỉnh sửa thông tin lớp"
                 >
                   <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -753,11 +938,34 @@ export default function AdminClassDetailPage() {
         }
       />
 
-      {canEditClassBasicInfo ? (
+      {canEditClassInfo ? (
         <EditClassBasicInfoPopup
           open={basicInfoPopupOpen}
           onClose={() => setBasicInfoPopupOpen(false)}
           classDetail={classDetail}
+          access={classWriteAccess}
+          canEditTuition={canEditClassTuition}
+          hasActiveStudents={activeClassStudents.length > 0}
+        />
+      ) : null}
+      {canEditClassTuition ? (
+        <EditClassTuitionPopup
+          open={tuitionPopupOpen}
+          onClose={() => {
+            setTuitionPopupOpen(false);
+            setTuitionRequiredForFirstStudent(false);
+          }}
+          classDetail={classDetail}
+          requiredBeforeFirstStudent={tuitionRequiredForFirstStudent}
+          hasActiveStudents={activeClassStudents.length > 0}
+          onSaved={
+            tuitionRequiredForFirstStudent
+              ? () => {
+                  setTuitionRequiredForFirstStudent(false);
+                  setStudentsPopupOpen(true);
+                }
+              : undefined
+          }
         />
       ) : null}
       {canEditTeacherRoster ? (
@@ -766,14 +974,24 @@ export default function AdminClassDetailPage() {
           onClose={() => setTeachersPopupOpen(false)}
           classDetail={classDetail}
         />
+      ) : isTrainingHead ? (
+        // #267/#277: thay cả danh sách gia sư chỉ Admin — Trưởng ban lưu theo
+        // từng route staff-ops (thêm / dừng dạy / lương / Quản lý lớp, % chỉ Admin).
+        <EditClassTeachersPopup
+          open={teachersPopupOpen}
+          onClose={() => setTeachersPopupOpen(false)}
+          classDetail={classDetail}
+          variant="trainingHead"
+          actorStaffId={viewerStaffId}
+        />
       ) : (
         <EditClassTeacherCompensationPopup
-          open={teachersPopupOpen && adminAccess.isAccountantExpense}
+          open={teachersPopupOpen && canEditTeacherCompensation}
           onClose={() => setTeachersPopupOpen(false)}
           classDetail={classDetail}
         />
       )}
-      {isAdmin || isAssistant ? (
+      {isAdmin ? (
         <EditClassSchedulePopup
           open={schedulePopupOpen}
           onClose={() => setSchedulePopupOpen(false)}
@@ -857,6 +1075,7 @@ export default function AdminClassDetailPage() {
             defaultScaleAmount={classDetail.scaleAmount}
             showTeacherCompensation={showTeacherCompensation}
             className="flex-1"
+            getTeacherHref={resolveTeacherHref}
             canStopTeaching={canManageClassStatus && classDetail.status === "running"}
             onStopTeaching={handleStopTeaching}
             stopTeachingPendingTeacherId={stopTeachingPendingTeacherId}
@@ -894,7 +1113,7 @@ export default function AdminClassDetailPage() {
                     Đồng bộ Google
                   </button>
                 ) : null}
-                {isAdmin || isAssistant ? (
+                {isAdmin ? (
                   <button
                     type="button"
                     onClick={() => setSchedulePopupOpen(true)}
@@ -935,7 +1154,7 @@ export default function AdminClassDetailPage() {
             canOpenClassStudentsPopup ? (
               <button
                 type="button"
-                onClick={() => setStudentsPopupOpen(true)}
+                onClick={openClassStudentsPopup}
                 className="inline-flex min-h-11 w-full items-center justify-center rounded-md border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:min-h-0 sm:w-auto"
               >
                 Chỉnh sửa
@@ -1286,6 +1505,7 @@ export default function AdminClassDetailPage() {
           teacherMode="select"
           canCreate={canCreateMakeupSchedule}
           canEdit={canManageMakeupSchedule}
+          canViewEventDetails={usesStaffOpsClassOperations}
           canDelete={canManageMakeupSchedule}
           canResync={isAdmin}
           onOpenPastEvents={() => setPastMakeupPopupOpen(true)}
@@ -1311,160 +1531,191 @@ export default function AdminClassDetailPage() {
           listFn={classApi.getClassMakeupEvents}
         />
 
-        <MissedTeachingAlertsCard
-          alerts={missedTeachingAlerts}
-          canCreateMakeup={canCreateMakeupSchedule}
-          createMakeupFn={classApi.createClassMakeupEvent}
-          saveExplanationFn={sessionApi.createMissedTeachingExplanation}
-          updateExplanationFn={sessionApi.updateMissedTeachingExplanation}
-          onChanged={handleMakeupScheduleChanged}
-        />
+        {canViewClassSurveysAndAlerts ? (
+          <MissedTeachingAlertsCard
+            alerts={missedTeachingAlerts}
+            canCreateMakeup={canCreateMakeupSchedule}
+            createMakeupFn={classApi.createClassMakeupEvent}
+            saveExplanationFn={
+              usesStaffOpsClassOperations
+                ? staffOpsApi.createMissedTeachingExplanation
+                : sessionApi.createMissedTeachingExplanation
+            }
+            updateExplanationFn={
+              usesStaffOpsClassOperations
+                ? staffOpsApi.updateMissedTeachingExplanation
+                : sessionApi.updateMissedTeachingExplanation
+            }
+            onChanged={handleMakeupScheduleChanged}
+          />
+        ) : null}
 
         {/* Row 3: Timeline lớp */}
-        <ClassCard title="Lịch sử & Nội dung" className="w-full">
-          <div className="mb-3 flex flex-col gap-3">
-            <ClassTabList
-              tabs={CLASS_DETAIL_TABS}
-              labels={CLASS_DETAIL_TAB_LABELS}
-              activeTab={activeTab}
-              onSelect={selectTab}
-              idPrefix="admin-class-detail-tab"
-              panelId="admin-class-detail-tabpanel"
-              ariaLabel="Buổi học hoặc chuyên đề"
-            />
-
-            {isSessionsTab ? (
-              <div className="flex flex-col gap-1.5 rounded-lg border border-border-default bg-bg-secondary/55 px-2.5 py-1.5 sm:flex-row sm:items-center sm:justify-between">
-                <MonthNav
-                  value={selectedMonth}
-                  onChange={setSelectedMonth}
-                  monthPopupOpen={monthPopupOpen}
-                  setMonthPopupOpen={setMonthPopupOpen}
-                  countLabel={`Tổng: ${sessionsInMonth.length + surveysInMonth.length}`}
-                  actionButton={
-                    canCreateSession || canManageSurveys ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        {canCreateSession ? (
-                          <button
-                            type="button"
-                            onClick={handleOpenAddSessionPopup}
-                            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-text-inverse shadow-sm transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                          >
-                            <PlusIcon className="size-3.5 shrink-0" aria-hidden />
-                            <span>Tạo buổi học</span>
-                          </button>
-                        ) : null}
-                        {canManageSurveys ? (
-                          <button
-                            type="button"
-                            onClick={() => setAddSurveyPopupOpen(true)}
-                            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary shadow-sm transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                          >
-                            <PlusIcon className="size-3.5 shrink-0" aria-hidden />
-                            <span>Tạo khảo sát</span>
-                          </button>
-                        ) : null}
-                      </div>
-                    ) : null
-                  }
-                />
-              </div>
-            ) : null}
-          </div>
-
-          <section
-            id="admin-class-detail-tabpanel"
-            role="tabpanel"
-            aria-labelledby={`admin-class-detail-tab-${activeTab}`}
-            className="min-w-0"
-          >
-            {isSessionsTab ? (
-              <>
-                {(isAdmin || isAssistant || adminAccess.isCustomerCare) && (
-                  <ClassSessionStatisticsButton classDetail={classDetail} scope="admin" />
-                )}
-                <QueryRefreshStrip
-                  active={
-                    (isSessionsFetching || isSurveysFetching) &&
-                    !(isSessionsLoading || isSurveysLoading)
-                  }
-                  label="Đang tải lại dữ liệu…"
-                  className="mb-3"
-                />
-                <ClassSurveyPanel
-                  className={classDetail.name}
-                  surveys={surveysInMonth}
-                  availableSurveys={availableSurveys}
-                  availableSurveysStatus={availableSurveysStatus}
-                  teachers={popupTeachers}
-                  students={activeSurveyStudents}
-                  error={isSurveysError}
-                  canManage={canManageSurveys}
-                  createOpen={addSurveyPopupOpen}
-                  onCreateOpenChange={setAddSurveyPopupOpen}
-                  defaultTeacherId={currentClassTeacherId}
-                  onCreate={handleCreateSurvey}
-                  onUpdate={handleUpdateSurvey}
-                  onDelete={handleDeleteSurvey}
-                  renderList={(surveyRows) =>
-                    isSessionsLoading || isSurveysLoading ? (
-                      <SessionHistoryTableSkeleton
-                        rows={5}
-                        entityMode="none"
-                        variant="classDetail"
-                        showBulkSelectionColumn
-                        showActionsColumn
-                      />
-                    ) : (
-                      <div
-                        className={cn(
-                          "transition-opacity",
-                          (isSessionsFetching || isSurveysFetching) && "opacity-70",
-                        )}
-                      >
-                        <SessionHistoryTable
-                          sessions={sessionsInMonth}
-                          extraRows={surveyRows}
-                          entityMode="teacher"
-                          hideTeacherDisplay
-                          variant="classDetail"
-                          emptyText="Không có buổi học hay khảo sát trong tháng này."
-                          editorLayout="wide"
-                          enableBulkPaymentStatusEdit={canEditSessionPaymentStatus}
-                          allowTeacherSelection={canEditSessions}
-                          allowTrialTeachingToggle={canEditSessions}
-                          allowFinancialEdits={canEditSessions}
-                          skipRequiredReviewValidation={canSkipRequiredSessionReview}
-                          allowAllowanceEdit={canEditSessions}
-                          allowAttendanceTuitionEdits={canEditSessions}
-                          allowPaymentStatusEdit={canEditSessionPaymentStatus}
-                          readOnlySessionDetails={!canEditSessions && !canEditSessionPaymentStatus}
-                          allowDeleteSession={canEditSessions && !isAccountant}
-                          onSessionUpdated={handleSessionUpdated}
-                          teachers={popupTeachers}
-                          getClassStudents={getClassStudents}
-                          sessionTuitionTotal={totalSessionTuition}
-                          showTrainingManagerAllowance={showTeacherCompensation}
-                        />
-                      </div>
-                    )
-                  }
-                />
-                {isSessionsError ? (
-                  <p className="mt-3 text-sm text-error" role="alert">
-                    Không tải được lịch sử buổi học.
-                  </p>
-                ) : null}
-              </>
-            ) : (
-              <ClassModulesTab
-                classId={id}
-                canManageContent={canCreateSession}
-                practiceActionsBasePath={`/admin/classes/${id}`}
+        {canViewSessionHistory ? (
+          <ClassCard title="Lịch sử & Nội dung" className="w-full">
+            <div className="mb-3 flex flex-col gap-3">
+              <ClassTabList
+                tabs={CLASS_DETAIL_TABS}
+                labels={CLASS_DETAIL_TAB_LABELS}
+                activeTab={activeTab}
+                onSelect={selectTab}
+                idPrefix="admin-class-detail-tab"
+                panelId="admin-class-detail-tabpanel"
+                ariaLabel="Buổi học hoặc chuyên đề"
               />
-            )}
-          </section>
-        </ClassCard>
+
+              {isSessionsTab ? (
+                <div className="flex flex-col gap-1.5 rounded-lg border border-border-default bg-bg-secondary/55 px-2.5 py-1.5 sm:flex-row sm:items-center sm:justify-between">
+                  <MonthNav
+                    value={selectedMonth}
+                    onChange={setSelectedMonth}
+                    monthPopupOpen={monthPopupOpen}
+                    setMonthPopupOpen={setMonthPopupOpen}
+                    countLabel={`Tổng: ${sessionsInMonth.length + surveysInMonth.length}`}
+                    actionButton={
+                      canCreateSession || canManageSurveys ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canCreateSession ? (
+                            <button
+                              type="button"
+                              onClick={handleOpenAddSessionPopup}
+                              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-text-inverse shadow-sm transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                            >
+                              <PlusIcon className="size-3.5 shrink-0" aria-hidden />
+                              <span>Tạo buổi học</span>
+                            </button>
+                          ) : null}
+                          {canManageSurveys ? (
+                            <button
+                              type="button"
+                              onClick={() => setAddSurveyPopupOpen(true)}
+                              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border-default bg-bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary shadow-sm transition-colors hover:bg-bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                            >
+                              <PlusIcon className="size-3.5 shrink-0" aria-hidden />
+                              <span>Tạo khảo sát</span>
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null
+                    }
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <section
+              id="admin-class-detail-tabpanel"
+              role="tabpanel"
+              aria-labelledby={`admin-class-detail-tab-${activeTab}`}
+              className="min-w-0"
+            >
+              {isSessionsTab ? (
+                <>
+                  <QueryRefreshStrip
+                    active={
+                      (isSessionsFetching || isSurveysFetching) &&
+                      !(isSessionsLoading || isSurveysLoading)
+                    }
+                    label="Đang tải lại dữ liệu…"
+                    className="mb-3"
+                  />
+                  <ClassSurveyPanel
+                    className={classDetail.name}
+                    surveys={surveysInMonth}
+                    availableSurveys={availableSurveys}
+                    availableSurveysStatus={availableSurveysStatus}
+                    teachers={popupTeachers}
+                    students={activeSurveyStudents}
+                    error={isSurveysError}
+                    canManage={canManageSurveys}
+                    canViewDetails={usesStaffOpsClassOperations}
+                    createOpen={addSurveyPopupOpen}
+                    onCreateOpenChange={setAddSurveyPopupOpen}
+                    defaultTeacherId={currentClassTeacherId}
+                    onCreate={handleCreateSurvey}
+                    onUpdate={handleUpdateSurvey}
+                    onDelete={handleDeleteSurvey}
+                    renderList={(surveyRows) =>
+                      isSessionsLoading || isSurveysLoading ? (
+                        <SessionHistoryTableSkeleton
+                          rows={5}
+                          entityMode="none"
+                          variant="classDetail"
+                          showBulkSelectionColumn
+                          showActionsColumn
+                        />
+                      ) : (
+                        <div
+                          className={cn(
+                            "transition-opacity",
+                            (isSessionsFetching || isSurveysFetching) && "opacity-70",
+                          )}
+                        >
+                          <SessionHistoryTable
+                            sessions={sessionsInMonth}
+                            extraRows={surveyRows}
+                            entityMode="teacher"
+                            hideTeacherDisplay
+                            variant="classDetail"
+                            emptyText="Không có buổi học hay khảo sát trong tháng này."
+                            editorLayout="wide"
+                            enableBulkPaymentStatusEdit={canEditSessionPaymentStatus}
+                            allowTeacherSelection={canEditSessions}
+                            allowTrialTeachingToggle={canToggleTrialTeaching}
+                            canToggleTrialForSession={canToggleTrialForSession}
+                            allowFinancialEdits={canEditSessions}
+                            skipRequiredReviewValidation={canSkipRequiredSessionReview}
+                            allowAllowanceEdit={
+                              canEditSessions || usesStaffOpsClassOperations
+                            }
+                            trainingHeadEdit={usesStaffOpsClassOperations}
+                            updateSessionFn={
+                              usesStaffOpsClassOperations
+                                ? updateSessionAsTrainingHead
+                                : undefined
+                            }
+                            allowAttendanceTuitionEdits={canEditSessions}
+                            allowPaymentStatusEdit={canEditSessionPaymentStatus}
+                            readOnlySessionDetails={!canEditSessions && !canEditSessionPaymentStatus}
+                            allowDeleteSession={
+                              (canEditSessions && !isAccountant) ||
+                              canDeleteSessionsAsHeadRole
+                            }
+                            canDeleteSessionItem={
+                              canDeleteSessionsAsHeadRole
+                                ? canHeadDeleteSession
+                                : undefined
+                            }
+                            onSessionUpdated={handleSessionUpdated}
+                            teachers={popupTeachers}
+                            getClassStudents={getClassStudents}
+                            sessionTuitionTotal={totalSessionTuition}
+                            // Trưởng ban ở lớp không quản lý: backend bỏ trợ cấp
+                            // Quản lý lớp từng buổi.
+                            showTrainingManagerAllowance={
+                              showTeacherCompensation && !usesStaffOpsClassOperations
+                            }
+                          />
+                        </div>
+                      )
+                    }
+                  />
+                  {isSessionsError ? (
+                    <p className="mt-3 text-sm text-error" role="alert">
+                      Không tải được lịch sử buổi học.
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <ClassModulesTab
+                  classId={id}
+                  canManageContent={canCreateSession}
+                  practiceActionsBasePath={`${routeBase}/classes/${id}`}
+                />
+              )}
+            </section>
+          </ClassCard>
+        ) : null}
       </div>
     </div>
   );

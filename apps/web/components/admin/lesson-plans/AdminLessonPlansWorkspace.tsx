@@ -274,7 +274,7 @@ const WORKSPACE_POLICY_COPY: Record<
       "Điều phối toàn bộ thư viện, task và lesson output trong một workspace thống nhất.",
   },
   lesson_plan_head: {
-    badge: "Trưởng giáo án",
+    badge: "Trưởng ban Chuyên môn",
     description:
       "Theo dõi tổng quan, xử lý công việc và quản lý kho giáo án trong staff shell.",
   },
@@ -332,7 +332,9 @@ export default function AdminLessonPlansWorkspace({
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
   const canManageWorkspace = !participantMode && workspacePolicy !== "accountant";
   const canCreate = workspacePolicy === "admin" || workspacePolicy === "lesson_plan_head" || (participantMode && workspacePolicy !== "accountant");
-  const canDelete = workspacePolicy === "admin";
+  // #279: Trưởng ban Chuyên môn được xoá đầu việc / sản phẩm / tài liệu.
+  const canDelete =
+    workspacePolicy === "admin" || workspacePolicy === "lesson_plan_head";
   const canEditOutputPaymentStatus =
     workspacePolicy === "admin" || workspacePolicy === "accountant";
   const visibleTabs = POLICY_VISIBLE_TABS[workspacePolicy];

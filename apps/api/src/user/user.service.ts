@@ -1,3 +1,5 @@
+import { lockOneTimeStudentPackages } from 'src/common/one-time-package-lock';
+import { hasSaleCsHeadAccess } from 'src/common/sale-cs-head-access';
 import {
   BadRequestException,
   ForbiddenException,
@@ -7,6 +9,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Prisma } from '../../generated/client';
+import {
+  assertClassTuitionBeforeFirstStudent,
+  findClassIdsWithoutActiveStudents,
+} from 'src/common/class-first-student-tuition';
 import {
   generateStudentId,
   generateStaffId,
@@ -18,6 +24,7 @@ import {
   ActionHistoryService,
 } from 'src/action-history/action-history.service';
 import { AuthService } from 'src/auth/auth.service';
+import { StaffService } from 'src/staff/staff.service';
 import type { PublicRequestOrigin } from 'src/mail/public-frontend-url';
 import { STAFF_DATA_CONSENT_VERSION } from 'src/auth/constants';
 import {
@@ -26,12 +33,21 @@ import {
   UpdateMyStudentProfileDto,
 } from 'src/dtos/profile.dto';
 import {
+  AdminCreateStaffUserDto,
   AdminCreateStudentUserDto,
   AdminCreateUserDto,
+  type AccountHandleResultDto,
   GetUsersQueryDto,
   UpdateUserDto,
 } from 'src/dtos/user.dto';
+import { changeAccountHandleInTx } from './account-handle';
 import { PrismaService } from 'src/prisma/prisma.service';
+import {
+  assertStaffCreateAllowed,
+  assertStaffRoleChangeAllowed,
+  assertUserRoleTypeChangeAllowed,
+  resolveStaffPolicyActor,
+} from 'src/common/staff-role-policy';
 import type {
   StudentClassCardDto,
   StudentClassDetailDto,
@@ -63,6 +79,7 @@ import {
   getPreferredUserFullName,
   splitFullName,
 } from 'src/common/user-name.util';
+import { releaseCustomerCareAssignmentsOnRoleRemovalInTx } from 'src/customer-care/customer-care-role-release';
 
 type UserAuditClient = Prisma.TransactionClient | PrismaService;
 const AVATAR_STORAGE_PATH_SEGMENT = 'avatar';
@@ -91,6 +108,7 @@ export class UserService {
     private readonly prisma: PrismaService,
     private readonly actionHistoryService: ActionHistoryService,
     private readonly authService: AuthService,
+    private readonly staffService: StaffService,
   ) {}
 
   private buildAvatarStoragePath(userId: string) {
@@ -310,7 +328,7 @@ export class UserService {
     const normalizedRoles = Array.from(
       new Set(
         staffRoles.filter((role): role is StaffRole =>
-          STAFF_ROLE_VALUES.has(role as StaffRole),
+          STAFF_ROLE_VALUES.has(role),
         ),
       ),
     );
@@ -439,6 +457,16 @@ export class UserService {
       throw new BadRequestException('Vui lòng nhập tên học sinh.');
     }
 
+    // Chặn trước khi tạo user pending, tránh tạo xong mới 403.
+    await this.assertRoleWriteAllowed(auditActor, {
+      targetStaffId: null,
+      previousRoleType: null,
+      nextRoleType,
+      previousStaffRoles: [],
+      nextStaffRoles:
+        nextRoleType === UserRole.staff ? (data.staffRoles ?? []) : [],
+    });
+
     const response =
       await this.authService.createPendingUserWithVerificationEmail(data, {
         auditActor,
@@ -503,7 +531,7 @@ export class UserService {
     if (
       !staff?.roles.includes(StaffRole.customer_care) ||
       staff.roles.includes(StaffRole.admin) ||
-      staff.roles.includes(StaffRole.assistant)
+      hasSaleCsHeadAccess(staff.roles)
     ) {
       return null;
     }
@@ -521,7 +549,7 @@ export class UserService {
       await this.resolveCreatorCustomerCareStaff(auditActor);
     if (creatorCustomerCareStaff && classIds.length > 0) {
       throw new ForbiddenException(
-        'CSKH không được xếp lớp khi tạo học sinh. Nhờ admin/trợ lí xếp lớp sau.',
+        'CSKH không được xếp lớp khi tạo học sinh. Nhờ admin/Trưởng phòng Sale & CSKH xếp lớp sau.',
       );
     }
     if (classIds.length > 0) {
@@ -532,6 +560,11 @@ export class UserService {
       if (classes.length !== classIds.length) {
         throw new NotFoundException('One or more classes not found');
       }
+      // #273: xếp vào lớp đang trống = học sinh đầu tiên → lớp phải có học phí.
+      await assertClassTuitionBeforeFirstStudent(
+        this.prisma,
+        await findClassIdsWithoutActiveStudents(this.prisma, classIds),
+      );
     }
 
     const response =
@@ -660,6 +693,14 @@ export class UserService {
               })),
             });
           }
+          // 16/11: lớp bán một lần chốt gói lớp lúc vào lớp.
+          await lockOneTimeStudentPackages(
+            tx,
+            normalizedClassIds.map((classId) => ({
+              classId,
+              studentId: student.id,
+            })),
+          );
 
           // CSKH tạo học sinh thì tự là Người chăm sóc với % mặc định trên hồ sơ.
           // Học sinh đã có Người chăm sóc thì giữ nguyên: chuyển người chỉ admin/trợ lí làm.
@@ -730,6 +771,187 @@ export class UserService {
     return response;
   }
 
+  /**
+   * 15/11: tạo tài khoản đăng nhập + hồ sơ nhân sự trong một bước (Admin, role
+   * trưởng). Chỉ nhận email / tên đăng nhập chưa thuộc tài khoản nào: không gắn
+   * hồ sơ vào, cũng không ghi đè (kể cả tài khoản chưa xác thực) user có sẵn.
+   */
+  async createStaffUser(
+    data: AdminCreateStaffUserDto,
+    auditActor?: ActionHistoryActor,
+    emailLinkOrigin?: PublicRequestOrigin,
+  ): Promise<{ message: string; staffId: string }> {
+    const fullName = data.full_name.trim();
+    if (!fullName) {
+      throw new BadRequestException('Vui lòng nhập họ tên nhân sự.');
+    }
+
+    // Chặn quyền trước khi tạo user pending, tránh tạo xong mới 403.
+    const policyActor = await resolveStaffPolicyActor(this.prisma, auditActor);
+    assertStaffCreateAllowed(policyActor, {});
+    assertStaffRoleChangeAllowed(policyActor, {
+      targetStaffId: null,
+      previousRoles: [],
+      nextRoles: data.roles,
+    });
+
+    const email = data.email.trim();
+    const accountHandle = data.accountHandle.trim();
+    const [emailOwner, handleOwner, cccdOwner] = await Promise.all([
+      this.prisma.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { id: true },
+      }),
+      this.prisma.user.findFirst({
+        where: {
+          accountHandle: { equals: accountHandle, mode: 'insensitive' },
+        },
+        select: { id: true },
+      }),
+      this.prisma.staffInfo.findUnique({
+        where: { cccdNumber: data.cccd_number },
+        select: { id: true },
+      }),
+    ]);
+    if (emailOwner) {
+      throw new BadRequestException('Email này đã có tài khoản.');
+    }
+    if (handleOwner) {
+      throw new BadRequestException('Tên đăng nhập đã được dùng.');
+    }
+    if (cccdOwner) {
+      throw new BadRequestException('Số CCCD đã tồn tại trong hệ thống.');
+    }
+
+    const names = splitFullName(fullName);
+    const response =
+      await this.authService.createPendingUserWithVerificationEmail(
+        {
+          email,
+          password: data.password,
+          accountHandle,
+          phone: data.phone?.trim() || undefined,
+          first_name: names.first_name,
+          last_name: names.last_name ?? undefined,
+        },
+        {
+          auditActor,
+          createDescription: 'Tạo tài khoản nhân sự',
+          updateDescription: 'Cập nhật user pending từ luồng tạo nhân sự',
+          successMessage: data.emailVerified
+            ? 'Tạo nhân sự thành công (đã xác thực email).'
+            : 'Tạo nhân sự thành công. Email xác thực đã được gửi.',
+          emailVerified: data.emailVerified,
+          emailLinkOrigin,
+        },
+      );
+
+    const createdUser = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+    if (!createdUser) {
+      throw new InternalServerErrorException(
+        'Không tìm thấy user vừa tạo để tạo hồ sơ nhân sự.',
+      );
+    }
+
+    const {
+      email: _email,
+      password: _password,
+      accountHandle: _accountHandle,
+      phone: _phone,
+      emailVerified: _emailVerified,
+      ...profile
+    } = data;
+    try {
+      const staff = await this.staffService.createStaff(
+        { ...profile, full_name: fullName, user_id: createdUser.id },
+        auditActor,
+      );
+      return { message: response.message, staffId: staff.id };
+    } catch (error) {
+      // Hồ sơ lỗi (VD: CCCD vừa bị người khác dùng) → bỏ tài khoản vừa tạo,
+      // không để lại user mồ côi chiếm email / tên đăng nhập.
+      await this.prisma.user
+        .delete({ where: { id: createdUser.id } })
+        .catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Luật 2 (#265): chỉ Admin cấp/thu hồi role trưởng, Admin; không tự thêm role. */
+  private async assertRoleWriteAllowed(
+    auditActor: ActionHistoryActor | undefined,
+    change: {
+      targetStaffId: string | null;
+      previousRoleType: UserRole | null;
+      nextRoleType: UserRole;
+      previousStaffRoles: readonly StaffRole[];
+      nextStaffRoles: readonly StaffRole[];
+    },
+  ) {
+    const policyActor = await resolveStaffPolicyActor(this.prisma, auditActor);
+    assertUserRoleTypeChangeAllowed(policyActor, change);
+    assertStaffRoleChangeAllowed(policyActor, {
+      targetStaffId: change.targetStaffId,
+      previousRoles: change.previousStaffRoles,
+      nextRoles: change.nextStaffRoles,
+    });
+  }
+
+  /**
+   * `PATCH /users/:id/account-handle` (16/11): Admin đổi tên đăng nhập mọi tài
+   * khoản; Trưởng phòng Sale & CSKH chỉ tài khoản học sinh (cùng phạm vi đặt
+   * mật khẩu). Đổi nhân sự của role trưởng đi qua route của module tương ứng.
+   * Không đăng xuất thiết bị: phiên hiện tại vẫn hợp lệ, lần sau đăng nhập
+   * bằng tên mới (hoặc email).
+   */
+  async setAccountHandle(
+    targetUserId: string,
+    accountHandle: string,
+    auditActor: ActionHistoryActor,
+  ): Promise<AccountHandleResultDto> {
+    const [target, policyActor] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { id: true, roleType: true },
+      }),
+      resolveStaffPolicyActor(this.prisma, auditActor),
+    ]);
+    if (!target) {
+      throw new NotFoundException('User not found');
+    }
+    if (!policyActor.isAdmin && target.roleType !== UserRole.student) {
+      throw new ForbiddenException(
+        'Chỉ Admin được đổi tên đăng nhập của tài khoản không phải học sinh.',
+      );
+    }
+
+    const change = await this.prisma.$transaction(async (tx) => {
+      const result = await changeAccountHandleInTx(tx, {
+        userId: targetUserId,
+        accountHandle,
+      });
+      if (result.changed) {
+        await this.actionHistoryService.recordUpdate(tx, {
+          actor: auditActor,
+          entityType: 'user',
+          entityId: targetUserId,
+          description: 'Đổi tên đăng nhập',
+          beforeValue: { accountHandle: result.previous },
+          afterValue: { accountHandle: result.next },
+        });
+      }
+      return result;
+    });
+
+    if (change.changed) {
+      this.authService.invalidateAuthIdentityCache(targetUserId);
+    }
+    return { id: targetUserId, accountHandle: change.next };
+  }
+
   async updateUser(data: UpdateUserDto, auditActor?: ActionHistoryActor) {
     const existingUser = await this.getUserAuditSnapshot(this.prisma, data.id);
 
@@ -739,6 +961,17 @@ export class UserService {
 
     const nextRoleType = data.roleType ?? existingUser.roleType;
     const normalizedStaffRoles = this.normalizeStaffRoles(data.staffRoles);
+    const previousStaffRoles = existingUser.staffInfo?.roles ?? [];
+    await this.assertRoleWriteAllowed(auditActor, {
+      targetStaffId: existingUser.staffInfo?.id ?? null,
+      previousRoleType: existingUser.roleType,
+      nextRoleType,
+      previousStaffRoles,
+      nextStaffRoles:
+        nextRoleType === UserRole.staff
+          ? (normalizedStaffRoles ?? previousStaffRoles)
+          : previousStaffRoles,
+    });
     const updateData: Prisma.UserUpdateInput = {};
 
     if (data.email !== undefined) {
@@ -806,6 +1039,13 @@ export class UserService {
                 data: {
                   roles: normalizedStaffRoles,
                 },
+              });
+
+              // Follow-up 13/11 mục 2.1: tắt CSKH → học sinh mất Người chăm sóc ngay.
+              await releaseCustomerCareAssignmentsOnRoleRemovalInTx(tx, {
+                staffId: existingUser.staffInfo.id,
+                previousRoles: existingUser.staffInfo.roles,
+                nextRoles: normalizedStaffRoles,
               });
 
               if (auditActor) {
@@ -1015,7 +1255,7 @@ export class UserService {
             _count: { select: { achievements: true } },
             achievements: {
               where: { isHighlight: true },
-              select: { id: true },
+              select: { id: true, imagePath: true },
               take: 1,
             },
           },
@@ -1034,12 +1274,16 @@ export class UserService {
     const profile = await this.attachProfileMediaUrls(
       this.sanitizeUser({
         ...user,
-        // Gate hồ sơ gia sư: bắt buộc >= 1 thành tích và có thành tích nổi bật.
+        // Gate hồ sơ gia sư: bắt buộc >= 1 thành tích, có thành tích nổi bật và
+        // thành tích nổi bật đã có ảnh minh chứng.
         staffInfo: user.staffInfo
           ? {
               ...staffInfo,
               achievementCount: staffCounts?.achievements ?? 0,
               hasHighlightAchievement: highlightAchievements.length > 0,
+              hasHighlightAchievementProof: Boolean(
+                highlightAchievements[0]?.imagePath,
+              ),
             }
           : null,
       }),

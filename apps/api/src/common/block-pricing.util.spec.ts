@@ -3,6 +3,7 @@ import {
   dualWritePerBlockClassFields,
   perBlockReconstructionErrorVnd,
   perSessionToPerBlock,
+  customAllowanceWriteFields,
   presentCustomAllowanceAsPerSession,
   standardBlockCountFromSlots,
 } from './block-pricing.util';
@@ -129,6 +130,35 @@ describe('block-pricing.util', () => {
       ).toEqual({
         studentTuitionPerBlock: 100_000,
       });
+    });
+  });
+  describe('custom allowance per-session column', () => {
+    it('keeps the exact admin input when per-block rounding is lossy', () => {
+      expect(customAllowanceWriteFields(70_000, 3)).toEqual({
+        customAllowance: 23_333,
+        customAllowancePerSession: 70_000,
+      });
+      expect(customAllowanceWriteFields(80_000, 3)).toEqual({
+        customAllowance: 26_667,
+        customAllowancePerSession: 80_000,
+      });
+      expect(customAllowanceWriteFields(null, 3)).toEqual({
+        customAllowance: null,
+        customAllowancePerSession: null,
+      });
+    });
+
+    it('presents the stored per-session value instead of per-block × blocks', () => {
+      expect(presentCustomAllowanceAsPerSession(23_333, 3, true)).toBe(69_999);
+      expect(presentCustomAllowanceAsPerSession(23_333, 3, true, 70_000)).toBe(
+        70_000,
+      );
+      expect(presentCustomAllowanceAsPerSession(26_667, 3, true, 80_000)).toBe(
+        80_000,
+      );
+      expect(presentCustomAllowanceAsPerSession(null, 3, true, 80_000)).toBe(
+        null,
+      );
     });
   });
 });

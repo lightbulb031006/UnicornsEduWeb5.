@@ -1,4 +1,25 @@
 import { Prisma } from 'generated/client';
+import type { StaffRole } from 'generated/enums';
+import { hasSaleCsHeadAccess } from 'src/common/sale-cs-head-access';
+
+/**
+ * #271: hoa hồng trưởng phòng chỉ tính cho người quản lý CSKH còn mang role
+ * Trưởng phòng Sale & CSKH. Người quản lý đã bị thu hồi role → không ai nhận
+ * (trả `null`); nhiều trưởng phòng cùng tồn tại, mỗi người chỉ ăn nhóm CSKH
+ * mình quản lý (`customer_care_managed_by_staff_id`).
+ */
+export function resolveSaleCsHeadManagerId(careStaff: {
+  customerCareManagedByStaffId: string | null | undefined;
+  customerCareManagedBy?: { roles: readonly StaffRole[] } | null;
+}): string | null {
+  const managerId = careStaff.customerCareManagedByStaffId ?? null;
+  if (!managerId) {
+    return null;
+  }
+  return hasSaleCsHeadAccess(careStaff.customerCareManagedBy?.roles)
+    ? managerId
+    : null;
+}
 
 export function isSelfManagedCustomerCareStaff(params: {
   staffId: string;
@@ -11,13 +32,13 @@ export function isSelfManagedCustomerCareStaff(params: {
 }
 
 export function isSelfManagedAssistantShareAttendance(params: {
-  assistantManagerStaffId: string | null | undefined;
+  saleCsHeadStaffId: string | null | undefined;
   customerCareStaffId: string | null | undefined;
 }): boolean {
   return (
-    params.assistantManagerStaffId != null &&
+    params.saleCsHeadStaffId != null &&
     params.customerCareStaffId != null &&
-    params.assistantManagerStaffId === params.customerCareStaffId
+    params.saleCsHeadStaffId === params.customerCareStaffId
   );
 }
 

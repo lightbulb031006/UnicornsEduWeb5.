@@ -3,6 +3,7 @@ import {
   LESSON_OUTPUT_DIFFICULTY_BANDS,
   LESSON_OUTPUT_DIFFICULTY_META,
   computeLessonOutputCost,
+  getLessonOutputFieldVisibility,
   getLessonOutputPricingError,
 } from "./lesson-output-pricing";
 
@@ -95,5 +96,47 @@ describe("getLessonOutputPricingError", () => {
     expect(
       getLessonOutputPricingError(null, "Level 2", { ...items, includesTest: false }),
     ).toBeNull();
+  });
+});
+
+describe("getLessonOutputFieldVisibility", () => {
+  const none = {
+    includesTest: false,
+    includesSolution: false,
+    includesLectureVideo: false,
+    includesTheoryLecture: false,
+  };
+
+  it("ẩn cả hai nhóm field khi chưa tick hạng mục nào", () => {
+    expect(getLessonOutputFieldVisibility(none)).toEqual({
+      hasAnyItem: false,
+      showProblemFields: false,
+      showTheoryFields: false,
+    });
+  });
+
+  it.each(["includesTest", "includesSolution", "includesLectureVideo"] as const)(
+    "%s mở field bài tập, không mở Level",
+    (key) => {
+      expect(getLessonOutputFieldVisibility({ ...none, [key]: true })).toEqual({
+        hasAnyItem: true,
+        showProblemFields: true,
+        showTheoryFields: false,
+      });
+    },
+  );
+
+  it("Bài giảng lý thuyết chỉ mở Level + link video", () => {
+    expect(
+      getLessonOutputFieldVisibility({ ...none, includesTheoryLecture: true }),
+    ).toEqual({ hasAnyItem: true, showProblemFields: false, showTheoryFields: true });
+  });
+
+  it("khoá giá thì hiện hết, không gate", () => {
+    expect(getLessonOutputFieldVisibility(none, true)).toEqual({
+      hasAnyItem: false,
+      showProblemFields: true,
+      showTheoryFields: true,
+    });
   });
 });

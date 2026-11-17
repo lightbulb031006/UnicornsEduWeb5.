@@ -7,7 +7,7 @@ import {
 
 function staffProfile(roles: string[], extra?: Partial<UserInfoDto>): UserInfoDto {
   const isHead = roles.includes("lesson_plan_head");
-  const isAssistant = roles.includes("assistant");
+  const isAssistant = roles.includes("sale_customer_care_head");
   const isAdmin = roles.includes("admin");
   return {
     id: "staff-1",
@@ -23,7 +23,7 @@ function staffProfile(roles: string[], extra?: Partial<UserInfoDto>): UserInfoDt
         tier: isAdmin
           ? "full"
           : isAssistant
-            ? "assistant"
+            ? "sale_customer_care_head"
             : isHead
               ? "lesson_plan_head"
               : null,
@@ -124,5 +124,27 @@ describe("resolveCourseWorkspaceTab", () => {
       status: "unknown",
       tab: null,
     });
+  });
+});
+
+describe("khoá học chỉ Admin (#267)", () => {
+  it("không cho Trợ lí vào workspace khoá học ở /admin", () => {
+    const caps = resolveCourseWorkspaceCapabilities(
+      staffProfile(["sale_customer_care_head"]),
+      "/admin",
+    );
+    expect(caps.canEnterWorkspace).toBe(false);
+    expect(caps.canMutateCourses).toBe(false);
+    expect(caps.canChangeCourseSaleMode).toBe(false);
+    expect(caps.visibleTabIds).toEqual([]);
+  });
+
+  it("Admin vẫn vào được và sửa được", () => {
+    const caps = resolveCourseWorkspaceCapabilities(
+      staffProfile(["admin"]),
+      "/admin",
+    );
+    expect(caps.canEnterWorkspace).toBe(true);
+    expect(caps.canMutateCourses).toBe(true);
   });
 });

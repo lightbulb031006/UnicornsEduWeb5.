@@ -54,9 +54,10 @@ export class StaffAttemptGradingController {
       actor,
       classId,
     );
-    if (mode !== 'admin' && mode !== 'teacher') {
+    // #275: Quản lý lớp chấm bài trên lớp mình như gia sư.
+    if (mode !== 'admin' && mode !== 'teacher' && mode !== 'training_manager') {
       throw new ForbiddenException(
-        'Chỉ gia sư phụ trách lớp hoặc admin mới được chấm tự luận.',
+        'Chỉ gia sư phụ trách lớp, Quản lý lớp hoặc admin mới được chấm tự luận.',
       );
     }
   }
@@ -118,9 +119,9 @@ export class StaffAttemptStatsController {
       actor,
       classId,
     );
-    if (mode !== 'admin' && mode !== 'teacher') {
+    if (mode !== 'admin' && mode !== 'teacher' && mode !== 'training_manager') {
       throw new ForbiddenException(
-        'Chỉ gia sư phụ trách lớp hoặc admin mới xem kết quả lần giao.',
+        'Chỉ gia sư phụ trách lớp, Quản lý lớp hoặc admin mới xem kết quả lần giao.',
       );
     }
   }

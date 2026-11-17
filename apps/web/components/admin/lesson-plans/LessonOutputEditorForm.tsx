@@ -22,6 +22,7 @@ import type {
 import * as lessonApi from "@/lib/apis/lesson.api";
 import {
   LESSON_OUTPUT_THEORY_LECTURE_MAX_LINKS,
+  getLessonOutputFieldVisibility,
   getLessonOutputPricingError,
 } from "@/lib/lesson-output-pricing";
 import LessonOutputPricingFields from "./LessonOutputPricingFields";
@@ -55,8 +56,15 @@ type Props = {
   allowTasklessOutput?: boolean;
   /** Khi `false`, ẩn dropdown thanh toán và giữ `paymentStatus` hiện tại. */
   allowPaymentStatusEdit?: boolean;
-  /** Deprecated: ô chi phí luôn read-only; backend tự tính từ bậc + tick. */
+  /**
+   * `false` = khoá bậc độ khó / level / hạng mục (quyết định chi phí). Tự khai
+   * chi phí giáo án: người nhận thanh toán, Trưởng ban Chuyên môn và Admin cài
+   * khi output chưa thanh toán (`lib/lesson-output-pricing-access.ts`). Ô chi
+   * phí luôn read-only.
+   */
   allowCostEdit?: boolean;
+  /** Lý do khoá bậc độ khó / level / hạng mục (khi `allowCostEdit = false`). */
+  pricingLockedMessage?: string;
   isSubmitting?: boolean;
   onCancel?: () => void;
   onSubmit: (payload: CreateLessonOutputPayload) => Promise<void> | void;
@@ -145,6 +153,44 @@ function StaffCard({
         ) : null}
       </div>
     </article>
+  );
+}
+
+/** Checkbox Checker / Code — gộp vào `tags` khi lưu. */
+function TagCheckboxes({
+  tagChecker,
+  tagCode,
+  onTagCheckerChange,
+  onTagCodeChange,
+}: {
+  tagChecker: boolean;
+  tagCode: boolean;
+  onTagCheckerChange: (value: boolean) => void;
+  onTagCodeChange: (value: boolean) => void;
+}) {
+  const checkboxClass =
+    "size-4 rounded border-border-default text-primary focus:ring-border-focus";
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:col-span-2">
+      <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-text-primary">
+        <input
+          type="checkbox"
+          checked={tagChecker}
+          onChange={(event) => onTagCheckerChange(event.target.checked)}
+          className={checkboxClass}
+        />
+        Checker
+      </label>
+      <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-text-primary">
+        <input
+          type="checkbox"
+          checked={tagCode}
+          onChange={(event) => onTagCodeChange(event.target.checked)}
+          className={checkboxClass}
+        />
+        Code
+      </label>
+    </div>
   );
 }
 
@@ -331,6 +377,8 @@ export default function LessonOutputEditorForm({
   forceSharedLayout = false,
   allowTasklessOutput = false,
   allowPaymentStatusEdit = true,
+  allowCostEdit = true,
+  pricingLockedMessage,
   isSubmitting = false,
   onCancel,
   onSubmit,
@@ -373,9 +421,14 @@ export default function LessonOutputEditorForm({
     () => initialData?.theoryLectureLinks ?? [],
   );
   const [level, setLevel] = useState(() => initialData?.level ?? "");
-  /** Output chỉ có Bài giảng lý thuyết → link video nằm ở danh sách riêng, Link output không bắt buộc. */
-  const isTheoryLectureOnly =
-    includesTheoryLecture && !includesTest && !includesSolution && !includesLectureVideo;
+  /**
+   * Field hiện theo hạng mục đã tick (khoá giá → hiện hết). Field đang ẩn được
+   * gửi `null` khi lưu, nên bỏ tick là xoá dữ liệu của nhóm field đó.
+   */
+  const { showProblemFields, showTheoryFields } = getLessonOutputFieldVisibility(
+    { includesTest, includesSolution, includesLectureVideo, includesTheoryLecture },
+    !allowCostEdit,
+  );
   const [source, setSource] = useState(() => initialData?.source ?? "");
   const [originalTitle, setOriginalTitle] = useState(
     () => initialData?.originalTitle ?? "",
@@ -443,7 +496,7 @@ export default function LessonOutputEditorForm({
       return;
     }
 
-    if (hideStaffFields) {
+    if (hideStaffFields && showProblemFields) {
       if (!originalLink.trim()) {
         toast.error("Link gốc là bắt buộc.");
         return;
@@ -465,8 +518,8 @@ export default function LessonOutputEditorForm({
 
     const enrichedTags = Array.from(new Set([
       ...selectedTags,
-      ...(tagChecker ? ["Checker"] : []),
-      ...(tagCode ? ["Code"] : []),
+      ...(showProblemFields && tagChecker ? ["Checker"] : []),
+      ...(showProblemFields && tagCode ? ["Code"] : []),
     ]));
 
     if (enrichedTags.length === 0) {
@@ -474,21 +527,28 @@ export default function LessonOutputEditorForm({
       return;
     }
 
-    if (!link.trim() && !isTheoryLectureOnly) {
+    if (showProblemFields && !link.trim()) {
       toast.error("Link output là bắt buộc.");
       return;
     }
 
     if (
-      !validateOptionalUrl(originalLink, "Link gốc") ||
-      !validateOptionalUrl(link, "Link output")
+      showProblemFields &&
+      (!validateOptionalUrl(originalLink, "Link gốc") ||
+        !validateOptionalUrl(link, "Link output"))
     ) {
       return;
     }
 
+    /** Field đang ẩn → `null` (xoá khi lưu). */
+    const keepProblem = (value: string) =>
+      showProblemFields ? value.trim() || null : null;
+    const resolvedLevel = showTheoryFields ? level.trim() || null : null;
+    const resolvedDifficultyBand = showProblemFields ? difficultyBand || null : null;
+
     const pricingError = getLessonOutputPricingError(
-      difficultyBand || null,
-      level,
+      resolvedDifficultyBand,
+      resolvedLevel,
       { includesTest, includesSolution, includesLectureVideo, includesTheoryLecture },
     );
     if (pricingError) {
@@ -529,11 +589,11 @@ export default function LessonOutputEditorForm({
     const payload: CreateLessonOutputPayload = {
       lessonTaskId: resolvedTaskId,
       lessonName: trimmedLessonName,
-      originalTitle: originalTitle.trim() || null,
-      source: source.trim() || null,
-      originalLink: originalLink.trim() || null,
-      level: level.trim() || null,
-      difficultyBand: difficultyBand || null,
+      originalTitle: keepProblem(originalTitle),
+      source: keepProblem(source),
+      originalLink: keepProblem(originalLink),
+      level: resolvedLevel,
+      difficultyBand: resolvedDifficultyBand,
       includesTest,
       includesSolution,
       includesLectureVideo,
@@ -541,8 +601,8 @@ export default function LessonOutputEditorForm({
       theoryLectureLinks: normalizedTheoryLectureLinks,
       tags: enrichedTags,
       date: date.trim(),
-      contestUploaded: contestUploaded.trim() || null,
-      link: link.trim() || null,
+      contestUploaded: keepProblem(contestUploaded),
+      link: keepProblem(link),
       status,
     };
 
@@ -557,11 +617,42 @@ export default function LessonOutputEditorForm({
     await onSubmit(payload);
   };
 
+  const pricingFields = (
+    <LessonOutputPricingFields
+      compact={useCompactTasklessLayout}
+      difficultyBand={difficultyBand}
+      includesTest={includesTest}
+      includesSolution={includesSolution}
+      includesLectureVideo={includesLectureVideo}
+      includesTheoryLecture={includesTheoryLecture}
+      theoryLectureLinks={theoryLectureLinks}
+      level={level}
+      levelOptions={LEVEL_OPTIONS}
+      storedCost={initialData ? initialData.cost : 0}
+      pricingLocked={!allowCostEdit}
+      pricingLockedMessage={pricingLockedMessage}
+      selectButtonClassName={selectButtonClass()}
+      selectMenuClassName={selectMenuClass()}
+      linkInputClassName={fieldInputClass()}
+      onDifficultyBandChange={setDifficultyBand}
+      onLevelChange={setLevel}
+      onIncludesTestChange={setIncludesTest}
+      onIncludesSolutionChange={setIncludesSolution}
+      onIncludesLectureVideoChange={setIncludesLectureVideo}
+      onIncludesTheoryLectureChange={setIncludesTheoryLecture}
+      onTheoryLectureLinksChange={setTheoryLectureLinks}
+    />
+  );
+
   if (useCompactTasklessLayout) {
     return (
       <form onSubmit={handleSubmit} className="space-y-4">
         <section className="rounded-lg border border-border-default bg-bg-surface p-3 sm:p-4">
           <div className="grid grid-cols-1 gap-3">
+            {pricingFields}
+
+            <div className="border-t border-border-default pt-3" />
+
             <label className="flex flex-col gap-1.5">
               <span className="text-sm text-text-secondary">
                 Tên bài <span className="text-error">*</span>
@@ -577,53 +668,7 @@ export default function LessonOutputEditorForm({
               />
             </label>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-sm text-text-secondary">
-                Link gốc <span className="text-error">*</span>
-              </span>
-              <input
-                type="url"
-                value={originalLink}
-                onChange={(event) => setOriginalLink(event.target.value)}
-                className={fieldInputClass()}
-                placeholder="https://..."
-                autoComplete="off"
-                required
-              />
-            </label>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1.5">
-                <span className="text-sm text-text-secondary">
-                  Tên gốc <span className="text-error">*</span>
-                </span>
-                <input
-                  type="text"
-                  value={originalTitle}
-                  onChange={(event) => setOriginalTitle(event.target.value)}
-                  className={fieldInputClass()}
-                  placeholder="Tên bài gốc"
-                  autoComplete="off"
-                  required
-                />
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className="text-sm text-text-secondary">
-                  Nguồn <span className="text-error">*</span>
-                </span>
-                <input
-                  type="text"
-                  value={source}
-                  onChange={(event) => setSource(event.target.value)}
-                  className={fieldInputClass()}
-                  placeholder="codeforces, Uni, …"
-                  autoComplete="off"
-                  required
-                />
-              </label>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start">
               <label className="flex flex-col gap-1.5">
                 <span className="text-sm text-text-secondary">
                   Tag <span className="text-error">*</span>
@@ -634,21 +679,6 @@ export default function LessonOutputEditorForm({
                   placeholder="Tìm kiếm và chọn tag…"
                 />
               </label>
-              <div className="flex flex-col gap-1.5">
-                <span className="text-sm text-text-secondary">Level</span>
-                <UpgradedSelect
-                  value={level}
-                  onValueChange={(value) => setLevel((value ?? "").trim())}
-                  options={LEVEL_OPTIONS}
-                  ariaLabel="Level"
-                  placeholder="Chọn level"
-                  buttonClassName={`${selectButtonClass()} flex items-center justify-between text-left`}
-                  menuClassName={selectMenuClass()}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start">
               <label className="flex flex-col gap-1.5">
                 <span className="text-sm text-text-secondary">
                   Ngày <span className="text-error">*</span>
@@ -660,50 +690,7 @@ export default function LessonOutputEditorForm({
                   required
                 />
               </label>
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-1">
-                  <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-text-primary">
-                    <input
-                      type="checkbox"
-                      checked={tagChecker}
-                      onChange={(event) => setTagChecker(event.target.checked)}
-                      className="size-4 rounded border-border-default text-primary focus:ring-border-focus"
-                    />
-                    Checker
-                  </label>
-                  <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-text-primary">
-                    <input
-                      type="checkbox"
-                      checked={tagCode}
-                      onChange={(event) => setTagCode(event.target.checked)}
-                      className="size-4 rounded border-border-default text-primary focus:ring-border-focus"
-                    />
-                    Code
-                  </label>
-                </div>
-              </div>
             </div>
-
-            <LessonOutputPricingFields
-              compact
-              difficultyBand={difficultyBand}
-              includesTest={includesTest}
-              includesSolution={includesSolution}
-              includesLectureVideo={includesLectureVideo}
-              includesTheoryLecture={includesTheoryLecture}
-              theoryLectureLinks={theoryLectureLinks}
-              level={level}
-              storedCost={initialData?.cost ?? 0}
-              selectButtonClassName={selectButtonClass()}
-              selectMenuClassName={selectMenuClass()}
-              linkInputClassName={fieldInputClass()}
-              onDifficultyBandChange={setDifficultyBand}
-              onIncludesTestChange={setIncludesTest}
-              onIncludesSolutionChange={setIncludesSolution}
-              onIncludesLectureVideoChange={setIncludesLectureVideo}
-              onIncludesTheoryLectureChange={setIncludesTheoryLecture}
-              onTheoryLectureLinksChange={setTheoryLectureLinks}
-            />
 
             {allowPaymentStatusEdit ? (
               <label className="flex flex-col gap-1.5">
@@ -720,32 +707,88 @@ export default function LessonOutputEditorForm({
               </label>
             ) : null}
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-sm text-text-secondary">Contest</span>
-              <textarea
-                value={contestUploaded}
-                onChange={(event) => setContestUploaded(event.target.value)}
-                className={`${fieldInputClass()} min-h-[6rem] resize-y py-3`}
-                rows={4}
-                placeholder="VD: Bài đã đưa vào contest ABC…"
-              />
-            </label>
+            {showProblemFields ? (
+              <>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm text-text-secondary">
+                    Link gốc <span className="text-error">*</span>
+                  </span>
+                  <input
+                    type="url"
+                    value={originalLink}
+                    onChange={(event) => setOriginalLink(event.target.value)}
+                    className={fieldInputClass()}
+                    placeholder="https://..."
+                    autoComplete="off"
+                    required
+                  />
+                </label>
 
-            <label className="flex flex-col gap-1.5">
-              <span className="text-sm text-text-secondary">
-                Link output
-                {isTheoryLectureOnly ? null : <span className="text-error"> *</span>}
-              </span>
-              <input
-                type="url"
-                value={link}
-                onChange={(event) => setLink(event.target.value)}
-                className={fieldInputClass()}
-                placeholder="https://..."
-                autoComplete="off"
-                required={!isTheoryLectureOnly}
-              />
-            </label>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-sm text-text-secondary">
+                      Tên gốc <span className="text-error">*</span>
+                    </span>
+                    <input
+                      type="text"
+                      value={originalTitle}
+                      onChange={(event) => setOriginalTitle(event.target.value)}
+                      className={fieldInputClass()}
+                      placeholder="Tên bài gốc"
+                      autoComplete="off"
+                      required
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-sm text-text-secondary">
+                      Nguồn <span className="text-error">*</span>
+                    </span>
+                    <input
+                      type="text"
+                      value={source}
+                      onChange={(event) => setSource(event.target.value)}
+                      className={fieldInputClass()}
+                      placeholder="codeforces, Uni, …"
+                      autoComplete="off"
+                      required
+                    />
+                  </label>
+                </div>
+
+                <TagCheckboxes
+                  tagChecker={tagChecker}
+                  tagCode={tagCode}
+                  onTagCheckerChange={setTagChecker}
+                  onTagCodeChange={setTagCode}
+                />
+
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm text-text-secondary">Contest</span>
+                  <textarea
+                    value={contestUploaded}
+                    onChange={(event) => setContestUploaded(event.target.value)}
+                    className={`${fieldInputClass()} min-h-[6rem] resize-y py-3`}
+                    rows={4}
+                    placeholder="VD: Bài đã đưa vào contest ABC…"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm text-text-secondary">
+                    Link output <span className="text-error">*</span>
+                  </span>
+                  <input
+                    type="url"
+                    value={link}
+                    onChange={(event) => setLink(event.target.value)}
+                    className={fieldInputClass()}
+                    placeholder="https://..."
+                    autoComplete="off"
+                    required
+                  />
+                </label>
+              </>
+            ) : null}
           </div>
         </section>
 
@@ -833,6 +876,10 @@ export default function LessonOutputEditorForm({
         }
       >
         <div className="space-y-4">
+          <div className="rounded-[1.5rem] border border-border-default bg-bg-surface p-4">
+            {pricingFields}
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
               <span>Tên bài</span>
@@ -843,17 +890,6 @@ export default function LessonOutputEditorForm({
                 placeholder="Ví dụ: Bài 1 - Tổ hợp cơ bản"
                 className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 required
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              <span>Contest uploaded</span>
-              <input
-                type="text"
-                value={contestUploaded}
-                onChange={(event) => setContestUploaded(event.target.value)}
-                placeholder="Ví dụ: Vĩnh Phúc HSG 2024"
-                className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
               />
             </label>
 
@@ -897,102 +933,6 @@ export default function LessonOutputEditorForm({
               </label>
             ) : null}
 
-            <div className="sm:col-span-2">
-              <LessonOutputPricingFields
-                difficultyBand={difficultyBand}
-                includesTest={includesTest}
-                includesSolution={includesSolution}
-                includesLectureVideo={includesLectureVideo}
-                includesTheoryLecture={includesTheoryLecture}
-                theoryLectureLinks={theoryLectureLinks}
-                level={level}
-                storedCost={initialData?.cost ?? 0}
-                selectButtonClassName={selectButtonClass()}
-                selectMenuClassName={selectMenuClass()}
-                linkInputClassName={fieldInputClass()}
-                onDifficultyBandChange={setDifficultyBand}
-                onIncludesTestChange={setIncludesTest}
-                onIncludesSolutionChange={setIncludesSolution}
-                onIncludesLectureVideoChange={setIncludesLectureVideo}
-                onIncludesTheoryLectureChange={setIncludesTheoryLecture}
-                onTheoryLectureLinksChange={setTheoryLectureLinks}
-              />
-            </div>
-
-            <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              <span>Level</span>
-              <UpgradedSelect
-                name="level"
-                value={level}
-                onValueChange={(value) => setLevel((value ?? "").trim())}
-                options={LEVEL_OPTIONS}
-                ariaLabel="Level lesson output"
-                placeholder="Chọn level"
-                buttonClassName={`${selectButtonClass()} flex items-center justify-between text-left`}
-                menuClassName={selectMenuClass()}
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              <span>
-                Nguồn
-                {hideStaffFields ? <span className="text-error"> *</span> : null}
-              </span>
-              <input
-                type="text"
-                value={source}
-                onChange={(event) => setSource(event.target.value)}
-                placeholder="Ví dụ: Vĩnh Phúc HSG 2024"
-                className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                required={hideStaffFields}
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-              <span>
-                Original title
-                {hideStaffFields ? <span className="text-error"> *</span> : null}
-              </span>
-              <input
-                type="text"
-                value={originalTitle}
-                onChange={(event) => setOriginalTitle(event.target.value)}
-                placeholder="Tên bài gốc hoặc tên trong đề nguồn"
-                className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                required={hideStaffFields}
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-              <span>
-                Link gốc
-                {hideStaffFields ? <span className="text-error"> *</span> : null}
-              </span>
-              <input
-                type="url"
-                value={originalLink}
-                onChange={(event) => setOriginalLink(event.target.value)}
-                placeholder="https://..."
-                className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                required={hideStaffFields}
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
-              <span>
-                Link output
-                {isTheoryLectureOnly ? null : <span className="text-error"> *</span>}
-              </span>
-              <input
-                type="url"
-                value={link}
-                onChange={(event) => setLink(event.target.value)}
-                placeholder="https://..."
-                className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                required={!isTheoryLectureOnly}
-              />
-            </label>
-
             <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
               <span>
                 Tags <span className="text-error">*</span>
@@ -1004,27 +944,87 @@ export default function LessonOutputEditorForm({
               />
             </label>
 
-            {hideStaffFields ? (
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 sm:col-span-2">
-                <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-text-primary">
+            {showProblemFields ? (
+              <>
+                <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                  <span>Contest uploaded</span>
                   <input
-                    type="checkbox"
-                    checked={tagChecker}
-                    onChange={(event) => setTagChecker(event.target.checked)}
-                    className="size-4 rounded border-border-default text-primary focus:ring-border-focus"
+                    type="text"
+                    value={contestUploaded}
+                    onChange={(event) => setContestUploaded(event.target.value)}
+                    placeholder="Ví dụ: Vĩnh Phúc HSG 2024"
+                    className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                   />
-                  Checker
                 </label>
-                <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-text-primary">
+
+                <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                  <span>
+                    Nguồn
+                    {hideStaffFields ? <span className="text-error"> *</span> : null}
+                  </span>
                   <input
-                    type="checkbox"
-                    checked={tagCode}
-                    onChange={(event) => setTagCode(event.target.checked)}
-                    className="size-4 rounded border-border-default text-primary focus:ring-border-focus"
+                    type="text"
+                    value={source}
+                    onChange={(event) => setSource(event.target.value)}
+                    placeholder="Ví dụ: Vĩnh Phúc HSG 2024"
+                    className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                    required={hideStaffFields}
                   />
-                  Code
                 </label>
-              </div>
+
+                <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                  <span>
+                    Original title
+                    {hideStaffFields ? <span className="text-error"> *</span> : null}
+                  </span>
+                  <input
+                    type="text"
+                    value={originalTitle}
+                    onChange={(event) => setOriginalTitle(event.target.value)}
+                    placeholder="Tên bài gốc hoặc tên trong đề nguồn"
+                    className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                    required={hideStaffFields}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                  <span>
+                    Link gốc
+                    {hideStaffFields ? <span className="text-error"> *</span> : null}
+                  </span>
+                  <input
+                    type="url"
+                    value={originalLink}
+                    onChange={(event) => setOriginalLink(event.target.value)}
+                    placeholder="https://..."
+                    className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                    required={hideStaffFields}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
+                  <span>
+                    Link output <span className="text-error">*</span>
+                  </span>
+                  <input
+                    type="url"
+                    value={link}
+                    onChange={(event) => setLink(event.target.value)}
+                    placeholder="https://..."
+                    className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                    required
+                  />
+                </label>
+
+                {hideStaffFields ? (
+                  <TagCheckboxes
+                    tagChecker={tagChecker}
+                    tagCode={tagCode}
+                    onTagCheckerChange={setTagChecker}
+                    onTagCodeChange={setTagCode}
+                  />
+                ) : null}
+              </>
             ) : null}
           </div>
         </div>

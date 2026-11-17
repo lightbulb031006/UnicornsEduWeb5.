@@ -1,3 +1,4 @@
+import { hasSaleCsHeadAccess } from "@/lib/sale-cs-head-access";
 export function AssistantDualRoleIncomeHelper({
   visible,
 }: {
@@ -15,5 +16,5 @@ export function AssistantDualRoleIncomeHelper({
 
 export function hasAssistantAndCustomerCareRoles(roles?: string[] | null) {
   if (!Array.isArray(roles)) return false;
-  return roles.includes("assistant") && roles.includes("customer_care");
+  return hasSaleCsHeadAccess(roles) && roles.includes("customer_care");
 }

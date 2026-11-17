@@ -25,7 +25,7 @@ export class ProtectedVideoController {
 
   @Get('status')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({ summary: 'Trạng thái Đồng bộ video của một link YouTube' })
   @ApiQuery({ name: 'url', description: 'Link YouTube đã lưu ở tiết/buổi' })
   @ApiResponse({
@@ -39,7 +39,7 @@ export class ProtectedVideoController {
 
   @Post('retry')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({ summary: 'Gửi lại link YouTube sang UNIOJ (Thử lại)' })
   @ApiBody({
     schema: {

@@ -18,10 +18,9 @@ const MANAGEMENT_HANDLERS = [
 ] as const;
 
 const PUBLISHER_STAFF_ROLES = [
-  StaffRole.assistant,
+  StaffRole.sale_customer_care_head,
   StaffRole.lesson_plan,
   StaffRole.lesson_plan_head,
-  StaffRole.accountant,
   StaffRole.accountant_income,
   StaffRole.accountant_expense,
   StaffRole.communication,

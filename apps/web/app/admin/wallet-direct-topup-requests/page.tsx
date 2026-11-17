@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -11,6 +11,7 @@ import type {
   StudentWalletDirectTopUpRequestResponse,
   StudentWalletDirectTopUpRequestStatus,
 } from "@/dtos/student.dto";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import * as studentApi from "@/lib/apis/student.api";
 import { cn } from "@/lib/utils";
 import {
@@ -25,7 +26,7 @@ const STATUS_OPTIONS: Array<{
   label: string;
   description: string;
 }> = [
-  { value: "pending", label: "Chờ duyệt", description: "Yêu cầu còn hạn cần admin xử lý" },
+  { value: "pending", label: "Chờ duyệt", description: "Yêu cầu còn hạn cần duyệt" },
   { value: "approved", label: "Đã duyệt", description: "Yêu cầu đã cộng ví" },
   { value: "expired", label: "Hết hạn", description: "Yêu cầu quá hạn hoặc đã bị đóng" },
   { value: "all", label: "Tất cả", description: "Toàn bộ lịch sử yêu cầu" },
@@ -170,6 +171,8 @@ function AdminWalletDirectTopUpRequestsPageContent() {
   const searchParams = useSearchParams();
   const getSearchParam = searchParams.get.bind(searchParams);
   const queryClient = useQueryClient();
+  const [confirmTarget, setConfirmTarget] =
+    useState<StudentWalletDirectTopUpRequestResponse | null>(null);
 
   const status = normalizeStatus(getSearchParam("status"));
   const page = normalizePage(getSearchParam("page"));
@@ -196,6 +199,7 @@ function AdminWalletDirectTopUpRequestsPageContent() {
       studentApi.approveStudentWalletDirectTopUpRequest(request.id),
     onSuccess: async (result, request) => {
       toast.success(result.message || "Đã duyệt yêu cầu nạp ví.");
+      setConfirmTarget(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["student", "wallet-direct-topup-requests"] }),
         queryClient.invalidateQueries({ queryKey: ["student", "detail", request.studentId] }),
@@ -230,11 +234,7 @@ function AdminWalletDirectTopUpRequestsPageContent() {
   };
 
   const handleApprove = (request: StudentWalletDirectTopUpRequestResponse) => {
-    const ok = window.confirm(
-      `Duyệt nạp ${formatCurrency(request.amount)} cho ${request.studentName}?`,
-    );
-    if (!ok) return;
-    approveMutation.mutate(request);
+    setConfirmTarget(request);
   };
 
   return (
@@ -249,7 +249,7 @@ function AdminWalletDirectTopUpRequestsPageContent() {
               Duyệt nạp ví học sinh
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-text-secondary">
-              Theo dõi yêu cầu nạp thẳng từ CSKH, kế toán và trợ lí; admin duyệt thì ví học sinh mới được cộng.
+              Theo dõi yêu cầu nạp thẳng từ CSKH và Trưởng phòng Sale & CSKH; Admin hoặc Trưởng phòng Sale & CSKH duyệt thì ví học sinh mới được cộng.
             </p>
           </div>
           <div className="rounded-lg border border-border-default bg-bg-surface px-4 py-3 text-sm">
@@ -437,6 +437,24 @@ function AdminWalletDirectTopUpRequestsPageContent() {
           </div>
         </section>
       </div>
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !approveMutation.isPending) setConfirmTarget(null);
+        }}
+        title="Duyệt nạp ví học sinh?"
+        description={
+          confirmTarget
+            ? `Cộng ${formatCurrency(confirmTarget.amount)} vào ví ${confirmTarget.studentName}. Thao tác này không hoàn tác được.`
+            : undefined
+        }
+        confirmLabel="Duyệt nạp"
+        confirmPending={approveMutation.isPending}
+        onConfirm={() => {
+          if (confirmTarget) approveMutation.mutate(confirmTarget);
+        }}
+      />
     </div>
   );
 }

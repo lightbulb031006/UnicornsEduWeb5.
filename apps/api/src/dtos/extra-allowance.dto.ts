@@ -115,6 +115,7 @@ export const SELF_MANAGED_EXTRA_ALLOWANCE_ROLES = [
   StaffRole.communication,
   StaffRole.technical,
   StaffRole.training,
+  StaffRole.training_head,
   StaffRole.sale,
 ] as const;
 

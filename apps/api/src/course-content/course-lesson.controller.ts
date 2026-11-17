@@ -32,10 +32,9 @@ import { CourseLessonService } from './course-lesson.service';
 import { COURSE_TREE_STAFF_ROLES } from './course-tree-roles';
 
 const COURSE_CONTENT_FORBIDDEN =
-  'Không thuộc đội giáo án của khoá. Dạy lớp không đồng nghĩa soạn giáo án.';
+  'Không thuộc đội chuyên môn của khoá. Dạy lớp không đồng nghĩa soạn giáo án.';
 
-const TREE_STAFF_DESC =
-  'Staff: assistant, teacher, lesson_plan, lesson_plan_head.';
+const TREE_STAFF_DESC = 'Staff: teacher, lesson_plan, lesson_plan_head.';
 
 @Controller('course/:courseId/modules/:moduleId/lessons')
 @ApiTags('course-lessons')

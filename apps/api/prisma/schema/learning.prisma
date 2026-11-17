@@ -215,8 +215,8 @@ model CourseDifficultyLevel {
 }
 
 /// Đội giáo án được gán vào một Khoá học để soạn nội dung học thuật và ngân hàng
-/// câu hỏi của khoá đó. Việc gán do admin, Trưởng giáo án (`lesson_plan_head`) hoặc
-/// Trợ lí (`assistant`) thực hiện. Thành viên `lesson_plan` chỉ thấy khoá mình được gán;
+/// câu hỏi của khoá đó. Việc gán do admin hoặc Trưởng ban Chuyên môn (`lesson_plan_head`)
+/// thực hiện. Thành viên `lesson_plan` chỉ thấy khoá mình được gán;
 /// `lesson_plan_head` thấy và sửa được nội dung của mọi khoá.
 model CourseLessonPlanMember {
   id        String    @id @default(dbgenerated("gen_random_uuid()"))
@@ -255,6 +255,8 @@ model ClassTeacher {
   classId                       String    @map("class_id")
   teacherId                     String    @map("teacher_id")
   customAllowance               Int?      @map("custom_allowance")
+  /// Mức trợ cấp / học sinh / buổi đúng như admin nhập (không quy đổi block). Null = theo mặc định lớp.
+  customAllowancePerSession     Int?      @map("custom_allowance_per_session")
   /// Scale riêng của gia sư trên lớp (VNĐ phẳng mỗi buổi). Null = theo `classes.scale_amount`; 0 = không có scale.
   customScaleAmount             Int?      @map("custom_scale_amount")
   operatingDeductionRatePercent Decimal   @default(0) @map("tax_rate_percent") @db.Decimal(5, 2)
@@ -467,10 +469,12 @@ model Attendance {
   trialCatchUpFee                     Int?                       @map("trial_catch_up_fee")
   /// Dòng ví `extend` thứ hai của buổi thu bù học thử.
   trialCatchUpTransactionId           String?                    @unique @map("trial_catch_up_transaction_id")
-  assistantManagerStaffId             String?                    @map("assistant_manager_staff_id")
-  assistantPaymentStatus              PaymentStatus?             @map("assistant_payment_status")
-  assistantTaxDeductionRatePercent    Decimal                    @default(0) @map("assistant_tax_deduction_rate_percent") @db.Decimal(5, 2)
-  assistantManagerStaff               StaffInfo?                 @relation("AttendanceAssistant", fields: [assistantManagerStaffId], references: [id])
+  /// Trưởng phòng Sale & CSKH quản lí CSKH của buổi (hưởng hoa hồng trưởng phòng). #268 đổi tên field
+  /// từ `saleCsHeadStaffId…`; cột DB giữ tên cũ `assistant_*` qua `@map`.
+  saleCsHeadStaffId                   String?                    @map("assistant_manager_staff_id")
+  saleCsHeadPaymentStatus             PaymentStatus?             @map("assistant_payment_status")
+  saleCsHeadTaxDeductionRatePercent   Decimal                    @default(0) @map("assistant_tax_deduction_rate_percent") @db.Decimal(5, 2)
+  saleCsHeadStaff                     StaffInfo?                 @relation("AttendanceSaleCsHead", fields: [saleCsHeadStaffId], references: [id])
   customerCareStaff                   StaffInfo?                 @relation("AttendanceCustomerCare", fields: [customerCareStaffId], references: [id])
   session                             Session                    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   student                             StudentInfo                @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -484,8 +488,8 @@ model Attendance {
   @@index([customerCareStaffId, customerCarePaymentStatus])
   @@index([customerCareStaffId, customerCarePaymentStatus, sessionId], map: "attendance_cc_staff_payment_session_idx")
   @@index([customerCareStaffId, studentId, sessionId])
-  @@index([assistantManagerStaffId, assistantPaymentStatus])
-  @@index([assistantManagerStaffId, assistantPaymentStatus, sessionId], map: "attendance_assistant_staff_payment_session_idx")
+  @@index([saleCsHeadStaffId, saleCsHeadPaymentStatus])
+  @@index([saleCsHeadStaffId, saleCsHeadPaymentStatus, sessionId], map: "attendance_assistant_staff_payment_session_idx")
   @@map("attendance")
 }
 

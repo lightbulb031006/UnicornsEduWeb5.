@@ -71,8 +71,8 @@ export const EXTRA_ALLOWANCE_ROLE_META = {
     pillClassName:
       `border border-primary/20 bg-primary/10 text-primary ${insetSurfaceShadow}`,
   },
-  assistant: {
-    label: ROLE_LABELS.assistant,
+  sale_customer_care_head: {
+    label: ROLE_LABELS.sale_customer_care_head,
     badgeClassName: "bg-warning/15 text-warning ring-1 ring-warning/25",
     pillClassName:
       `border border-warning/25 bg-warning/10 text-warning ${insetSurfaceShadow}`,
@@ -88,12 +88,6 @@ export const EXTRA_ALLOWANCE_ROLE_META = {
     badgeClassName: "bg-info/18 text-info ring-1 ring-info/25",
     pillClassName:
       `border border-info/25 bg-info/12 text-info ${insetSurfaceShadow}`,
-  },
-  accountant: {
-    label: ROLE_LABELS.accountant,
-    badgeClassName: "bg-success/12 text-success ring-1 ring-success/20",
-    pillClassName:
-      `border border-success/20 bg-success/10 text-success ${insetSurfaceShadow}`,
   },
   accountant_income: {
     label: ROLE_LABELS.accountant_income,
@@ -127,6 +121,12 @@ export const EXTRA_ALLOWANCE_ROLE_META = {
   },
   training: {
     label: ROLE_LABELS.training,
+    badgeClassName: "bg-secondary/12 text-secondary ring-1 ring-secondary/20",
+    pillClassName:
+      `border border-secondary/20 bg-secondary/10 text-secondary ${insetSurfaceShadow}`,
+  },
+  training_head: {
+    label: ROLE_LABELS.training_head,
     badgeClassName: "bg-secondary/12 text-secondary ring-1 ring-secondary/20",
     pillClassName:
       `border border-secondary/20 bg-secondary/10 text-secondary ${insetSurfaceShadow}`,
@@ -197,7 +197,7 @@ export const EXTRA_ALLOWANCE_ROLE_OPTIONS = (
   [
     { value: "admin", label: renderExtraAllowanceRoleOptionLabel("admin") },
     { value: "teacher", label: renderExtraAllowanceRoleOptionLabel("teacher") },
-    { value: "assistant", label: renderExtraAllowanceRoleOptionLabel("assistant") },
+    { value: "sale_customer_care_head", label: renderExtraAllowanceRoleOptionLabel("sale_customer_care_head") },
     {
       value: "lesson_plan",
       label: renderExtraAllowanceRoleOptionLabel("lesson_plan"),
@@ -225,6 +225,10 @@ export const EXTRA_ALLOWANCE_ROLE_OPTIONS = (
     {
       value: "training",
       label: renderExtraAllowanceRoleOptionLabel("training"),
+    },
+    {
+      value: "training_head",
+      label: renderExtraAllowanceRoleOptionLabel("training_head"),
     },
     {
       value: "sale",

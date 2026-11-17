@@ -1,3 +1,4 @@
+import { hasSaleCsHeadAccess } from 'src/common/sale-cs-head-access';
 import {
   BadRequestException,
   ForbiddenException,
@@ -33,6 +34,11 @@ import {
 } from 'src/payroll/assistant-share.util';
 import { resolveTaxDeductionRate } from 'src/payroll/deduction-rates';
 import { PrismaService } from 'src/prisma/prisma.service';
+import {
+  assertActorNotEditingOwnCompensation,
+  resolveStaffPolicyActor,
+} from 'src/common/staff-role-policy';
+import { computeStaffSensitiveView } from 'src/common/staff-sensitive-view';
 
 const DEFAULT_DAYS = 30;
 const RECENT_TOP_UP_DAYS = 21;
@@ -58,6 +64,20 @@ type CustomerCareCommissionAggregateRow = {
   paidCommission: unknown;
   monthCommission?: unknown;
 };
+
+/** #270: bỏ số tiền hoa hồng (thu nhập cá nhân) khi người xem không được thấy. */
+function redactCommissionAmounts(
+  row: CustomerCareCommissionDto,
+): CustomerCareCommissionDto {
+  return {
+    studentId: row.studentId,
+    fullName: row.fullName,
+    totalCommission: null,
+    pendingCommission: null,
+    paidCommission: null,
+    ...(row.monthCommission !== undefined ? { monthCommission: null } : {}),
+  };
+}
 
 function parseMonthRange(monthKey: string): {
   start: Date;
@@ -124,6 +144,13 @@ export class CustomerCareService {
     userId: string,
     roleType: UserRole,
     requestedStaffId: string,
+    options: {
+      /**
+       * #270: màn hoa hồng (khoản chi nhân sự) mở thêm cho Kế toán chi — người
+       * được xem thu nhập cá nhân. Màn học sinh/nạp ví không mở.
+       */
+      allowIncomeViewers?: boolean;
+    } = {},
   ) {
     if (roleType === UserRole.admin) {
       return requestedStaffId;
@@ -144,16 +171,22 @@ export class CustomerCareService {
     }
 
     if (
-      staff.roles.includes(StaffRole.assistant) ||
-      staff.roles.includes(StaffRole.accountant) ||
+      hasSaleCsHeadAccess(staff.roles) ||
       staff.roles.includes(StaffRole.accountant_income)
+    ) {
+      return requestedStaffId;
+    }
+
+    if (
+      options.allowIncomeViewers &&
+      staff.roles.includes(StaffRole.accountant_expense)
     ) {
       return requestedStaffId;
     }
 
     if (!staff.roles.includes(StaffRole.customer_care)) {
       throw new ForbiddenException(
-        'Màn CSKH chỉ mở cho admin, trợ lí, kế toán, hoặc staff có role customer_care.',
+        'Màn CSKH chỉ mở cho admin, Trưởng phòng Sale & CSKH, kế toán, hoặc staff có role customer_care.',
       );
     }
 
@@ -183,11 +216,10 @@ export class CustomerCareService {
       return false;
     }
 
+    // #267: thanh toán hoa hồng CSKH là việc trả lương → Trợ lí không còn quyền.
+    // #270: Kế toán thu không xử lý khoản chi nhân sự.
     return (
       staff.roles.includes(StaffRole.admin) ||
-      staff.roles.includes(StaffRole.assistant) ||
-      staff.roles.includes(StaffRole.accountant) ||
-      staff.roles.includes(StaffRole.accountant_income) ||
       staff.roles.includes(StaffRole.accountant_expense)
     );
   }
@@ -207,8 +239,7 @@ export class CustomerCareService {
     }
 
     return (
-      staff.roles.includes(StaffRole.admin) ||
-      staff.roles.includes(StaffRole.assistant)
+      staff.roles.includes(StaffRole.admin) || hasSaleCsHeadAccess(staff.roles)
     );
   }
 
@@ -243,9 +274,12 @@ export class CustomerCareService {
       staffId: accessibleStaffId,
       student: { status: StudentStatus.active },
     };
-    const total = await this.prisma.customerCareService.count({
-      where: activeStudentWhere,
-    });
+    const [total, assignedTotal] = await Promise.all([
+      this.prisma.customerCareService.count({ where: activeStudentWhere }),
+      this.prisma.customerCareService.count({
+        where: { staffId: accessibleStaffId },
+      }),
+    ]);
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const safePage = Math.min(page, totalPages);
     const skip = (safePage - 1) * limit;
@@ -314,6 +348,7 @@ export class CustomerCareService {
         total,
         page: safePage,
         limit,
+        assignedTotal,
       },
     };
   }
@@ -603,8 +638,57 @@ export class CustomerCareService {
       userId,
       roleType,
       staffId,
+      { allowIncomeViewers: true },
     );
+    const canViewAmounts = await this.canViewCommissionAmounts(
+      userId,
+      roleType,
+      accessibleStaffId,
+    );
+    const result = await this.loadCommissionsByStaffId(
+      accessibleStaffId,
+      query,
+    );
+    if (canViewAmounts) {
+      return Array.isArray(result)
+        ? result
+        : { ...result, amountsVisible: true };
+    }
+    if (Array.isArray(result)) {
+      return result.map(redactCommissionAmounts);
+    }
+    return {
+      data: result.data.map(redactCommissionAmounts),
+      summary: {
+        studentCount: result.summary.studentCount,
+        totalPending: null,
+        totalMonthCommission: null,
+      },
+      amountsVisible: false,
+    };
+  }
 
+  /**
+   * #270: tiền hoa hồng là thu nhập cá nhân → chỉ Admin, Kế toán chi và chính
+   * CSKH đó thấy số tiền. Trưởng phòng Sale & CSKH, Kế toán thu vẫn mở màn
+   * nhưng số tiền là `null` (vẫn thấy % hoa hồng, trạng thái thanh toán).
+   */
+  private async canViewCommissionAmounts(
+    userId: string,
+    roleType: UserRole,
+    staffId: string,
+  ): Promise<boolean> {
+    const actor = await resolveStaffPolicyActor(this.prisma, {
+      userId,
+      roleType,
+    });
+    return computeStaffSensitiveView(actor, staffId).income;
+  }
+
+  private async loadCommissionsByStaffId(
+    accessibleStaffId: string,
+    query: CustomerCareCommissionListQueryDto,
+  ): Promise<CustomerCareCommissionListDto | CustomerCareCommissionDto[]> {
     const staff = await this.prisma.staffInfo.findUnique({
       where: { id: accessibleStaffId },
       select: { id: true },
@@ -804,7 +888,7 @@ export class CustomerCareService {
     const summary = data.reduce(
       (acc, row) => ({
         studentCount: acc.studentCount + 1,
-        totalPending: acc.totalPending + row.pendingCommission,
+        totalPending: acc.totalPending + (row.pendingCommission ?? 0),
         totalMonthCommission:
           acc.totalMonthCommission + (row.monthCommission ?? 0),
       }),
@@ -830,6 +914,12 @@ export class CustomerCareService {
       userId,
       roleType,
       staffId,
+      { allowIncomeViewers: true },
+    );
+    const canViewAmounts = await this.canViewCommissionAmounts(
+      userId,
+      roleType,
+      accessibleStaffId,
     );
 
     const staff = await this.prisma.staffInfo.findUnique({
@@ -958,7 +1048,7 @@ export class CustomerCareService {
         className: attendance.session.class?.name ?? null,
         tuitionFee: tuition,
         customerCareCoef: coef,
-        commission,
+        commission: canViewAmounts ? commission : null,
         paymentStatus:
           attendance.customerCarePaymentStatus ?? PaymentStatus.pending,
       };
@@ -981,16 +1071,23 @@ export class CustomerCareService {
         'Tài khoản hiện tại không có quyền cập nhật trạng thái thanh toán hoa hồng CSKH.',
       );
     }
+    await assertActorNotEditingOwnCompensation(
+      this.prisma,
+      { userId, roleType },
+      [staffId],
+    );
 
     const accessibleStaffId = await this.resolveAccessibleStaffId(
       userId,
       roleType,
       staffId,
+      { allowIncomeViewers: true },
     );
 
+    // Body thiếu/ sai kiểu (DTO là interface, không validate runtime) → 400, không 500.
     const uniqueAttendanceIds = Array.from(
       new Set(
-        attendanceIds.filter(
+        (Array.isArray(attendanceIds) ? attendanceIds : []).filter(
           (attendanceId): attendanceId is string =>
             typeof attendanceId === 'string' && attendanceId.trim().length > 0,
         ),
@@ -1121,6 +1218,11 @@ export class CustomerCareService {
         'Tài khoản hiện tại không có quyền chỉnh % CSKH.',
       );
     }
+    await assertActorNotEditingOwnCompensation(
+      this.prisma,
+      { userId, roleType },
+      [staffId],
+    );
 
     const accessibleStaffId = await this.resolveAccessibleStaffId(
       userId,
@@ -1128,9 +1230,10 @@ export class CustomerCareService {
       staffId,
     );
 
+    // Body thiếu/ sai kiểu (DTO là interface, không validate runtime) → 400, không 500.
     const uniqueStudentIds = Array.from(
       new Set(
-        studentIds.filter(
+        (Array.isArray(studentIds) ? studentIds : []).filter(
           (studentId): studentId is string =>
             typeof studentId === 'string' && studentId.trim().length > 0,
         ),

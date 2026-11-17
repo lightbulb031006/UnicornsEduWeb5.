@@ -5,9 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ResponsiveDialog } from "@/components/ui/ResponsiveDialog";
-import type { UserDetailWithStaff } from "@/dtos/user.dto";
 import * as userApi from "@/lib/apis/user.api";
-import { getUserDisplayName } from "@/lib/user-manage-form";
 
 const TITLE_ID = "set-user-password-title";
 const DESCRIPTION_ID = "set-user-password-description";
@@ -18,19 +16,34 @@ const INPUT_CLASS =
   "mt-1 min-h-11 w-full rounded-xl border border-border-default bg-bg-surface px-3.5 py-2.5 text-sm text-text-primary shadow-sm transition-[border-color,box-shadow] duration-200 placeholder:text-text-muted focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus/40";
 
 type Props = {
-  user: UserDetailWithStaff;
+  /** User id của tài khoản cần đặt mật khẩu. */
+  userId: string;
+  /** Tên hiển thị trong dialog / toast. */
+  displayName: string;
   open: boolean;
   onClose: () => void;
 };
 
-export default function SetUserPasswordDialog({ user, open, onClose }: Props) {
+export default function SetUserPasswordDialog({
+  userId,
+  displayName,
+  open,
+  onClose,
+}: Props) {
   if (!open) return null;
   // Mount lại mỗi lần mở để form luôn trống.
-  return <SetUserPasswordForm user={user} onClose={onClose} />;
+  return (
+    <SetUserPasswordForm
+      userId={userId}
+      displayName={displayName}
+      onClose={onClose}
+    />
+  );
 }
 
 function SetUserPasswordForm({
-  user,
+  userId,
+  displayName,
   onClose,
 }: Omit<Props, "open">) {
   const [password, setPassword] = useState("");
@@ -39,12 +52,11 @@ function SetUserPasswordForm({
   const [error, setError] = useState<string | null>(null);
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
 
-  const displayName = getUserDisplayName(user) || user.accountHandle || user.email;
   const isDirty = password.length > 0 || confirmPassword.length > 0;
 
   const mutation = useMutation({
     mutationFn: (newPassword: string) =>
-      userApi.setUserPassword(user.id, { newPassword }),
+      userApi.setUserPassword(userId, { newPassword }),
     onSuccess: () => {
       toast.success(`Đã đổi mật khẩu cho ${displayName}.`);
       onClose();

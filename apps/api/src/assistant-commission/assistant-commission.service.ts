@@ -1,4 +1,8 @@
 import {
+  SALE_CS_HEAD_ROLE,
+  hasSaleCsHeadAccess,
+} from 'src/common/sale-cs-head-access';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -26,6 +30,8 @@ import {
   commissionTuitionBasisVnd,
 } from 'src/payroll/assistant-share.util';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { computeStaffSensitiveView } from 'src/common/staff-sensitive-view';
+import { assertActorNotEditingOwnCompensation } from 'src/common/staff-role-policy';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
@@ -155,7 +161,7 @@ export class AssistantCommissionService {
 
     if (roleType !== UserRole.staff) {
       throw new ForbiddenException(
-        'Chỉ admin hoặc staff được phép xem dữ liệu hoa hồng trợ lí.',
+        'Chỉ admin hoặc staff được phép xem dữ liệu hoa hồng trưởng phòng.',
       );
     }
 
@@ -166,16 +172,20 @@ export class AssistantCommissionService {
       );
     }
 
-    const canAccess =
-      staff.roles.includes(StaffRole.admin) ||
-      staff.roles.includes(StaffRole.assistant) ||
-      staff.roles.includes(StaffRole.accountant) ||
-      staff.roles.includes(StaffRole.accountant_income) ||
-      staff.roles.includes(StaffRole.accountant_expense);
+    // #270: hoa hồng trưởng phòng là thu nhập cá nhân → Admin, Kế toán chi và
+    // chính Trưởng phòng đó. Trưởng phòng khác và Kế toán thu không xem.
+    const canAccess = computeStaffSensitiveView(
+      {
+        isAdmin: staff.roles.includes(StaffRole.admin),
+        staffId: staff.id,
+        roles: staff.roles,
+      },
+      requestedAssistantStaffId,
+    ).income;
 
     if (!canAccess) {
       throw new ForbiddenException(
-        'Tài khoản hiện tại không có quyền xem hoa hồng trợ lí.',
+        'Tài khoản hiện tại không có quyền xem hoa hồng trưởng phòng.',
       );
     }
 
@@ -196,11 +206,11 @@ export class AssistantCommissionService {
       return false;
     }
 
+    // #270: Kế toán thu không xử lý khoản chi nhân sự.
+    // #271: trạng thái thanh toán là việc trả lương → Trưởng phòng Sale & CSKH
+    // chỉ xem, không cập nhật (kể cả hoa hồng của trưởng phòng khác).
     return (
       staff.roles.includes(StaffRole.admin) ||
-      staff.roles.includes(StaffRole.assistant) ||
-      staff.roles.includes(StaffRole.accountant) ||
-      staff.roles.includes(StaffRole.accountant_income) ||
       staff.roles.includes(StaffRole.accountant_expense)
     );
   }
@@ -215,7 +225,7 @@ export class AssistantCommissionService {
       throw new NotFoundException('Assistant staff not found');
     }
 
-    if (!assistantStaff.roles.includes(StaffRole.assistant)) {
+    if (!hasSaleCsHeadAccess(assistantStaff.roles)) {
       throw new NotFoundException('Assistant staff not found');
     }
 
@@ -595,15 +605,15 @@ export class AssistantCommissionService {
 
     const attendances = await this.prisma.attendance.findMany({
       where: {
-        assistantManagerStaffId: accessibleAssistantStaffId,
+        saleCsHeadStaffId: accessibleAssistantStaffId,
         customerCareStaffId,
         studentId,
         status: { in: CHARGEABLE_ATTENDANCE_STATUSES },
         ...(scope === 'pending'
           ? {
               OR: [
-                { assistantPaymentStatus: PaymentStatus.pending },
-                { assistantPaymentStatus: null },
+                { saleCsHeadPaymentStatus: PaymentStatus.pending },
+                { saleCsHeadPaymentStatus: null },
               ],
             }
           : {}),
@@ -623,7 +633,7 @@ export class AssistantCommissionService {
         tuitionFee: true,
         payrollBasisTuitionFee: true,
         status: true,
-        assistantPaymentStatus: true,
+        saleCsHeadPaymentStatus: true,
         session: {
           select: {
             id: true,
@@ -665,7 +675,7 @@ export class AssistantCommissionService {
         shareAmount,
         attendanceStatus: attendance.status,
         paymentStatus:
-          attendance.assistantPaymentStatus ?? PaymentStatus.pending,
+          attendance.saleCsHeadPaymentStatus ?? PaymentStatus.pending,
         customerCareStaffName: customerCareStaff.fullName,
       };
     });
@@ -681,9 +691,14 @@ export class AssistantCommissionService {
     const canUpdate = await this.canUpdatePaymentStatus(userId, roleType);
     if (!canUpdate) {
       throw new ForbiddenException(
-        'Tài khoản hiện tại không có quyền cập nhật trạng thái thanh toán hoa hồng trợ lí.',
+        'Tài khoản hiện tại không có quyền cập nhật trạng thái thanh toán hoa hồng trưởng phòng.',
       );
     }
+    await assertActorNotEditingOwnCompensation(
+      this.prisma,
+      { userId, roleType },
+      [assistantStaffId],
+    );
 
     const accessibleAssistantStaffId =
       await this.resolveAccessibleAssistantStaffId(
@@ -721,12 +736,12 @@ export class AssistantCommissionService {
       const existingAttendances = await tx.attendance.findMany({
         where: {
           id: { in: uniqueAttendanceIds },
-          assistantManagerStaffId: accessibleAssistantStaffId,
+          saleCsHeadStaffId: accessibleAssistantStaffId,
           status: { in: CHARGEABLE_ATTENDANCE_STATUSES },
         },
         select: {
           id: true,
-          assistantPaymentStatus: true,
+          saleCsHeadPaymentStatus: true,
         },
       });
 
@@ -748,7 +763,7 @@ export class AssistantCommissionService {
       const changedAttendanceIds = existingAttendances
         .filter(
           (attendance) =>
-            (attendance.assistantPaymentStatus ?? PaymentStatus.pending) !==
+            (attendance.saleCsHeadPaymentStatus ?? PaymentStatus.pending) !==
             paymentStatus,
         )
         .map((attendance) => attendance.id);
@@ -766,7 +781,7 @@ export class AssistantCommissionService {
       if (paymentStatus === PaymentStatus.paid) {
         const taxRatePercent = await resolveTaxDeductionRate(tx, {
           staffId: accessibleAssistantStaffId,
-          roleType: StaffRole.assistant,
+          roleType: SALE_CS_HEAD_ROLE,
           effectiveDate: new Date(),
         });
 
@@ -775,8 +790,8 @@ export class AssistantCommissionService {
             id: { in: changedAttendanceIds },
           },
           data: {
-            assistantPaymentStatus: PaymentStatus.paid,
-            assistantTaxDeductionRatePercent: taxRatePercent,
+            saleCsHeadPaymentStatus: PaymentStatus.paid,
+            saleCsHeadTaxDeductionRatePercent: taxRatePercent,
           },
         });
         updatedCount = updateResult.count;
@@ -786,8 +801,8 @@ export class AssistantCommissionService {
             id: { in: changedAttendanceIds },
           },
           data: {
-            assistantPaymentStatus: PaymentStatus.pending,
-            assistantTaxDeductionRatePercent: 0,
+            saleCsHeadPaymentStatus: PaymentStatus.pending,
+            saleCsHeadTaxDeductionRatePercent: 0,
           },
         });
         updatedCount = updateResult.count;

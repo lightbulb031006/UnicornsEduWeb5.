@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ActionHistoryModule } from '../action-history/action-history.module';
 import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import {
@@ -9,7 +10,7 @@ import {
 import { AchievementService } from './achievement.service';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, ActionHistoryModule],
   controllers: [
     StaffAchievementController,
     StudentAchievementController,

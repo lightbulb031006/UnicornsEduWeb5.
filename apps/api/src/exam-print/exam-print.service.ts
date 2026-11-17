@@ -83,9 +83,9 @@ export class ExamPrintService {
       actor,
       classId,
     );
-    if (mode !== 'admin' && mode !== 'teacher') {
+    if (mode !== 'admin' && mode !== 'teacher' && mode !== 'training_manager') {
       throw new ForbiddenException(
-        'Chỉ gia sư phụ trách lớp hoặc admin mới in đề lần giao.',
+        'Chỉ gia sư phụ trách lớp, Quản lý lớp hoặc admin mới in đề lần giao.',
       );
     }
     const item = await this.prisma.classContentItem.findFirst({

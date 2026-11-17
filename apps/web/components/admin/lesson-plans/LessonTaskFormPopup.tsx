@@ -140,18 +140,18 @@ function LessonTaskFormPopupContent({
 
   const resultSummary = useMemo(() => {
     if (isStaffOptionsFetching) {
-      return "Đang tìm nhân sự giáo án…";
+      return "Đang tìm nhân sự chuyên môn…";
     }
 
     if (staffOptions.length === 0) {
       return deferredStaffSearch
         ? "Không tìm thấy nhân sự phù hợp với từ khóa hiện tại."
-        : "Chưa có gợi ý nhân sự giáo án.";
+        : "Chưa có gợi ý nhân sự chuyên môn.";
     }
 
     return deferredStaffSearch
       ? `Có ${staffOptions.length} kết quả gần nhất cho tìm kiếm hiện tại.`
-      : "Gợi ý nhanh 6 nhân sự giáo án đầu tiên theo hệ thống.";
+      : "Gợi ý nhanh 6 nhân sự chuyên môn đầu tiên theo hệ thống.";
   }, [deferredStaffSearch, isStaffOptionsFetching, staffOptions.length]);
 
   const handleSubmit = async (event: SyntheticEvent<HTMLFormElement>) => {
@@ -364,7 +364,7 @@ function LessonTaskFormPopupContent({
             <div className="flex flex-col gap-3 border-b border-border-default pb-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <p className="text-sm font-semibold text-text-primary">
-                  Tìm nhân sự giáo án
+                  Tìm nhân sự chuyên môn
                 </p>
                 <p className="mt-1 text-xs leading-5 text-text-secondary">
                   Chọn một hoặc nhiều nhân sự để thực hiện task này.
@@ -387,7 +387,7 @@ function LessonTaskFormPopupContent({
                   autoComplete="off"
                   value={staffSearch}
                   onChange={(event) => setStaffSearch(event.target.value)}
-                  placeholder="Nhập tên nhân sự giáo án…"
+                  placeholder="Nhập tên nhân sự chuyên môn…"
                   className="min-h-11 rounded-xl border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
@@ -445,7 +445,7 @@ function LessonTaskFormPopupContent({
                 <div className="rounded-2xl border border-dashed border-border-default bg-bg-secondary/40 px-4 py-8 text-sm text-text-muted">
                   {deferredStaffSearch
                     ? "Không có kết quả phù hợp. Thử đổi từ khóa ngắn hơn hoặc đúng họ tên hơn."
-                    : "Không có gợi ý nhân sự giáo án ở thời điểm hiện tại."}
+                    : "Không có gợi ý nhân sự chuyên môn ở thời điểm hiện tại."}
                 </div>
               )}
             </div>

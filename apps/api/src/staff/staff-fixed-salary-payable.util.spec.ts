@@ -26,7 +26,7 @@ describe('staff-fixed-salary-payable.util', () => {
     const record = mapFixedSalaryPayableToPreviewRecord(
       {
         id: 'payable-1',
-        roleType: StaffRole.assistant,
+        roleType: StaffRole.sale_customer_care_head,
         month: '2026-09',
         status: PaymentStatus.pending,
         note: 'Vào giữa tháng',
@@ -42,7 +42,7 @@ describe('staff-fixed-salary-payable.util', () => {
 
     expect(record.sourceType).toBe('fixed_salary');
     expect(record.sourceLabel).toBe('Lương cứng');
-    expect(record.role).toBe(StaffRole.assistant);
+    expect(record.role).toBe(StaffRole.sale_customer_care_head);
     expect(record.label).toBe('Vào giữa tháng');
     expect(record.netAmount).toBe(3_420_000);
     expect(record.operatingAmount).toBe(400_000);

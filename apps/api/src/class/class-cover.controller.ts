@@ -73,7 +73,7 @@ export class ClassCoverController {
   @ApiOperation({
     summary: 'Upload/replace class cover image',
     description:
-      'Admin và trợ lí: mọi lớp. Gia sư đứng lớp và Quản lý lớp: chỉ lớp của mình. JPG/PNG/WEBP, tối đa 5MB.',
+      'Admin, Trưởng phòng Sale & CSKH, Trưởng ban Đào tạo: mọi lớp. Gia sư đứng lớp và Quản lý lớp: chỉ lớp của mình. JPG/PNG/WEBP, tối đa 5MB.',
   })
   @ApiConsumes('multipart/form-data')
   @ApiParam({ name: 'id', description: 'Class id' })

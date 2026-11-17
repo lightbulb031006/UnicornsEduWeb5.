@@ -53,6 +53,7 @@ const ENTITY_LABELS: Record<string, string> = {
   bonus: "Khoản thưởng",
   extra_allowance: "Trợ cấp thêm",
   cf_problem_tutorial: "Tutorial CF",
+  staff_achievement: "Thành tích nhân sự",
 };
 
 const ENTITY_OPTIONS = [
@@ -61,6 +62,7 @@ const ENTITY_OPTIONS = [
   { value: "class", label: "Lớp học" },
   { value: "student", label: "Học sinh" },
   { value: "staff", label: "Nhân sự" },
+  { value: "staff_achievement", label: "Thành tích nhân sự" },
   { value: "user", label: "Người dùng" },
   { value: "cost", label: "Khoản chi" },
   { value: "bonus", label: "Khoản thưởng" },

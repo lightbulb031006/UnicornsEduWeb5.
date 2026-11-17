@@ -3,7 +3,6 @@ jest.mock('src/calendar/calendar.service', () => ({
 }));
 
 import { StaffRole } from 'generated/enums';
-import { ALLOW_ASSISTANT_ON_ADMIN_KEY } from './decorators/allow-assistant-on-admin.decorator';
 import { ALLOW_STAFF_ROLES_ON_ADMIN_KEY } from './decorators/allow-staff-roles-on-admin.decorator';
 import { BonusController } from '../bonus/bonus.controller';
 import { ClassController } from '../class/class.controller';
@@ -14,10 +13,15 @@ import { StaffController } from '../staff/staff.controller';
 import { StudentController } from '../student/student.controller';
 import { UserController } from '../user/user.controller';
 
+/**
+ * Danh sách staff role được vào admin route, theo đúng cách RolesGuard đọc
+ * (`getAllAndOverride`: handler ghi đè class). Không có metadata nào → `[]`
+ * (#267: trang quản trị mặc định đóng, chỉ Admin).
+ */
 function getAllowedStaffRoles(
   controller: { prototype: object },
   methodName: string,
-): StaffRole[] | undefined {
+): StaffRole[] {
   const descriptor = Object.getOwnPropertyDescriptor(
     controller.prototype,
     methodName,
@@ -28,165 +32,184 @@ function getAllowedStaffRoles(
     throw new Error(`Controller method not found: ${methodName}`);
   }
 
-  const metadata: unknown = Reflect.getMetadata(
+  const handlerMetadata: unknown = Reflect.getMetadata(
     ALLOW_STAFF_ROLES_ON_ADMIN_KEY,
     methodTarget,
   );
-
-  return Array.isArray(metadata) ? (metadata as StaffRole[]) : undefined;
-}
-
-function getAllowAssistantOnAdminRoute(
-  controller: { prototype: object },
-  methodName?: string,
-): boolean | undefined {
-  let target: object = controller;
-
-  if (methodName !== undefined) {
-    const descriptor = Object.getOwnPropertyDescriptor(
-      controller.prototype,
-      methodName,
-    );
-    const methodTarget: unknown = descriptor?.value;
-
-    if (typeof methodTarget !== 'function') {
-      throw new Error(`Controller method not found: ${methodName}`);
-    }
-
-    target = methodTarget;
-  }
-
-  const metadata: unknown = Reflect.getMetadata(
-    ALLOW_ASSISTANT_ON_ADMIN_KEY,
-    target,
+  const classMetadata: unknown = Reflect.getMetadata(
+    ALLOW_STAFF_ROLES_ON_ADMIN_KEY,
+    controller,
   );
+  const metadata = handlerMetadata ?? classMetadata;
 
-  return typeof metadata === 'boolean' ? metadata : undefined;
+  return Array.isArray(metadata) ? (metadata as StaffRole[]) : [];
 }
 
-describe('RBAC route metadata', () => {
-  it.each(['createUser', 'updateUser', 'setUserPassword', 'deleteUser'])(
-    'allows assistant on UserController.%s',
+describe('RBAC route metadata (#267 deny-by-default)', () => {
+  it.each(['createUser', 'updateUser', 'deleteUser'])(
+    'keeps UserController.%s admin-only',
     (methodName) => {
-      expect(getAllowedStaffRoles(UserController, methodName)).toEqual([
-        StaffRole.assistant,
-      ]);
+      expect(getAllowedStaffRoles(UserController, methodName)).toEqual([]);
     },
   );
 
+  it('allows assistant to set passwords (service limits target to students)', () => {
+    expect(getAllowedStaffRoles(UserController, 'setUserPassword')).toEqual([
+      StaffRole.sale_customer_care_head,
+    ]);
+  });
+
   it('allows assistant and customer care on UserController.createStudentUser', () => {
     expect(getAllowedStaffRoles(UserController, 'createStudentUser')).toEqual([
-      StaffRole.assistant,
+      StaffRole.sale_customer_care_head,
       StaffRole.customer_care,
     ]);
   });
 
-  it('allows assistant for staff profile role/link updates', () => {
-    expect(getAllowedStaffRoles(StaffController, 'updateStaff')).toEqual([
-      StaffRole.assistant,
+  // 15/11: tạo nhân sự mới (tài khoản + hồ sơ) cho Admin + 3 role trưởng.
+  it('allows 3 head roles on UserController.createStaffUser', () => {
+    expect(getAllowedStaffRoles(UserController, 'createStaffUser')).toEqual([
+      StaffRole.sale_customer_care_head,
+      StaffRole.training_head,
+      StaffRole.lesson_plan_head,
     ]);
   });
 
-  it('allows assistant on staff lifecycle helper routes', () => {
-    expect(getAllowedStaffRoles(StaffController, 'createStaff')).toEqual([
-      StaffRole.assistant,
-    ]);
-    expect(getAllowedStaffRoles(StaffController, 'deleteStaff')).toEqual([
-      StaffRole.assistant,
-    ]);
-    expect(getAllowedStaffRoles(StaffController, 'updateStaffStatus')).toEqual([
-      StaffRole.assistant,
-    ]);
-  });
+  it.each(['createStaff', 'updateStaff', 'updateStaffStatus', 'deleteStaff'])(
+    'keeps StaffController.%s admin-only',
+    (methodName) => {
+      expect(getAllowedStaffRoles(StaffController, methodName)).toEqual([]);
+    },
+  );
 
-  it('allows assistant on operational student and class status actions', () => {
-    expect(
-      getAllowedStaffRoles(StudentController, 'updateStudentStatus'),
-    ).toEqual([StaffRole.assistant, StaffRole.customer_care]);
+  it.each(['endClass', 'stopClassTeacher'])(
+    'keeps ClassController.%s admin-only',
+    (methodName) => {
+      expect(getAllowedStaffRoles(ClassController, methodName)).toEqual([]);
+    },
+  );
+
+  it('#273: thêm/bớt học sinh trong lớp chỉ mở thêm cho Trưởng phòng Sale & CSKH', () => {
     expect(
       getAllowedStaffRoles(ClassController, 'updateClassStudents'),
-    ).toEqual([StaffRole.assistant]);
-    expect(getAllowedStaffRoles(ClassController, 'endClass')).toEqual([
-      StaffRole.assistant,
-    ]);
-    expect(getAllowedStaffRoles(ClassController, 'stopClassTeacher')).toEqual([
-      StaffRole.assistant,
-    ]);
+    ).toEqual([StaffRole.sale_customer_care_head]);
+    expect(
+      getAllowedStaffRoles(StudentController, 'updateStudentClasses'),
+    ).toEqual([StaffRole.sale_customer_care_head]);
   });
 
-  it('allows assistant and assigned customer care to update student profile', () => {
-    expect(getAllowedStaffRoles(StudentController, 'updateStudent')).toEqual([
-      StaffRole.assistant,
-      StaffRole.customer_care,
-    ]);
-    expect(
-      getAllowedStaffRoles(StudentController, 'updateStudentById'),
-    ).toEqual([StaffRole.assistant, StaffRole.customer_care]);
-    expect(
-      getAllowedStaffRoles(StudentController, 'updateStudentExamSchedules'),
-    ).toEqual([StaffRole.assistant, StaffRole.customer_care]);
+  it('allows assistant and customer care on student status/profile actions', () => {
+    for (const methodName of [
+      'updateStudentStatus',
+      'updateStudent',
+      'updateStudentById',
+      'updateStudentExamSchedules',
+    ]) {
+      expect(getAllowedStaffRoles(StudentController, methodName)).toEqual([
+        StaffRole.sale_customer_care_head,
+        StaffRole.customer_care,
+      ]);
+    }
   });
 
-  it('keeps student wallet history out of accountant scopes', () => {
+  it('Kế toán thu xem lịch sử ví học sinh (quyết định 13/11)', () => {
     expect(
       getAllowedStaffRoles(StudentController, 'getStudentWalletHistory'),
-    ).toEqual([StaffRole.assistant, StaffRole.customer_care]);
+    ).toEqual([
+      StaffRole.sale_customer_care_head,
+      StaffRole.accountant_income,
+      StaffRole.customer_care,
+    ]);
   });
 
   it('allows assistant on student delete and wallet adjustment routes', () => {
     expect(
       getAllowedStaffRoles(StudentController, 'updateStudentAccountBalance'),
-    ).toEqual([StaffRole.assistant]);
+    ).toEqual([StaffRole.sale_customer_care_head]);
     expect(getAllowedStaffRoles(StudentController, 'deleteStudent')).toEqual([
-      StaffRole.assistant,
+      StaffRole.sale_customer_care_head,
     ]);
   });
 
-  it('allows assistant on tax deduction settings by default', () => {
+  it('opens the direct top-up approval queue to Trưởng phòng Sale & CSKH only', () => {
+    for (const methodName of [
+      'listStudentWalletDirectTopUpRequests',
+      'getStudentWalletDirectTopUpRequest',
+      'approveStudentWalletDirectTopUpRequestFromQueue',
+    ]) {
+      expect(getAllowedStaffRoles(StudentController, methodName)).toEqual([
+        StaffRole.sale_customer_care_head,
+      ]);
+    }
+  });
+
+  it('keeps tax deduction settings admin-only', () => {
     expect(
-      getAllowAssistantOnAdminRoute(DeductionSettingsController),
-    ).toBeUndefined();
+      getAllowedStaffRoles(
+        DeductionSettingsController,
+        'updateRoleTaxDeductionRate',
+      ),
+    ).toEqual([]);
   });
 
-  it('allows assistant and expense accountant to create costs', () => {
-    expect(getAllowedStaffRoles(CostController, 'createCost')).toEqual([
-      StaffRole.assistant,
-      StaffRole.accountant_expense,
-    ]);
-  });
+  it.each(['createCost', 'deleteCost'])(
+    'allows only expense accountant on CostController.%s',
+    (methodName) => {
+      expect(getAllowedStaffRoles(CostController, methodName)).toEqual([
+        StaffRole.accountant_expense,
+      ]);
+    },
+  );
 
-  it('allows assistant and expense accountant to delete costs', () => {
-    expect(getAllowedStaffRoles(CostController, 'deleteCost')).toEqual([
-      StaffRole.assistant,
-      StaffRole.accountant_expense,
-    ]);
-  });
+  it.each(['createBonus', 'deleteBonus'])(
+    'allows staff admin and expense accountant on BonusController.%s',
+    (methodName) => {
+      expect(getAllowedStaffRoles(BonusController, methodName)).toEqual([
+        StaffRole.admin,
+        StaffRole.accountant_expense,
+      ]);
+    },
+  );
 
-  it('allows staff admin, assistant, and expense accountant to create bonuses', () => {
-    expect(getAllowedStaffRoles(BonusController, 'createBonus')).toEqual([
-      StaffRole.admin,
-      StaffRole.assistant,
-      StaffRole.accountant_expense,
-    ]);
-  });
+  it.each(['createExtraAllowance', 'deleteExtraAllowance'])(
+    'allows only expense accountant on ExtraAllowanceController.%s',
+    (methodName) => {
+      expect(
+        getAllowedStaffRoles(ExtraAllowanceController, methodName),
+      ).toEqual([StaffRole.accountant_expense]);
+    },
+  );
+});
 
-  it('allows staff admin, assistant, and expense accountant to delete bonuses', () => {
-    expect(getAllowedStaffRoles(BonusController, 'deleteBonus')).toEqual([
-      StaffRole.admin,
-      StaffRole.assistant,
-      StaffRole.accountant_expense,
-    ]);
-  });
+describe('Staff sensitive routes (#270)', () => {
+  it.each(['searchAssignableUsers', 'deleteStaffAvatar'])(
+    'keeps StaffController.%s admin-only (trả email / sửa hồ sơ)',
+    (methodName) => {
+      expect(getAllowedStaffRoles(StaffController, methodName)).toEqual([]);
+    },
+  );
 
-  it('allows assistant and expense accountant to create extra allowances', () => {
-    expect(
-      getAllowedStaffRoles(ExtraAllowanceController, 'createExtraAllowance'),
-    ).toEqual([StaffRole.assistant, StaffRole.accountant_expense]);
-  });
+  it.each(['getStaff', 'getStaffById'])(
+    'StaffController.%s chỉ mở thêm cho Kế toán chi (service redact theo người xem)',
+    (methodName) => {
+      expect(getAllowedStaffRoles(StaffController, methodName)).toEqual([
+        StaffRole.accountant_expense,
+      ]);
+    },
+  );
 
-  it('allows assistant and expense accountant to delete extra allowances', () => {
-    expect(
-      getAllowedStaffRoles(ExtraAllowanceController, 'deleteExtraAllowance'),
-    ).toEqual([StaffRole.assistant, StaffRole.accountant_expense]);
+  it('StaffController.getStaffById chuyển người xem từ JWT xuống service', async () => {
+    const staffService = { getStaffById: jest.fn().mockResolvedValue({}) };
+    const controller = new StaffController(staffService as never);
+
+    await controller.getStaffById(
+      { id: 'user-1', roleType: 'staff' } as never,
+      'staff-1',
+    );
+
+    expect(staffService.getStaffById).toHaveBeenCalledWith('staff-1', {
+      userId: 'user-1',
+      roleType: 'staff',
+    });
   });
 });

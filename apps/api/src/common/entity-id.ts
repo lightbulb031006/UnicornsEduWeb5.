@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { isUniqueConstraintOn } from './prisma-unique-error';
 
 const SHORT_ID_PART = '[0-9a-f]{10}';
 
@@ -133,20 +134,5 @@ export function assertStaffLessonTaskId(
 }
 
 export function isEntityIdUniqueConstraintError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-
-  const code = (error as { code?: string }).code;
-  const target = (error as { meta?: { target?: unknown } }).meta?.target;
-
-  if (code !== 'P2002') {
-    return false;
-  }
-
-  if (Array.isArray(target)) {
-    return target.some((item) => String(item) === 'id');
-  }
-
-  return String(target) === 'id';
+  return isUniqueConstraintOn(error, 'id', { exact: true });
 }

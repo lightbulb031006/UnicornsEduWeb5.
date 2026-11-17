@@ -208,6 +208,7 @@ describe('CostService', () => {
     await expect(
       service.createCost({
         category: 'Marketing',
+        amount: 100000,
         date: '2026-02-31',
       }),
     ).rejects.toThrow(

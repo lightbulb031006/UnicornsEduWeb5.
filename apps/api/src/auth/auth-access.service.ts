@@ -1,3 +1,4 @@
+import { hasSaleCsHeadAccess } from 'src/common/sale-cs-head-access';
 import { Injectable } from '@nestjs/common';
 import {
   StaffRole,
@@ -20,7 +21,7 @@ import { STAFF_DATA_CONSENT_VERSION } from './constants';
 export type AuthWorkspace = 'admin' | 'staff' | 'student';
 export type AdminAccessTier =
   | 'full'
-  | 'assistant'
+  | 'sale_customer_care_head'
   | 'accountant'
   | 'lesson_plan_head'
   | null;
@@ -65,7 +66,7 @@ type StaffProfileForAccess = {
   bankQrLink: string | null;
   _count?: { achievements: number };
   /** Thành tích nổi bật (lấy tối đa 1 dòng `isHighlight`). */
-  achievements?: Array<{ id: string }>;
+  achievements?: Array<{ id: string; imagePath: string | null }>;
 };
 
 type StudentProfileForAccess = {
@@ -121,17 +122,22 @@ function isStaffProfileComplete(
 }
 
 /**
- * Gia sư (`teacher`) phải có ít nhất 1 thành tích và đã chọn thành tích nổi bật
- * thì hồ sơ mới tính là đủ.
+ * Gia sư (`teacher`) phải có ít nhất 1 thành tích, đã chọn thành tích nổi bật
+ * và thành tích nổi bật đã có ảnh minh chứng thì hồ sơ mới tính là đủ. Sao
+ * gắn được trước khi có ảnh; gate này mới là chỗ đòi minh chứng
+ * (ADR 2026-11-11-staff-achievement-star-first).
  */
 export function hasRequiredStaffAchievements(
   staffRoles: StaffRole[],
   achievementCount: number,
   hasHighlightAchievement: boolean,
+  hasHighlightAchievementProof: boolean,
 ) {
   return (
     !staffRoles.includes(StaffRole.teacher) ||
-    (achievementCount > 0 && hasHighlightAchievement)
+    (achievementCount > 0 &&
+      hasHighlightAchievement &&
+      hasHighlightAchievementProof)
   );
 }
 
@@ -150,12 +156,11 @@ function resolveAdminTier(
     return 'full';
   }
 
-  if (staffRoles.includes(StaffRole.assistant)) {
-    return 'assistant';
+  if (hasSaleCsHeadAccess(staffRoles)) {
+    return 'sale_customer_care_head';
   }
 
   if (
-    staffRoles.includes(StaffRole.accountant) ||
     staffRoles.includes(StaffRole.accountant_income) ||
     staffRoles.includes(StaffRole.accountant_expense)
   ) {
@@ -278,7 +283,7 @@ export class AuthAccessService {
             _count: { select: { achievements: true } },
             achievements: {
               where: { isHighlight: true },
-              select: { id: true },
+              select: { id: true, imagePath: true },
               take: 1,
             },
           },
@@ -352,6 +357,7 @@ export class AuthAccessService {
         staffRoles,
         staffProfile?._count?.achievements ?? 0,
         (staffProfile?.achievements?.length ?? 0) > 0,
+        Boolean(staffProfile?.achievements?.[0]?.imagePath),
       ) &&
       hasCurrentStaffDataConsent({
         dataProcessingConsentAcceptedAt:

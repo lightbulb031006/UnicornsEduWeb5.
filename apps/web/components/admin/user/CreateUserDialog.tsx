@@ -31,7 +31,7 @@ const ROLE_TYPE_OPTIONS: Array<{ value: UserRoleType; label: string }> = [
 const STAFF_ROLES: StaffRole[] = [
   "admin",
   "teacher",
-  "assistant",
+  "sale_customer_care_head",
   "lesson_plan",
   "lesson_plan_head",
   "accountant_income",
@@ -40,6 +40,7 @@ const STAFF_ROLES: StaffRole[] = [
   "technical",
   "customer_care",
   "training",
+  "training_head",
   "sale",
 ];
 

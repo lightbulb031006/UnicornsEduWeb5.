@@ -23,6 +23,8 @@ export interface ProfileStaffInfoDto {
   achievementCount?: number;
   /** Đã chọn thành tích nổi bật chưa; gia sư (`teacher`) bắt buộc có. */
   hasHighlightAchievement?: boolean;
+  /** Dòng nổi bật đã có ảnh minh chứng chưa; gia sư (`teacher`) bắt buộc có. */
+  hasHighlightAchievementProof?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

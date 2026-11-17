@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import type { Prisma } from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { DEVICE_SUPERSEDED_ERROR_CODE } from './constants';
 
 const DEVICE_TOKEN_BYTES = 32;
 const LOGIN_REQUEST_TOKEN_BYTES = 32;
@@ -14,6 +15,13 @@ export const NO_ACTIVE_DEVICE_ERROR = {
   statusCode: 401,
   error: 'NO_ACTIVE_DEVICE',
   message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
+} as const;
+
+export const DEVICE_SUPERSEDED_ERROR = {
+  statusCode: 401,
+  error: DEVICE_SUPERSEDED_ERROR_CODE,
+  message:
+    'Tài khoản vừa được đăng nhập ở thiết bị khác, bạn đã bị đăng xuất. Nếu không phải bạn, hãy đổi mật khẩu.',
 } as const;
 
 export interface DeviceInfo {
@@ -68,6 +76,10 @@ export class UserDeviceService {
    * thiết bị", cùng tạo row; row thừa chặn `DEVICE_ACTIVE` tới khi refresh hết
    * hạn dù không ai dùng. Row mới mang sẵn `refreshExpiresAt` để nếu bước cấp
    * JWT sau đó lỗi, row không bị coi là legacy (sống 60 ngày).
+   *
+   * `markSuperseded` (học sinh tự đăng xuất mọi thiết bị): thiết bị sống bị
+   * thay thì ghi `users.devices_superseded_at` để máy bị đá nhận
+   * `DEVICE_SUPERSEDED`, và trả snapshot các máy đó cho lịch sử thao tác.
    * @returns `null` khi `rejectIfLive` và user còn thiết bị sống.
    */
   async replaceDevicesForUser(params: {
@@ -75,6 +87,7 @@ export class UserDeviceService {
     token: string;
     refreshExpiresAt: Date;
     rejectIfLive: boolean;
+    markSuperseded?: boolean;
     deviceInfo?: DeviceInfo;
     ipAddress?: string;
   }) {
@@ -91,8 +104,27 @@ export class UserDeviceService {
         }
       }
 
+      const supersededDevices = params.markSuperseded
+        ? await tx.userDevice.findMany({
+            where: { userId: params.userId, ...this.liveDeviceWhere() },
+            select: {
+              id: true,
+              deviceInfo: true,
+              ipAddress: true,
+              lastActiveAt: true,
+              createdAt: true,
+            },
+          })
+        : [];
+      if (supersededDevices.length > 0) {
+        await tx.user.update({
+          where: { id: params.userId },
+          data: { devicesSupersededAt: new Date() },
+        });
+      }
+
       await tx.userDevice.deleteMany({ where: { userId: params.userId } });
-      return tx.userDevice.create({
+      const device = await tx.userDevice.create({
         data: {
           userId: params.userId,
           tokenHash,
@@ -102,7 +134,33 @@ export class UserDeviceService {
           lastActiveAt: new Date(),
         },
       });
+      return { ...device, supersededDevices };
     });
+  }
+
+  /**
+   * Lỗi 401 khi JWT không còn thiết bị sống. Token cấp trước lần học sinh tự
+   * đăng xuất mọi thiết bị là máy bị đá → `DEVICE_SUPERSEDED`; còn lại (hết
+   * hạn, tự đăng xuất, bị buộc đăng xuất) → `NO_ACTIVE_DEVICE`. `iat` tính
+   * bằng giây nên so với đầu giây kế tiếp: token của chính máy mới (cấp cùng
+   * giây với mốc) không bị báo nhầm là bị đá.
+   */
+  async resolveNoLiveDeviceError(userId: string, issuedAtSeconds?: number) {
+    if (!issuedAtSeconds) {
+      return NO_ACTIVE_DEVICE_ERROR;
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { devicesSupersededAt: true },
+    });
+    const supersededAt = user?.devicesSupersededAt;
+    if (
+      supersededAt &&
+      supersededAt.getTime() >= (issuedAtSeconds + 1) * 1000
+    ) {
+      return DEVICE_SUPERSEDED_ERROR;
+    }
+    return NO_ACTIVE_DEVICE_ERROR;
   }
 
   async findActiveDeviceByTokenHash(tokenHash: string) {

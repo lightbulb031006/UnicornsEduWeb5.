@@ -4,7 +4,7 @@ Cổng nhập câu hỏi hàng loạt cho Ngân hàng câu hỏi của một Kho
 
 Hai chỗ gọi cùng một component:
 
-- Đội giáo án: tab **Câu hỏi** trên workspace khoá (`/admin/courses/:id?tab=cau-hoi` hoặc `/staff/courses/:id?tab=cau-hoi`) → **Nhập từ AI**. `courseId` lấy từ route; khoá chưa có chương thì tab hiện empty state (không mở form/import).
+- Đội chuyên môn: tab **Câu hỏi** trên workspace khoá (`/admin/courses/:id?tab=cau-hoi` hoặc `/staff/courses/:id?tab=cau-hoi`) → **Nhập từ AI**. `courseId` lấy từ route; khoá chưa có chương thì tab hiện empty state (không mở form/import).
 - Gia sư: panel **Thêm chuyên đề → Tạo riêng cho lớp** → khối câu hỏi → **✨ Nhập từ AI** (mở inline trong panel; `courseId` đã có từ lớp).
 
 Câu hỏi nhập vào luôn thuộc **ngân hàng của khoá**, kể cả khi gia sư nhập từ một chuyên đề riêng lớp.
@@ -142,5 +142,5 @@ Không có bảng draft: toàn bộ bước soát diễn ra ở client, chỉ m�
 
 ## Quyền
 
-- Đội giáo án được gán vào khoá (`course_lesson_plan_members`, kể cả `lesson_plan_head`): chỉ nhập vào khoá mình được gán.
-- Gia sư: nhập vào ngân hàng của khoá mà lớp mình đang dạy thuộc về. Backend chặn `create`/`bulkCreate`/`update` nếu không phải manager/đội giáo án của khoá và không có `class_teachers` active trên lớp thuộc khoá đó.
+- Đội chuyên môn được gán vào khoá (`course_lesson_plan_members`, kể cả `lesson_plan_head`): chỉ nhập vào khoá mình được gán.
+- Gia sư: nhập vào ngân hàng của khoá mà lớp mình đang dạy thuộc về. Backend chặn `create`/`bulkCreate`/`update` nếu không phải manager/đội chuyên môn của khoá và không có `class_teachers` active trên lớp thuộc khoá đó.

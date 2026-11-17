@@ -83,7 +83,7 @@ function getAmountForSource(
     const labelMap: Record<string, string> = {
       "operating-cost": "Chi phí vận hành",
       "extra-allowance-cost": "Trợ cấp khác",
-      "assistant-cost": "Trợ cấp trợ lí",
+      "assistant-cost": "Hoa hồng trưởng phòng",
       "training-manager-cost": "Trợ cấp quản lý lớp",
       "profit-revenue": "Học phí đã học",
       "profit-personnel": "Chi phí nhân sự",

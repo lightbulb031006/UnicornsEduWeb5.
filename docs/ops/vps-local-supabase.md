@@ -110,6 +110,17 @@ docker exec uniedu-data-db-1 pg_restore -U postgres --clean --if-exists --no-own
   --role=uniedu_<id> -d uniedu_<id> /backups/daily/uniedu_<id>-<ts>.dump
 ```
 
+## Xem DB bằng Supabase Studio (chạy trên máy dev)
+
+Data stack không có Studio. Chạy Studio **trên Mac**, nối về Postgres qua SSH tunnel Tailscale:
+
+```bash
+deploy/studio-local/studio.sh up it      # http://localhost:64323  (eng: 64324, jp: 64325)
+deploy/studio-local/studio.sh down
+```
+
+Hướng dẫn đầy đủ (kiến trúc, bảo mật, giới hạn, xử lý sự cố): [supabase-studio-local.md](supabase-studio-local.md).
+
 ## Lưu ý vận hành
 
 - Data stack phải chạy trước app (network external). `docker compose down` ở `/root/uniedu-data` sẽ lỗi khi app còn gắn network — dừng app trước hoặc chỉ `restart`.

@@ -31,7 +31,7 @@ type Props = {
   defaultAllowancePerStudent?: number | null;
   /** Class `scale_amount` (VNĐ / buổi). Used when teacher has no custom scale. */
   defaultScaleAmount?: number | null;
-  /** Admin, accountant, assistant only — shows per-teacher Trợ cấp + Vận hành. */
+  /** Admin, Kế toán thu/chi, Trưởng phòng Sale & CSKH only — shows per-teacher Trợ cấp + Vận hành. */
   showTeacherCompensation?: boolean;
   /**
    * Gia sư tự xem lớp: chỉ dòng của gia sư này hiện trợ cấp / scale / vận hành
@@ -41,12 +41,22 @@ type Props = {
   className?: string;
   action?: React.ReactNode;
   enableTeacherNavigation?: boolean;
+  /**
+   * Link hồ sơ gia sư; trả `null` thì dòng đó không bấm được. Mặc định
+   * `/admin/staffs/:id` — trang chỉ Admin / Kế toán chi vào được, nên màn
+   * dùng cho role khác phải truyền resolver (xem `resolveClassTeacherHref`).
+   */
+  getTeacherHref?: (teacherId: string) => string | null;
   canStopTeaching?: boolean;
   onStopTeaching?: (teacherId: string) => void;
   stopTeachingPendingTeacherId?: string | null;
   /** Không hiện nút Nghỉ dạy cho dòng này (quản lý lớp không tự cho mình nghỉ). */
   stopTeachingLockedTeacherId?: string | null;
 };
+
+function defaultTeacherHref(teacherId: string): string {
+  return `/admin/staffs/${encodeURIComponent(teacherId)}`;
+}
 
 function normalizeMoneyAmount(value?: number | null): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
@@ -124,6 +134,7 @@ export default function TutorCard({
   className = "",
   action,
   enableTeacherNavigation = true,
+  getTeacherHref = defaultTeacherHref,
   canStopTeaching = false,
   onStopTeaching,
   stopTeachingPendingTeacherId = null,
@@ -157,24 +168,22 @@ export default function TutorCard({
                   teacher.assignmentStatus !== "inactive" &&
                   teacher.id !== stopTeachingLockedTeacherId;
                 const isStopTeachingPending = stopTeachingPendingTeacherId === teacher.id;
+                const teacherHref = enableTeacherNavigation ? getTeacherHref(teacher.id) : null;
+                const canNavigate = teacherHref != null;
 
                 return (
                   <div
                     key={teacher.id}
                     role="button"
-                    tabIndex={enableTeacherNavigation ? 0 : -1}
-                    aria-disabled={!enableTeacherNavigation}
-                    onClick={
-                      enableTeacherNavigation
-                        ? () => push(`/admin/staffs/${encodeURIComponent(teacher.id)}`)
-                        : undefined
-                    }
+                    tabIndex={canNavigate ? 0 : -1}
+                    aria-disabled={!canNavigate}
+                    onClick={canNavigate ? () => push(teacherHref) : undefined}
                     onKeyDown={
-                      enableTeacherNavigation
+                      canNavigate
                         ? (e) => {
                             if (e.key === "Enter" || e.key === " ") {
                               e.preventDefault();
-                              push(`/admin/staffs/${encodeURIComponent(teacher.id)}`);
+                              push(teacherHref);
                             }
                           }
                         : undefined
@@ -184,7 +193,7 @@ export default function TutorCard({
                         ? "px-2.5 py-2 sm:px-3 sm:py-2.5"
                         : "px-2.5 py-1.5 sm:px-3 sm:py-2"
                     } ${
-                      enableTeacherNavigation
+                      canNavigate
                         ? "cursor-pointer hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                         : "cursor-default"
                     }`}

@@ -4,9 +4,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, Suspense } from "react";
 import { useDebouncedCallback } from "use-debounce";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { QrCodeIcon } from "@heroicons/react/24/outline";
+import { QrCodeIcon, UserPlusIcon } from "@heroicons/react/24/outline";
 import { toast } from "sonner";
 import { StudentListTableSkeleton } from "@/components/admin/student";
+import CreateCustomerCareStudentPopup from "@/components/customer-care/CreateCustomerCareStudentPopup";
 import QueryRefreshStrip from "@/components/ui/query-refresh-strip";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import { StudentLevelBadge } from "@/components/ui/LevelBadge";
@@ -121,8 +122,9 @@ function AdminStudentsPageContent() {
     retry: false,
     staleTime: 60_000,
   });
-  const { canCreateWalletQr, canDeleteStudent } =
+  const { canCreateWalletQr, canDeleteStudent, canCreateStudent } =
     resolveStudentAdminCapabilities(fullProfile, routeBase);
+  const [createStudentOpen, setCreateStudentOpen] = useState(false);
 
   const page = parsePositiveInt(getSearchParam("page"));
   const search = getSearchParam("search") ?? "";
@@ -353,7 +355,16 @@ function AdminStudentsPageContent() {
                   Quản lý danh sách học sinh, theo dõi trạng thái học tập và lớp đang tham gia tập trung.
                 </p>
               </div>
-
+              {canCreateStudent ? (
+                <button
+                  type="button"
+                  onClick={() => setCreateStudentOpen(true)}
+                  className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-text-inverse shadow-sm transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus sm:w-auto sm:py-2"
+                >
+                  <UserPlusIcon className="size-4 shrink-0" aria-hidden />
+                  Tạo học sinh
+                </button>
+              ) : null}
             </div>
 
             <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -909,6 +920,12 @@ function AdminStudentsPageContent() {
           </div>
         </>
       )}
+      {createStudentOpen ? (
+        <CreateCustomerCareStudentPopup
+          variant="saleCsHead"
+          onClose={() => setCreateStudentOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

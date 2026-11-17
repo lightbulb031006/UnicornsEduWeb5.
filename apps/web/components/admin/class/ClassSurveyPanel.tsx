@@ -904,7 +904,7 @@ export default function ClassSurveyPanel({
       availableSurveys.length === 0 &&
       canManage ? (
         <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
-          Chưa có bài khảo sát nào được tạo. Vui lòng liên hệ admin/đội giáo án.
+          Chưa có bài khảo sát nào được tạo. Vui lòng liên hệ admin/đội chuyên môn.
         </div>
       ) : null}
       {availableSurveysStatus === "error" && canManage ? (

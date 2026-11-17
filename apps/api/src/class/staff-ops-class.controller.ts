@@ -23,7 +23,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { StaffRole, UserRole } from 'generated/enums';
+import { UserRole } from 'generated/enums';
 import {
   CurrentUser,
   type JwtPayload,
@@ -50,24 +50,12 @@ import {
 } from 'src/dtos/class-schedule.dto';
 import { PaginationQueryDto } from 'src/dtos/pagination.dto';
 import { CalendarService } from 'src/calendar/calendar.service';
-import { StaffOperationsAccessService } from 'src/staff-ops/staff-operations-access.service';
+import {
+  StaffOperationsAccessService,
+  canWorkOnAllClassSessions,
+} from 'src/staff-ops/staff-operations-access.service';
 import { ClassService } from './class.service';
 import { ClassSurveyService } from './class-survey.service';
-
-const ELEVATED_CLASS_ACCESS_ROLES: readonly StaffRole[] = [
-  StaffRole.admin,
-  StaffRole.assistant,
-  StaffRole.accountant,
-  StaffRole.accountant_income,
-  StaffRole.accountant_expense,
-];
-
-function isTeacherScopedActor(roles: StaffRole[]) {
-  return (
-    roles.includes(StaffRole.teacher) &&
-    !roles.some((role) => ELEVATED_CLASS_ACCESS_ROLES.includes(role))
-  );
-}
 
 @Controller('staff-ops/classes')
 @ApiTags('staff-ops-classes')
@@ -81,50 +69,44 @@ export class StaffOpsClassController {
     private readonly staffOperationsAccess: StaffOperationsAccessService,
   ) {}
 
+  /**
+   * Buổi bù (#275): Admin + Quản lý lớp quản lý mọi buổi bù của lớp; gia sư chỉ
+   * buổi bù do chính mình phụ trách. Trả `undefined` = không khoá gia sư.
+   */
   private async resolveMakeupManagementTeacherScope(
     user: JwtPayload,
     classId: string,
     eventId: string,
     dto?: UpdateClassScopedMakeupScheduleEventDto,
   ): Promise<string | undefined> {
-    if (user.roleType === UserRole.admin) {
-      return undefined;
-    }
-
-    const actor = await this.staffOperationsAccess.resolveClassViewerActor(
+    const access = await this.staffOperationsAccess.resolveClassWorkAccess(
       user.id,
       user.roleType,
+      classId,
     );
 
-    if (
-      actor.roles.includes(StaffRole.admin) ||
-      actor.roles.includes(StaffRole.assistant)
-    ) {
+    if (canWorkOnAllClassSessions(access)) {
       return undefined;
     }
 
-    if (isTeacherScopedActor(actor.roles)) {
-      await this.staffOperationsAccess.assertTeacherAssignedToClass(
-        actor.id,
-        classId,
-      );
+    if (access.isClassTeacher && access.staffId) {
       await this.calendarService.assertTeacherCanManageMakeupScheduleEventForClass(
         classId,
         eventId,
-        actor.id,
+        access.staffId,
       );
 
-      if (dto?.teacherId && dto.teacherId !== actor.id) {
+      if (dto?.teacherId && dto.teacherId !== access.staffId) {
         throw new ForbiddenException(
           'Teacher chỉ được quản lý buổi bù do chính mình phụ trách.',
         );
       }
 
-      return actor.id;
+      return access.staffId;
     }
 
     throw new ForbiddenException(
-      'Chỉ admin, trợ lí hoặc teacher phụ trách buổi bù mới được quản lý buổi bù trong staff workspace.',
+      'Chỉ Admin, Quản lý lớp hoặc teacher phụ trách buổi bù mới được quản lý buổi bù trong staff workspace.',
     );
   }
 
@@ -132,7 +114,8 @@ export class StaffOpsClassController {
   @ApiOperation({
     summary: 'List classes for staff operations',
     description:
-      'List classes for staff operations UI. Finance and student/teacher mutations remain unavailable from this route family.',
+      'List classes for staff operations UI. Finance and student/teacher mutations remain unavailable from this route family. ' +
+      '#277: Trưởng ban Đào tạo nhận **mọi lớp** (bỏ học phí lớp + học phí từng học sinh); `scope=managed` lọc về lớp mình quản lý.',
   })
   @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
@@ -148,7 +131,7 @@ export class StaffOpsClassController {
     required: false,
     enum: ['managed'],
     description:
-      'Ban Đào Tạo kiêm gia sư: `managed` chỉ trả lớp mình quản lý (mặc định trả lớp mình dạy hoặc quản lý). Role khác bỏ qua.',
+      'Ban Đào Tạo: `managed` chỉ trả lớp mình quản lý (mặc định: lớp mình dạy hoặc quản lý; Trưởng ban Đào tạo mặc định mọi lớp — #277). Role khác bỏ qua.',
   })
   @ApiResponse({ status: 200, description: 'Paginated class list.' })
   async getClasses(
@@ -171,9 +154,15 @@ export class StaffOpsClassController {
   @Get(':id')
   @ApiOperation({
     summary: 'Get class detail for staff operations',
+    description:
+      '#277: Trưởng ban Đào tạo xem mọi lớp: thông tin lớp, gia sư + lương gia sư theo lớp, lịch; không có học phí lớp / học phí từng học sinh / số dư ví. Quyết định 13/11: Trưởng ban Đào tạo, Quản lý lớp, gia sư nhận `students[]` chỉ gồm `id`, `fullName`, `status`, `customerCareStaff`, `totalAttendedSession` (không email / SĐT / phụ huynh / hồ sơ học sinh); CSKH, Admin, Kế toán giữ.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiResponse({ status: 200, description: 'Class detail.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Role không được mở màn chi tiết lớp.',
+  })
   @ApiResponse({ status: 404, description: 'Class not found.' })
   async getClassById(
     @CurrentUser() user: JwtPayload,
@@ -250,10 +239,15 @@ export class StaffOpsClassController {
   @ApiOperation({
     summary: 'Create class with minimal metadata',
     description:
-      'Create a new class for staff operations. Only minimal class metadata is accepted.',
+      'Create a new class for staff operations. Only minimal class metadata is accepted. #274: chỉ Admin và Trưởng ban Đào tạo (Trưởng phòng Sale & CSKH dùng POST /class); lịch học (schedule) và trạng thái khác running chỉ Admin.',
   })
   @ApiBody({ type: CreateStaffOpsClassDto })
   @ApiResponse({ status: 201, description: 'Class created.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Role không được tạo lớp, hoặc role trưởng gửi lịch học / trạng thái kết thúc (#274).',
+  })
   async createClass(
     @CurrentUser() user: JwtPayload,
     @Body() dto: CreateStaffOpsClassDto,
@@ -272,26 +266,31 @@ export class StaffOpsClassController {
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: CreateClassScopedMakeupScheduleEventDto })
   @ApiResponse({ status: 201, description: 'Makeup event created.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin / Quản lý lớp / gia sư của lớp, hoặc gia sư đụng buổi bù của gia sư khác (#275).',
+  })
   async createMakeupEventByClassId(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
     @Body() dto: CreateClassScopedMakeupScheduleEventDto,
   ): Promise<{ success: boolean; data: MakeupScheduleEventDto }> {
-    const actor = await this.staffOperationsAccess.resolveActor(
+    // #275: Admin / Quản lý lớp tạo buổi bù cho bất kỳ gia sư nào của lớp;
+    // gia sư chỉ cho chính mình; lớp khác → 403.
+    const access = await this.staffOperationsAccess.resolveClassWorkAccess(
       user.id,
       user.roleType,
+      id,
     );
 
-    if (isTeacherScopedActor(actor.roles)) {
-      await this.staffOperationsAccess.assertTeacherAssignedToClass(
-        actor.id,
-        id,
+    if (
+      !canWorkOnAllClassSessions(access) &&
+      dto.teacherId !== access.staffId
+    ) {
+      throw new ForbiddenException(
+        'Teacher chỉ được tạo buổi bù với chính mình là người phụ trách.',
       );
-      if (dto.teacherId !== actor.id) {
-        throw new ForbiddenException(
-          'Teacher chỉ được tạo buổi bù với chính mình là người phụ trách.',
-        );
-      }
     }
 
     return this.calendarService.createMakeupScheduleEventForClass(id, dto, {
@@ -310,6 +309,11 @@ export class StaffOpsClassController {
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: CreateClassSurveyDto })
   @ApiResponse({ status: 201, description: 'Class survey created.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Khảo sát của lớp (#275): chỉ Admin, Quản lý lớp (mọi khảo sát của lớp) và gia sư của lớp (khảo sát do mình phụ trách).',
+  })
   async createClassSurvey(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -332,8 +336,9 @@ export class StaffOpsClassController {
   @ApiOperation({
     summary: 'Update teacher pay of a class (training manager)',
     description:
-      'Quản lý lớp (Ban Đào Tạo), trợ lí hoặc admin chỉnh trợ cấp/hs, trần trợ cấp, scale mặc định của lớp và trợ cấp/scale/% vận hành của gia sư đã có trong lớp. ' +
-      'Không nhận học phí hay thông tin lớp khác. Quản lý lớp không được sửa dòng của chính mình (403). ' +
+      'Admin, Trưởng ban Đào tạo (mọi lớp — #277) hoặc Quản lý lớp (lớp mình) chỉnh trợ cấp/hs, trần trợ cấp, scale mặc định của lớp và trợ cấp/scale/% vận hành của gia sư đã có trong lớp. ' +
+      'Không nhận học phí, % trợ cấp quản lý lớp (chỉ Admin, qua PATCH /class/:id/training-manager) hay thông tin lớp khác. ' +
+      '#276/#277: Quản lý lớp và Trưởng ban Đào tạo không được sửa phần lương của chính mình (403): dòng của mình, và khi đang dạy lớp thì cả trợ cấp tối đa, trợ cấp mỗi học sinh / scale mặc định mà dòng của mình đang kế thừa. ' +
       'Chỉ áp dụng cho buổi tạo sau khi lưu.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
@@ -342,7 +347,8 @@ export class StaffOpsClassController {
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({
     status: 403,
-    description: 'Không phải quản lý lớp, hoặc sửa dòng của chính mình.',
+    description:
+      'Không phải Admin / Trưởng ban Đào tạo / Quản lý lớp của lớp, hoặc chạm phần lương của chính mình (#276/#277).',
   })
   @ApiResponse({ status: 404, description: 'Class not found.' })
   async updateClassTeacherPay(
@@ -369,7 +375,8 @@ export class StaffOpsClassController {
     summary: 'Add a teacher to a class (training manager)',
     description:
       'Thêm 1 gia sư (staff role `teacher`, đang active) mà không đụng gia sư khác. Gia sư từng nghỉ dạy lớp này được mở lại với lương reset về mặc định lớp. ' +
-      'Gia sư mới tự thêm khung giờ của mình qua PATCH :id/schedule.',
+      'Gia sư mới tự thêm khung giờ của mình qua PATCH :id/schedule. ' +
+      'Quyền: Admin, Trưởng ban Đào tạo (mọi lớp — #277), Quản lý lớp (lớp mình); không tự thêm chính mình (403).',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: AddClassTeacherDto })
@@ -380,7 +387,8 @@ export class StaffOpsClassController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Không phải quản lý lớp, hoặc tự thêm chính mình.',
+    description:
+      'Không phải Admin / Trưởng ban Đào tạo / Quản lý lớp của lớp, hoặc tự thêm chính mình.',
   })
   @ApiResponse({ status: 404, description: 'Class or teacher not found.' })
   @ApiResponse({ status: 409, description: 'Gia sư đã ở trong lớp.' })
@@ -397,7 +405,7 @@ export class StaffOpsClassController {
       );
     if (lockedTeacherId && dto.teacher_id === lockedTeacherId) {
       throw new ForbiddenException(
-        'Quản lý lớp không được tự thêm chính mình làm gia sư.',
+        'Không được tự thêm chính mình làm gia sư (lương của chính mình).',
       );
     }
     await this.classService.addClassTeacher(id, dto.teacher_id, {
@@ -412,7 +420,7 @@ export class StaffOpsClassController {
   @ApiOperation({
     summary: 'Mark a teacher as stopped teaching (training manager)',
     description:
-      'Chuyển phân công gia sư sang nghỉ dạy, xoá khung giờ cố định và buổi bù tương lai của gia sư đó. Quản lý lớp không được cho chính mình nghỉ (403).',
+      'Chuyển phân công gia sư sang nghỉ dạy, xoá khung giờ cố định và buổi bù tương lai của gia sư đó. Quyền: Admin, Trưởng ban Đào tạo (mọi lớp — #277), Quản lý lớp (lớp mình); không được cho chính mình nghỉ (403).',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiParam({ name: 'teacherId', description: 'Staff id of the teacher' })
@@ -428,7 +436,8 @@ export class StaffOpsClassController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Không phải quản lý lớp, hoặc cho chính mình nghỉ.',
+    description:
+      'Không phải Admin / Trưởng ban Đào tạo / Quản lý lớp của lớp, hoặc cho chính mình nghỉ.',
   })
   @ApiResponse({
     status: 404,
@@ -448,7 +457,7 @@ export class StaffOpsClassController {
       );
     if (lockedTeacherId && teacherId === lockedTeacherId) {
       throw new ForbiddenException(
-        'Quản lý lớp không được tự cho chính mình nghỉ dạy.',
+        'Không được tự cho chính mình nghỉ dạy (lương của chính mình).',
       );
     }
     const { calendarSyncWarnings } = await this.classService.stopClassTeacher(
@@ -476,6 +485,8 @@ export class StaffOpsClassController {
       'Upsert schedule slots. Slot active nhưng vắng mặt trong `schedule` sẽ được giữ nguyên — ' +
       'xoá phải liệt kê id trong `removedEntryIds`. Gia sư (teacher-only role) chỉ được thêm/sửa/xoá ' +
       'slot có `teacherId` là chính mình; đụng vào slot của gia sư khác sẽ bị từ chối (403). ' +
+      '#275: Admin và Quản lý lớp sửa mọi slot của lớp (Quản lý lớp không backdate `effectiveFrom`); ' +
+      'lớp không được giao / Kế toán → 403. ' +
       'Truyền `expectedUpdatedAt` để bật optimistic lock.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
@@ -483,7 +494,8 @@ export class StaffOpsClassController {
   @ApiResponse({ status: 200, description: 'Class schedule updated.' })
   @ApiResponse({
     status: 403,
-    description: 'Gia sư cố sửa/xoá lịch của gia sư khác.',
+    description:
+      'Gia sư cố sửa/xoá lịch của gia sư khác, hoặc không phải Admin / gia sư / Quản lý lớp của lớp.',
   })
   @ApiResponse({
     status: 409,
@@ -511,13 +523,17 @@ export class StaffOpsClassController {
   @ApiOperation({
     summary: 'Resync class schedule to Google Calendar for staff operations',
     description:
-      'Admin resyncs the whole class schedule. Staff accounts resync only the current actor teacher schedule entries. Existing Google events are updated before orphaned events are deleted.',
+      'Admin và Quản lý lớp (#276) resync toàn bộ lịch của lớp. Gia sư chỉ resync khung giờ của chính mình. Existing Google events are updated before orphaned events are deleted.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiResponse({
     status: 200,
     description: 'Class schedule resynced to Google Calendar.',
     type: ClassScheduleGoogleCalendarResyncResponseDto,
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Không phải Admin / Quản lý lớp / gia sư của lớp.',
   })
   async resyncClassScheduleGoogleCalendar(
     @CurrentUser() user: JwtPayload,
@@ -527,14 +543,22 @@ export class StaffOpsClassController {
       return this.calendarService.resyncClassScheduleWithGoogleCalendar(id);
     }
 
-    const actor = await this.staffOperationsAccess.resolveActor(
+    // #276: Admin (staff role) + Quản lý lớp đồng bộ lại toàn bộ lịch (link
+    // Meet) của lớp; gia sư chỉ khung giờ của mình; lớp khác → 403.
+    const access = await this.staffOperationsAccess.resolveClassWorkAccess(
       user.id,
       user.roleType,
+      id,
     );
-    await this.staffOperationsAccess.assertTeacherAssignedToClass(actor.id, id);
+    if (canWorkOnAllClassSessions(access)) {
+      return this.calendarService.resyncClassScheduleWithGoogleCalendar(id);
+    }
+    if (!access.staffId) {
+      throw new ForbiddenException('Staff profile required');
+    }
     return this.calendarService.resyncClassScheduleWithGoogleCalendarForTeacher(
       id,
-      actor.id,
+      access.staffId,
     );
   }
 
@@ -542,7 +566,7 @@ export class StaffOpsClassController {
   @ApiOperation({
     summary: 'Resync one makeup event to Google Calendar for staff operations',
     description:
-      'Admin resyncs any makeup event in the class. Staff accounts resync only makeup events assigned to their own staff profile.',
+      'Admin và Quản lý lớp (#276) resync mọi buổi bù của lớp. Gia sư chỉ resync buổi bù do chính mình phụ trách.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiParam({ name: 'eventId', description: 'Makeup event id' })
@@ -550,6 +574,10 @@ export class StaffOpsClassController {
     status: 200,
     description: 'Makeup event resynced to Google Calendar.',
     type: MakeupGoogleCalendarResyncResponseDto,
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Không phải Admin / Quản lý lớp / gia sư của lớp.',
   })
   async resyncClassMakeupGoogleCalendar(
     @CurrentUser() user: JwtPayload,
@@ -570,16 +598,23 @@ export class StaffOpsClassController {
       );
     }
 
-    const actor = await this.staffOperationsAccess.resolveActor(
+    // #276: Admin (staff role) + Quản lý lớp đồng bộ mọi buổi bù của lớp;
+    // gia sư chỉ buổi bù do mình phụ trách.
+    const access = await this.staffOperationsAccess.resolveClassWorkAccess(
       user.id,
       user.roleType,
+      id,
     );
-    await this.staffOperationsAccess.assertTeacherAssignedToClass(actor.id, id);
+    if (!access.staffId) {
+      throw new ForbiddenException('Staff profile required');
+    }
     return this.calendarService.resyncMakeupScheduleEventWithGoogleCalendarForClass(
       id,
       eventId,
       {
-        teacherId: actor.id,
+        ...(canWorkOnAllClassSessions(access)
+          ? {}
+          : { teacherId: access.staffId }),
         actor: {
           userId: user.id,
           userEmail: user.email,
@@ -597,6 +632,11 @@ export class StaffOpsClassController {
   @ApiParam({ name: 'eventId', description: 'Makeup event id' })
   @ApiBody({ type: UpdateClassScopedMakeupScheduleEventDto })
   @ApiResponse({ status: 200, description: 'Makeup event updated.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin / Quản lý lớp / gia sư của lớp, hoặc gia sư đụng buổi bù của gia sư khác (#275).',
+  })
   async updateMakeupEventByClassId(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -630,6 +670,11 @@ export class StaffOpsClassController {
   @ApiParam({ name: 'surveyId', description: 'Survey id' })
   @ApiBody({ type: UpdateClassSurveyDto })
   @ApiResponse({ status: 200, description: 'Class survey updated.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Khảo sát của lớp (#275): chỉ Admin, Quản lý lớp (mọi khảo sát của lớp) và gia sư của lớp (khảo sát do mình phụ trách).',
+  })
   async updateClassSurvey(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -657,6 +702,11 @@ export class StaffOpsClassController {
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiParam({ name: 'eventId', description: 'Makeup event id' })
   @ApiResponse({ status: 200, description: 'Makeup event deleted.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin / Quản lý lớp / gia sư của lớp, hoặc gia sư đụng buổi bù của gia sư khác (#275).',
+  })
   async deleteMakeupEventByClassId(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -678,6 +728,11 @@ export class StaffOpsClassController {
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiParam({ name: 'surveyId', description: 'Survey id' })
   @ApiResponse({ status: 200, description: 'Class survey deleted.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Khảo sát của lớp (#275): chỉ Admin, Quản lý lớp (mọi khảo sát của lớp) và gia sư của lớp (khảo sát do mình phụ trách).',
+  })
   async deleteClassSurvey(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,

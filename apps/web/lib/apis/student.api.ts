@@ -1,6 +1,7 @@
 import type {
   CreateStudentWalletDirectTopUpRequestPayload,
   CreateStudentPayload,
+  SetStudentEmailVerifiedResult,
   StudentAssignableUser,
   StudentDetail,
   StudentExamScheduleItem,
@@ -164,6 +165,18 @@ export async function updateStudentStatus(
     status,
     ...(reason?.trim() ? { reason: reason.trim() } : {}),
   });
+  return response.data;
+}
+
+/** 16/11: bật/tắt «Email đã xác thực» (Admin, Trưởng phòng Sale & CSKH, CSKH phụ trách). */
+export async function setStudentEmailVerified(
+  id: string,
+  emailVerified: boolean,
+): Promise<SetStudentEmailVerifiedResult> {
+  const response = await api.patch<SetStudentEmailVerifiedResult>(
+    `/student/${encodeURIComponent(id)}/email-verified`,
+    { email_verified: emailVerified },
+  );
   return response.data;
 }
 

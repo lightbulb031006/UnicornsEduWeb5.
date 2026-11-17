@@ -3,7 +3,7 @@
 import { useCallback, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, ShieldAlert, VideoOff } from "lucide-react";
+import { ShieldAlert, VideoOff } from "lucide-react";
 import type {
   ProtectedVideoPlaybackDto,
   ProtectedVideoSource,
@@ -11,14 +11,17 @@ import type {
 import { getProtectedVideoPlayback } from "@/lib/apis/protected-video.api";
 import { useDevToolsDetector } from "@/lib/useDevToolsDetector";
 import { cn } from "@/lib/utils";
+import ProtectedVideoProcessingNotice from "./ProtectedVideoProcessingNotice";
 
 const ProtectedHlsPlayer = dynamic(() => import("./ProtectedHlsPlayer"), {
   ssr: false,
   loading: () => <div className="h-full w-full animate-pulse bg-black" />,
 });
 
-/** Video đang đồng bộ: hỏi lại server mỗi 30 giây. */
-const PROCESSING_REFETCH_MS = 30_000;
+/** Video đang đồng bộ: hỏi lại server mỗi 15 giây (cùng nhịp badge staff). */
+const PROCESSING_REFETCH_MS = 15_000;
+/** Video lỗi: hỏi thưa hơn — staff bấm Thử lại thì tự chuyển sang «đang xử lý». */
+const FAILED_REFETCH_MS = 60_000;
 
 export function protectedVideoPlaybackQueryKey(source: ProtectedVideoSource) {
   return [
@@ -90,8 +93,12 @@ export default function ProtectedVideoPlayer({
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: 1,
-    refetchInterval: (query) =>
-      query.state.data?.state === "processing" ? PROCESSING_REFETCH_MS : false,
+    refetchInterval: (query) => {
+      const state = query.state.data?.state;
+      if (state === "processing") return PROCESSING_REFETCH_MS;
+      if (state === "failed") return FAILED_REFETCH_MS;
+      return false;
+    },
   });
 
   const handleExpired = useCallback(() => {
@@ -157,14 +164,19 @@ export default function ProtectedVideoPlayer({
         );
       case "processing":
         return (
+          <ProtectedVideoProcessingNotice
+            stage={playback.stage}
+            progress={playback.progress}
+            queuePosition={playback.queuePosition}
+            queueTotal={playback.queueTotal}
+          />
+        );
+      case "failed":
+        return (
           <PlayerNotice
-            icon={<Loader2 className="size-5 animate-spin" aria-hidden />}
-            title="Video đang xử lý"
-            description={
-              playback.progress !== null
-                ? `Đã xong ${playback.progress}%. Trang sẽ tự cập nhật khi video sẵn sàng.`
-                : "Trang sẽ tự cập nhật khi video sẵn sàng."
-            }
+            icon={<VideoOff className="size-5" aria-hidden />}
+            title="Video không xem được"
+            description="Video gặp lỗi khi xử lý. Liên hệ gia sư hoặc trợ giảng của lớp nếu em cần xem video này."
           />
         );
       case "unavailable":

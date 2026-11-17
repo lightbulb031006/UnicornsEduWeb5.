@@ -1,6 +1,6 @@
 # ADR: Thành tích nổi bật là cột riêng `is_highlight`, bắt buộc với gia sư
 
-- **Status:** Accepted
+- **Status:** Accepted — phần tự gắn sao (quyết định 2) bị thay bởi `docs/adr/2026-11-11-staff-achievement-star-first.md`: không bao giờ tự gắn sao
 - **Date:** 2026-11-04
 - **Mở rộng:** `docs/adr/2026-10-20-teacher-achievement-required.md` — gate gia sư thêm điều kiện có thành tích nổi bật.
 

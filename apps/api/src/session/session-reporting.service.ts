@@ -1,17 +1,25 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '../../generated/client';
-import { UserRole } from '../../generated/enums';
+import { StaffRole, UserRole } from '../../generated/enums';
+import { SALE_CS_HEAD_ROLE } from '../common/sale-cs-head-access';
+import { hasAnyStaffRole } from '../common/staff-role-policy';
 import { SessionUnpaidSummaryItem } from '../dtos/session.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   previewNextSessionOrdinal,
   withSessionOrdinals,
 } from './session-ordinal.util';
-import { StaffOperationsAccessService } from '../staff-ops/staff-operations-access.service';
+import {
+  StaffOperationsAccessService,
+  seesClassAsTrainingManager,
+} from '../staff-ops/staff-operations-access.service';
 import { getUserFullNameFromParts } from '../common/user-name.util';
 import { SQL_TEACHER_SESSION_CAPPED_GROSS } from '../common/teacher-session-allowance-sql.util';
 import {
+  redactOtherTeachersSessions,
   redactSessionsForAccountantView,
+  redactSessionForTrainingHeadView,
+  redactSessionForTrainingManagerView,
   redactSessionsForTrainingManagerView,
   resolveAccountantFinanceView,
 } from '../common/accountant-finance-redaction.util';
@@ -72,6 +80,19 @@ export class SessionReportingService {
     },
   } as const;
 
+  // Chỉ lấy id + tên gia sư: không trả CCCD/ngân hàng/địa chỉ... cho người xem lịch buổi học.
+  private readonly teacherSelect = {
+    select: {
+      id: true,
+      user: {
+        select: {
+          first_name: true,
+          last_name: true,
+        },
+      },
+    },
+  } as const;
+
   private readonly makeupScheduleEventSelect = {
     select: {
       originalDate: true,
@@ -101,16 +122,7 @@ export class SessionReportingService {
     const sessions = await this.prisma.session.findMany({
       where: this.buildSessionsByClassWhere(classId, month, year),
       include: {
-        teacher: {
-          include: {
-            user: {
-              select: {
-                first_name: true,
-                last_name: true,
-              },
-            },
-          },
-        },
+        teacher: this.teacherSelect,
         attendance: this.attendanceInclude,
         makeupScheduleEvent: this.makeupScheduleEventSelect,
       },
@@ -136,30 +148,17 @@ export class SessionReportingService {
       userId,
       roleType,
     );
-    const accessMode =
-      await this.staffOperationsAccess.resolveClassViewAccessMode(
-        actor,
-        classId,
-      );
+    const access = await this.staffOperationsAccess.resolveClassAccess(
+      actor,
+      classId,
+    );
+    const accessMode = access.mode;
 
     const sessions = await this.prisma.session.findMany({
-      where: this.buildSessionsByClassWhere(
-        classId,
-        month,
-        year,
-        accessMode === 'teacher' ? actor.id : undefined,
-      ),
+      // Gia sư thấy mọi buổi của lớp; buổi của gia sư khác được redact còn nhận xét ở dưới.
+      where: this.buildSessionsByClassWhere(classId, month, year),
       include: {
-        teacher: {
-          include: {
-            user: {
-              select: {
-                first_name: true,
-                last_name: true,
-              },
-            },
-          },
-        },
+        teacher: this.teacherSelect,
         attendance: this.attendanceInclude,
         makeupScheduleEvent: this.makeupScheduleEventSelect,
       },
@@ -173,8 +172,52 @@ export class SessionReportingService {
       sessions.map((session) => this.withDerivedTeacherFullName(session)),
     );
 
+    // #277: Ban Đào tạo xem lịch sử buổi — không học phí / vận hành. 14/11:
+    // Trưởng ban Đào tạo thấy thêm trợ cấp, hệ số, trạng thái thanh toán trợ
+    // cấp gia sư để chỉnh tay (`PATCH /staff-ops/sessions/:id/training-head`).
     if (accessMode === 'training_manager') {
-      return redactSessionsForTrainingManagerView(mappedSessions);
+      return redactSessionsForTrainingManagerView(mappedSessions, {
+        keepTeacherCompensation: access.isTrainingHead,
+      });
+    }
+    if (accessMode === 'training_head') {
+      // Lớp không quản lý: ẩn thêm trợ cấp quản lý lớp từng buổi.
+      return mappedSessions.map((session) =>
+        redactSessionForTrainingHeadView(session),
+      );
+    }
+
+    if (accessMode === 'teacher') {
+      const resolvedView = resolveAccountantFinanceView(roleType, actor.roles);
+      // Quyết định 13/11: gia sư không thấy học phí, kể cả trên buổi của
+      // mình — trừ khi kiêm role được xem học phí (Admin, trưởng phòng, Kế
+      // toán thu). Góc nhìn `expense` chỉ che học phí.
+      const financeView =
+        resolvedView === 'full' &&
+        !hasAnyStaffRole(actor.roles, [
+          StaffRole.admin,
+          SALE_CS_HEAD_ROLE,
+          StaffRole.accountant_income,
+        ])
+          ? 'expense'
+          : resolvedView;
+      // #275 hợp quyền: kiêm Quản lý lớp (hoặc #277 Trưởng ban Đào tạo) →
+      // buổi của gia sư khác hiện như Quản lý lớp, không chỉ còn phần nhận xét.
+      if (seesClassAsTrainingManager(access)) {
+        return mappedSessions.map((session) =>
+          session.teacherId === actor.id
+            ? redactSessionsForAccountantView([session], financeView)[0]
+            : access.isClassManager
+              ? redactSessionForTrainingManagerView(session, {
+                  keepTeacherCompensation: access.isTrainingHead,
+                })
+              : redactSessionForTrainingHeadView(session),
+        );
+      }
+      return redactSessionsForAccountantView(
+        redactOtherTeachersSessions(mappedSessions, actor.id),
+        financeView,
+      );
     }
 
     return redactSessionsForAccountantView(
@@ -237,19 +280,10 @@ export class SessionReportingService {
         },
       },
       include: {
-        class: true,
+        class: { select: { id: true, name: true } },
         attendance: this.attendanceInclude,
         makeupScheduleEvent: this.makeupScheduleEventSelect,
-        teacher: {
-          include: {
-            user: {
-              select: {
-                first_name: true,
-                last_name: true,
-              },
-            },
-          },
-        },
+        teacher: this.teacherSelect,
       },
       orderBy: {
         date: 'desc',

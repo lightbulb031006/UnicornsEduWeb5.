@@ -1,3 +1,4 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import {
   Body,
   Controller,
@@ -14,7 +15,6 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBody,
   ApiConsumes,
@@ -43,35 +43,33 @@ import {
   ParseStaffIdPipe,
   ParseStudentIdPipe,
 } from '../common/pipes/parse-entity-id.pipe';
+import { achievementImageUploadInterceptor } from './achievement-image-upload';
 import {
-  buildImageUploadFileFilter,
-  DEFAULT_MAX_IMAGE_BYTES,
-} from '../storage/supabase-storage';
-import { AchievementService } from './achievement.service';
+  AchievementService,
+  SELF_STAFF_ACHIEVEMENT_EDITOR,
+} from './achievement.service';
 
-const imageUploadInterceptor = FileInterceptor('image', {
-  limits: { fileSize: DEFAULT_MAX_IMAGE_BYTES },
-  fileFilter: buildImageUploadFileFilter({
-    defaultFieldLabel: 'Ảnh minh chứng',
-    labelsByFieldName: { image: 'Ảnh minh chứng' },
-  }),
-});
+const imageUploadInterceptor = achievementImageUploadInterceptor;
 
 @ApiTags('achievements')
 @ApiCookieAuth('access_token')
 @Controller('staff/:staffId/achievements')
 @Roles(UserRole.admin)
-@AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
 export class StaffAchievementController {
   constructor(private readonly achievementService: AchievementService) {}
+
+  /** Admin/trợ lí sửa hồ sơ người khác; hồ sơ của chính mình → 403. */
+  private editorFor(user: JwtPayload, staffId: string) {
+    return this.achievementService.resolveOtherStaffAchievementEditor(
+      user,
+      staffId,
+    );
+  }
 
   @Get()
   // Viewing must match whoever can view the staff profile itself
   // (GET staff/:id allows assistant + accountant_expense on admin routes).
-  @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
-    StaffRole.accountant_expense,
-  )
+  @AllowStaffRolesOnAdminRoutes(StaffRole.accountant_expense)
   @ApiOperation({ summary: 'List staff achievements' })
   @ApiParam({ name: 'staffId', description: 'Staff id (UNISTAFF-…)' })
   @ApiResponse({
@@ -87,13 +85,14 @@ export class StaffAchievementController {
   @UseInterceptors(imageUploadInterceptor)
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Create staff achievement with a required proof image',
+    summary:
+      'Create staff achievement (proof image optional; never auto-highlighted)',
   })
   @ApiParam({ name: 'staffId', description: 'Staff id (UNISTAFF-…)' })
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['title', 'image'],
+      required: ['title'],
       properties: {
         title: { type: 'string' },
         sortOrder: { type: 'integer' },
@@ -101,19 +100,24 @@ export class StaffAchievementController {
       },
     },
   })
-  @ApiResponse({
-    status: 201,
-    description: 'Created achievement with proof image.',
-  })
-  @ApiResponse({ status: 400, description: 'Missing title or proof image.' })
+  @ApiResponse({ status: 201, description: 'Created achievement.' })
+  @ApiResponse({ status: 400, description: 'Missing title or invalid image.' })
+  @ApiResponse({ status: 403, description: 'Own staff record.' })
   @ApiResponse({ status: 404, description: 'Staff not found.' })
-  create(
+  async create(
+    @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Body() body: CreateAchievementDto,
     @UploadedFile()
     file?: { buffer: Buffer; mimetype: string; size: number },
   ) {
-    return this.achievementService.createStaffAchievement(staffId, body, file);
+    const editor = await this.editorFor(user, staffId);
+    return this.achievementService.createStaffAchievement(
+      staffId,
+      body,
+      file,
+      editor,
+    );
   }
 
   @Patch(':achievementId')
@@ -122,16 +126,20 @@ export class StaffAchievementController {
   @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
   @ApiBody({ type: UpdateAchievementDto })
   @ApiResponse({ status: 200, description: 'Updated achievement.' })
+  @ApiResponse({ status: 403, description: 'Own staff record.' })
   @ApiResponse({ status: 404, description: 'Achievement not found.' })
-  update(
+  async update(
+    @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Param('achievementId', ParseUUIDPipe) achievementId: string,
     @Body() body: UpdateAchievementDto,
   ) {
+    const editor = await this.editorFor(user, staffId);
     return this.achievementService.updateStaffAchievement(
       staffId,
       achievementId,
       body,
+      editor,
     );
   }
 
@@ -141,14 +149,18 @@ export class StaffAchievementController {
   @ApiParam({ name: 'staffId', description: 'Staff id (UNISTAFF-…)' })
   @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
   @ApiResponse({ status: 200, description: 'Deleted.' })
+  @ApiResponse({ status: 403, description: 'Own staff record.' })
   @ApiResponse({ status: 404, description: 'Achievement not found.' })
-  remove(
+  async remove(
+    @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Param('achievementId', ParseUUIDPipe) achievementId: string,
   ) {
+    const editor = await this.editorFor(user, staffId);
     return this.achievementService.deleteStaffAchievement(
       staffId,
       achievementId,
+      editor,
     );
   }
 
@@ -158,10 +170,13 @@ export class StaffAchievementController {
   @ApiBody({ type: ReorderAchievementsDto })
   @ApiResponse({ status: 200, description: 'Reordered list.' })
   @ApiResponse({ status: 400, description: 'Incomplete or invalid id set.' })
-  reorder(
+  @ApiResponse({ status: 403, description: 'Own staff record.' })
+  async reorder(
+    @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Body() body: ReorderAchievementsDto,
   ) {
+    await this.editorFor(user, staffId);
     return this.achievementService.reorderStaffAchievements(staffId, body);
   }
 
@@ -175,16 +190,21 @@ export class StaffAchievementController {
   @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
   @ApiResponse({
     status: 200,
-    description: 'Danh sách thành tích sau khi đổi, thành tích nổi bật đứng đầu.',
+    description:
+      'Danh sách thành tích sau khi đổi, thành tích nổi bật đứng đầu.',
   })
+  @ApiResponse({ status: 403, description: 'Own staff record.' })
   @ApiResponse({ status: 404, description: 'Achievement not found.' })
-  setHighlight(
+  async setHighlight(
+    @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Param('achievementId', ParseUUIDPipe) achievementId: string,
   ) {
+    const editor = await this.editorFor(user, staffId);
     return this.achievementService.setStaffHighlightAchievement(
       staffId,
       achievementId,
+      editor,
     );
   }
 
@@ -207,37 +227,44 @@ export class StaffAchievementController {
     description: 'Achievement with signed image URL.',
   })
   @ApiResponse({ status: 400, description: 'Invalid image.' })
-  uploadImage(
+  @ApiResponse({ status: 403, description: 'Own staff record.' })
+  async uploadImage(
+    @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Param('achievementId', ParseUUIDPipe) achievementId: string,
     @UploadedFile()
     file?: { buffer: Buffer; mimetype: string; size: number },
   ) {
+    const editor = await this.editorFor(user, staffId);
     return this.achievementService.uploadStaffAchievementImage(
       staffId,
       achievementId,
       file,
+      editor,
     );
   }
 
   @Delete(':achievementId/image')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Reject clearing a staff achievement proof image',
+    summary:
+      'Clear a staff achievement proof image (highlight rows allowed for admin/assistant)',
   })
   @ApiParam({ name: 'staffId', description: 'Staff id (UNISTAFF-…)' })
   @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
-  @ApiResponse({
-    status: 400,
-    description: 'Staff proof images can be replaced, not removed.',
-  })
-  deleteImage(
+  @ApiResponse({ status: 200, description: 'Achievement without image.' })
+  @ApiResponse({ status: 403, description: 'Own staff record.' })
+  @ApiResponse({ status: 404, description: 'Achievement not found.' })
+  async deleteImage(
+    @CurrentUser() user: JwtPayload,
     @Param('staffId', new ParseStaffIdPipe()) staffId: string,
     @Param('achievementId', ParseUUIDPipe) achievementId: string,
   ) {
+    const editor = await this.editorFor(user, staffId);
     return this.achievementService.deleteStaffAchievementImage(
       staffId,
       achievementId,
+      editor,
     );
   }
 }
@@ -248,17 +275,16 @@ export class StaffAchievementController {
 @Roles(UserRole.admin)
 // Mutations (create/update/delete/upload/reorder) stay admin + assistant only;
 // customer_care/accountant/accountant_income can view (see the `list()` override) but not edit.
-@AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+@AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
 export class StudentAchievementController {
   constructor(private readonly achievementService: AchievementService) {}
 
   @Get()
   // Viewing must match whoever can view the student profile itself
-  // (GET student/:id also allows accountant + accountant_income on admin routes).
+  // (GET student/:id also allows accountant_income on admin routes).
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
+    SALE_CS_HEAD_ROLE,
     StaffRole.customer_care,
-    StaffRole.accountant,
     StaffRole.accountant_income,
   )
   @ApiOperation({ summary: 'List student achievements' })
@@ -272,41 +298,15 @@ export class StudentAchievementController {
   }
 
   @Post()
-  @UseInterceptors(imageUploadInterceptor)
-  @ApiConsumes('multipart/form-data', 'application/json')
-  @ApiOperation({
-    summary: 'Create student achievement with an optional proof image',
-  })
+  @ApiOperation({ summary: 'Create student achievement' })
   @ApiParam({ name: 'studentId', description: 'Student id (UNIST-…)' })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['award', 'exam', 'year', 'level'],
-      properties: {
-        award: { type: 'string' },
-        exam: { type: 'string' },
-        year: { type: 'integer' },
-        level: { type: 'string' },
-        courseLabel: { type: 'string', nullable: true },
-        sortOrder: { type: 'integer' },
-        image: { type: 'string', format: 'binary' },
-      },
-    },
-  })
+  @ApiBody({ type: CreateStudentAchievementDto })
   @ApiResponse({ status: 201, description: 'Created achievement.' })
-  @ApiResponse({ status: 400, description: 'Invalid fields or image.' })
-  @ApiResponse({ status: 503, description: 'Achievement buckets unavailable.' })
   create(
     @Param('studentId', new ParseStudentIdPipe()) studentId: string,
     @Body() body: CreateStudentAchievementDto,
-    @UploadedFile()
-    file?: { buffer: Buffer; mimetype: string; size: number },
   ) {
-    return this.achievementService.createStudentAchievement(
-      studentId,
-      body,
-      file,
-    );
+    return this.achievementService.createStudentAchievement(studentId, body);
   }
 
   @Patch(':achievementId')
@@ -420,12 +420,13 @@ export class MyAchievementController {
   @UseInterceptors(imageUploadInterceptor)
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Create my staff achievement with a required proof image',
+    summary:
+      'Create my staff achievement (proof image optional; never auto-highlighted)',
   })
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['title', 'image'],
+      required: ['title'],
       properties: {
         title: { type: 'string' },
         sortOrder: { type: 'integer' },
@@ -433,11 +434,8 @@ export class MyAchievementController {
       },
     },
   })
-  @ApiResponse({
-    status: 201,
-    description: 'Created achievement with proof image.',
-  })
-  @ApiResponse({ status: 400, description: 'Missing title or proof image.' })
+  @ApiResponse({ status: 201, description: 'Created achievement.' })
+  @ApiResponse({ status: 400, description: 'Missing title or invalid image.' })
   async create(
     @CurrentUser() user: JwtPayload,
     @Body() body: CreateAchievementDto,
@@ -445,7 +443,12 @@ export class MyAchievementController {
     file?: { buffer: Buffer; mimetype: string; size: number },
   ) {
     const staffId = await this.staffIdFor(user);
-    return this.achievementService.createStaffAchievement(staffId, body, file);
+    return this.achievementService.createStaffAchievement(
+      staffId,
+      body,
+      file,
+      SELF_STAFF_ACHIEVEMENT_EDITOR,
+    );
   }
 
   @Patch(':achievementId')
@@ -462,6 +465,7 @@ export class MyAchievementController {
       staffId,
       achievementId,
       body,
+      SELF_STAFF_ACHIEVEMENT_EDITOR,
     );
   }
 
@@ -477,6 +481,7 @@ export class MyAchievementController {
     return this.achievementService.deleteStaffAchievement(
       staffId,
       achievementId,
+      SELF_STAFF_ACHIEVEMENT_EDITOR,
     );
   }
 
@@ -500,7 +505,8 @@ export class MyAchievementController {
   @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
   @ApiResponse({
     status: 200,
-    description: 'Danh sách thành tích sau khi đổi, thành tích nổi bật đứng đầu.',
+    description:
+      'Danh sách thành tích sau khi đổi, thành tích nổi bật đứng đầu.',
   })
   @ApiResponse({ status: 404, description: 'Achievement not found.' })
   async setHighlight(
@@ -511,6 +517,7 @@ export class MyAchievementController {
     return this.achievementService.setStaffHighlightAchievement(
       staffId,
       achievementId,
+      SELF_STAFF_ACHIEVEMENT_EDITOR,
     );
   }
 
@@ -538,19 +545,23 @@ export class MyAchievementController {
       staffId,
       achievementId,
       file,
+      SELF_STAFF_ACHIEVEMENT_EDITOR,
     );
   }
 
   @Delete(':achievementId/image')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Reject clearing my staff achievement proof image',
+    summary:
+      'Clear my staff achievement proof image (not allowed on the highlight row)',
   })
   @ApiParam({ name: 'achievementId', description: 'Achievement UUID' })
+  @ApiResponse({ status: 200, description: 'Achievement without image.' })
   @ApiResponse({
     status: 400,
-    description: 'Staff proof images can be replaced, not removed.',
+    description: 'Highlight achievement image can be replaced, not removed.',
   })
+  @ApiResponse({ status: 404, description: 'Achievement not found.' })
   async deleteImage(
     @CurrentUser() user: JwtPayload,
     @Param('achievementId', ParseUUIDPipe) achievementId: string,
@@ -559,6 +570,7 @@ export class MyAchievementController {
     return this.achievementService.deleteStaffAchievementImage(
       staffId,
       achievementId,
+      SELF_STAFF_ACHIEVEMENT_EDITOR,
     );
   }
 }

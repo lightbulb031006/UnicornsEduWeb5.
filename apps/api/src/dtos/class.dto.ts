@@ -1,6 +1,7 @@
 import {
   ApiProperty,
   ApiPropertyOptional,
+  OmitType,
   PartialType,
   PickType,
 } from '@nestjs/swagger';
@@ -251,9 +252,33 @@ export class CreateClassDto {
   @IsArray()
   @IsStudentId({ each: true })
   student_ids?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Quản lý lớp (staff id) giao ngay khi tạo lớp (#274). Phải là nhân sự Đào Tạo hoặc gia sư đang hoạt động; gia sư chưa thuộc Ban Đào Tạo được cấp thêm role `training`. % trợ cấp quản lý lớp không nhận ở đây (chỉ Admin sửa qua PATCH /class/:id/training-manager).',
+    example: 'UNISTAFF-c3d4e5f6a7',
+  })
+  @IsOptional()
+  @IsStaffId()
+  training_manager_staff_id?: string;
 }
 
-/** DTO for PATCH /class/:id/basic-info – basic info + tuition only */
+/**
+ * Trường thuộc **Học phí lớp** (#272). Chỉ sửa qua `PATCH /class/:id/tuition`;
+ * `PATCH /class/:id/basic-info` (Thông tin lớp) không nhận các trường này.
+ */
+export const CLASS_TUITION_FIELDS = [
+  'student_tuition_per_session',
+  'student_tuition_per_block',
+  'tuition_package_total',
+  'tuition_package_session',
+] as const;
+
+/**
+ * DTO for PATCH /class/:id/basic-info – **Thông tin lớp** (tên, khoá, trạng
+ * thái, sĩ số, không điểm danh, hạn xem nội dung) + lương gia sư mặc định của
+ * lớp. Không có học phí (#272 → `UpdateClassTuitionDto`).
+ */
 export class UpdateClassBasicInfoDto extends PartialType(
   PickType(CreateClassDto, [
     'name',
@@ -263,10 +288,6 @@ export class UpdateClassBasicInfoDto extends PartialType(
     'allowance_per_session_per_student',
     'max_allowance_per_session',
     'scale_amount',
-    'student_tuition_per_session',
-    'student_tuition_per_block',
-    'tuition_package_total',
-    'tuition_package_session',
     'no_attendance',
   ]),
 ) {
@@ -284,6 +305,11 @@ export class UpdateClassBasicInfoDto extends PartialType(
   })
   content_access_expires_at?: string | null;
 }
+
+/** DTO for PATCH /class/:id/tuition – **Học phí lớp** (#272). */
+export class UpdateClassTuitionDto extends PartialType(
+  PickType(CreateClassDto, CLASS_TUITION_FIELDS),
+) {}
 
 export class UpdateClassPricingModeDto {
   @ApiProperty({
@@ -662,7 +688,10 @@ export class UpdateClassStudentsDto {
   students: StudentClassCreateDto[];
 }
 
-export class UpdateClassDto extends PartialType(CreateClassDto) {
+// #274: Quản lý lớp chỉ nhận khi tạo lớp; sửa sau dùng PATCH /class/:id/training-manager.
+export class UpdateClassDto extends PartialType(
+  OmitType(CreateClassDto, ['training_manager_staff_id'] as const),
+) {
   @ApiProperty({
     description: 'Class id',
     example: 'UNICL-b2c3d4e5f6',
@@ -715,7 +744,7 @@ export class ClassCoverImageDto {
 
   @ApiProperty({
     description:
-      'Người gọi có được upload/thay/gỡ ảnh bìa lớp này không (admin, trợ lí, Gia sư đứng lớp, Quản lý lớp).',
+      'Người gọi có được upload/thay/gỡ ảnh bìa lớp này không (admin, Gia sư đứng lớp, Quản lý lớp).',
   })
   canManage: boolean;
 }

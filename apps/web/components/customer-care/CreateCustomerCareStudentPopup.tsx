@@ -80,13 +80,29 @@ function FormTextField({
 
 type Props = {
   onClose: () => void;
+  /**
+   * `customerCare`: CSKH thuần — backend tự gán người tạo làm Người chăm sóc.
+   * `saleCsHead` (15/11): Trưởng phòng Sale & CSKH — backend không tự gán.
+   */
+  variant?: "customerCare" | "saleCsHead";
+};
+
+const VARIANT_DESCRIPTION: Record<NonNullable<Props["variant"]>, string> = {
+  customerCare:
+    "Bạn sẽ là Người chăm sóc của học sinh này, áp % mặc định trên hồ sơ CSKH. Xếp lớp do admin/Trưởng phòng Sale & CSKH làm sau.",
+  saleCsHead:
+    "Tạo tài khoản đăng nhập kèm hồ sơ học sinh. Xếp lớp và gán Người chăm sóc làm sau trên hồ sơ học sinh.",
 };
 
 /**
- * CSKH tạo học sinh kèm tài khoản đăng nhập. Backend tự gán CSKH tạo làm Người
- * chăm sóc với % mặc định trên hồ sơ; CSKH không xếp lớp ở đây.
+ * Tạo học sinh kèm tài khoản đăng nhập (`POST /users/student`), không xếp lớp.
+ * Dùng cho CSKH (`/staff/customer-care-detail`) và Trưởng phòng Sale & CSKH
+ * (trang Học sinh).
  */
-export default function CreateCustomerCareStudentPopup({ onClose }: Props) {
+export default function CreateCustomerCareStudentPopup({
+  onClose,
+  variant = "customerCare",
+}: Props) {
   const queryClient = useQueryClient();
   const { confirm, dialog } = useConfirmDialog();
   const [form, setForm] = useState<CustomerCareStudentFormState>(
@@ -98,8 +114,11 @@ export default function CreateCustomerCareStudentPopup({ onClose }: Props) {
   const createMutation = useMutation({
     mutationFn: () => userApi.createStudentUser(buildCustomerCareStudentPayload(form)),
     onSuccess: async (response) => {
-      // Gồm danh sách học sinh và các summary của portfolio CSKH.
-      await queryClient.invalidateQueries({ queryKey: ["customer-care"] });
+      // Danh sách học sinh (trang Học sinh) + summary portfolio CSKH.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["student", "list"] }),
+        queryClient.invalidateQueries({ queryKey: ["customer-care"] }),
+      ]);
       toast.success(response.message || "Tạo học sinh thành công.");
       onClose();
     },
@@ -157,10 +176,7 @@ export default function CreateCustomerCareStudentPopup({ onClose }: Props) {
           >
             Tạo học sinh mới
           </h2>
-          <p className="mt-1 text-sm text-text-secondary">
-            Bạn sẽ là Người chăm sóc của học sinh này, áp % mặc định trên hồ sơ CSKH. Xếp lớp do
-            admin/trợ lí làm sau.
-          </p>
+          <p className="mt-1 text-sm text-text-secondary">{VARIANT_DESCRIPTION[variant]}</p>
         </div>
         <form onSubmit={handleSubmit} noValidate className="flex min-h-0 flex-1 flex-col">
           <ResponsiveDialogBody className="space-y-5">

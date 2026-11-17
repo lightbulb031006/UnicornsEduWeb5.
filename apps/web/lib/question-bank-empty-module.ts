@@ -22,7 +22,7 @@ export function resolveQuestionBankEmptyModuleCopy(
   }
   return {
     title: "Chưa có chuyên đề",
-    body: "Khoá học này chưa có chuyên đề nên chưa thể tạo câu hỏi. Liên hệ trợ lí để tạo chuyên đề trước.",
+    body: "Khoá học này chưa có chuyên đề nên chưa thể tạo câu hỏi. Liên hệ admin để tạo chuyên đề trước.",
     actionLabel: null,
   };
 }

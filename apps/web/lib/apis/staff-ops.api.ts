@@ -24,6 +24,7 @@ import type {
   MissedTeachingExplanationRecord,
   SessionItem,
   SessionNextOrdinalResponse,
+  TrainingHeadSessionUpdatePayload,
   UpdateMissedTeachingExplanationPayload,
 } from "@/dtos/session.dto";
 import type {
@@ -259,6 +260,19 @@ export async function updateSession(
 ): Promise<SessionItem> {
   const safeId = encodeURIComponent(id);
   const response = await api.put(`/staff-ops/sessions/${safeId}`, data);
+  return response.data as SessionItem;
+}
+
+/** 14/11: Trưởng ban Đào tạo — trợ cấp, Dạy thử, Học thử của buổi. */
+export async function updateSessionAsTrainingHead(
+  id: string,
+  data: TrainingHeadSessionUpdatePayload,
+): Promise<SessionItem> {
+  const safeId = encodeURIComponent(id);
+  const response = await api.patch(
+    `/staff-ops/sessions/${safeId}/training-head`,
+    data,
+  );
   return response.data as SessionItem;
 }
 

@@ -32,7 +32,7 @@ Cấu hình env:
 
 ### 2.1 Lấy JSON dữ liệu tiến độ học tập
 - **Endpoint**: `GET /unioj/report`
-- **Quyền**: `admin`, `staff`, `student` (Cookie `access_token` hợp lệ).
+- **Quyền**: `admin`, `staff`, `student` (Cookie `access_token` hợp lệ). **Học sinh chỉ xem được báo cáo của chính mình**: backend bỏ qua `name` và dùng `student_info.full_name` của tài khoản đang đăng nhập (`UniojService.resolveReportStudentName`); không có hồ sơ → `404`. Admin/staff tra theo `name` truyền vào.
 - **Tham số**:
   - `name` (Bắt buộc): Tên đầy đủ học sinh.
   - `days` (Không bắt buộc): Khoảng thời gian thống kê (7–365 ngày). Mặc định 90 ngày.
@@ -45,7 +45,7 @@ Cấu hình env:
 
 ### 2.2 Tải & Xem PDF Báo cáo chi tiết cho phụ huynh
 - **Endpoint**: `GET /unioj/report/pdf`
-- **Quyền**: `admin`, `staff`, `student` (Cookie `access_token` hợp lệ).
+- **Quyền**: `admin`, `staff`, `student` (Cookie `access_token` hợp lệ). **Học sinh chỉ xem được báo cáo của chính mình**: backend bỏ qua `name` và dùng `student_info.full_name` của tài khoản đang đăng nhập (`UniojService.resolveReportStudentName`); không có hồ sơ → `404`. Admin/staff tra theo `name` truyền vào.
 - **Tham số**:
   - `name` (Bắt buộc): Tên đầy đủ học sinh.
   - `days` (Không bắt buộc): Khoảng thời gian thống kê.

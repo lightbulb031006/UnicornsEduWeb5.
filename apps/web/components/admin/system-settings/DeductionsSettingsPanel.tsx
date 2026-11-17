@@ -22,7 +22,7 @@ type RoleDefaultFormState = {
 
 const STAFF_ROLE_OPTIONS: { value: StaffRoleType; label: string }[] = [
   { value: "teacher", label: ROLE_LABELS.teacher },
-  { value: "assistant", label: ROLE_LABELS.assistant },
+  { value: "sale_customer_care_head", label: ROLE_LABELS.sale_customer_care_head },
   { value: "accountant_income", label: ROLE_LABELS.accountant_income },
   { value: "accountant_expense", label: ROLE_LABELS.accountant_expense },
   { value: "customer_care", label: ROLE_LABELS.customer_care },
@@ -31,6 +31,7 @@ const STAFF_ROLE_OPTIONS: { value: StaffRoleType; label: string }[] = [
   { value: "communication", label: ROLE_LABELS.communication },
   { value: "technical", label: ROLE_LABELS.technical },
   { value: "training", label: ROLE_LABELS.training },
+  { value: "training_head", label: ROLE_LABELS.training_head },
   { value: "sale", label: ROLE_LABELS.sale },
 ];
 

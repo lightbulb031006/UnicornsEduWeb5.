@@ -2,20 +2,23 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import type { SyntheticEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
 import { toast } from "sonner";
 import * as authApi from "@/lib/apis/auth.api";
-import type {
-  LoginDto,
-  StudentLoginEmailNotVerifiedError,
+import {
+  SIGNED_OUT_REASON_DEVICE_SUPERSEDED,
+  type LoginDto,
+  type StudentLoginDto,
+  type StudentLoginEmailNotVerifiedError,
 } from "@/dtos/Auth.dto";
 import { useAuth } from "@/context/AuthContext";
 import { BrandLogoLockup } from "@/components/BrandLogoLockup";
 import { AuthCardSkeleton } from "@/components/auth/AuthCardSkeleton";
 import { SentToEmailNotice } from "@/components/auth/SentToEmailNotice";
+import { StudentDeviceBlockedCard } from "@/components/auth/StudentDeviceBlockedCard";
 import {
   buildSetupPasswordHref,
   readSafeNextPath,
@@ -26,20 +29,72 @@ import {
 } from "@/lib/post-login-session";
 import { getClientApiBaseUrl } from "@/lib/api-base-url";
 import {
-  getLoginErrorToastMessage,
-  nestMessageFromResponseData,
-} from "@/lib/auth-error-message.helpers";
-import {
   EMAIL_VERIFICATION_RESEND_COOLDOWN_MS,
   openEmailVerificationModal,
 } from "@/lib/email-verification-access";
 import { useResendCooldown } from "@/hooks/use-resend-cooldown";
+
+function nestMessageFromResponseData(data: unknown): string | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+  const raw = (data as { message?: unknown }).message;
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim();
+  }
+  if (
+    Array.isArray(raw) &&
+    raw.every((m): m is string => typeof m === "string")
+  ) {
+    return raw.join(" ");
+  }
+  return null;
+}
+
+function getLoginErrorToastMessage(error: unknown): string {
+  if (!isAxiosError(error)) {
+    return "Đăng nhập thất bại.";
+  }
+
+  const status = error.response?.status;
+  const data = error.response?.data;
+  const serverMsg = nestMessageFromResponseData(data);
+
+  if (status === 400) {
+    return (
+      serverMsg ??
+      "Dữ liệu không hợp lệ. Mật khẩu cần ít nhất 6 ký tự (theo quy định server)."
+    );
+  }
+
+  if (status === 401) {
+    return serverMsg ?? "Sai tài khoản hoặc mật khẩu.";
+  }
+
+  if (status === 409) {
+    return (
+      serverMsg ??
+      "Tài khoản đang đăng nhập ở thiết bị khác. Vui lòng đăng xuất thiết bị cũ hoặc liên hệ quản trị viên."
+    );
+  }
+
+  if (status === 429) {
+    return (
+      serverMsg ??
+      "Too many requests. Bạn thao tác quá nhanh. Vui lòng đợi một chút rồi thử lại."
+    );
+  }
+
+  return "Đăng nhập thất bại.";
+}
 
 function hasAuthenticatedSession(user: { id: string; accountHandle: string }) {
   return Boolean(user.id && user.accountHandle);
 }
 
 type LoginStep = "form" | "blocked" | "email-unverified";
+/** Bị chặn qua form mật khẩu (gửi lại kèm cờ) hay qua Google (chạy lại OAuth). */
+type BlockedVia = "password" | "google";
 
 function readEmailNotVerifiedMaskedEmail(error: unknown): string | null {
   if (!isAxiosError(error) || error.response?.status !== 400) return null;
@@ -68,7 +123,10 @@ function LoginPageContent() {
     const err = getSearchParam("error");
     return err === "device_blocked" ? "blocked" : "form";
   });
-  const existingSessionRedirectRef = useRef<string | null>(null);
+  const [blockedVia, setBlockedVia] = useState<BlockedVia>(() =>
+    getSearchParam("error") === "device_blocked" ? "google" : "password",
+  );
+  const [isForcingGoogle, setIsForcingGoogle] = useState(false);
   const [isActivating, setIsActivating] = useState(false);
   // Email nhận mail (đã che) và lúc gửi — dùng cho màn «đã gửi» + cooldown Gửi lại.
   const [sentMaskedEmail, setSentMaskedEmail] = useState<string | null>(null);
@@ -84,6 +142,12 @@ function LoginPageContent() {
       toast.error("Tài khoản chưa tồn tại trong hệ thống. Vui lòng liên hệ quản trị viên để được cấp tài khoản.");
     }
     if (err === "google_no_user") toast.error("Không lấy được thông tin từ Google. Vui lòng thử lại.");
+    if (err === SIGNED_OUT_REASON_DEVICE_SUPERSEDED) {
+      toast.error(
+        "Tài khoản vừa được đăng nhập ở thiết bị khác, bạn đã bị đăng xuất. Nếu không phải bạn, hãy đổi mật khẩu.",
+        { duration: 10_000 },
+      );
+    }
   }, [getSearchParam]);
 
   // Staff/admin chưa xác minh email: bấm Đăng nhập một lần là gửi luôn mail
@@ -176,7 +240,7 @@ function LoginPageContent() {
 
   // Student login init
   const studentLoginInitMutation = useMutation({
-    mutationFn: async (body: LoginDto) => {
+    mutationFn: async (body: StudentLoginDto) => {
       return authApi.studentLoginInit(body);
     },
     // Email đã xác minh → server cấp phiên luôn, không còn bước magic link.
@@ -205,6 +269,8 @@ function LoginPageContent() {
         return;
       }
       if (isAxiosError(error) && error.response?.status === 409) {
+        // Giữ thông tin đăng nhập: nút «Đăng xuất tất cả thiết bị» gửi lại.
+        setBlockedVia("password");
         setLoginStep("blocked");
         return;
       }
@@ -221,8 +287,9 @@ function LoginPageContent() {
       return;
     }
 
-    if (existingSessionRedirectRef.current === user.id) return;
-    existingSessionRedirectRef.current = user.id;
+    // Chốt cờ trước khi redirect để effect không chạy lại lần hai.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsRedirecting(true);
     const nextPath = readSafeNextPath(getSearchParam("next"));
     void bootstrapPostLoginSession({
       fallbackUser: user,
@@ -230,11 +297,7 @@ function LoginPageContent() {
       setUser,
       requestedNextPath: nextPath,
     }).then(({ redirectHref }) => {
-      setIsRedirecting(true);
       replace(redirectHref);
-    }).catch((error: unknown) => {
-      existingSessionRedirectRef.current = null;
-      toast.error(getLoginErrorToastMessage(error));
     });
   }, [
     getSearchParam,
@@ -259,6 +322,20 @@ function LoginPageContent() {
     studentLoginInitMutation.mutate({ accountHandle, password, rememberMe });
   };
 
+  const handleForceLogoutOthers = () => {
+    if (blockedVia === "google") {
+      setIsForcingGoogle(true);
+      window.location.href = `${getClientApiBaseUrl()}/auth/google?force_device=1`;
+      return;
+    }
+    studentLoginInitMutation.mutate({
+      accountHandle,
+      password,
+      rememberMe,
+      forceLogoutOthers: true,
+    });
+  };
+
   const handleBackToForm = () => {
     setLoginStep("form");
     setSentMaskedEmail(null);
@@ -277,40 +354,11 @@ function LoginPageContent() {
   // Blocked device screen
   if (loginStep === "blocked") {
     return (
-      <div className="flex min-h-dvh items-start justify-center bg-bg-primary px-4 py-6 sm:items-center sm:py-10">
-        <div className="w-full max-w-md motion-fade-up">
-          <div className="rounded-2xl border border-border-default bg-bg-surface p-5 shadow-lg motion-hover-lift sm:p-8">
-            <div className="mb-6 flex justify-center px-1 sm:mb-8">
-              <BrandLogoLockup
-                variant="auth"
-                className="max-w-full flex-wrap justify-center"
-                priority
-              />
-            </div>
-            <h1 className="text-2xl font-semibold text-text-primary text-center mb-4">
-              Tài khoản đang bị chặn
-            </h1>
-            <div className="rounded-lg bg-error/10 border border-error/20 p-4 mb-6">
-              <p className="text-sm text-error text-center">
-                Tài khoản này đang đăng nhập ở thiết bị khác. Mỗi học sinh chỉ được phép đăng nhập trên một thiết bị tại một thời điểm.
-              </p>
-            </div>
-            <div className="space-y-3 text-sm text-text-secondary">
-              <p className="font-medium text-text-primary">Cách khắc phục:</p>
-              <ul className="list-disc list-inside space-y-1.5">
-                <li>Đăng xuất trên thiết bị đang dùng</li>
-                <li>Liên hệ giáo viên hoặc quản trị viên để buộc đăng xuất</li>
-              </ul>
-            </div>
-            <button
-              onClick={handleBackToForm}
-              className="mt-6 w-full rounded-lg bg-primary py-2.5 font-medium text-text-inverse hover:bg-primary-hover active:bg-primary-active focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 transition-colors duration-200"
-            >
-              Thử lại
-            </button>
-          </div>
-        </div>
-      </div>
+      <StudentDeviceBlockedCard
+        forcePending={isLoading || isForcingGoogle}
+        onForceLogoutOthers={handleForceLogoutOthers}
+        onRetry={handleBackToForm}
+      />
     );
   }
 

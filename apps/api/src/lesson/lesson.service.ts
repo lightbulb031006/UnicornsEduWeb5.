@@ -20,6 +20,13 @@ import {
   getLessonOutputPricingError,
 } from './lesson-output-pricing';
 import {
+  assertCanDeleteLessonWork,
+  assertCanSetLessonOutputPricing,
+  canDeleteLessonResource,
+  canEditLessonOutputPaymentStatus,
+  LESSON_RESOURCE_DELETE_FORBIDDEN_MESSAGE,
+} from './lesson-plan-head-policy';
+import {
   ActionHistoryActor,
   ActionHistoryService,
 } from '../action-history/action-history.service';
@@ -63,6 +70,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import type { JwtPayload } from '../auth/decorators/current-user.decorator';
 import { resolveTaxDeductionRate } from '../payroll/deduction-rates';
+import { assertActorNotEditingOwnCompensation } from 'src/common/staff-role-policy';
+import { computeStaffSensitiveView } from 'src/common/staff-sensitive-view';
 
 type LessonTaskRecord = {
   id: string;
@@ -498,6 +507,7 @@ export class LessonService {
         completedOutputCount,
         cancelledOutputCount,
       },
+      // Follow-up grill 13/11: chi phí từng output công khai trong workspace.
       outputs: outputs.map((output) => this.mapWorkOutputItem(output)),
       outputsMeta: outputMeta,
     };
@@ -603,7 +613,11 @@ export class LessonService {
           outputGroups.find(
             (group) => group.status === LessonOutputStatus.cancelled,
           )?._count ?? 0,
-        unpaidCostTotal: outputCostAggregate._sum.cost ?? 0,
+        // Tổng chi phí giáo án của một người = thu nhập cá nhân (#270): chỉ
+        // Admin, Kế toán chi và chính người đó; Trưởng ban nhận `null`.
+        unpaidCostTotal: this.canViewLessonStaffIncome(access, staffId)
+          ? (outputCostAggregate._sum.cost ?? 0)
+          : null,
       },
       outputs: outputs.map((output) => this.mapWorkOutputItem(output)),
     };
@@ -771,11 +785,14 @@ export class LessonService {
       throw new NotFoundException('Lesson resource not found');
     }
 
-    this.assertResourceWriteAccess(
-      existingResource,
-      access,
-      'xóa tài nguyên giáo án',
-    );
+    // Follow-up grill 13/11: người tạo xoá tài nguyên của mình; Admin +
+    // Trưởng ban Chuyên môn xoá mọi tài nguyên.
+    if (
+      access &&
+      !canDeleteLessonResource(access, existingResource.createdBy)
+    ) {
+      throw new ForbiddenException(LESSON_RESOURCE_DELETE_FORBIDDEN_MESSAGE);
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const deletedResource = await tx.lessonResource.delete({
@@ -1017,10 +1034,29 @@ export class LessonService {
     );
     const cost =
       computeLessonOutputCost(difficultyBand, pricingItems, level) ?? 0;
+    // #279: chỉ Admin + Kế toán chi đặt trạng thái thanh toán khác `pending`;
+    // Trưởng ban Chuyên môn 403 (Ban Chuyên môn thường vẫn bị ép `pending`).
+    if (
+      access?.canManage &&
+      data.paymentStatus != null &&
+      data.paymentStatus !== PaymentStatus.pending &&
+      !canEditLessonOutputPaymentStatus(access)
+    ) {
+      throw new ForbiddenException(
+        'Tài khoản hiện tại không có quyền cập nhật trạng thái thanh toán output.',
+      );
+    }
     const paymentStatus =
       access?.canParticipate && !access.canManage
         ? PaymentStatus.pending
         : (data.paymentStatus ?? PaymentStatus.pending);
+    const setsPricing =
+      difficultyBand != null ||
+      level != null ||
+      includesTest ||
+      includesSolution ||
+      includesLectureVideo ||
+      includesTheoryLecture;
     const date = this.requireDateOnly(data.date, 'date');
     const contestUploaded = toTrimmedString(data.contestUploaded);
     const link = toTrimmedString(data.link);
@@ -1045,6 +1081,17 @@ export class LessonService {
         access?.canParticipate && !access.canManage
           ? this.requireParticipantStaffId(access)
           : await this.resolveLessonOutputStaffId(tx, data.staffId);
+      if (access && setsPricing) {
+        assertCanSetLessonOutputPricing(access, staffId);
+      }
+      if (paymentStatus !== PaymentStatus.pending) {
+        // #265: Kế toán chi không tự đặt trạng thái thanh toán output của mình.
+        await assertActorNotEditingOwnCompensation(
+          tx,
+          this.toPolicyActor(actor),
+          [staffId],
+        );
+      }
       const outputDeductionSnapshot =
         await this.resolveLessonOutputDeductionSnapshot(tx, staffId, date);
 
@@ -1275,6 +1322,9 @@ export class LessonService {
       updateData.cost = computedCost;
     }
 
+    const paymentStatusChanged =
+      data.paymentStatus !== undefined &&
+      data.paymentStatus !== existingOutput.paymentStatus;
     if (data.paymentStatus !== undefined) {
       if (!this.canEditOutputPaymentStatus(access)) {
         throw new ForbiddenException(
@@ -1319,6 +1369,49 @@ export class LessonService {
 
     if (data.status !== undefined) {
       updateData.status = data.status;
+    }
+
+    // Tự khai chi phí giáo án: bậc độ khó / level / hạng mục quyết định chi
+    // phí — người nhận thanh toán tự cài, Trưởng ban sửa của người khác, khi
+    // output chưa thanh toán; đã thanh toán chỉ Admin.
+    const pricingChanged =
+      (data.difficultyBand !== undefined &&
+        (data.difficultyBand ?? null) !==
+          (existingOutput.difficultyBand ?? null)) ||
+      (data.level !== undefined &&
+        toTrimmedString(data.level) !== existingOutput.level) ||
+      (data.includesTest !== undefined &&
+        (data.includesTest === true) !==
+          Boolean(existingOutput.includesTest)) ||
+      (data.includesSolution !== undefined &&
+        (data.includesSolution === true) !==
+          Boolean(existingOutput.includesSolution)) ||
+      (data.includesLectureVideo !== undefined &&
+        (data.includesLectureVideo === true) !==
+          Boolean(existingOutput.includesLectureVideo)) ||
+      (data.includesTheoryLecture !== undefined &&
+        (data.includesTheoryLecture === true) !==
+          Boolean(existingOutput.includesTheoryLecture));
+    const assignsOutputToSelf =
+      data.staffId !== undefined &&
+      nextStaffId !== existingOutput.staffId &&
+      access?.staffId != null &&
+      nextStaffId === access.staffId;
+    if (access && (pricingChanged || assignsOutputToSelf)) {
+      assertCanSetLessonOutputPricing(
+        access,
+        nextStaffId,
+        existingOutput.paymentStatus,
+      );
+    }
+    if (paymentStatusChanged) {
+      // #265: Kế toán chi không đổi trạng thái thanh toán output mà chính mình
+      // là người nhận (trước hoặc sau khi đổi người nhận). Admin được.
+      await assertActorNotEditingOwnCompensation(
+        this.prisma,
+        this.toPolicyActor(actor),
+        [existingOutput.staffId, nextStaffId],
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -1393,8 +1486,16 @@ export class LessonService {
         select: {
           id: true,
           paymentStatus: true,
+          staffId: true,
         },
       });
+
+      // #265: Kế toán chi không đổi trạng thái output mà mình là người nhận.
+      await assertActorNotEditingOwnCompensation(
+        tx,
+        this.toPolicyActor(actor) ?? auditActor,
+        existingOutputs.map((output) => output.staffId),
+      );
 
       const existingOutputIds = new Set(
         existingOutputs.map((output) => output.id),
@@ -2187,6 +2288,32 @@ export class LessonService {
     );
   }
 
+  private canViewLessonStaffIncome(
+    access: LessonActorContext | null,
+    targetStaffId: string,
+  ) {
+    if (!access) {
+      return true;
+    }
+    return computeStaffSensitiveView(
+      {
+        isAdmin:
+          access.roleType === UserRole.admin ||
+          access.staffRoles.includes(StaffRole.admin),
+        staffId: access.staffId,
+        roles: [...access.staffRoles],
+      },
+      targetStaffId,
+    ).income;
+  }
+
+  /** Actor cho `staff-role-policy` từ JWT (không có JWT → job nội bộ). */
+  private toPolicyActor(actor?: JwtPayload) {
+    return actor?.id
+      ? { userId: actor.id, roleType: actor.roleType }
+      : undefined;
+  }
+
   private canEditOutputPaymentStatus(access: LessonActorContext | null) {
     if (!access) {
       return true;
@@ -2194,9 +2321,7 @@ export class LessonService {
 
     return (
       access.roleType === UserRole.admin ||
-      access.staffRoles.includes(StaffRole.admin) ||
-      access.staffRoles.includes(StaffRole.assistant) ||
-      access.staffRoles.includes(StaffRole.accountant_expense)
+      canEditLessonOutputPaymentStatus(access)
     );
   }
 
@@ -2422,7 +2547,6 @@ export class LessonService {
 
     const canManage =
       staff.roles.includes(StaffRole.admin) ||
-      staff.roles.includes(StaffRole.assistant) ||
       staff.roles.includes(StaffRole.lesson_plan_head);
     const canParticipate =
       canManage || staff.roles.includes(StaffRole.lesson_plan);
@@ -2540,7 +2664,7 @@ export class LessonService {
 
     if (!staff) {
       throw new BadRequestException(
-        'Chỉ được gán nhân sự thực hiện có role giáo án hoặc trưởng giáo án.',
+        'Chỉ được gán nhân sự thực hiện có role Ban Chuyên môn hoặc Trưởng ban Chuyên môn.',
       );
     }
 
@@ -2584,7 +2708,7 @@ export class LessonService {
 
     if (assignableStaff.length !== normalizedStaffIds.length) {
       throw new BadRequestException(
-        'Chỉ được gán nhân sự thực hiện có role giáo án hoặc trưởng giáo án.',
+        'Chỉ được gán nhân sự thực hiện có role Ban Chuyên môn hoặc Trưởng ban Chuyên môn.',
       );
     }
 

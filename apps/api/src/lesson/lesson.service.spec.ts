@@ -86,6 +86,9 @@ describe('LessonService', () => {
       findFirst: jest.fn(),
       findMany: jest.fn(),
     },
+    user: {
+      findUnique: jest.fn(),
+    },
     roleTaxDeductionRate: {
       findFirst: jest.fn(),
     },
@@ -504,7 +507,7 @@ describe('LessonService', () => {
   it('allows overview for staff who has both lesson planner and accountant roles', async () => {
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-mixed-role',
-      roles: ['lesson_plan', 'accountant'],
+      roles: ['lesson_plan', 'accountant_expense'],
     });
     mockPrisma.lessonResource.count.mockResolvedValue(1);
     mockPrisma.lessonTask.count
@@ -544,7 +547,7 @@ describe('LessonService', () => {
       {
         id: 'staff-mixed-role',
         fullName: 'Mixed Planner',
-        roles: ['lesson_plan', 'accountant'],
+        roles: ['lesson_plan', 'accountant_expense'],
         status: 'active',
       },
     ]);
@@ -554,7 +557,7 @@ describe('LessonService', () => {
         staff: {
           id: 'staff-mixed-role',
           fullName: 'Mixed Planner',
-          roles: ['lesson_plan', 'accountant'],
+          roles: ['lesson_plan', 'accountant_expense'],
           status: 'active',
         },
       },
@@ -566,7 +569,7 @@ describe('LessonService', () => {
         staff: {
           id: 'staff-mixed-role',
           fullName: 'Mixed Planner',
-          roles: ['lesson_plan', 'accountant'],
+          roles: ['lesson_plan', 'accountant_expense'],
           status: 'active',
         },
       },
@@ -2165,6 +2168,7 @@ describe('LessonService', () => {
       includesTheoryLecture: false,
       theoryLectureLinks: [],
       tags: ['graph'],
+      // Follow-up grill 13/11: chi phí từng output công khai.
       cost: 120000,
       date: '2026-03-31',
       contestUploaded: 'ABC 123',
@@ -2364,6 +2368,7 @@ describe('LessonService', () => {
       },
     });
     expect(result.lessonName).toBe('Bài mới participant');
+    // Follow-up grill 13/11: chi phí từng output công khai.
     expect(result.cost).toBe(200000);
     expect(result.paymentStatus).toBe(PaymentStatus.pending);
   });
@@ -2577,6 +2582,7 @@ describe('LessonService', () => {
         }) as unknown,
       }) as unknown,
     );
+    // Follow-up grill 13/11: chi phí từng output công khai trong workspace.
     expect(result.cost).toBe(150000);
   });
 
@@ -3165,7 +3171,7 @@ describe('LessonService', () => {
     expect(mockPrisma.lessonResource.update).not.toHaveBeenCalled();
   });
 
-  it('allows participant to delete their own lesson resource', async () => {
+  it('allows participant to delete their own lesson resource (follow-up grill 13/11)', async () => {
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-participant',
       roles: ['lesson_plan'],
@@ -3207,7 +3213,6 @@ describe('LessonService', () => {
         roleType: 'staff',
       },
     );
-
     expect(mockPrisma.lessonResource.delete).toHaveBeenCalledWith({
       where: { id: 'resource-own-delete-1' },
     });
@@ -3529,6 +3534,7 @@ describe('LessonService', () => {
       select: {
         id: true,
         paymentStatus: true,
+        staffId: true,
       },
     });
     expect(mockPrisma.lessonOutput.updateMany).toHaveBeenCalledWith({
@@ -3584,6 +3590,557 @@ describe('LessonService', () => {
     expect(result).toEqual({
       requestedCount: 2,
       updatedCount: 1,
+    });
+  });
+
+  describe('#279 Trưởng ban Chuyên môn toàn quyền khu giáo án', () => {
+    const headUser = {
+      id: 'user-head',
+      email: 'head@example.com',
+      accountHandle: 'head',
+      roleType: UserRole.staff,
+    } as never;
+    const plannerUser = {
+      id: 'user-planner',
+      email: 'planner@example.com',
+      accountHandle: 'planner',
+      roleType: UserRole.staff,
+    } as never;
+
+    function mockActor(actor: { id: string; roles: StaffRole[] }) {
+      mockPrisma.staffInfo.findUnique.mockImplementation(
+        (args: { where: { userId?: string; id?: string } }) => {
+          if (args.where.userId) {
+            return Promise.resolve(actor);
+          }
+          return Promise.resolve({
+            id: args.where.id,
+            status: StaffStatus.active,
+            roles: [StaffRole.lesson_plan],
+          });
+        },
+      );
+    }
+
+    function outputRecord(overrides: Record<string, unknown> = {}) {
+      return {
+        id: 'output-279',
+        lessonTaskId: 'task-279',
+        lessonName: 'Bài 279',
+        originalTitle: null,
+        source: null,
+        originalLink: null,
+        level: null,
+        difficultyBand: null,
+        includesTest: false,
+        includesSolution: false,
+        includesLectureVideo: false,
+        includesTheoryLecture: false,
+        theoryLectureLinks: [],
+        tags: [],
+        cost: 30000,
+        paymentStatus: PaymentStatus.pending,
+        date: new Date('2026-11-01T00:00:00.000Z'),
+        contestUploaded: null,
+        link: null,
+        staffId: 'staff-other',
+        status: LessonOutputStatus.pending,
+        createdAt: new Date('2026-11-01T08:00:00.000Z'),
+        updatedAt: new Date('2026-11-01T08:00:00.000Z'),
+        staff: {
+          id: 'staff-other',
+          user: { first_name: 'Người', last_name: 'Khác' },
+          roles: [StaffRole.lesson_plan],
+          status: StaffStatus.active,
+        },
+        lessonTask: {
+          id: 'task-279',
+          title: 'Task 279',
+          status: LessonTaskStatus.in_progress,
+          priority: LessonTaskPriority.medium,
+        },
+        ...overrides,
+      };
+    }
+
+    const resourceRecord = {
+      id: 'resource-279',
+      title: 'Tài liệu',
+      description: null,
+      resourceLink: 'https://example.com/r',
+      lessonTaskId: null,
+      tags: [],
+      createdBy: 'user-planner',
+      createdAt: new Date('2026-11-01T08:00:00.000Z'),
+      updatedAt: new Date('2026-11-01T08:00:00.000Z'),
+    };
+
+    it('Trưởng ban xoá được tài liệu (kể cả của người khác)', async () => {
+      mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+      mockPrisma.lessonResource.findUnique.mockResolvedValue(resourceRecord);
+      mockPrisma.lessonResource.delete.mockResolvedValue(resourceRecord);
+
+      await service.deleteResource('resource-279', undefined, headUser);
+
+      expect(mockPrisma.lessonResource.delete).toHaveBeenCalledWith({
+        where: { id: 'resource-279' },
+      });
+    });
+
+    it('Trưởng ban bị 403 khi tạo sản phẩm với trạng thái thanh toán khác pending', async () => {
+      mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+
+      await expect(
+        service.createOutput(
+          {
+            lessonName: 'Bài 279',
+            date: '2026-11-01',
+            paymentStatus: PaymentStatus.paid,
+            staffId: 'staff-other',
+          },
+          undefined,
+          headUser,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.lessonOutput.create).not.toHaveBeenCalled();
+    });
+
+    it('Trưởng ban cài bậc độ khó / hạng mục cho sản phẩm của người khác', async () => {
+      mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+      mockPrisma.lessonOutput.findUnique.mockResolvedValue(outputRecord());
+      mockPrisma.lessonOutput.update.mockResolvedValue(
+        outputRecord({
+          difficultyBand: LessonOutputDifficultyBand.hard,
+          includesTest: true,
+          cost: 30000,
+        }),
+      );
+
+      const result = await service.updateOutput(
+        'output-279',
+        {
+          difficultyBand: LessonOutputDifficultyBand.hard,
+          includesTest: true,
+        },
+        undefined,
+        headUser,
+      );
+
+      expect(mockPrisma.lessonOutput.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            difficultyBand: LessonOutputDifficultyBand.hard,
+            cost: 30000,
+          }) as unknown,
+        }) as unknown,
+      );
+      expect(result.cost).toBe(30000);
+    });
+
+    it('Trưởng ban tự khai bậc độ khó cho output chưa thanh toán của chính mình', async () => {
+      mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+      mockPrisma.lessonOutput.findUnique.mockResolvedValue(
+        outputRecord({ staffId: 'staff-head' }),
+      );
+      mockPrisma.lessonOutput.update.mockResolvedValue(
+        outputRecord({
+          staffId: 'staff-head',
+          difficultyBand: LessonOutputDifficultyBand.hard,
+        }),
+      );
+
+      await service.updateOutput(
+        'output-279',
+        { difficultyBand: LessonOutputDifficultyBand.hard },
+        undefined,
+        headUser,
+      );
+
+      expect(mockPrisma.lessonOutput.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            difficultyBand: LessonOutputDifficultyBand.hard,
+          }) as unknown,
+        }) as unknown,
+      );
+    });
+
+    it('Trưởng ban bị 403 khi sửa bậc độ khó của output đã thanh toán (kể cả của mình)', async () => {
+      mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+      mockPrisma.lessonOutput.findUnique.mockResolvedValue(
+        outputRecord({
+          staffId: 'staff-head',
+          paymentStatus: PaymentStatus.paid,
+        }),
+      );
+
+      await expect(
+        service.updateOutput(
+          'output-279',
+          { difficultyBand: LessonOutputDifficultyBand.hard },
+          undefined,
+          headUser,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.lessonOutput.update).not.toHaveBeenCalled();
+    });
+
+    it('Trưởng ban bị 403 khi tự nhận output đã thanh toán về mình', async () => {
+      mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+      mockPrisma.lessonOutput.findUnique.mockResolvedValue(
+        outputRecord({ paymentStatus: PaymentStatus.paid }),
+      );
+
+      await expect(
+        service.updateOutput(
+          'output-279',
+          { staffId: 'staff-head' },
+          undefined,
+          headUser,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.lessonOutput.update).not.toHaveBeenCalled();
+    });
+
+    it('Ban Chuyên môn thường tự khai bậc độ khó / level / hạng mục khi tạo output của mình', async () => {
+      mockActor({ id: 'staff-planner', roles: [StaffRole.lesson_plan] });
+      mockPrisma.lessonTask.findUnique.mockResolvedValue({ id: 'task-279' });
+      mockPrisma.lessonTask.findFirst.mockResolvedValue({ id: 'task-279' });
+      mockPrisma.lessonOutput.create.mockResolvedValue(
+        outputRecord({
+          staffId: 'staff-planner',
+          level: 'Level 2',
+          difficultyBand: LessonOutputDifficultyBand.easy,
+          includesTest: true,
+        }),
+      );
+
+      await service.createOutput(
+        {
+          lessonTaskId: 'task-279',
+          lessonName: 'Bài 279',
+          date: '2026-11-01',
+          level: 'Level 2',
+          difficultyBand: LessonOutputDifficultyBand.easy,
+          includesTest: true,
+          paymentStatus: PaymentStatus.paid,
+        },
+        undefined,
+        plannerUser,
+      );
+
+      expect(mockPrisma.lessonOutput.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            staffId: 'staff-planner',
+            difficultyBand: LessonOutputDifficultyBand.easy,
+            // Ban Chuyên môn thường luôn bị ép `pending`.
+            paymentStatus: PaymentStatus.pending,
+          }) as unknown,
+        }) as unknown,
+      );
+    });
+
+    it('Ban Chuyên môn thường tự khai hạng mục cho output chưa thanh toán của mình', async () => {
+      mockActor({ id: 'staff-planner', roles: [StaffRole.lesson_plan] });
+      mockPrisma.lessonOutput.findFirst.mockResolvedValue(
+        outputRecord({ staffId: 'staff-planner' }),
+      );
+      mockPrisma.lessonOutput.update.mockResolvedValue(
+        outputRecord({ staffId: 'staff-planner', includesSolution: true }),
+      );
+
+      await service.updateOutput(
+        'output-279',
+        { includesSolution: true },
+        undefined,
+        plannerUser,
+      );
+
+      expect(mockPrisma.lessonOutput.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            includesSolution: true,
+          }) as unknown,
+        }) as unknown,
+      );
+    });
+
+    it('Ban Chuyên môn thường bị 403 khi đổi hạng mục output đã thanh toán của mình', async () => {
+      mockActor({ id: 'staff-planner', roles: [StaffRole.lesson_plan] });
+      mockPrisma.lessonOutput.findFirst.mockResolvedValue(
+        outputRecord({
+          staffId: 'staff-planner',
+          paymentStatus: PaymentStatus.paid,
+        }),
+      );
+
+      await expect(
+        service.updateOutput(
+          'output-279',
+          { includesSolution: true },
+          undefined,
+          plannerUser,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.lessonOutput.update).not.toHaveBeenCalled();
+    });
+
+    it('Ban Chuyên môn thường bị 403 khi đổi hạng mục output của người khác', async () => {
+      mockActor({ id: 'staff-planner', roles: [StaffRole.lesson_plan] });
+      mockPrisma.lessonOutput.findFirst.mockResolvedValue(outputRecord());
+
+      await expect(
+        service.updateOutput(
+          'output-279',
+          { includesSolution: true },
+          undefined,
+          plannerUser,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.lessonOutput.update).not.toHaveBeenCalled();
+    });
+
+    it('Ban Chuyên môn thường gửi lại đúng giá trị cũ của bậc/level/hạng mục thì không bị chặn', async () => {
+      mockActor({ id: 'staff-planner', roles: [StaffRole.lesson_plan] });
+      const existing = outputRecord({
+        staffId: 'staff-planner',
+        level: 'Level 1',
+        difficultyBand: LessonOutputDifficultyBand.easy,
+        includesTest: true,
+        cost: 20000,
+      });
+      mockPrisma.lessonOutput.findFirst.mockResolvedValue(existing);
+      mockPrisma.lessonOutput.update.mockResolvedValue({
+        ...existing,
+        lessonName: 'Tên mới',
+      });
+
+      const result = await service.updateOutput(
+        'output-279',
+        {
+          lessonName: 'Tên mới',
+          level: 'Level 1',
+          difficultyBand: LessonOutputDifficultyBand.easy,
+          includesTest: true,
+          includesSolution: false,
+        },
+        undefined,
+        plannerUser,
+      );
+
+      expect(result.lessonName).toBe('Tên mới');
+      // Sản phẩm của chính mình → vẫn thấy chi phí.
+      expect(result.cost).toBe(20000);
+    });
+
+    it('bảng Công việc: mọi nhân sự giáo án thấy chi phí từng output (follow-up grill 13/11)', async () => {
+      const outputs = [
+        outputRecord({ id: 'output-own', staffId: 'staff-planner' }),
+        outputRecord({ id: 'output-other', staffId: 'staff-other' }),
+      ];
+      mockPrisma.lessonTask.count.mockResolvedValue(1);
+      mockPrisma.lessonOutput.groupBy.mockResolvedValue([
+        { status: LessonOutputStatus.pending, _count: 2 },
+      ]);
+      mockPrisma.lessonOutput.findMany.mockResolvedValue(outputs);
+
+      mockActor({ id: 'staff-planner', roles: [StaffRole.lesson_plan] });
+      const plannerView = await service.getWork({}, plannerUser);
+      expect(
+        plannerView.outputs.map((output) => [output.id, output.cost]),
+      ).toEqual([
+        ['output-own', 30000],
+        ['output-other', 30000],
+      ]);
+      expect(plannerView.outputs.map((output) => output.paymentStatus)).toEqual(
+        [PaymentStatus.pending, PaymentStatus.pending],
+      );
+
+      mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+      const headView = await service.getWork({}, headUser);
+      expect(headView.outputs.map((output) => output.cost)).toEqual([
+        30000, 30000,
+      ]);
+      expect(headView.outputs.map((output) => output.paymentStatus)).toEqual([
+        PaymentStatus.pending,
+        PaymentStatus.pending,
+      ]);
+    });
+
+    describe('#265 Kế toán chi không đổi trạng thái thanh toán output của chính mình', () => {
+      const accountantUser = {
+        id: 'user-acc',
+        email: 'acc@example.com',
+        accountHandle: 'acc',
+        roleType: UserRole.staff,
+      } as never;
+      const accountantRoles = [
+        StaffRole.lesson_plan,
+        StaffRole.accountant_expense,
+      ];
+
+      beforeEach(() => {
+        mockActor({ id: 'staff-acc', roles: accountantRoles });
+        mockPrisma.user.findUnique.mockResolvedValue({
+          roleType: UserRole.staff,
+          staffInfo: { id: 'staff-acc', roles: accountantRoles },
+        });
+      });
+
+      it('đơn lẻ: 403 khi output thuộc chính Kế toán chi', async () => {
+        mockPrisma.lessonOutput.findUnique.mockResolvedValue(
+          outputRecord({ staffId: 'staff-acc' }),
+        );
+
+        await expect(
+          service.updateOutput(
+            'output-279',
+            { paymentStatus: PaymentStatus.paid },
+            undefined,
+            accountantUser,
+          ),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(mockPrisma.lessonOutput.update).not.toHaveBeenCalled();
+      });
+
+      it('đơn lẻ: được đổi trạng thái output của người khác', async () => {
+        mockPrisma.lessonOutput.findUnique.mockResolvedValue(outputRecord());
+        mockPrisma.lessonOutput.update.mockResolvedValue(
+          outputRecord({ paymentStatus: PaymentStatus.paid }),
+        );
+
+        const result = await service.updateOutput(
+          'output-279',
+          { paymentStatus: PaymentStatus.paid },
+          undefined,
+          accountantUser,
+        );
+
+        expect(result.paymentStatus).toBe(PaymentStatus.paid);
+      });
+
+      it('hàng loạt: 403 khi danh sách có output của chính Kế toán chi', async () => {
+        mockPrisma.lessonOutput.findMany.mockResolvedValueOnce([
+          {
+            id: 'output-other',
+            paymentStatus: PaymentStatus.pending,
+            staffId: 'staff-other',
+          },
+          {
+            id: 'output-own',
+            paymentStatus: PaymentStatus.pending,
+            staffId: 'staff-acc',
+          },
+        ]);
+
+        await expect(
+          service.bulkUpdateOutputPaymentStatus(
+            ['output-other', 'output-own'],
+            PaymentStatus.paid,
+            {
+              userId: 'user-acc',
+              userEmail: 'acc@example.com',
+              roleType: UserRole.staff,
+            },
+            accountantUser,
+          ),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(mockPrisma.lessonOutput.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('Admin được đổi trạng thái output của chính mình (đơn lẻ + hàng loạt)', async () => {
+        mockActor({ id: 'staff-admin', roles: [StaffRole.admin] });
+        mockPrisma.user.findUnique.mockResolvedValue({
+          roleType: UserRole.staff,
+          staffInfo: { id: 'staff-admin', roles: [StaffRole.admin] },
+        });
+        const adminUser = {
+          id: 'user-admin',
+          email: 'admin@example.com',
+          accountHandle: 'admin',
+          roleType: UserRole.staff,
+        } as never;
+        mockPrisma.lessonOutput.findUnique.mockResolvedValue(
+          outputRecord({ staffId: 'staff-admin' }),
+        );
+        mockPrisma.lessonOutput.update.mockResolvedValue(
+          outputRecord({
+            staffId: 'staff-admin',
+            paymentStatus: PaymentStatus.paid,
+          }),
+        );
+
+        await service.updateOutput(
+          'output-279',
+          { paymentStatus: PaymentStatus.paid },
+          undefined,
+          adminUser,
+        );
+        expect(mockPrisma.lessonOutput.update).toHaveBeenCalled();
+
+        mockPrisma.lessonOutput.findMany.mockResolvedValueOnce([
+          {
+            id: 'output-279',
+            paymentStatus: PaymentStatus.paid,
+            staffId: 'staff-admin',
+          },
+        ]);
+        await expect(
+          service.bulkUpdateOutputPaymentStatus(
+            ['output-279'],
+            PaymentStatus.paid,
+            undefined,
+            adminUser,
+          ),
+        ).resolves.toEqual({ requestedCount: 1, updatedCount: 0 });
+      });
+    });
+
+    describe('tổng chi phí giáo án của một người = thu nhập cá nhân (#270)', () => {
+      beforeEach(() => {
+        mockPrisma.lessonOutput.count.mockResolvedValue(1);
+        mockPrisma.lessonOutput.groupBy.mockResolvedValue([]);
+        mockPrisma.lessonOutput.aggregate.mockResolvedValue({
+          _sum: { cost: 30000 },
+        });
+        mockPrisma.lessonOutput.findMany.mockResolvedValue([]);
+      });
+
+      it('Trưởng ban xem thống kê người khác: `unpaidCostTotal` = null', async () => {
+        mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+
+        const result = await service.getOutputStatsByStaff(
+          'staff-other',
+          {},
+          headUser,
+        );
+
+        expect(result.summary.unpaidCostTotal).toBeNull();
+      });
+
+      it('Trưởng ban xem của chính mình và Kế toán chi xem người khác: thấy tổng', async () => {
+        mockActor({ id: 'staff-head', roles: [StaffRole.lesson_plan_head] });
+        const own = await service.getOutputStatsByStaff(
+          'staff-head',
+          {},
+          headUser,
+        );
+        expect(own.summary.unpaidCostTotal).toBe(30000);
+
+        mockActor({ id: 'staff-acc', roles: [StaffRole.accountant_expense] });
+        const accountantView = await service.getOutputStatsByStaff(
+          'staff-other',
+          {},
+          {
+            id: 'user-acc',
+            email: 'acc@example.com',
+            accountHandle: 'acc',
+            roleType: UserRole.staff,
+          } as never,
+        );
+        expect(accountantView.summary.unpaidCostTotal).toBe(30000);
+      });
     });
   });
 });

@@ -14,6 +14,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { StaffRole, UserRole } from 'generated/enums';
+import { TRAINING_ACCESS_ROLES } from 'src/common/training-access';
 import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
 import {
   CurrentUser,
@@ -33,11 +34,9 @@ export class ClassTimelineController {
   @Get()
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
     StaffRole.teacher,
     StaffRole.customer_care,
-    StaffRole.training,
-    StaffRole.accountant,
+    ...TRAINING_ACCESS_ROLES,
     StaffRole.accountant_income,
     StaffRole.accountant_expense,
   )
@@ -93,7 +92,7 @@ export class ClassTimelineController {
   @ApiResponse({
     status: 200,
     description:
-      "{ state: 'ready', masterUrl, expiresAt } | { state: 'processing', progress } | { state: 'unavailable' } | { state: 'none' }",
+      "{ state: 'ready', masterUrl, expiresAt } | { state: 'processing', stage: 'queued'|'downloading'|'transcoding'|'uploading', progress, queuePosition, queueTotal } | { state: 'failed' } | { state: 'unavailable' } | { state: 'none' }",
   })
   @ApiResponse({
     status: 403,

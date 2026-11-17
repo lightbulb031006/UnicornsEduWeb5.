@@ -40,7 +40,7 @@ export class ClassContentController {
 
   @Post()
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Thêm lẻ một tiết (lý thuyết hoặc thực hành) của khoá vào lớp, kể cả chuyên đề lớp chưa có tiết nào — nhóm chuyên đề mới đứng đầu. Thực hành thành lần giao: openAt tuỳ chọn (bỏ trống = lúc thêm, server).',
@@ -71,7 +71,7 @@ export class ClassContentController {
 
   @Get()
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({ summary: 'Lấy danh sách nội dung lớp học' })
   @ApiParam({ name: 'classId', description: 'ID lớp học' })
   @ApiResponse({ status: 200, description: 'Danh sách nội dung.' })
@@ -88,7 +88,7 @@ export class ClassContentController {
 
   @Get('groups')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Nội dung lớp gom theo chuyên đề: mỗi nhóm có tiết lý thuyết (theo thứ tự trong chuyên đề) và tiết thực hành đã giao',
@@ -112,7 +112,7 @@ export class ClassContentController {
 
   @Get('course-lessons')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Mọi tiết (lý thuyết + thực hành) chưa lưu trữ của khoá để thêm vào lớp, kèm moduleId và alreadyAdded',
@@ -136,7 +136,7 @@ export class ClassContentController {
 
   @Post('reorder')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({ summary: 'Sắp xếp lại thứ tự nội dung lớp học' })
   @ApiParam({ name: 'classId', description: 'ID lớp học' })
   @ApiBody({
@@ -160,7 +160,7 @@ export class ClassContentController {
 
   @Get(':itemId/theory-progress')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Lấy tiến độ tiết lý thuyết của roster lớp: đã xem và hoàn thành bài tập ôn nhẹ',
@@ -184,7 +184,7 @@ export class ClassContentController {
 
   @Patch(':itemId')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Cập nhật lần giao (openAt, durationMinutes, shuffleQuestions) — không sửa đề',
@@ -210,7 +210,7 @@ export class ClassContentController {
 
   @Delete(':itemId')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary: 'Ẩn nội dung lớp khỏi học sinh (không xoá dữ liệu / bài làm)',
   })
@@ -236,7 +236,7 @@ export class ClassContentController {
 
   @Post(':itemId/restore')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({ summary: 'Khôi phục nội dung lớp đã ẩn — học sinh thấy lại' })
   @ApiParam({ name: 'classId', description: 'ID lớp học' })
   @ApiParam({ name: 'itemId', description: 'ID nội dung' })
@@ -256,7 +256,7 @@ export class ClassContentController {
 
   @Post(':itemId/remove')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Gỡ tiết khỏi lớp (khác Ẩn): biến mất ở mọi phía, giữ bài làm/điểm; gỡ tiết cuối của chuyên đề thì nhóm biến mất',
@@ -285,7 +285,7 @@ export class ClassContentController {
 
   @Get(':itemId/removal-impact')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Ảnh hưởng nếu gỡ tiết: số câu tự luận chưa chấm, số học sinh đang làm dở',

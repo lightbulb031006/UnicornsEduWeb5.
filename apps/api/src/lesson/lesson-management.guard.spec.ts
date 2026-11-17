@@ -102,9 +102,28 @@ describe('LessonManagementGuard', () => {
       ),
     ).rejects.toThrow(
       new ForbiddenException(
-        'Màn quản lý giáo án chỉ mở cho admin, trợ lí, hoặc staff có role lesson_plan_head.',
+        'Màn quản lý giáo án chỉ mở cho Admin hoặc staff có role lesson_plan_head.',
       ),
     );
+  });
+
+  // #267: Trợ lí không còn vào màn quản lý giáo án.
+  it('rejects assistant staff', async () => {
+    mockPrisma.staffInfo.findFirst.mockResolvedValue({
+      id: 'staff-info-2',
+      roles: [StaffRole.sale_customer_care_head],
+    });
+
+    await expect(
+      guard.canActivate(
+        createContext({
+          id: 'staff-2',
+          email: 'assistant@example.com',
+          accountHandle: 'sale_customer_care_head',
+          roleType: UserRole.staff,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('allows staff.lesson_plan_head to access lesson management', async () => {

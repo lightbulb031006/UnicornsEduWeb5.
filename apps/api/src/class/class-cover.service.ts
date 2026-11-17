@@ -6,8 +6,12 @@ import {
 } from '@nestjs/common';
 import { StaffRole, UserRole } from 'generated/enums';
 import type { ClassCoverImageDto } from 'src/dtos/class.dto';
+import { hasSaleCsHeadAccess } from 'src/common/sale-cs-head-access';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { StaffOperationsAccessService } from 'src/staff-ops/staff-operations-access.service';
+import {
+  isTrainingHeadActor,
+  StaffOperationsAccessService,
+} from 'src/staff-ops/staff-operations-access.service';
 import { CLASS_COVER_STORAGE_BUCKET } from 'src/storage/media-buckets';
 import {
   buildClassCoverPath,
@@ -29,9 +33,11 @@ export class ClassCoverService {
   ) {}
 
   /**
-   * Quyền upload/thay/gỡ ảnh bìa: admin và trợ lí với mọi lớp; Gia sư đứng lớp
-   * (`class_teachers.status = 'active'`) và Quản lý lớp (`classes.training_manager_staff_id`)
-   * chỉ với lớp của mình.
+   * Quyền upload/thay/gỡ ảnh bìa: admin và các trưởng (Trưởng phòng Sale & CSKH,
+   * Trưởng ban Đào tạo — cùng phạm vi xem mọi lớp #272/#277) với mọi lớp; Gia sư
+   * đứng lớp (`class_teachers.status = 'active'`) và Quản lý lớp
+   * (`classes.training_manager_staff_id`) chỉ với lớp của mình. Chỉ ảnh bìa —
+   * các trưởng vẫn không quản lý lớp (gia sư, học phí, lịch…).
    */
   async canManage(
     userId: string,
@@ -49,9 +55,12 @@ export class ClassCoverService {
     if (!staff) {
       return false;
     }
+    if (staff.roles.includes(StaffRole.admin)) {
+      return true;
+    }
     if (
-      staff.roles.includes(StaffRole.admin) ||
-      staff.roles.includes(StaffRole.assistant)
+      hasSaleCsHeadAccess(staff.roles) ||
+      isTrainingHeadActor(staff.roles)
     ) {
       return true;
     }
@@ -150,6 +159,16 @@ export class ClassCoverService {
     if (roleType === UserRole.admin) {
       return;
     }
+    // #272: Trưởng phòng Sale & CSKH xem chi tiết mọi lớp qua `/class/:id` nhưng
+    // không thuộc nhóm của màn staff-ops → cho xem ảnh bìa riêng ở đây, không
+    // nới `resolveClassViewerActor` (dùng chung cho buổi học, khảo sát, bài làm).
+    const staff = await this.prisma.staffInfo.findFirst({
+      where: { userId },
+      select: { roles: true },
+    });
+    if (hasSaleCsHeadAccess(staff?.roles)) {
+      return;
+    }
     const actor = await this.staffOperationsAccess.resolveClassViewerActor(
       userId,
       roleType,
@@ -164,7 +183,7 @@ export class ClassCoverService {
   ) {
     if (!(await this.canManage(userId, roleType, classId))) {
       throw new ForbiddenException(
-        'Chỉ admin, trợ lí, Gia sư đứng lớp hoặc Quản lý lớp mới được đổi ảnh bìa lớp này.',
+        'Chỉ admin, các trưởng, Gia sư đứng lớp hoặc Quản lý lớp mới được đổi ảnh bìa lớp này.',
       );
     }
   }

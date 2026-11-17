@@ -48,10 +48,10 @@ function StaffAssistantDetailPageContent() {
   }
 
   if (canViewCrossStaffRoleDetail(profile, staffId)) {
-    return <ExtraAllowanceRoleDetailPage roleType="assistant" staffId={staffId} />;
+    return <ExtraAllowanceRoleDetailPage roleType="sale_customer_care_head" staffId={staffId} />;
   }
 
-  return <StaffSelfExtraAllowanceRoleDetailPage roleType="assistant" />;
+  return <StaffSelfExtraAllowanceRoleDetailPage roleType="sale_customer_care_head" />;
 }
 
 export default function StaffAssistantDetailPage() {

@@ -12,7 +12,6 @@ import {
   AttendanceStatus,
   HomeworkQuality,
   SessionProgressStatus,
-  StaffRole,
   UserRole,
 } from '../../generated/enums';
 import {
@@ -49,10 +48,23 @@ describe('SessionCreateService', () => {
   };
 
   const accessService = {
-    resolveActor: jest.fn(),
-    assertTeacherAssignedToClass: jest.fn(),
+    resolveClassWorkAccess: jest.fn(),
     resolveSingleTeacherForClass: jest.fn(),
   };
+  const workAccess = (
+    overrides: Partial<{
+      staffId: string | null;
+      isAdmin: boolean;
+      isClassTeacher: boolean;
+      isClassManager: boolean;
+    }>,
+  ) => ({
+    staffId: 'teacher-1',
+    isAdmin: false,
+    isClassTeacher: false,
+    isClassManager: false,
+    ...overrides,
+  });
 
   const rosterService = {
     assertAttendanceStudentsBelongToClass: jest.fn(),
@@ -146,10 +158,9 @@ describe('SessionCreateService', () => {
   });
 
   it('blocks a teacher from creating a session while a survey deadline block is active', async () => {
-    accessService.resolveActor.mockResolvedValue({
-      id: 'teacher-1',
-      roles: [StaffRole.teacher],
-    });
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ isClassTeacher: true }),
+    );
     mockPrisma.class.findUnique.mockResolvedValue({
       status: 'running',
       sessions: [{ date: new Date('2019-12-01T00:00:00.000Z') }],
@@ -185,10 +196,9 @@ describe('SessionCreateService', () => {
   });
 
   it('lets a teacher create a session once the class has no blocking survey', async () => {
-    accessService.resolveActor.mockResolvedValue({
-      id: 'teacher-1',
-      roles: [StaffRole.teacher],
-    });
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ isClassTeacher: true }),
+    );
     mockPrisma.class.findUnique.mockResolvedValue({
       status: 'running',
       sessions: [{ date: new Date('2019-12-01T00:00:00.000Z') }],
@@ -213,10 +223,9 @@ describe('SessionCreateService', () => {
   });
 
   it('uses the current teacher actor when staff creates a session', async () => {
-    accessService.resolveActor.mockResolvedValue({
-      id: 'teacher-1',
-      roles: [StaffRole.teacher],
-    });
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ isClassTeacher: true }),
+    );
     rosterService.assertAttendanceStudentsBelongToClass.mockResolvedValue(
       new Map([['student-1', 150000]]),
     );
@@ -255,10 +264,6 @@ describe('SessionCreateService', () => {
       },
     );
 
-    expect(accessService.assertTeacherAssignedToClass).toHaveBeenCalledWith(
-      'teacher-1',
-      'class-1',
-    );
     expect(accessService.resolveSingleTeacherForClass).not.toHaveBeenCalled();
     expect(createSessionSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -289,35 +294,158 @@ describe('SessionCreateService', () => {
     expect(createSessionSpy.mock.calls[0][0].allowanceAmount).toBeUndefined();
   });
 
-  it('lets an assistant mark Dạy thử (coefficient 0) via staff-ops', async () => {
-    accessService.resolveActor.mockResolvedValue({
-      id: 'assistant-1',
-      roles: [StaffRole.assistant],
+  const staffCreateInput = {
+    date: '2026-10-10',
+    lessonContent: '<p>Nội dung</p>',
+    homework: '<p>BTVN</p>',
+    tutorial: '<p>Tutorial</p>',
+  };
+
+  it('#275: Quản lý lớp chọn gia sư khác của lớp khi tạo buổi', async () => {
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ staffId: 'manager-1', isClassManager: true }),
+    );
+    mockPrisma.classTeacher.findUnique.mockResolvedValue({
+      teacherId: 'teacher-2',
     });
-    accessService.resolveSingleTeacherForClass.mockResolvedValue('teacher-1');
+    mockPrisma.class.findUnique.mockResolvedValue(null);
     const createSessionSpy = jest
       .spyOn(service, 'createSession')
       .mockResolvedValue({ id: 'session-4' } as never);
 
     await service.createSessionForStaff('user-2', UserRole.staff, 'class-1', {
-      date: '2026-10-10',
-      coefficient: 0,
-      lessonContent: '<p>Nội dung</p>',
-      homework: '<p>BTVN</p>',
-      tutorial: '<p>Tutorial</p>',
+      ...staffCreateInput,
+      teacherId: 'teacher-2',
     });
 
     expect(createSessionSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ coefficient: 0 }),
+      expect.objectContaining({ classId: 'class-1', teacherId: 'teacher-2' }),
       undefined,
     );
   });
 
-  it('resolves the class teacher when admin creates a staff-ops session', async () => {
-    accessService.resolveActor.mockResolvedValue({
-      id: 'admin-1',
-      roles: [],
+  it('#275: gia sư được chọn phải dạy lớp (400)', async () => {
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ staffId: 'manager-1', isClassManager: true }),
+    );
+    mockPrisma.classTeacher.findUnique.mockResolvedValue(null);
+    const createSessionSpy = jest.spyOn(service, 'createSession');
+
+    await expect(
+      service.createSessionForStaff('user-2', UserRole.staff, 'class-1', {
+        ...staffCreateInput,
+        teacherId: 'teacher-99',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(createSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it('#275: gia sư thuần không được tạo buổi cho gia sư khác (403)', async () => {
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ isClassTeacher: true }),
+    );
+    const createSessionSpy = jest.spyOn(service, 'createSession');
+
+    await expect(
+      service.createSessionForStaff('user-1', UserRole.staff, 'class-1', {
+        ...staffCreateInput,
+        teacherId: 'teacher-2',
+      }),
+    ).rejects.toThrow('Gia sư chỉ được tạo buổi học do chính mình dạy.');
+    expect(createSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it('#275: kiêm gia sư + Quản lý lớp tạo được buổi cho gia sư khác (hợp quyền)', async () => {
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ isClassTeacher: true, isClassManager: true }),
+    );
+    mockPrisma.classTeacher.findUnique.mockResolvedValue({
+      teacherId: 'teacher-2',
     });
+    mockPrisma.class.findUnique.mockResolvedValue(null);
+    const createSessionSpy = jest
+      .spyOn(service, 'createSession')
+      .mockResolvedValue({ id: 'session-5' } as never);
+
+    await service.createSessionForStaff('user-1', UserRole.staff, 'class-1', {
+      ...staffCreateInput,
+      teacherId: 'teacher-2',
+    });
+
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ teacherId: 'teacher-2' }),
+      undefined,
+    );
+  });
+
+  it.each([
+    ['Dạy thử (hệ số 0)', 0],
+    ['hệ số khác 1', 0.5],
+  ])(
+    '#275: Quản lý lớp không được đặt %s cho buổi của gia sư khác',
+    async (_label, coefficient) => {
+      accessService.resolveClassWorkAccess.mockResolvedValue(
+        workAccess({ staffId: 'manager-1', isClassManager: true }),
+      );
+      mockPrisma.classTeacher.findUnique.mockResolvedValue({
+        teacherId: 'teacher-2',
+      });
+      validationService.normalizeCoefficient.mockReturnValueOnce(coefficient);
+      const createSessionSpy = jest.spyOn(service, 'createSession');
+
+      await expect(
+        service.createSessionForStaff('user-2', UserRole.staff, 'class-1', {
+          ...staffCreateInput,
+          teacherId: 'teacher-2',
+          coefficient,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(createSessionSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('#275: gia sư vẫn đánh dấu Dạy thử trên buổi của chính mình', async () => {
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ isClassTeacher: true }),
+    );
+    mockPrisma.class.findUnique.mockResolvedValue(null);
+    validationService.normalizeCoefficient.mockReturnValueOnce(0);
+    const createSessionSpy = jest
+      .spyOn(service, 'createSession')
+      .mockResolvedValue({ id: 'session-6' } as never);
+
+    await service.createSessionForStaff('user-1', UserRole.staff, 'class-1', {
+      ...staffCreateInput,
+      coefficient: 0,
+    });
+
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ teacherId: 'teacher-1', coefficient: 0 }),
+      undefined,
+    );
+  });
+
+  it('#275: lớp không được giao → 403 từ resolveClassWorkAccess', async () => {
+    accessService.resolveClassWorkAccess.mockRejectedValue(
+      new ForbiddenException('no'),
+    );
+    const createSessionSpy = jest.spyOn(service, 'createSession');
+
+    await expect(
+      service.createSessionForStaff(
+        'user-3',
+        UserRole.staff,
+        'class-1',
+        staffCreateInput,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(createSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it('resolves the class teacher when admin creates a staff-ops session', async () => {
+    accessService.resolveClassWorkAccess.mockResolvedValue(
+      workAccess({ staffId: null, isAdmin: true }),
+    );
     accessService.resolveSingleTeacherForClass.mockResolvedValue('teacher-9');
     rosterService.assertAttendanceStudentsBelongToClass.mockResolvedValue(
       new Map([['student-1', 150000]]),
@@ -355,7 +483,6 @@ describe('SessionCreateService', () => {
       },
     );
 
-    expect(accessService.assertTeacherAssignedToClass).not.toHaveBeenCalled();
     expect(accessService.resolveSingleTeacherForClass).toHaveBeenCalledWith(
       'class-1',
     );

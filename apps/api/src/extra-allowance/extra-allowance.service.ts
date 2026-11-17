@@ -21,6 +21,7 @@ import {
 } from '../dtos/extra-allowance.dto';
 import { PaginationQueryDto } from '../dtos/pagination.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertActorNotEditingOwnCompensation } from 'src/common/staff-role-policy';
 import {
   parseMonthKeyToEffectiveDate,
   resolveTaxDeductionRate,
@@ -301,6 +302,8 @@ export class ExtraAllowanceService {
         return 'Kỹ thuật';
       case StaffRole.training:
         return 'Đào Tạo';
+      case StaffRole.training_head:
+        return 'Trưởng ban Đào tạo';
       case StaffRole.sale:
         return 'Sale';
       default:
@@ -406,6 +409,7 @@ export class ExtraAllowanceService {
         userEmail: user.email,
         roleType: user.roleType,
       },
+      { allowSelf: true },
     );
   }
 
@@ -433,6 +437,7 @@ export class ExtraAllowanceService {
         userEmail: user.email,
         roleType: user.roleType,
       },
+      { allowSelf: true },
     );
   }
 
@@ -453,11 +458,15 @@ export class ExtraAllowanceService {
     );
     await this.getOwnUnpaidSelfManagedAllowance(staff.id, id);
 
-    return this.deleteExtraAllowance(id, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    return this.deleteExtraAllowance(
+      id,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+      { allowSelf: true },
+    );
   }
 
   /**
@@ -496,10 +505,20 @@ export class ExtraAllowanceService {
     return this.searchSaleStudentOptions(search);
   }
 
+  /**
+   * `allowSelf`: chỉ luồng tự khai trợ cấp (`*MyStaffExtraAllowance`, ép trạng
+   * thái chờ thanh toán) được bỏ qua luật «không tự sửa lương của mình» (#265).
+   */
   async createExtraAllowance(
     data: CreateExtraAllowanceDto,
     auditActor?: ActionHistoryActor,
+    options?: { allowSelf?: boolean },
   ) {
+    if (!options?.allowSelf) {
+      await assertActorNotEditingOwnCompensation(this.prisma, auditActor, [
+        data.staffId,
+      ]);
+    }
     return this.prisma.$transaction(async (tx) => {
       await this.assertActiveStaffForAllowance(tx, data.staffId);
       const studentId = await this.resolveAllowanceStudentId(tx, {
@@ -546,6 +565,7 @@ export class ExtraAllowanceService {
   async updateExtraAllowance(
     data: UpdateExtraAllowanceDto,
     auditActor?: ActionHistoryActor,
+    options?: { allowSelf?: boolean },
   ) {
     if (!data.id) {
       throw new NotFoundException('Extra allowance not found');
@@ -555,6 +575,12 @@ export class ExtraAllowanceService {
 
     if (!existingAllowance) {
       throw new NotFoundException('Extra allowance not found');
+    }
+    if (!options?.allowSelf) {
+      await assertActorNotEditingOwnCompensation(this.prisma, auditActor, [
+        existingAllowance.staffId,
+        data.staffId,
+      ]);
     }
 
     const updateData: Omit<UpdateExtraAllowanceDto, 'id' | 'studentId'> = {};
@@ -644,6 +670,12 @@ export class ExtraAllowanceService {
         );
       }
 
+      await assertActorNotEditingOwnCompensation(
+        tx,
+        auditActor,
+        existingAllowances.map((allowance) => allowance.staffId),
+      );
+
       const changedAllowanceIds = existingAllowances
         .filter(
           (allowance) => (allowance.status ?? PaymentStatus.pending) !== status,
@@ -708,11 +740,20 @@ export class ExtraAllowanceService {
     });
   }
 
-  async deleteExtraAllowance(id: string, auditActor?: ActionHistoryActor) {
+  async deleteExtraAllowance(
+    id: string,
+    auditActor?: ActionHistoryActor,
+    options?: { allowSelf?: boolean },
+  ) {
     const existingAllowance = await this.getExtraAllowanceSnapshot(id);
 
     if (!existingAllowance) {
       throw new NotFoundException('Extra allowance not found');
+    }
+    if (!options?.allowSelf) {
+      await assertActorNotEditingOwnCompensation(this.prisma, auditActor, [
+        existingAllowance.staffId,
+      ]);
     }
 
     return this.prisma.$transaction(async (tx) => {

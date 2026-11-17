@@ -86,6 +86,24 @@ describe("validateProfileForm", () => {
     expect(result.errors[ACHIEVEMENTS_FIELD_KEY]?.message).toContain("ngôi sao");
   });
 
+  it("gia sư đã tích sao nhưng dòng sao chưa có ảnh thì báo thiếu minh chứng", () => {
+    const teacher = makeProfile({
+      staffInfo: {
+        ...completeStaff,
+        roles: ["teacher"],
+        achievementCount: 1,
+        hasHighlightAchievement: true,
+        hasHighlightAchievementProof: false,
+      },
+    });
+    const result = validateProfileForm(teacher, getProfileFormValues(teacher));
+    expect(result.orderedKeys).toEqual([ACHIEVEMENTS_FIELD_KEY]);
+    expect(result.errors[ACHIEVEMENTS_FIELD_KEY]?.message).toContain(
+      "minh chứng",
+    );
+    expect(result.hasBlockingError).toBe(false);
+  });
+
   it("gia sư chưa có thành tích thì báo thiếu, role khác không bị yêu cầu", () => {
     const teacher = makeProfile({
       staffInfo: { ...completeStaff, roles: ["teacher"], achievementCount: 0 },
@@ -105,7 +123,7 @@ describe("validateProfileForm", () => {
         achievementCount: 1,
         hasHighlightAchievement: true,
       },
-      { ...completeStaff, roles: ["accountant"], achievementCount: 0 },
+      { ...completeStaff, roles: ["accountant_income"], achievementCount: 0 },
     ]) {
       const profile = makeProfile({ staffInfo });
       expect(

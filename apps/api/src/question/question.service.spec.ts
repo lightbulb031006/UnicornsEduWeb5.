@@ -84,7 +84,7 @@ describe('QuestionService', () => {
     mockCourseAccess.resolveActor.mockResolvedValue({
       userId: 'u1',
       staffId: 'staff-1',
-      roles: ['assistant'],
+      roles: ['sale_customer_care_head'],
       isAdminUser: true,
     });
     mockCourseAccess.assertCanWriteCourseQuestions.mockResolvedValue(undefined);

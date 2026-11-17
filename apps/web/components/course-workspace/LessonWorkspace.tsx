@@ -27,7 +27,6 @@ import {
 } from "@/components/course-workspace/CourseWorkspaceSkeletons";
 import { useConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useHydrated } from "@/lib/hooks/useHydrated";
-import { cn } from "@/lib/utils";
 import type { CourseWorkspaceRouteBase } from "@/dtos/course-workspace.dto";
 import type {
   LessonKind,
@@ -261,12 +260,7 @@ function LessonWorkspaceInner({
 
   return (
     <div className={SHELL_CLASS}>
-      <div
-        className={cn(
-          "mx-auto flex min-h-0 w-full flex-1 flex-col gap-4",
-          lesson?.kind === "practice" ? "max-w-5xl" : "max-w-3xl",
-        )}
-      >
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
         <WorkspaceBreadcrumb
           backHref={backToLessons}
           items={[

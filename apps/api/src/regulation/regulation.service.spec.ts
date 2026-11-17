@@ -39,19 +39,19 @@ describe('RegulationService', () => {
     );
   });
 
-  it('returns all regulations for assistant staff', async () => {
+  it('returns all regulations for staff admin', async () => {
     const row = makeRegulationRow({
       audiences: [RegulationAudience.staff_teacher],
     });
     mockPrisma.staffInfo.findFirst.mockResolvedValue({
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.admin],
     });
     mockPrisma.regulation.findMany.mockResolvedValue([row]);
 
     const result = await service.getRegulations({
-      id: 'user-assistant',
-      email: 'assistant@example.com',
-      accountHandle: 'assistant',
+      id: 'user-staff-admin',
+      email: 'staff-admin@example.com',
+      accountHandle: 'staff-admin',
       roleType: UserRole.staff,
     });
 
@@ -62,6 +62,30 @@ describe('RegulationService', () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0]?.id).toBe(row.id);
+  });
+
+  // #267: quy định là quyền chỉ Admin; Trợ lí chỉ còn xem quy định gửi cho
+  // nhóm của mình như staff thường.
+  it('filters regulations to the assistant audience for assistant staff', async () => {
+    mockPrisma.staffInfo.findFirst.mockResolvedValue({
+      roles: [StaffRole.sale_customer_care_head],
+    });
+    mockPrisma.regulation.findMany.mockResolvedValue([]);
+
+    await service.getRegulations({
+      id: 'user-assistant',
+      email: 'assistant@example.com',
+      accountHandle: 'sale_customer_care_head',
+      roleType: UserRole.staff,
+    });
+
+    const call = mockPrisma.regulation.findMany.mock.calls[0]?.[0] as {
+      where?: unknown;
+    };
+    expect(call.where).toBeDefined();
+    expect(JSON.stringify(call.where)).toContain(
+      RegulationAudience.staff_sale_customer_care_head,
+    );
   });
 
   it('filters regulations to matching staff audiences for normal staff', async () => {
@@ -94,6 +118,30 @@ describe('RegulationService', () => {
         },
       }),
     );
+  });
+
+  it('training_head thấy cả quy định gửi staff_training', async () => {
+    mockPrisma.staffInfo.findFirst.mockResolvedValue({
+      roles: [StaffRole.training_head],
+    });
+    mockPrisma.regulation.findMany.mockResolvedValue([]);
+
+    await service.getRegulations({
+      id: 'user-training-head',
+      email: 'head@example.com',
+      accountHandle: 'head',
+      roleType: UserRole.staff,
+    });
+
+    const call = mockPrisma.regulation.findMany.mock.calls[0][0];
+    const hasSome = call.where.OR[1].audiences.hasSome;
+    expect(hasSome).toEqual(
+      expect.arrayContaining([
+        RegulationAudience.staff_training_head,
+        RegulationAudience.staff_training,
+      ]),
+    );
+    expect(hasSome).toHaveLength(2);
   });
 
   it('creates a regulation and records action history', async () => {
@@ -214,7 +262,7 @@ describe('RegulationService', () => {
       {
         id: 'assistant-user',
         email: 'assistant@example.com',
-        accountHandle: 'assistant',
+        accountHandle: 'sale_customer_care_head',
         roleType: UserRole.staff,
       },
       {
@@ -284,7 +332,7 @@ describe('RegulationService', () => {
       {
         id: 'assistant-user',
         email: 'assistant@example.com',
-        accountHandle: 'assistant',
+        accountHandle: 'sale_customer_care_head',
         roleType: UserRole.staff,
       },
       actor,

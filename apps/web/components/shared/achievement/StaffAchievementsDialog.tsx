@@ -17,19 +17,27 @@ import {
   ResponsiveDialogBody,
 } from "@/components/ui/ResponsiveDialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import AchievementListEditor from "./AchievementListEditor";
 import { HighlightAchievementBadge } from "./HighlightAchievementGuide";
 
-/** Nút «Xem thành tích (n)» trong dòng danh sách; không hiện khi n = 0. */
+/**
+ * Nút «Xem thành tích (n)» trong dòng danh sách. n = 0: ẩn, trừ khi người xem
+ * sửa được (`editable`) thì hiện «Thêm thành tích».
+ */
 export function StaffAchievementsButton({
   count,
   onOpen,
+  editable = false,
   className = "",
 }: {
   count: number | null | undefined;
   onOpen: () => void;
+  editable?: boolean;
   className?: string;
 }) {
-  const label = staffAchievementsButtonLabel(count);
+  const label =
+    staffAchievementsButtonLabel(count) ??
+    (editable ? "Thêm thành tích" : null);
   if (!label) return null;
 
   // Dòng danh sách tự điều hướng khi click / Enter: chặn để chỉ mở popup.
@@ -54,18 +62,25 @@ export function StaffAchievementsButton({
   );
 }
 
-/** Popup chỉ đọc: thành tích nhân sự theo thứ tự hồ sơ, bấm ảnh để phóng to. */
+/**
+ * Popup thành tích nhân sự theo thứ tự hồ sơ, bấm ảnh để phóng to. Mặc định chỉ
+ * đọc; `editable` → editor đầy đủ (thêm/sửa/xoá/sao/ảnh), không ràng buộc minh
+ * chứng vì người sửa không phải chủ hồ sơ.
+ */
 export default function StaffAchievementsDialog({
   staffId,
   staffName,
   onClose,
   mode = "admin",
+  editable = false,
 }: {
   staffId: string;
   staffName: string;
   onClose: () => void;
-  /** `training`: Ban Đào Tạo đọc qua endpoint đã lọc field. */
-  mode?: "admin" | "training";
+  /** `training`: Ban Đào Tạo đọc/sửa qua `/training/tutors/:id/achievements`; `saleCsTeam`: Trưởng phòng Sale & CSKH đọc/sửa (nhân sự dưới cấp) qua `/sale-cs-team/members/:id/achievements`. */
+  mode?: "admin" | "training" | "saleCsTeam";
+  /** Không bật cho hồ sơ của chính người xem (API trả 403). */
+  editable?: boolean;
 }) {
   const titleId = useId();
   const owner: AchievementOwnerRef = { kind: "staff", mode, staffId };
@@ -104,7 +119,9 @@ export default function StaffAchievementsDialog({
         </button>
       </div>
       <ResponsiveDialogBody>
-        {isLoading ? (
+        {editable ? (
+          <AchievementListEditor owner={owner} heading="" />
+        ) : isLoading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
               <Skeleton key={i} className="h-20 w-full rounded-lg" />

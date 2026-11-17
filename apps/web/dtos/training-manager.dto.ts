@@ -18,6 +18,8 @@ export interface UpdateClassTrainingManagerPayload {
 export interface TrainingManagerManagedClassItem {
   classId: string;
   className: string;
+  /** % QLL hiện tại của lớp — áp cho buổi tạo mới, không đổi buổi cũ. */
+  trainingManagerRatePercent: number;
   monthTotal: number;
   pendingTotal: number;
 }
@@ -29,6 +31,10 @@ export interface TrainingManagerManagedClassListResponse {
     totalMonth: number;
     totalPending: number;
   };
+}
+
+export interface UpdateTrainingManagerSessionRatePayload {
+  trainingManagerRatePercent: number;
 }
 
 export type TrainingManagerPaymentStatus = "pending" | "paid";

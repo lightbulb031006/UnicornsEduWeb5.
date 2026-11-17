@@ -150,11 +150,15 @@ describe('UserProfileController', () => {
 
     expect(userService.getLinkedStaffId).toHaveBeenCalledWith('user-1');
     expect(bonusService.getBonusOwnershipById).toHaveBeenCalledWith('bonus-1');
-    expect(bonusService.deleteBonus).toHaveBeenCalledWith('bonus-1', {
-      userId: 'user-1',
-      userEmail: 'staff@example.com',
-      roleType: UserRole.staff,
-    });
+    expect(bonusService.deleteBonus).toHaveBeenCalledWith(
+      'bonus-1',
+      {
+        userId: 'user-1',
+        userEmail: 'staff@example.com',
+        roleType: UserRole.staff,
+      },
+      { allowSelf: true },
+    );
   });
 
   it('does not delete another staff profile bonus from self-service', async () => {

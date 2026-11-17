@@ -436,7 +436,7 @@ export async function getLessonOutputStatsByStaff(
       pendingOutputCount: payload?.summary?.pendingOutputCount ?? 0,
       completedOutputCount: payload?.summary?.completedOutputCount ?? 0,
       cancelledOutputCount: payload?.summary?.cancelledOutputCount ?? 0,
-      unpaidCostTotal: payload?.summary?.unpaidCostTotal ?? 0,
+      unpaidCostTotal: payload?.summary?.unpaidCostTotal ?? null,
     },
     outputs: Array.isArray(payload?.outputs)
       ? payload.outputs

@@ -152,12 +152,25 @@ export function perBlockToPerSession(
   return perBlock * standardBlockCount;
 }
 
-/** API still speaks per-session; DB may already store per-block after expand backfill. */
+/**
+ * API still speaks per-session; DB may already store per-block after expand backfill.
+ * `storedPerSession` (`class_teachers.custom_allowance_per_session`) is the exact
+ * admin input and wins: per-block × blocks loses the rounding remainder
+ * (70000 / 3 → 23333 → 69999).
+ */
 export function presentCustomAllowanceAsPerSession(
   stored: number | null | undefined,
   standardBlockCount: number | null | undefined,
   storedAsPerBlock: boolean,
+  storedPerSession?: number | null,
 ): number | null {
+  if (
+    stored != null &&
+    typeof storedPerSession === 'number' &&
+    Number.isFinite(storedPerSession)
+  ) {
+    return storedPerSession;
+  }
   if (
     stored == null ||
     typeof stored !== 'number' ||
@@ -180,6 +193,20 @@ export function storeCustomAllowanceFromPerSessionInput(
   }
   const perBlock = perSessionToPerBlock(incomingPerSession, standardBlockCount);
   return perBlock ?? incomingPerSession;
+}
+
+/** Both `class_teachers` columns for a per-session override written by admin. */
+export function customAllowanceWriteFields(
+  incomingPerSession: number | null,
+  standardBlockCount: number | null | undefined,
+): { customAllowance: number | null; customAllowancePerSession: number | null } {
+  return {
+    customAllowance: storeCustomAllowanceFromPerSessionInput(
+      incomingPerSession,
+      standardBlockCount,
+    ),
+    customAllowancePerSession: incomingPerSession,
+  };
 }
 
 export function perBlockReconstructionErrorVnd(

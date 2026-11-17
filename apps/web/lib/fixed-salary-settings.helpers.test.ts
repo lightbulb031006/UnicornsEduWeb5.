@@ -17,7 +17,7 @@ import {
   isFixedSalaryCandidateFullyClosed,
 } from "./fixed-salary-settings.helpers";
 
-const ROLE_LABELS = { assistant: "Trợ lí", communication: "Truyền thông" };
+const ROLE_LABELS = { sale_customer_care_head: "Trưởng phòng Sale & CSKH", communication: "Truyền thông" };
 
 function axis(params: {
   hasOverride: boolean;
@@ -36,7 +36,7 @@ describe("FIXED_SALARY_STAFF_ROLES", () => {
   it("does not include teacher", () => {
     expect(isFixedSalaryStaffRole("teacher")).toBe(false);
     expect(FIXED_SALARY_STAFF_ROLES).not.toContain("teacher");
-    expect(isFixedSalaryStaffRole("assistant")).toBe(true);
+    expect(isFixedSalaryStaffRole("sale_customer_care_head")).toBe(true);
   });
 });
 
@@ -44,7 +44,7 @@ describe("collectDisabledRoleOverrideWarnings", () => {
   it("asks only when a currently held role with a persisted override is turned off", () => {
     const roleRows: StaffFixedSalaryRoleRow[] = [
       {
-        roleType: "assistant",
+        roleType: "sale_customer_care_head",
         amount: axis({ hasOverride: true, overrideValue: 12_000_000 }),
         operatingRate: axis({ hasOverride: true, overrideValue: 15 }),
       },
@@ -56,7 +56,7 @@ describe("collectDisabledRoleOverrideWarnings", () => {
     ];
 
     const warnings = collectDisabledRoleOverrideWarnings({
-      originalRoles: ["assistant", "communication"],
+      originalRoles: ["sale_customer_care_head", "communication"],
       nextRoles: ["communication"],
       roleRows,
       roleLabels: ROLE_LABELS,
@@ -64,8 +64,8 @@ describe("collectDisabledRoleOverrideWarnings", () => {
 
     expect(warnings).toEqual([
       {
-        roleType: "assistant",
-        roleLabel: "Trợ lí",
+        roleType: "sale_customer_care_head",
+        roleLabel: "Trưởng phòng Sale & CSKH",
         hasAmountOverride: true,
         hasRateOverride: true,
         amountOverride: 12_000_000,
@@ -73,18 +73,18 @@ describe("collectDisabledRoleOverrideWarnings", () => {
       },
     ]);
     expect(formatDisabledRoleOverrideWarningLine(warnings[0])).toBe(
-      "Tắt vai trò Trợ lí sẽ xóa mức đè lương cứng 12.000.000đ và % vận hành 15%.",
+      "Tắt vai trò Trưởng phòng Sale & CSKH sẽ xóa mức đè lương cứng 12.000.000đ và % vận hành 15%.",
     );
     expect(LOCKED_FIXED_SALARY_MONTH_NOTE).toContain("đã chốt");
   });
 
   it("does not ask when the disabled role has no override on either axis", () => {
     const warnings = collectDisabledRoleOverrideWarnings({
-      originalRoles: ["assistant"],
+      originalRoles: ["sale_customer_care_head"],
       nextRoles: [],
       roleRows: [
         {
-          roleType: "assistant",
+          roleType: "sale_customer_care_head",
           amount: axis({ hasOverride: false }),
           operatingRate: axis({ hasOverride: false }),
         },
@@ -97,11 +97,11 @@ describe("collectDisabledRoleOverrideWarnings", () => {
 
   it("still asks when only one axis has an override, including intentional 0", () => {
     const warnings = collectDisabledRoleOverrideWarnings({
-      originalRoles: ["assistant"],
+      originalRoles: ["sale_customer_care_head"],
       nextRoles: [],
       roleRows: [
         {
-          roleType: "assistant",
+          roleType: "sale_customer_care_head",
           amount: axis({ hasOverride: true, overrideValue: 0 }),
           operatingRate: axis({ hasOverride: false }),
         },
@@ -111,7 +111,7 @@ describe("collectDisabledRoleOverrideWarnings", () => {
 
     expect(warnings).toHaveLength(1);
     expect(formatDisabledRoleOverrideWarningLine(warnings[0])).toBe(
-      "Tắt vai trò Trợ lí sẽ xóa mức đè lương cứng 0đ và % vận hành không có mức đè.",
+      "Tắt vai trò Trưởng phòng Sale & CSKH sẽ xóa mức đè lương cứng 0đ và % vận hành không có mức đè.",
     );
   });
 });

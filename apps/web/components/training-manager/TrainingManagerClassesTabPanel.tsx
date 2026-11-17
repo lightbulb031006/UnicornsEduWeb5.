@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   useMutation,
   useQueries,
@@ -14,6 +14,10 @@ import { MonthInput } from "@/components/ui/MonthInput";
 import SelectionCheckbox from "@/components/ui/SelectionCheckbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import TrainingManagerInlineRateEditor, {
+  TrainingManagerRateChip,
+} from "@/components/training-manager/TrainingManagerInlineRateEditor";
+import TrainingManagerRateDialog from "@/components/training-manager/TrainingManagerRateDialog";
 import type {
   TrainingManagerManagedClassItem,
   TrainingManagerPaymentStatus,
@@ -24,7 +28,10 @@ import {
   bulkUpdateTrainingManagerPaymentStatus,
   getTrainingManagerManagedClasses,
   getTrainingManagerSessionAllowances,
+  updateClassTrainingManager,
+  updateTrainingManagerSessionRate,
 } from "@/lib/apis/training-manager.api";
+import { getMutationErrorMessage } from "@/lib/mutation-feedback";
 import {
   buildAdminLikePath,
   resolveAdminLikeRouteBase,
@@ -42,14 +49,23 @@ type Props = {
   classLinkBase?: "staff" | "admin";
 };
 
+// Mobile: dòng lớp là card (tên lớp, rồi 3 ô số liệu có nhãn); từ `sm` mới là 1 hàng bảng.
 const ROW_GRID_CLASS =
-  "grid-cols-[minmax(0,1fr)_minmax(7rem,8.5rem)_minmax(7rem,8.5rem)_1.25rem]";
+  "sm:grid-cols-[minmax(0,1fr)_10rem_minmax(7rem,8.5rem)_minmax(7rem,8.5rem)_1.25rem]";
+
+const ROW_PADDING_CLASS = "px-3 sm:gap-3 sm:px-5";
 
 const SESSION_GRID_CLASS =
-  "grid-cols-[7.5rem_minmax(0,1fr)_5.5rem_6.5rem_8.5rem_8.5rem]";
+  "grid-cols-[7.5rem_minmax(0,1fr)_7.5rem_6.5rem_8.5rem_8.5rem]";
 
 const SESSION_GRID_WITH_SELECTION_CLASS =
-  "grid-cols-[2.75rem_7.5rem_minmax(0,1fr)_5.5rem_6.5rem_8.5rem_8.5rem]";
+  "grid-cols-[2.75rem_7.5rem_minmax(0,1fr)_7.5rem_6.5rem_8.5rem_8.5rem]";
+
+type SessionRateEditTarget = {
+  classId: string;
+  className: string;
+  session: TrainingManagerSessionAllowanceItem;
+};
 
 const PAYMENT_STATUS_LABELS: Record<TrainingManagerPaymentStatus, string> = {
   pending: "Chưa thanh toán",
@@ -89,9 +105,32 @@ function SessionAllowanceSkeleton() {
   );
 }
 
+function SessionRateCell({
+  session,
+  canEditRate,
+  onEditRate,
+}: {
+  session: TrainingManagerSessionAllowanceItem;
+  canEditRate: boolean;
+  onEditRate: (session: TrainingManagerSessionAllowanceItem) => void;
+}) {
+  // Buổi đã thanh toán bị BE chặn sửa % — hiện tĩnh để khỏi bấm vô ích.
+  const isEditable = canEditRate && session.paymentStatus === "pending";
+  return (
+    <TrainingManagerRateChip
+      value={session.trainingManagerRatePercent}
+      onClick={isEditable ? () => onEditRate(session) : undefined}
+      ariaLabel={`Sửa % QLL buổi ${formatSessionDate(session.date)}`}
+      reserveIconSpace={canEditRate}
+    />
+  );
+}
+
 function SessionAllowanceRows({
   sessions,
   canEdit,
+  canEditRate,
+  onEditRate,
   selectedSessionIds,
   onToggleSession,
   isLoading,
@@ -99,6 +138,8 @@ function SessionAllowanceRows({
 }: {
   sessions: TrainingManagerSessionAllowanceItem[];
   canEdit: boolean;
+  canEditRate: boolean;
+  onEditRate: (session: TrainingManagerSessionAllowanceItem) => void;
   selectedSessionIds: Set<string>;
   onToggleSession: (sessionId: string) => void;
   isLoading: boolean;
@@ -151,10 +192,12 @@ function SessionAllowanceRows({
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                 <div>
-                  <p className="text-text-muted">% QLL</p>
-                  <p className="tabular-nums font-medium text-text-primary">
-                    {session.trainingManagerRatePercent.toFixed(2)}%
-                  </p>
+                  <p className="mb-1 text-text-muted">% QLL</p>
+                  <SessionRateCell
+                    session={session}
+                    canEditRate={canEditRate}
+                    onEditRate={onEditRate}
+                  />
                 </div>
                 <div>
                   <p className="text-text-muted">Trợ cấp</p>
@@ -184,7 +227,12 @@ function SessionAllowanceRows({
               : SESSION_GRID_CLASS,
           )}
         >
-          {canEdit ? <span className="sr-only">Chọn</span> : null}
+          {canEdit ? (
+            // Bọc thêm span: `sr-only` là position absolute nên tự nó không chiếm ô grid → header lệch 1 cột.
+            <span>
+              <span className="sr-only">Chọn</span>
+            </span>
+          ) : null}
           <span>Ngày</span>
           <span>Học phí buổi</span>
           <span className="text-right">% QLL</span>
@@ -222,8 +270,12 @@ function SessionAllowanceRows({
                 <span className="tabular-nums text-text-secondary">
                   {formatCurrency(session.sessionTuitionTotal)}
                 </span>
-                <span className="text-right tabular-nums text-text-muted">
-                  {session.trainingManagerRatePercent.toFixed(2)}%
+                <span className="flex justify-end">
+                  <SessionRateCell
+                    session={session}
+                    canEditRate={canEditRate}
+                    onEditRate={onEditRate}
+                  />
                 </span>
                 <span className="text-right tabular-nums font-semibold text-primary">
                   {formatCurrency(session.allowanceAmount)}
@@ -244,6 +296,26 @@ function SessionAllowanceRows({
   );
 }
 
+/** Ô số liệu của dòng lớp: mobile có nhãn nhỏ phía trên, desktop nhãn nằm ở header bảng. */
+function ClassRowStat({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-0.5", className)}>
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted sm:sr-only">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
+
 function ManagedClassRow({
   item,
   href,
@@ -251,6 +323,9 @@ function ManagedClassRow({
   onToggleExpand,
   monthLabel,
   canEditPaymentStatus,
+  canEditRate,
+  onSaveClassRate,
+  onEditSessionRate,
   selectedSessionIds,
   onToggleSession,
   sessions,
@@ -262,6 +337,9 @@ function ManagedClassRow({
   onToggleExpand: () => void;
   monthLabel: string;
   canEditPaymentStatus: boolean;
+  canEditRate: boolean;
+  onSaveClassRate: (ratePercent: number) => Promise<unknown>;
+  onEditSessionRate: (session: TrainingManagerSessionAllowanceItem) => void;
   selectedSessionIds: Set<string>;
   onToggleSession: (sessionId: string) => void;
   sessions: TrainingManagerSessionAllowanceItem[];
@@ -274,7 +352,8 @@ function ManagedClassRow({
       <div
         {...rowLink(href, `Xem lớp ${item.className}`)}
         className={cn(
-          "grid items-center gap-2 px-3 py-3 text-sm sm:gap-3 sm:px-4",
+          "grid items-center gap-2 py-3 text-sm",
+          ROW_PADDING_CLASS,
           ROW_GRID_CLASS,
           ROW_LINK_INTERACTION_CLASS,
         )}
@@ -316,12 +395,31 @@ function ManagedClassRow({
             {item.className}
           </Link>
         </div>
-        <p className="text-right font-semibold tabular-nums text-text-primary">
-          {formatCurrency(item.monthTotal)}
-        </p>
-        <p className="text-right font-semibold tabular-nums text-warning">
-          {formatCurrency(item.pendingTotal)}
-        </p>
+        {/* Mobile: khối 3 ô dưới tên lớp. `sm:contents` trả các ô về grid cha. */}
+        <div className="ml-11 grid grid-cols-2 gap-x-2 gap-y-3 rounded-xl bg-bg-secondary/60 p-2 sm:contents">
+          {/* Mobile: hàng riêng cuối card, đủ chỗ cho input + ✓/✕. */}
+          <ClassRowStat
+            label="% QLL"
+            className="order-last col-span-2 sm:order-none sm:col-span-1 sm:items-end"
+          >
+            <TrainingManagerInlineRateEditor
+              value={item.trainingManagerRatePercent}
+              label={`lớp ${item.className}`}
+              canEdit={canEditRate}
+              onSave={onSaveClassRate}
+            />
+          </ClassRowStat>
+          <ClassRowStat label="Tổng tháng" className="sm:items-end">
+            <span className="font-semibold tabular-nums text-text-primary">
+              {formatCurrency(item.monthTotal)}
+            </span>
+          </ClassRowStat>
+          <ClassRowStat label="Chưa TT" className="sm:items-end">
+            <span className="font-semibold tabular-nums text-warning">
+              {formatCurrency(item.pendingTotal)}
+            </span>
+          </ClassRowStat>
+        </div>
         <span className="hidden sm:block" aria-hidden />
       </div>
       {isExpanded ? (
@@ -332,6 +430,8 @@ function ManagedClassRow({
           <SessionAllowanceRows
             sessions={sessions}
             canEdit={canEditPaymentStatus}
+            canEditRate={canEditRate}
+            onEditRate={onEditSessionRate}
             selectedSessionIds={selectedSessionIds}
             onToggleSession={onToggleSession}
             isLoading={sessionsLoading}
@@ -374,13 +474,17 @@ export default function TrainingManagerClassesTabPanel({
     staleTime: 60_000,
   });
   const staffRoles = fullProfile?.staffInfo?.roles ?? [];
+  // Khớp BE bulkUpdatePaymentStatus: chỉ Admin + Kế toán chi.
   const canEditPaymentStatus =
     fullProfile?.roleType === "admin" ||
-    staffRoles.includes("assistant") ||
-    staffRoles.includes("accountant_income") ||
     staffRoles.includes("accountant_expense") ||
-    staffRoles.includes("accountant") ||
     staffRoles.includes("admin");
+  // #276: % trợ cấp quản lý lớp chỉ Admin sửa (BE
+  // `assertCanEditClassManagerAllowanceRate`).
+  const canEditRate =
+    fullProfile?.roleType === "admin" || staffRoles.includes("admin");
+  const [rateEditTarget, setRateEditTarget] =
+    useState<SessionRateEditTarget | null>(null);
 
   const { data, isLoading, isFetching, isError } = useQuery({
     queryKey: ["training-manager", "managed-classes", staffId, monthKey],
@@ -472,6 +576,74 @@ export default function TrainingManagerClassesTabPanel({
     onError: () => {
       toast.error(
         "Không thể cập nhật trạng thái thanh toán. Vui lòng thử lại.",
+      );
+    },
+  });
+
+  const classRateMutation = useMutation({
+    mutationFn: ({
+      item,
+      ratePercent,
+    }: {
+      item: TrainingManagerManagedClassItem;
+      ratePercent: number;
+    }) =>
+      updateClassTrainingManager(item.classId, {
+        trainingManagerRatePercent: ratePercent,
+      }),
+    // Trả promise refetch để ô inline chỉ đóng khi số mới đã về, tránh nháy số cũ.
+    onSuccess: (_result, { item }) => {
+      toast.success(
+        `Đã cập nhật % QLL lớp ${item.className}. Áp dụng cho buổi tạo mới.`,
+      );
+      return queryClient.invalidateQueries({
+        queryKey: ["training-manager", "managed-classes", staffId],
+      });
+    },
+    onError: (error) => {
+      toast.error(
+        getMutationErrorMessage(
+          error,
+          "Không thể cập nhật % QLL của lớp. Vui lòng thử lại.",
+        ),
+      );
+    },
+  });
+
+  const rateMutation = useMutation({
+    mutationFn: ({
+      target,
+      ratePercent,
+    }: {
+      target: SessionRateEditTarget;
+      ratePercent: number;
+    }) =>
+      updateTrainingManagerSessionRate(staffId, target.session.sessionId, {
+        trainingManagerRatePercent: ratePercent,
+      }),
+    onSuccess: (_result, { target }) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["training-manager", "managed-classes", staffId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "training-manager",
+          "session-allowances",
+          staffId,
+          target.classId,
+        ],
+      });
+      setRateEditTarget(null);
+      toast.success(
+        `Đã cập nhật % QLL buổi ${formatSessionDate(target.session.date)}.`,
+      );
+    },
+    onError: (error) => {
+      toast.error(
+        getMutationErrorMessage(
+          error,
+          "Không thể cập nhật % QLL. Vui lòng thử lại.",
+        ),
       );
     },
   });
@@ -581,11 +753,13 @@ export default function TrainingManagerClassesTabPanel({
 
       <div
         className={cn(
-          "hidden border-b border-border-default bg-bg-secondary/70 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted sm:grid sm:px-5",
+          "hidden border-b border-border-default bg-bg-secondary/70 py-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted sm:grid",
+          ROW_PADDING_CLASS,
           ROW_GRID_CLASS,
         )}
       >
         <span>Tên lớp</span>
+        <span className="text-right">% QLL</span>
         <span className="text-right">Tổng tháng</span>
         <span className="text-right">Chưa TT</span>
         <span className="sr-only">Mở rộng</span>
@@ -631,6 +805,17 @@ export default function TrainingManagerClassesTabPanel({
                   onToggleExpand={() => toggleExpandClass(item.classId)}
                   monthLabel={monthLabel}
                   canEditPaymentStatus={canEditPaymentStatus}
+                  canEditRate={canEditRate}
+                  onSaveClassRate={(ratePercent) =>
+                    classRateMutation.mutateAsync({ item, ratePercent })
+                  }
+                  onEditSessionRate={(session) =>
+                    setRateEditTarget({
+                      classId: item.classId,
+                      className: item.className,
+                      session,
+                    })
+                  }
                   selectedSessionIds={selectedSessionIds}
                   onToggleSession={toggleSessionSelection}
                   sessions={sessionsByClassId.get(item.classId) ?? []}
@@ -729,6 +914,20 @@ export default function TrainingManagerClassesTabPanel({
             </div>
           </div>
         </>
+      ) : null}
+
+      {rateEditTarget ? (
+        <TrainingManagerRateDialog
+          key={rateEditTarget.session.sessionId}
+          title={`Sửa % QLL buổi ${formatSessionDate(rateEditTarget.session.date)}`}
+          description={`Lớp ${rateEditTarget.className} · Học phí buổi ${formatCurrency(rateEditTarget.session.sessionTuitionTotal)}. Trợ cấp được tính lại theo % mới.`}
+          initialRatePercent={rateEditTarget.session.trainingManagerRatePercent}
+          isPending={rateMutation.isPending}
+          onSubmit={(ratePercent) =>
+            rateMutation.mutate({ target: rateEditTarget, ratePercent })
+          }
+          onClose={() => setRateEditTarget(null)}
+        />
       ) : null}
     </section>
   );

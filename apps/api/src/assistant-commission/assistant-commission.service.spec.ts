@@ -40,6 +40,7 @@ describe('AssistantCommissionService', () => {
       updateMany: jest.fn(),
     },
     $queryRaw: jest.fn(),
+    user: { findUnique: jest.fn().mockResolvedValue(null) },
     $transaction: jest.fn(),
   };
 
@@ -54,11 +55,11 @@ describe('AssistantCommissionService', () => {
     mockPrisma.staffInfo.findMany.mockResolvedValue([]);
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'assistant-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
     mockPrisma.staffInfo.findFirst.mockResolvedValue({
       id: 'assistant-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
     mockPrisma.attendance.findMany.mockResolvedValue([]);
     mockPrisma.attendance.updateMany.mockResolvedValue({ count: 0 });
@@ -220,7 +221,7 @@ describe('AssistantCommissionService', () => {
         id: 'attendance-1',
         tuitionFee: 1_000_000,
         status: AttendanceStatus.present,
-        assistantPaymentStatus: PaymentStatus.pending,
+        saleCsHeadPaymentStatus: PaymentStatus.pending,
         session: {
           id: 'session-1',
           date: new Date('2026-05-01T00:00:00.000Z'),
@@ -304,18 +305,114 @@ describe('AssistantCommissionService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  describe('head commission visibility (#270)', () => {
+    it.each([
+      ['Trưởng phòng khác', [StaffRole.sale_customer_care_head]],
+      ['Kế toán thu', [StaffRole.accountant_income]],
+      [
+        'Trưởng phòng khác kiêm Kế toán thu',
+        [StaffRole.sale_customer_care_head, StaffRole.accountant_income],
+      ],
+    ])('chặn %s xem hoa hồng của trưởng phòng', async (_label, roles) => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue({
+        id: 'viewer-staff',
+        roles,
+      });
+
+      await expect(
+        service.getManagedCustomerCare(
+          'viewer-user',
+          UserRole.staff,
+          'assistant-1',
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it.each([
+      [
+        'chính trưởng phòng',
+        'assistant-1',
+        [StaffRole.sale_customer_care_head],
+      ],
+      ['Kế toán chi', 'viewer-staff', [StaffRole.accountant_expense]],
+      [
+        'Kế toán thu kiêm Kế toán chi',
+        'viewer-staff',
+        [StaffRole.accountant_income, StaffRole.accountant_expense],
+      ],
+    ])(
+      'cho %s xem hoa hồng của trưởng phòng',
+      async (_label, staffId, roles) => {
+        mockPrisma.staffInfo.findFirst.mockResolvedValue({
+          id: staffId,
+          roles,
+        });
+
+        await expect(
+          service.getManagedCustomerCare(
+            'viewer-user',
+            UserRole.staff,
+            'assistant-1',
+          ),
+        ).resolves.toBeDefined();
+      },
+    );
+
+    it('chặn Kế toán thu cập nhật trạng thái thanh toán', async () => {
+      mockPrisma.staffInfo.findFirst.mockResolvedValue({
+        id: 'income-staff',
+        roles: [StaffRole.accountant_income],
+      });
+
+      await expect(
+        service.bulkUpdatePaymentStatus(
+          'income-user',
+          UserRole.staff,
+          'assistant-1',
+          ['attendance-1'],
+          PaymentStatus.paid,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['chính trưởng phòng', 'assistant-1'],
+      ['trưởng phòng khác', 'other-head'],
+    ])(
+      '#271: chặn %s cập nhật trạng thái thanh toán hoa hồng',
+      async (_label, staffId) => {
+        mockPrisma.staffInfo.findFirst.mockResolvedValue({
+          id: staffId,
+          roles: [StaffRole.sale_customer_care_head],
+        });
+
+        await expect(
+          service.bulkUpdatePaymentStatus(
+            'head-user',
+            UserRole.staff,
+            'assistant-1',
+            ['attendance-1'],
+            PaymentStatus.paid,
+          ),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   it('bulk updates assistant share payment status to paid with tax snapshot', async () => {
     mockPrisma.attendance.findMany.mockResolvedValue([
       {
         id: 'attendance-1',
-        assistantPaymentStatus: PaymentStatus.pending,
+        saleCsHeadPaymentStatus: PaymentStatus.pending,
       },
     ]);
     mockPrisma.attendance.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.bulkUpdatePaymentStatus(
-      'assistant-user',
-      UserRole.staff,
+      'admin-user',
+      UserRole.admin,
       'assistant-1',
       ['attendance-1'],
       PaymentStatus.paid,
@@ -324,8 +421,8 @@ describe('AssistantCommissionService', () => {
     expect(mockPrisma.attendance.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ['attendance-1'] } },
       data: {
-        assistantPaymentStatus: PaymentStatus.paid,
-        assistantTaxDeductionRatePercent: 10,
+        saleCsHeadPaymentStatus: PaymentStatus.paid,
+        saleCsHeadTaxDeductionRatePercent: 10,
       },
     });
     expect(result).toEqual({
@@ -339,14 +436,14 @@ describe('AssistantCommissionService', () => {
     mockPrisma.attendance.findMany.mockResolvedValue([
       {
         id: 'attendance-1',
-        assistantPaymentStatus: PaymentStatus.paid,
+        saleCsHeadPaymentStatus: PaymentStatus.paid,
       },
     ]);
     mockPrisma.attendance.updateMany.mockResolvedValue({ count: 1 });
 
     await service.bulkUpdatePaymentStatus(
-      'assistant-user',
-      UserRole.staff,
+      'admin-user',
+      UserRole.admin,
       'assistant-1',
       ['attendance-1'],
       PaymentStatus.pending,
@@ -355,8 +452,8 @@ describe('AssistantCommissionService', () => {
     expect(mockPrisma.attendance.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ['attendance-1'] } },
       data: {
-        assistantPaymentStatus: PaymentStatus.pending,
-        assistantTaxDeductionRatePercent: 0,
+        saleCsHeadPaymentStatus: PaymentStatus.pending,
+        saleCsHeadTaxDeductionRatePercent: 0,
       },
     });
   });
@@ -366,8 +463,8 @@ describe('AssistantCommissionService', () => {
 
     await expect(
       service.bulkUpdatePaymentStatus(
-        'assistant-user',
-        UserRole.staff,
+        'admin-user',
+        UserRole.admin,
         'assistant-1',
         ['attendance-404'],
         PaymentStatus.paid,

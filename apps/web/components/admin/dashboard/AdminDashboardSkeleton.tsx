@@ -114,7 +114,8 @@ export function AdminDashboardBodySkeleton() {
       <div className={DASHBOARD_STATUS_GRID}>
         <DashboardPanelSkeleton rows={3} />
         <DashboardPanelSkeleton rows={5} />
-        <CustomerSourceSectionSkeleton className={DASHBOARD_STATUS_TRAILING_SPAN} />
+        <DashboardPanelSkeleton rows={4} />
+        <CustomerSourceSectionSkeleton />
       </div>
       <DashboardPanelSkeleton rows={5} />
     </div>

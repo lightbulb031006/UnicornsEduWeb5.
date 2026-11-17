@@ -57,9 +57,18 @@ describe('CourseAccessService', () => {
   });
 
   describe('isManager', () => {
-    it.each(['admin', 'assistant'])('returns true for %s', (role) => {
-      const actor = { roles: [role], isAdminUser: false } as never;
+    it('returns true for staff admin', () => {
+      const actor = { roles: ['admin'], isAdminUser: false } as never;
       expect(service.isManager(actor)).toBe(true);
+    });
+
+    // #267: Trợ lí không còn quản lý khoá học / ngân hàng câu hỏi.
+    it('returns false for assistant', () => {
+      const actor = {
+        roles: ['sale_customer_care_head'],
+        isAdminUser: false,
+      } as never;
+      expect(service.isManager(actor)).toBe(false);
     });
 
     it('returns true for admin users', () => {
@@ -77,135 +86,10 @@ describe('CourseAccessService', () => {
     });
   });
 
-  describe('resolveListableCourseIds', () => {
-    it.each(['admin', 'assistant'])(
-      'returns null (all) for manager role %s',
-      async (role) => {
-        const actor = { roles: [role], isAdminUser: false } as never;
-        await expect(
-          service.resolveListableCourseIds(actor),
-        ).resolves.toBeNull();
-        expect(prisma.courseLessonPlanMember.findMany).not.toHaveBeenCalled();
-      },
-    );
-
-    it.each([
-      'training',
-      'accountant_income',
-      'accountant_expense',
-      'teacher',
-      'customer_care',
-    ])('returns null (all) for non-lesson-plan role %s', async (role) => {
-      const actor = {
-        staffId: 'UNISTAFF-other',
-        roles: [role],
-        isAdminUser: false,
-      } as never;
-      await expect(service.resolveListableCourseIds(actor)).resolves.toBeNull();
-      expect(prisma.courseLessonPlanMember.findMany).not.toHaveBeenCalled();
-    });
-
-    it('returns null (all) for an admin user without a staff profile', async () => {
-      const actor = {
-        staffId: null,
-        roles: [],
-        isAdminUser: true,
-      } as never;
-      await expect(service.resolveListableCourseIds(actor)).resolves.toBeNull();
-    });
-
-    it('returns null (all) for staff without a profile and without lesson_plan', async () => {
-      const actor = {
-        staffId: null,
-        roles: [],
-        isAdminUser: false,
-      } as never;
-      await expect(service.resolveListableCourseIds(actor)).resolves.toBeNull();
-    });
-
-    it('returns null when a lesson-plan team role is combined with a manager role', async () => {
-      const actor = {
-        staffId: 'UNISTAFF-head',
-        roles: ['lesson_plan_head', 'assistant'],
-        isAdminUser: false,
-      } as never;
-      await expect(service.resolveListableCourseIds(actor)).resolves.toBeNull();
-      expect(prisma.courseLessonPlanMember.findMany).not.toHaveBeenCalled();
-    });
-
-    it('still filters when lesson_plan is combined with a non-manager role', async () => {
-      prisma.courseLessonPlanMember.findMany.mockResolvedValue([
-        { courseId: 'course-a' },
-      ]);
-      const actor = {
-        staffId: 'UNISTAFF-abc',
-        roles: ['lesson_plan', 'teacher'],
-        isAdminUser: false,
-      } as never;
-      await expect(service.resolveListableCourseIds(actor)).resolves.toEqual([
-        'course-a',
-      ]);
-    });
-
-    it('returns only assigned course ids for a pure lesson_plan member', async () => {
-      prisma.courseLessonPlanMember.findMany.mockResolvedValue([
-        { courseId: 'course-a' },
-        { courseId: 'course-b' },
-      ]);
-      const actor = {
-        staffId: 'UNISTAFF-abc',
-        roles: ['lesson_plan'],
-        isAdminUser: false,
-      } as never;
-
-      await expect(service.resolveListableCourseIds(actor)).resolves.toEqual([
-        'course-a',
-        'course-b',
-      ]);
-      expect(prisma.courseLessonPlanMember.findMany).toHaveBeenCalledWith({
-        where: { staffId: 'UNISTAFF-abc' },
-        select: { courseId: true },
-      });
-    });
-
-    it.each([['lesson_plan_head'], ['lesson_plan', 'lesson_plan_head']])(
-      'returns only assigned course ids for head roles %j',
-      async (...roles) => {
-        prisma.courseLessonPlanMember.findMany.mockResolvedValue([
-          { courseId: 'course-a' },
-        ]);
-        const actor = {
-          staffId: 'UNISTAFF-head',
-          roles,
-          isAdminUser: false,
-        } as never;
-        await expect(service.resolveListableCourseIds(actor)).resolves.toEqual([
-          'course-a',
-        ]);
-        expect(prisma.courseLessonPlanMember.findMany).toHaveBeenCalledWith({
-          where: { staffId: 'UNISTAFF-head' },
-          select: { courseId: true },
-        });
-      },
-    );
-
-    it('returns an empty list for pure lesson_plan without a staff id', async () => {
-      const actor = {
-        staffId: null,
-        roles: ['lesson_plan'],
-        isAdminUser: false,
-      } as never;
-      await expect(service.resolveListableCourseIds(actor)).resolves.toEqual(
-        [],
-      );
-      expect(prisma.courseLessonPlanMember.findMany).not.toHaveBeenCalled();
-    });
-  });
-
   describe('resolveViewableCourseIds', () => {
     it('returns null (all) for managers', async () => {
       prisma.staffInfo.findUnique.mockResolvedValue(null);
-      const actor = { roles: ['assistant'], isAdminUser: false } as never;
+      const actor = { roles: ['admin'], isAdminUser: false } as never;
       await expect(service.resolveViewableCourseIds(actor)).resolves.toBeNull();
     });
 
@@ -260,7 +144,7 @@ describe('CourseAccessService', () => {
   describe('canViewCourse / canManageCourse', () => {
     it('grants managers access to any course', async () => {
       const actor = {
-        roles: ['assistant'],
+        roles: ['admin'],
         isAdminUser: false,
       } as never;
       await expect(service.canViewCourse(actor, 'course-x')).resolves.toBe(

@@ -489,9 +489,16 @@ function EditClassDialog({ onClose, classDetail }: Omit<Props, "open">) {
       toast.error(tuitionPkg.message);
       return;
     }
+    // Follow-up 13/11: gói trống chỉ hợp lệ khi lớp không có và không sắp nhận
+    // học sinh đang học (backend chặn thật).
+    const existingStudents = classDetail.students ?? [];
+    const hasOrWillHaveActiveStudents =
+      existingStudents.some((student) => (student.status ?? "").toLowerCase() === "active") ||
+      selectedStudents.some((student) => !existingStudents.some((existing) => existing.id === student.id));
     const oneTimePkgError = oneTimePackageError(
       classDetail.pricingMode ?? "per_session",
       tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total,
+      { allowEmpty: !hasOrWillHaveActiveStudents },
     );
     if (oneTimePkgError) {
       toast.error(oneTimePkgError);

@@ -9,6 +9,11 @@ import { SessionLedgerService } from './session-ledger.service';
 import { SessionSnapshotService } from './session-snapshot.service';
 import { SessionStudentBalanceService } from './session-student-balance.service';
 import { SessionTrialCatchUpService } from './session-trial-catch-up.service';
+import { isSessionPaymentLocked } from './session-validation.service';
+import {
+  assertSessionDeleteAllowed,
+  resolveStaffPolicyActor,
+} from '../common/staff-role-policy';
 
 @Injectable()
 export class SessionDeleteService {
@@ -39,6 +44,13 @@ export class SessionDeleteService {
       if (!existingSession) {
         throw new NotFoundException('Session not found');
       }
+      // 15/11: role trưởng xoá được buổi, trừ buổi đã thanh toán / ghi cọc.
+      // Đọc trạng thái trong cùng transaction để không lọt buổi vừa chốt trả.
+      assertSessionDeleteAllowed(await resolveStaffPolicyActor(tx, actor), {
+        isPaymentLocked: isSessionPaymentLocked(
+          existingSession.teacherPaymentStatus,
+        ),
+      });
       const beforeValue = actor
         ? await this.sessionSnapshotService.getSessionAuditSnapshot(tx, id)
         : null;

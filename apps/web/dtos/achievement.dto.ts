@@ -74,7 +74,9 @@ export type ReorderAchievementsPayload = {
 
 export type AchievementOwnerRef =
   | { kind: "staff"; mode: "admin"; staffId: string }
-  /** Ban Đào Tạo: chỉ đọc qua `/training/tutors/:id/achievements`. */
+  /** Ban Đào Tạo: đọc/sửa qua `/training/tutors/:id/achievements`. */
   | { kind: "staff"; mode: "training"; staffId: string }
+  /** Trưởng phòng Sale & CSKH: đọc; sửa nhân sự dưới cấp qua `/sale-cs-team/members/:id/achievements`. */
+  | { kind: "staff"; mode: "saleCsTeam"; staffId: string }
   | { kind: "staff"; mode: "self" }
   | { kind: "student"; mode: "admin"; studentId: string };

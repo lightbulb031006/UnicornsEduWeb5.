@@ -30,7 +30,7 @@ When you resolve a fuzzy term during a session, write it into `CONTEXT.md` right
 - `Chuyên đề` / module (`modules`) — was `Chủ đề` / chapter; see `docs/adr/2026-09-15-three-level-content-model.md`
 - `Tiết học` / lesson (`lessons`) vs `Buổi học` / session — easy to confuse; keep both full words, never abbreviate. Flattened from topic + lecture; one old lecture = one lesson (`docs/adr/2026-09-16-one-lecture-becomes-one-lesson.md`). Class-owned lessons are XOR with modules (`docs/adr/2026-09-16-class-owned-lesson-xor.md`)
 - Retired (do not reuse): `Chapter`/`chapters`, `Topic`/`topics`, `Lecture`/`lectures`, `TopicKind`, `ClassTheoryTopicView`, HTTP `/chapters` `/topics` `/lectures`
-- `Lớp không điểm danh` / class skip-attendance — `Class.noAttendance` is always-on for new sessions; admin/assistant only; no per-session toggle. See `docs/adr/2026-09-05-class-without-attendance-still-charges.md`
+- `Lớp không điểm danh` / class skip-attendance — `Class.noAttendance` is always-on for new sessions; admin/Trưởng phòng Sale & CSKH only; no per-session toggle. See `docs/adr/2026-09-05-class-without-attendance-still-charges.md`
 - `Buổi không điểm danh` / session snapshot — frozen on `Session.snapshotNoAttendance` from the class flag at create; charging/auto-present still follow the same ADR
 - `thiết bị đăng nhập` / `UserDevice` — login device, not `Session`; see `docs/adr/2026-09-07-immediate-device-revocation.md`
 

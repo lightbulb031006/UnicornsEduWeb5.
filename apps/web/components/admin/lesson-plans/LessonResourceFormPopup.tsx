@@ -163,7 +163,7 @@ function LessonResourceFormPopupContent({
               {getTitle(mode)}
             </h2>
             <p className="mt-2 text-sm leading-6 text-text-secondary">
-              Lưu tài nguyên tham chiếu để đội giáo án truy cập lại nhanh trong
+              Lưu tài nguyên tham chiếu để đội chuyên môn truy cập lại nhanh trong
               tab Tổng quan.
             </p>
             {linkedTask ? (

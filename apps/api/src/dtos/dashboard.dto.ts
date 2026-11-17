@@ -400,6 +400,7 @@ export interface AdminDashboardPendingPayrollBreakdownDto {
   fixedSalaryAmount: number;
   assistantAmount: number;
   trainingManagerAmount: number;
+  lessonPlanHeadAmount: number;
 }
 
 export interface AdminDashboardTrendPointDto {
@@ -421,6 +422,7 @@ export interface AdminDashboardBreakdownItemDto {
     | 'fixedSalaryCost'
     | 'assistantCost'
     | 'trainingManagerCost'
+    | 'lessonPlanHeadCost'
     | 'operatingCost';
   label: string;
   kind: 'revenue' | 'expense';
@@ -551,6 +553,7 @@ export interface AdminDashboardMonthlyStatisticDto {
   fixedSalaryCost: number;
   assistantCost: number;
   trainingManagerCost: number;
+  lessonPlanHeadCost: number;
   operatingCost: number;
   totalTopup: number;
   totalUnpaid: number;
@@ -989,7 +992,7 @@ export class GetStaffDashboardStudentChangesQueryDto {
 
   @ApiProperty({
     description:
-      'Phạm vi CSKH: own (chỉ học sinh do bản thân phụ trách) hoặc managed (bản thân + CSKH được quản lí, dùng cho trợ lí).',
+      'Phạm vi CSKH: own (chỉ học sinh do bản thân phụ trách) hoặc managed (bản thân + CSKH được quản lí, dùng cho Trưởng phòng Sale & CSKH).',
     enum: STAFF_DASHBOARD_STUDENT_CHANGE_SCOPES,
     example: 'own',
   })
@@ -1029,15 +1032,37 @@ export interface StaffDashboardUnpaidStaffItemDto {
   totalUnpaid: number;
 }
 
+/** Trường tổng hợp khoản chi nhân sự trong summary dashboard (#270). */
+export type StaffDashboardPayrollSummaryField =
+  | 'monthlyExpense'
+  | 'monthlyProfit'
+  | 'pendingPayrollTotal'
+  | 'pendingPayrollBreakdown'
+  | 'unpaidStaffCount';
+
+/**
+ * #270: Kế toán thu không thấy khoản chi nhân sự → các trường payroll vắng khỏi
+ * summary khi người xem chỉ có Kế toán thu (không kèm Kế toán chi / Admin).
+ */
+export type StaffDashboardFinancialSummaryDto = Omit<
+  AdminDashboardSummaryDto,
+  StaffDashboardPayrollSummaryField
+> &
+  Partial<Pick<AdminDashboardSummaryDto, StaffDashboardPayrollSummaryField>>;
+
 export interface StaffDashboardFinancialOverviewDto {
   period: AdminDashboardPeriodDto;
-  summary: AdminDashboardSummaryDto;
+  summary: StaffDashboardFinancialSummaryDto;
+  /** #270: chỉ còn `revenue` + `operatingCost` khi ẩn khoản chi nhân sự. */
   breakdown: AdminDashboardBreakdownItemDto[];
 }
 
 export interface StaffDashboardAccountantSectionDto {
-  unpaidStaff: StaffDashboardUnpaidStaffItemDto[];
+  /** #270: vắng khi người xem không được thấy khoản chi nhân sự (chỉ Kế toán thu). */
+  unpaidStaff?: StaffDashboardUnpaidStaffItemDto[];
   financialOverview: StaffDashboardFinancialOverviewDto;
+  /** #270: `false` → đã bỏ mọi khoản chi nhân sự khỏi section. */
+  staffPayoutsVisible: boolean;
 }
 
 export interface StaffDashboardExpenseSummaryDto {
@@ -1207,4 +1232,240 @@ export interface AdminMonthlyReportDto {
   customerCare: MonthlyReportCustomerCareRowDto[];
   newStudents: MonthlyReportNewStudentDto[];
   droppedStudents: MonthlyReportDroppedStudentDto[];
+}
+
+export class GetStudentDemographicsQueryDto {
+  @ApiPropertyOptional({
+    description: 'Lọc trạng thái học sinh: all (mặc định) | active | inactive.',
+    enum: ['all', 'active', 'inactive'],
+  })
+  @IsOptional()
+  @IsIn(['all', 'active', 'inactive'])
+  status?: 'all' | 'active' | 'inactive';
+
+  @ApiPropertyOptional({
+    description:
+      'Tháng 01-12 (bắt buộc kèm `year`). Có tháng → kỳ = tháng đó; chỉ `year` → kỳ = cả năm; bỏ trống cả hai → toàn thời gian.',
+    example: '09',
+  })
+  @IsOptional()
+  @Matches(/^(0[1-9]|1[0-2])$/, { message: 'month must use 01-12 format.' })
+  month?: string;
+
+  @ApiPropertyOptional({ description: 'Năm YYYY.', example: '2026' })
+  @ValidateIf(
+    (o: GetStudentDemographicsQueryDto) => o.month != null || o.year != null,
+  )
+  @Matches(/^\d{4}$/, { message: 'year must use YYYY format.' })
+  year?: string;
+}
+
+/** Kỳ thống kê học sinh: toàn thời gian, theo tháng hoặc theo năm. */
+export interface StudentDemographicsPeriodDto {
+  type: 'all' | 'month' | 'year';
+  /** `YYYY-MM` (month) | `YYYY` (year) | null (all). */
+  key: string | null;
+  label: string;
+  /** Ngày đầu kỳ `YYYY-MM-DD` (inclusive), null khi toàn thời gian. */
+  from: string | null;
+  /** Ngày sau cuối kỳ `YYYY-MM-DD` (exclusive), null khi toàn thời gian. */
+  toExclusive: string | null;
+}
+
+export interface StudentDemographicsCategoryItemDto {
+  courseId: string | null;
+  courseName: string;
+  studentCount: number;
+  classCount?: number;
+}
+
+export interface StudentDemographicsBirthYearGroupDto {
+  birthYear: number | null;
+  label: string;
+  studentCount: number;
+  totalTopup: number;
+  /** Doanh thu = học phí đã học (attendance.tuition_fee, buổi present/excused), toàn thời gian. */
+  totalRevenue: number;
+  categories: StudentDemographicsCategoryItemDto[];
+}
+
+export interface StudentDemographicsProvinceGroupDto {
+  province: string;
+  studentCount: number;
+  percentage: number;
+  totalTopup: number;
+  totalRevenue: number;
+  birthYears: StudentDemographicsBirthYearGroupDto[];
+  categories: StudentDemographicsCategoryItemDto[];
+}
+
+export interface StudentDemographicsBirthYearSummaryDto {
+  birthYear: number | null;
+  label: string;
+  studentCount: number;
+  percentage: number;
+  totalTopup: number;
+  totalRevenue: number;
+  provinces: Array<{
+    province: string;
+    studentCount: number;
+  }>;
+  categories: StudentDemographicsCategoryItemDto[];
+}
+
+export interface StudentDemographicsSummaryDto {
+  statusFilter?: 'all' | 'active' | 'inactive';
+  totalActiveStudents: number;
+  enrolledStudentsCount: number;
+  unenrolledStudentsCount: number;
+  totalProvincesCount: number;
+  totalCategoriesCount: number;
+  totalTopup: number;
+  averageTopup: number;
+  /** Tổng học phí đã học (toàn thời gian) của nhóm học sinh trong phạm vi lọc. */
+  totalRevenue: number;
+  /** Doanh thu TB / học sinh có doanh thu > 0. */
+  averageRevenue: number;
+  revenueStudentsCount: number;
+  /** Tổng lợi nhuận các khoá (học phí − gia sư − QL lớp − CSKH), toàn bộ học sinh, toàn thời gian. */
+  totalProfit: number;
+  topProvince: string | null;
+  topBirthYear: number | null;
+  topCategory: string | null;
+  /** Khoá có doanh thu cao nhất. */
+  topRevenueCategory: string | null;
+  /** Tuổi trung bình (chỉ tính học sinh có năm sinh hợp lệ). */
+  averageAge: number | null;
+  missingBirthYearCount: number;
+  unusualBirthYearCount: number;
+}
+
+export interface StudentDemographicsMatrixColumnDto {
+  key: string;
+  label: string;
+}
+
+export interface StudentDemographicsProvinceMatrixRowDto {
+  province: string;
+  totalStudents: number;
+  totalTopup: number;
+  totalRevenue: number;
+  cells: Record<string, number>;
+  /** Doanh thu theo khoá (key = cột), gán theo khoá của lớp có buổi học. */
+  revenueCells: Record<string, number>;
+}
+
+export interface StudentDemographicsBirthYearMatrixRowDto {
+  birthYear: number | null;
+  label: string;
+  totalStudents: number;
+  totalTopup: number;
+  totalRevenue: number;
+  cells: Record<string, number>;
+  revenueCells: Record<string, number>;
+}
+
+export interface StudentDemographicsCourseBirthYearDto {
+  birthYear: number | null;
+  label: string;
+  studentCount: number;
+  percentage: number;
+  totalRevenue: number;
+}
+
+/** Phân tích chi tiết theo từng khoá (Category): độ tuổi, khu vực, doanh thu. */
+export interface StudentDemographicsCourseBreakdownDto {
+  /** Khoá cột ma trận (courseId hoặc `__unassigned__`). */
+  key: string;
+  courseId: string | null;
+  courseName: string;
+  studentCount: number;
+  classCount: number;
+  percentage: number;
+  totalTopup: number;
+  /** Học phí đã học thuộc các lớp của khoá này. */
+  totalRevenue: number;
+  /** Doanh thu khoá / số học sinh của khoá có doanh thu > 0. */
+  averageRevenue: number;
+  revenueShare: number;
+  /** Học phí đã học của khoá trên toàn bộ học sinh (không theo bộ lọc trạng thái) — gốc tính lợi nhuận. */
+  profitRevenue: number;
+  /** Trợ cấp gia sư (sau khấu trừ vận hành, trước thuế). */
+  teacherCost: number;
+  /** Trợ cấp quản lý lớp (`sessions.training_manager_allowance_amount`). */
+  trainingManagerCost: number;
+  /** Hoa hồng CSKH (học phí cơ sở × `customer_care_coef`). */
+  customerCareCost: number;
+  totalCost: number;
+  /** profitRevenue − teacherCost − trainingManagerCost − customerCareCost. */
+  profit: number;
+  /** % lợi nhuận / học phí của khoá. */
+  profitMargin: number;
+  /** % lợi nhuận khoá / tổng lợi nhuận. */
+  profitShare: number;
+  averageAge: number | null;
+  minBirthYear: number | null;
+  maxBirthYear: number | null;
+  topBirthYear: number | null;
+  missingBirthYearCount: number;
+  birthYears: StudentDemographicsCourseBirthYearDto[];
+  provinces: Array<{ province: string; studentCount: number }>;
+}
+
+export interface StudentDemographicsStudentRowDto {
+  studentId: string;
+  fullName: string;
+  status: string | null;
+  school: string | null;
+  province: string;
+  /** Năm sinh hợp lệ (null nếu trống hoặc ngoài khoảng hợp lệ). */
+  birthYear: number | null;
+  /** Giá trị gốc trong DB (để rà soát dữ liệu sai). */
+  rawBirthYear: number | null;
+  birthYearLabel: string;
+  age: number | null;
+  classNames: string[];
+  courseKeys: string[];
+  courseNames: string[];
+  totalTopup: number;
+  totalRevenue: number;
+  /** Doanh thu theo key khoá. */
+  revenueByCourse: Record<string, number>;
+  attendanceCount: number;
+}
+
+export interface StudentDemographicsDataQualityDto {
+  /** Năm sinh để trống hoặc không hợp lệ. */
+  missingBirthYear: StudentDemographicsStudentRowDto[];
+  /** Năm sinh hợp lệ nhưng ngoài độ tuổi phổ thông (6–19 tuổi). */
+  unusualBirthYear: StudentDemographicsStudentRowDto[];
+  normalAgeRange: { min: number; max: number };
+}
+
+export interface AdminDashboardStudentDemographicsDto {
+  /** Kỳ đang xem; có kỳ thì số liệu chỉ tính học sinh có buổi học trong kỳ. */
+  period: StudentDemographicsPeriodDto;
+  summary: StudentDemographicsSummaryDto;
+  categories: Array<{
+    courseId: string | null;
+    courseName: string;
+    studentCount: number;
+    classCount: number;
+    totalRevenue: number;
+  }>;
+  byProvince: StudentDemographicsProvinceGroupDto[];
+  byBirthYear: StudentDemographicsBirthYearSummaryDto[];
+  byCourse: StudentDemographicsCourseBreakdownDto[];
+  provinceMatrix: {
+    columns: StudentDemographicsMatrixColumnDto[];
+    rows: StudentDemographicsProvinceMatrixRowDto[];
+  };
+  birthYearMatrix: {
+    columns: StudentDemographicsMatrixColumnDto[];
+    rows: StudentDemographicsBirthYearMatrixRowDto[];
+  };
+  /** Danh sách từng học sinh trong phạm vi lọc (sắp theo tên). */
+  students: StudentDemographicsStudentRowDto[];
+  dataQuality: StudentDemographicsDataQualityDto;
+  generatedAt: string;
 }

@@ -1,6 +1,14 @@
 # Ops / data migrations
 
-Đồng bộ nguồn Tin → Toán mới nhất: [08/10/2026 — phạm vi, backup và kết quả triển khai](upstream-sync-math-2026-10-08.md). Đã phát hành thành công lúc 13:54 ngày 08/10/2026; 10 migration qua backup/rehearsal và đối chiếu dữ liệu production.
+## Math fork (`math.uniedu.vn`)
+
+| Tài liệu | Nội dung |
+|----------|----------|
+| [upstream-sync-math-2026-11-17.md](upstream-sync-math-2026-11-17.md) | Đồng bộ Tin mới nhất vào Toán, backup, 8 migration mới và trạng thái kiểm thử |
+| [upstream-sync-math-2026-11-05.md](upstream-sync-math-2026-11-05.md) | Lần đồng bộ trước, hồ sơ môn và các migration dữ liệu cần chặn |
+| [vps-single-instance-runbook.md](vps-single-instance-runbook.md) | Runbook production một instance `math` |
+
+Toán tiếp tục dùng `LMS_PROFILE=math`, database/storage được quản lý hiện có và `scripts/math-release-preflight.sh`. Không áp trực tiếp registry/data-stack IT/ENG/JP ở phần dưới cho production Toán.
 
 ## Multi-instance VPS deploy
 
@@ -8,21 +16,14 @@ Nhiều bản UnicornsEduWeb5 trên **cùng một VPS** — mỗi môn học / d
 
 | Tài liệu | Nội dung |
 |----------|----------|
-| [upstream-sync-math-2026-11-05.md](upstream-sync-math-2026-11-05.md) | Đồng bộ tháng 11 cho Toán, hồ sơ môn và chốt migration |
-| [vps-single-instance-runbook.md](vps-single-instance-runbook.md) | **Runbook triển khai** — instance `math`, Cloudflare Tunnel, secrets GitHub, xử lý sự cố deploy |
-| [vps-multi-instance-runbook.md](vps-multi-instance-runbook.md) | **Tham khảo upstream Tin/Anh/Nhật** — bootstrap IT/ENG/JP, Cloudflare Tunnel, secrets GitHub |
-| [vps-local-supabase.md](vps-local-supabase.md) | **Data stack upstream Tin/Anh/Nhật** — Postgres (3 database) + Supabase Storage self-host trên VPS, sync từ cloud, cutover, backup |
+| [vps-multi-instance-runbook.md](vps-multi-instance-runbook.md) | **Runbook triển khai** — bootstrap IT/ENG/JP, Cloudflare Tunnel, secrets GitHub |
+| [vps-local-supabase.md](vps-local-supabase.md) | **Data stack** — Postgres (3 database) + Supabase Storage self-host trên VPS, sync từ cloud, cutover, backup |
+| [supabase-studio-local.md](supabase-studio-local.md) | **Supabase Studio trên máy dev** — xem/truy vấn DB production qua SSH tunnel Tailscale, không chạy thêm gì trên VPS |
 | [`deploy/instances.json`](../../deploy/instances.json) | Registry instance (`it`, `eng`, `jp`, …) |
 | [`.env.production.eng.example`](../../.env.production.eng.example) | Mẫu `.env` cho instance ENG |
 | [`.env.production.jp.example`](../../.env.production.jp.example) | Mẫu `.env` cho instance JP (`/root/UnicornsEduJP`) |
 
 Bật CD cho instance mới: bootstrap VPS theo runbook, rồi `"enabled": true` trong `deploy/instances.json`. Mọi instance **dùng chung** `unicorns-api:latest` và `unicorns-web:latest`.
-
-## Troubleshooting
-
-| Tài liệu | Triệu chứng |
-|----------|-------------|
-| [troubleshoot-login-500.md](troubleshoot-login-500.md) | Web mở được nhưng đăng nhập luôn thất bại (API trả `500`/`502`, thường do database) |
 
 ---
 

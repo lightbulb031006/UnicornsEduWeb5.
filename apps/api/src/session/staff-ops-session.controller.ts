@@ -31,6 +31,7 @@ import {
   CreateStaffOpsSessionDto,
   MissedTeachingAlertDto,
   MissedTeachingExplanationResponseDto,
+  TrainingHeadSessionUpdateDto,
   UpdateMissedTeachingExplanationDto,
   UpdateStaffOpsSessionDto,
 } from 'src/dtos/session.dto';
@@ -151,6 +152,11 @@ export class StaffOpsSessionController {
     description: 'Missed teaching explanation saved.',
     type: MissedTeachingExplanationResponseDto,
   })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin / Quản lý lớp / gia sư của lớp, hoặc gia sư giải trình buổi của gia sư khác (follow-up grill 13/11: cùng quyền xếp lịch bù #275).',
+  })
   async createMissedTeachingExplanationByClassId(
     @CurrentUser() user: JwtPayload,
     @Param('classId', new ParseClassIdPipe()) classId: string,
@@ -180,6 +186,12 @@ export class StaffOpsSessionController {
     description: 'Missed teaching explanation updated.',
     type: MissedTeachingExplanationResponseDto,
   })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin / Quản lý lớp / gia sư của lớp của giải trình, hoặc gia sư sửa giải trình của gia sư khác (follow-up grill 13/11).',
+  })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy giải trình vắng.' })
   async updateMissedTeachingExplanation(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseUUIDPipe()) id: string,
@@ -202,15 +214,19 @@ export class StaffOpsSessionController {
   @ApiOperation({
     summary: 'Create class session for staff operations',
     description:
-      'Creates a session allowing date/time/notes/attendance and coefficient. No-attendance classes snapshot Class.noAttendance; the payload has no noAttendance override. startTime and endTime are required; endTime must be after startTime. Teacher, allowance and tuition overrides are not accepted.',
+      'Creates a session allowing date/time/notes/attendance and coefficient. No-attendance classes snapshot Class.noAttendance; the payload has no noAttendance override. startTime and endTime are required; endTime must be after startTime. #275: Admin, gia sư của lớp hoặc Quản lý lớp (hợp quyền). `teacherId` tuỳ chọn: Admin / Quản lý lớp chọn bất kỳ gia sư của lớp, gia sư chỉ chính mình. Hệ số khác 1 / Dạy thử chỉ Admin hoặc gia sư tự tạo buổi của mình. Allowance và tuition override không được nhận.',
   })
   @ApiParam({ name: 'classId', description: 'Class id' })
   @ApiBody({ type: CreateStaffOpsSessionDto })
   @ApiResponse({ status: 201, description: 'Session created.' })
   @ApiResponse({
+    status: 400,
+    description: 'Gia sư được chọn không dạy lớp này.',
+  })
+  @ApiResponse({
     status: 403,
     description:
-      'Teacher blocked: the running class has not submitted a survey that is inside its deadline block window (from the day before endDate, Vietnam time).',
+      'Không phải Admin / gia sư của lớp / Quản lý lớp; gia sư chọn gia sư khác; Quản lý lớp đặt hệ số hoặc dạy thử cho buổi của gia sư khác; hoặc lớp chưa nộp khảo sát trong cửa sổ khoá (từ ngày trước endDate, giờ Việt Nam).',
   })
   async createSession(
     @CurrentUser() user: JwtPayload,
@@ -222,6 +238,7 @@ export class StaffOpsSessionController {
       user.roleType,
       classId,
       {
+        teacherId: dto.teacherId,
         date: dto.date,
         startTime: dto.startTime,
         endTime: dto.endTime,
@@ -250,17 +267,62 @@ export class StaffOpsSessionController {
   @ApiOperation({
     summary: 'Update class session for staff operations',
     description:
-      'Updates session date/time/notes/attendance and coefficient only. Sending startTime/endTime requires both and end after start. Paid/deposit sessions reject time changes. Teacher, allowance and tuition fields are not accepted.',
+      'Updates session date/time/notes/attendance and coefficient only. Sending startTime/endTime requires both and end after start. Paid/deposit sessions reject time changes. Teacher, allowance and tuition fields are not accepted. #275: gia sư chỉ sửa buổi do mình dạy; Admin và Quản lý lớp sửa mọi buổi của lớp (người kiêm gia sư + Quản lý lớp được hợp quyền). Đổi hệ số / Dạy thử chỉ Admin hoặc gia sư trên buổi của mình.',
   })
   @ApiParam({ name: 'id', description: 'Session id' })
   @ApiBody({ type: UpdateStaffOpsSessionDto })
   @ApiResponse({ status: 200, description: 'Session updated.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin / gia sư của lớp / Quản lý lớp (kể cả Kế toán thu/chi); gia sư sửa buổi của gia sư khác; Quản lý lớp đổi hệ số / Dạy thử của buổi gia sư khác.',
+  })
+  @ApiResponse({ status: 404, description: 'Session not found.' })
   async updateSession(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: UpdateStaffOpsSessionDto,
   ) {
     return this.sessionService.updateSessionForStaff(
+      user.id,
+      user.roleType,
+      id,
+      dto,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+  }
+
+  @Patch('sessions/:id/training-head')
+  @ApiOperation({
+    summary:
+      'Trưởng ban Đào tạo chỉnh tay trợ cấp / Dạy thử / Học thử của buổi',
+    description:
+      '14/11: Admin hoặc Trưởng ban Đào tạo (mọi lớp). Chỉnh tay `allowanceAmount` (trợ cấp gốc của buổi), tick Dạy thử (`coefficient` 0/1) và tick Học thử từng học sinh (chỉ đổi sang/ra khỏi `trial`, học sinh không gửi giữ nguyên). Không sửa được buổi do chính mình dạy (#265); buổi đã thanh toán / ghi cọc không đổi trợ cấp hay Dạy thử. Đổi Học thử mà không nhập trợ cấp → trợ cấp tự tính lại theo số học sinh tính phí. Response ẩn học phí / vận hành với Trưởng ban.',
+  })
+  @ApiParam({ name: 'id', description: 'Session id' })
+  @ApiBody({ type: TrainingHeadSessionUpdateDto })
+  @ApiResponse({ status: 200, description: 'Session updated.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Không có thay đổi; buổi đã thanh toán / ghi cọc; học sinh không thuộc buổi; buổi không điểm danh.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin / Trưởng ban Đào tạo; sửa buổi do chính mình dạy; đổi trạng thái điểm danh không liên quan Học thử.',
+  })
+  @ApiResponse({ status: 404, description: 'Session not found.' })
+  async updateSessionAsTrainingHead(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: TrainingHeadSessionUpdateDto,
+  ) {
+    return this.sessionService.updateSessionAsTrainingHead(
       user.id,
       user.roleType,
       id,

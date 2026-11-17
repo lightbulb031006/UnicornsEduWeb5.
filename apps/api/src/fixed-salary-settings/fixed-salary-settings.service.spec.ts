@@ -381,7 +381,9 @@ describe('FixedSalarySettingsService', () => {
       }),
     );
     expect(
-      result.roles.find((row) => row.roleType === StaffRole.assistant),
+      result.roles.find(
+        (row) => row.roleType === StaffRole.sale_customer_care_head,
+      ),
     ).toEqual(
       expect.objectContaining({
         amount: null,
@@ -427,7 +429,7 @@ describe('FixedSalarySettingsService', () => {
       {
         items: [
           {
-            roleType: StaffRole.assistant,
+            roleType: StaffRole.sale_customer_care_head,
             amount: 5_000_000,
           },
         ],
@@ -441,7 +443,7 @@ describe('FixedSalarySettingsService', () => {
         entityType: 'role_fixed_salary_default',
         description: 'Create role default fixed salary',
         afterValue: expect.objectContaining({
-          roleType: StaffRole.assistant,
+          roleType: StaffRole.sale_customer_care_head,
           amount: 5_000_000,
         }),
       }),
@@ -451,7 +453,7 @@ describe('FixedSalarySettingsService', () => {
       {
         items: [
           {
-            roleType: StaffRole.assistant,
+            roleType: StaffRole.sale_customer_care_head,
             amount: 6_000_000,
           },
         ],
@@ -472,7 +474,7 @@ describe('FixedSalarySettingsService', () => {
       service.upsertRoleDefaults({
         items: [
           {
-            roleType: StaffRole.assistant,
+            roleType: StaffRole.sale_customer_care_head,
             amount: -1,
           },
         ],
@@ -608,7 +610,7 @@ describe('FixedSalarySettingsService', () => {
       {
         items: [
           {
-            roleType: StaffRole.assistant,
+            roleType: StaffRole.sale_customer_care_head,
             operatingRatePercent: 8,
           },
         ],
@@ -630,7 +632,7 @@ describe('FixedSalarySettingsService', () => {
       service.upsertRoleOperatingRates({
         items: [
           {
-            roleType: StaffRole.assistant,
+            roleType: StaffRole.sale_customer_care_head,
             operatingRatePercent: 120,
           },
         ],
@@ -643,7 +645,7 @@ describe('FixedSalarySettingsService', () => {
   function seedDualRoleStaff() {
     staffRows.push({
       id: 'staff-an',
-      roles: [StaffRole.communication, StaffRole.assistant],
+      roles: [StaffRole.communication, StaffRole.sale_customer_care_head],
       status: StaffStatus.active,
       user: {
         first_name: 'An',
@@ -680,7 +682,7 @@ describe('FixedSalarySettingsService', () => {
       (row) => row.roleType === StaffRole.communication,
     );
     const assistantRow = result.staff[0]?.roles.find(
-      (row) => row.roleType === StaffRole.assistant,
+      (row) => row.roleType === StaffRole.sale_customer_care_head,
     );
 
     expect(result.staff[0]?.roles).toHaveLength(2);
@@ -828,7 +830,7 @@ describe('FixedSalarySettingsService', () => {
     await expect(
       service.upsertStaffAmountOverride({
         staffId: 'staff-an',
-        roleType: StaffRole.accountant,
+        roleType: StaffRole.accountant_income,
         amount: 1,
       }),
     ).rejects.toThrow(BadRequestException);
@@ -865,10 +867,10 @@ describe('FixedSalarySettingsService', () => {
 
     await service.syncStaffRoleOverridesInTx(mockPrisma as never, {
       staffId: 'staff-an',
-      nextRoles: [StaffRole.communication, StaffRole.assistant],
+      nextRoles: [StaffRole.communication, StaffRole.sale_customer_care_head],
       items: [
         {
-          roleType: StaffRole.assistant,
+          roleType: StaffRole.sale_customer_care_head,
           amount: 0,
           operatingRatePercent: null,
         },
@@ -880,7 +882,7 @@ describe('FixedSalarySettingsService', () => {
     expect(staffSalaryOverrideRows).toEqual([
       expect.objectContaining({
         staffId: 'staff-an',
-        roleType: StaffRole.assistant,
+        roleType: StaffRole.sale_customer_care_head,
         amount: 0,
       }),
     ]);
@@ -910,7 +912,7 @@ describe('FixedSalarySettingsService', () => {
     staffSalaryOverrideRows.push({
       id: 'override-assistant-amount',
       staffId: 'staff-an',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       amount: 500_000,
     });
 
@@ -927,7 +929,9 @@ describe('FixedSalarySettingsService', () => {
     });
 
     expect(
-      staffSalaryOverrideRows.find((row) => row.roleType === StaffRole.assistant),
+      staffSalaryOverrideRows.find(
+        (row) => row.roleType === StaffRole.sale_customer_care_head,
+      ),
     ).toBeUndefined();
     expect(
       staffSalaryOverrideRows.find((row) => row.roleType === StaffRole.communication)
@@ -949,13 +953,13 @@ describe('FixedSalarySettingsService', () => {
     staffSalaryOverrideRows.push({
       id: 'override-assistant-amount',
       staffId: 'staff-an',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       amount: 12_000_000,
     });
     staffOperatingOverrideRows.push({
       id: 'override-assistant-rate',
       staffId: 'staff-an',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       ratePercent: 15,
     });
 
@@ -968,20 +972,23 @@ describe('FixedSalarySettingsService', () => {
     });
 
     expect(
-      staffSalaryOverrideRows.find((row) => row.roleType === StaffRole.assistant),
+      staffSalaryOverrideRows.find(
+        (row) => row.roleType === StaffRole.sale_customer_care_head,
+      ),
     ).toBeUndefined();
     expect(
       staffOperatingOverrideRows.find(
-        (row) => row.roleType === StaffRole.assistant,
+        (row) => row.roleType === StaffRole.sale_customer_care_head,
       ),
     ).toBeUndefined();
     expect(actionHistoryService.recordDelete).toHaveBeenCalledWith(
       mockPrisma,
       expect.objectContaining({
         entityType: 'staff_fixed_salary_override',
-        description: 'Xóa mức đè lương cứng vì tắt vai trò assistant',
+        description:
+          'Xóa mức đè lương cứng vì tắt vai trò sale_customer_care_head',
         beforeValue: expect.objectContaining({
-          roleType: StaffRole.assistant,
+          roleType: StaffRole.sale_customer_care_head,
           amount: 12_000_000,
         }),
       }),
@@ -990,9 +997,10 @@ describe('FixedSalarySettingsService', () => {
       mockPrisma,
       expect.objectContaining({
         entityType: 'staff_fixed_salary_operating_rate_override',
-        description: 'Xóa mức đè % vận hành lương cứng vì tắt vai trò assistant',
+        description:
+          'Xóa mức đè % vận hành lương cứng vì tắt vai trò sale_customer_care_head',
         beforeValue: expect.objectContaining({
-          roleType: StaffRole.assistant,
+          roleType: StaffRole.sale_customer_care_head,
           operatingRatePercent: 15,
         }),
       }),
@@ -1010,7 +1018,7 @@ describe('FixedSalarySettingsService', () => {
         nextRoles: [StaffRole.communication],
         items: [
           {
-            roleType: StaffRole.assistant,
+            roleType: StaffRole.sale_customer_care_head,
             amount: 1,
           },
         ],
@@ -1042,7 +1050,7 @@ describe('FixedSalarySettingsService', () => {
   it('omits teacher from resolved override rows and clears leftover teacher overrides on sync', async () => {
     staffRows.push({
       id: 'staff-tutor',
-      roles: [StaffRole.teacher, StaffRole.assistant],
+      roles: [StaffRole.teacher, StaffRole.sale_customer_care_head],
       status: StaffStatus.active,
       user: {
         first_name: 'Tutor',
@@ -1060,12 +1068,12 @@ describe('FixedSalarySettingsService', () => {
 
     const listed = await service.getStaffOverrides({ staffId: 'staff-tutor' });
     expect(listed.staff[0]?.roles.map((row) => row.roleType)).toEqual([
-      StaffRole.assistant,
+      StaffRole.sale_customer_care_head,
     ]);
 
     await service.syncStaffRoleOverridesInTx(mockPrisma as never, {
       staffId: 'staff-tutor',
-      nextRoles: [StaffRole.teacher, StaffRole.assistant],
+      nextRoles: [StaffRole.teacher, StaffRole.sale_customer_care_head],
       items: [],
       staff: { user: staffRows[0]?.user },
     });

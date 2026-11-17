@@ -1,5 +1,7 @@
 import {
+  DEVICE_SUPERSEDED_ERROR,
   LAST_ACTIVE_TOUCH_INTERVAL_MS,
+  NO_ACTIVE_DEVICE_ERROR,
   UserDeviceService,
 } from './user-device.service';
 
@@ -13,13 +15,20 @@ describe('UserDeviceService', () => {
       deleteMany: jest.fn(),
       count: jest.fn(),
     },
+    user: {
+      findUnique: jest.fn(),
+    },
   };
   const tx = {
     $executeRaw: jest.fn(),
     userDevice: {
       count: jest.fn(),
+      findMany: jest.fn(),
       deleteMany: jest.fn(),
       create: jest.fn(),
+    },
+    user: {
+      update: jest.fn(),
     },
   };
   const prismaWithTx = {
@@ -250,7 +259,7 @@ describe('UserDeviceService', () => {
           refreshExpiresAt,
           rejectIfLive: true,
         }),
-      ).resolves.toEqual({ id: 'device-new' });
+      ).resolves.toEqual({ id: 'device-new', supersededDevices: [] });
 
       expect(order).toEqual(['lock', 'count']);
       expect(tx.userDevice.deleteMany).toHaveBeenCalledWith({
@@ -278,6 +287,82 @@ describe('UserDeviceService', () => {
       expect(tx.userDevice.count).not.toHaveBeenCalled();
       expect(tx.userDevice.deleteMany).toHaveBeenCalled();
       expect(tx.userDevice.create).toHaveBeenCalled();
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
+    it('markSuperseded stamps the user and returns the kicked live devices', async () => {
+      tx.userDevice.findMany.mockResolvedValueOnce([{ id: 'device-old' }]);
+      tx.userDevice.create.mockResolvedValueOnce({ id: 'device-new' });
+
+      await expect(
+        service.replaceDevicesForUser({
+          userId: 'student-1',
+          token: 'device-token',
+          refreshExpiresAt,
+          rejectIfLive: false,
+          markSuperseded: true,
+        }),
+      ).resolves.toEqual({
+        id: 'device-new',
+        supersededDevices: [{ id: 'device-old' }],
+      });
+
+      expect(tx.user.update).toHaveBeenCalledWith({
+        where: { id: 'student-1' },
+        data: { devicesSupersededAt: expect.any(Date) as Date },
+      });
+    });
+
+    it('markSuperseded without a live device does not stamp the user', async () => {
+      tx.userDevice.findMany.mockResolvedValueOnce([]);
+      tx.userDevice.create.mockResolvedValueOnce({ id: 'device-new' });
+
+      await service.replaceDevicesForUser({
+        userId: 'student-1',
+        token: 'device-token',
+        refreshExpiresAt,
+        rejectIfLive: false,
+        markSuperseded: true,
+      });
+
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveNoLiveDeviceError', () => {
+    const kickedAt = new Date('2026-11-05T08:00:10.500Z');
+
+    it('reports DEVICE_SUPERSEDED for a token issued before the kick', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({
+        devicesSupersededAt: kickedAt,
+      });
+      const issuedAt = Math.floor(kickedAt.getTime() / 1000) - 60;
+
+      await expect(
+        service.resolveNoLiveDeviceError('student-1', issuedAt),
+      ).resolves.toBe(DEVICE_SUPERSEDED_ERROR);
+    });
+
+    it('reports NO_ACTIVE_DEVICE for a token issued after the kick', async () => {
+      // Máy mới (cấp cùng giây với mốc) tự đăng xuất về sau: không phải bị đá.
+      prisma.user.findUnique.mockResolvedValueOnce({
+        devicesSupersededAt: kickedAt,
+      });
+      const issuedAt = Math.floor(kickedAt.getTime() / 1000);
+
+      await expect(
+        service.resolveNoLiveDeviceError('student-1', issuedAt),
+      ).resolves.toBe(NO_ACTIVE_DEVICE_ERROR);
+    });
+
+    it('reports NO_ACTIVE_DEVICE when the account was never superseded', async () => {
+      prisma.user.findUnique.mockResolvedValueOnce({
+        devicesSupersededAt: null,
+      });
+
+      await expect(
+        service.resolveNoLiveDeviceError('student-1', 1_700_000_000),
+      ).resolves.toBe(NO_ACTIVE_DEVICE_ERROR);
     });
   });
 });

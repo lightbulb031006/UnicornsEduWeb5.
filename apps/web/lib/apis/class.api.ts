@@ -29,6 +29,7 @@ import {
   UpdateClassStudentsPayload,
   UpdateClassTeacherCompensationPayload,
   UpdateClassTeachersPayload,
+  UpdateClassTuitionPayload,
 } from '@/dtos/class.dto';
 import type {
   ClassScheduleGoogleCalendarResyncSummary,
@@ -733,6 +734,16 @@ export async function updateClassBasicInfo(
   const safeId = encodeURIComponent(id);
   const response = await api.patch(`/class/${safeId}/basic-info`, data);
   return response.data;
+}
+
+/** **Học phí lớp** (#272): Admin + Trưởng phòng Sale & CSKH. */
+export async function updateClassTuition(
+  id: string,
+  data: UpdateClassTuitionPayload,
+): Promise<ClassDetail> {
+  const safeId = encodeURIComponent(id);
+  const response = await api.patch(`/class/${safeId}/tuition`, data);
+  return normalizeClassRecord(response.data as ClassDetail);
 }
 
 export async function updateClassPricingMode(

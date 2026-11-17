@@ -13,6 +13,8 @@ model User {
   dataProcessingConsentAcceptedAt         DateTime?                         @map("data_processing_consent_accepted_at") @db.Timestamptz(6)
   dataProcessingConsentVersion            String?                           @map("data_processing_consent_version")
   refreshToken                            String?                           @map("refresh_token")
+  /// Lần gần nhất học sinh tự đăng xuất mọi thiết bị để đăng nhập máy mới; token cấp trước mốc này nhận `DEVICE_SUPERSEDED`.
+  devicesSupersededAt                     DateTime?                         @map("devices_superseded_at") @db.Timestamptz(6)
   avatarPath                              String?                           @map("avatar_path")
   avatarWatermarkedPath                   String?                           @map("avatar_watermarked_path")
   createdAt                               DateTime                          @default(now()) @map("created_at") @db.Timestamptz(6)

@@ -81,7 +81,7 @@ describe('NotificationService', () => {
         message: '  <p>Nhắc lịch họp</p>  ',
         targetAll: true,
         targetRoleTypes: [UserRole.staff],
-        targetStaffRoles: [StaffRole.assistant],
+        targetStaffRoles: [StaffRole.sale_customer_care_head],
         targetUserIds: ['f8ddf4e2-9bfa-49d8-ab34-e2e4902948f6'],
       },
       {
@@ -158,7 +158,7 @@ describe('NotificationService', () => {
       status: NotificationStatus.published,
       targetAll: false,
       targetRoleTypes: [UserRole.staff],
-      targetStaffRoles: [StaffRole.assistant],
+      targetStaffRoles: [StaffRole.sale_customer_care_head],
       targetUserIds: ['staff-user-1'],
       version: 2,
       pushCount: 2,
@@ -167,7 +167,7 @@ describe('NotificationService', () => {
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-1',
       status: StaffStatus.active,
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
     mockPrisma.notification.findMany.mockResolvedValue([row]);
     mockPrisma.$queryRaw.mockResolvedValue([{ notification_id: 'notif-1' }]);
@@ -176,7 +176,7 @@ describe('NotificationService', () => {
       {
         id: 'staff-user-1',
         email: 'assistant@example.com',
-        accountHandle: 'assistant',
+        accountHandle: 'sale_customer_care_head',
         roleType: UserRole.staff,
       },
       { limit: 20 },
@@ -191,7 +191,11 @@ describe('NotificationService', () => {
             { targetAll: true },
             { targetUserIds: { has: 'staff-user-1' } },
             { targetRoleTypes: { has: UserRole.staff } },
-            { targetStaffRoles: { hasSome: [StaffRole.assistant] } },
+            {
+              targetStaffRoles: {
+                hasSome: [StaffRole.sale_customer_care_head],
+              },
+            },
           ],
         },
       }),
@@ -341,13 +345,12 @@ describe('NotificationService', () => {
       );
     });
 
-    it('admin và trợ lí thấy nháp của mình + mọi thông báo đã đẩy', async () => {
-      withStaffRoles([StaffRole.assistant]);
+    it('admin thấy nháp của mình + mọi thông báo đã đẩy (kiểm duyệt)', async () => {
       mockPrisma.notification.findMany.mockResolvedValue([]);
 
       await service.getAdminNotifications(
         { status: NotificationStatus.published },
-        staffActor('assistant-1'),
+        adminActor,
       );
 
       expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(
@@ -357,7 +360,7 @@ describe('NotificationService', () => {
               { status: NotificationStatus.published },
               {
                 OR: [
-                  { createdByUserId: 'assistant-1' },
+                  { createdByUserId: 'admin-1' },
                   { status: NotificationStatus.published },
                 ],
               },
@@ -367,15 +370,52 @@ describe('NotificationService', () => {
       );
     });
 
-    it('trả canEdit/canDelete theo từng thông báo cho trợ lí', async () => {
-      withStaffRoles([StaffRole.assistant]);
+    it('staff có role admin cũng được kiểm duyệt', async () => {
+      withStaffRoles([StaffRole.admin]);
+      mockPrisma.notification.findMany.mockResolvedValue([]);
+
+      await service.getAdminNotifications({}, staffActor('staff-admin'));
+
+      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            OR: [
+              { createdByUserId: 'staff-admin' },
+              { status: NotificationStatus.published },
+            ],
+          },
+        }),
+      );
+    });
+
+    it.each([
+      ['trợ lí (TP Sale & CSKH)', [StaffRole.sale_customer_care_head]],
+      ['kế toán thu', [StaffRole.accountant_income]],
+      [
+        'trợ lí kiêm kế toán thu',
+        [StaffRole.sale_customer_care_head, StaffRole.accountant_income],
+      ],
+    ])('%s chỉ thấy thông báo do mình tạo (#269)', async (_label, roles) => {
+      withStaffRoles(roles);
+      mockPrisma.notification.findMany.mockResolvedValue([]);
+
+      await service.getAdminNotifications({}, staffActor('assistant-1'));
+
+      expect(mockPrisma.notification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { createdByUserId: 'assistant-1' },
+        }),
+      );
+    });
+
+    it('trả canEdit/canDelete theo từng thông báo cho trợ lí (chỉ bài của mình)', async () => {
+      withStaffRoles([StaffRole.sale_customer_care_head]);
       mockPrisma.notification.findMany.mockResolvedValue([
         publishedBy(makeAuthor('assistant-1', UserRole.staff), 'own'),
-        publishedBy(
-          makeAuthor('staff-2', UserRole.staff, [StaffRole.training]),
-          'staff',
-        ),
-        publishedBy(makeAuthor('admin-9', UserRole.admin), 'admin'),
+        makeNotificationRow({
+          id: 'own-draft',
+          createdByUserId: 'assistant-1',
+        }),
       ]);
 
       const items = await service.getAdminNotifications(
@@ -387,8 +427,7 @@ describe('NotificationService', () => {
         items.map(({ id, canEdit, canDelete }) => ({ id, canEdit, canDelete })),
       ).toEqual([
         { id: 'own', canEdit: true, canDelete: true },
-        { id: 'staff', canEdit: false, canDelete: true },
-        { id: 'admin', canEdit: false, canDelete: false },
+        { id: 'own-draft', canEdit: true, canDelete: true },
       ]);
     });
 
@@ -438,11 +477,11 @@ describe('NotificationService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('trợ lí không xoá được thông báo của người hiện là admin', async () => {
-      withStaffRoles([StaffRole.assistant]);
+    it('trợ lí không xoá được thông báo đã đẩy của staff khác (#269)', async () => {
+      withStaffRoles([StaffRole.sale_customer_care_head]);
       mockPrisma.notification.findUnique.mockResolvedValue(
         publishedBy(
-          makeAuthor('staff-admin', UserRole.staff, [StaffRole.admin]),
+          makeAuthor('staff-2', UserRole.staff, [StaffRole.training]),
         ),
       );
 
@@ -456,8 +495,8 @@ describe('NotificationService', () => {
       expect(mockPrisma.notification.delete).not.toHaveBeenCalled();
     });
 
-    it('trợ lí xoá được thông báo khi người tạo không còn tài khoản', async () => {
-      withStaffRoles([StaffRole.assistant]);
+    it('trợ lí không xoá được thông báo khi người tạo không còn tài khoản (#269)', async () => {
+      withStaffRoles([StaffRole.sale_customer_care_head]);
       mockPrisma.notification.findUnique.mockResolvedValue(publishedBy(null));
 
       await expect(
@@ -465,6 +504,37 @@ describe('NotificationService', () => {
           'notif-pub',
           auditActor,
           staffActor('assistant-1'),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.notification.delete).not.toHaveBeenCalled();
+    });
+
+    it('trợ lí xoá được thông báo do chính mình tạo', async () => {
+      withStaffRoles([StaffRole.sale_customer_care_head]);
+      mockPrisma.notification.findUnique.mockResolvedValue(
+        publishedBy(makeAuthor('assistant-1', UserRole.staff)),
+      );
+
+      await expect(
+        service.deleteNotification(
+          'notif-pub',
+          auditActor,
+          staffActor('assistant-1'),
+        ),
+      ).resolves.toEqual({ id: 'notif-pub' });
+    });
+
+    it('staff có role admin xoá được thông báo đã đẩy của người khác', async () => {
+      withStaffRoles([StaffRole.admin]);
+      mockPrisma.notification.findUnique.mockResolvedValue(
+        publishedBy(makeAuthor('staff-2', UserRole.staff)),
+      );
+
+      await expect(
+        service.deleteNotification(
+          'notif-pub',
+          auditActor,
+          staffActor('staff-admin'),
         ),
       ).resolves.toEqual({ id: 'notif-pub' });
     });

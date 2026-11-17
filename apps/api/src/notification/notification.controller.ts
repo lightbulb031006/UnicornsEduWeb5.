@@ -61,7 +61,7 @@ export class NotificationController {
   @ApiOperation({
     summary: 'List notifications for admin management',
     description:
-      "Return the caller's own drafts and published notifications. Admin and assistant additionally see every published notification (moderation). Each item carries `canEdit` / `canDelete` for the caller.",
+      "Return the caller's own drafts and published notifications. Only admin (users.role_type admin or staff role admin) additionally sees every published notification (moderation); every other staff role, including the Sale & CSKH head (`sale_customer_care_head`), only sees their own (#269). Each item carries `canEdit` / `canDelete` for the caller.",
   })
   @ApiQuery({
     name: 'status',
@@ -254,7 +254,7 @@ export class NotificationController {
   @ApiOperation({
     summary: 'Delete a notification',
     description:
-      'Delete a notification. The author may delete their own; admin may delete any published notification; assistant may delete published notifications whose author is not currently admin. Deletion does not emit a realtime retract event.',
+      'Delete a notification. The author may delete their own; only admin may delete published notifications of other authors (moderation, #269); other staff roles including the Sale & CSKH head get 403. Deletion does not emit a realtime retract event.',
   })
   @ApiParam({
     name: 'id',

@@ -14,7 +14,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type { Readable } from 'stream';
 import { PrismaService } from '../prisma/prisma.service';
-import { StudentClassStatus } from 'generated/enums';
+import { StudentClassStatus, UserRole } from 'generated/enums';
 
 interface RawLevelModule {
   title: string;
@@ -536,6 +536,30 @@ export class UniojService {
           'Lỗi kết nối tới hệ thống UNIOJ.',
       );
     }
+  }
+
+  /**
+   * Tên học viên dùng để tra báo cáo UNIOJ. Học sinh chỉ được xem báo cáo của
+   * chính mình: bỏ qua `requestedName` và lấy `student_info.full_name` của tài
+   * khoản đang đăng nhập. Admin/staff tra theo tên được truyền.
+   */
+  async resolveReportStudentName(
+    actor: { userId: string; roleType: UserRole },
+    requestedName: string,
+  ): Promise<string> {
+    if (actor.roleType !== UserRole.student) {
+      return requestedName;
+    }
+
+    const student = await this.prisma.studentInfo.findUnique({
+      where: { userId: actor.userId },
+      select: { fullName: true },
+    });
+    const ownName = student?.fullName?.trim();
+    if (!ownName) {
+      throw new NotFoundException('Không tìm thấy hồ sơ học sinh.');
+    }
+    return ownName;
   }
 
   async getStudentReport(name: string, days?: number): Promise<any> {

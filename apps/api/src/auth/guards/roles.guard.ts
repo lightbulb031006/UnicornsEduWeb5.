@@ -10,7 +10,6 @@ import { AuthIdentityCacheService } from '../auth-identity-cache.service';
 import { AuthAccessService } from '../auth-access.service';
 import type { RequestWithResolvedAuthContext } from '../auth-request-context';
 import type { JwtPayload } from '../decorators/current-user.decorator';
-import { ALLOW_ASSISTANT_ON_ADMIN_KEY } from '../decorators/allow-assistant-on-admin.decorator';
 import { ALLOW_STAFF_ROLES_ON_ADMIN_KEY } from '../decorators/allow-staff-roles-on-admin.decorator';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 
@@ -78,11 +77,6 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const allowAssistantOnAdminRoutes =
-      this.reflector.getAllAndOverride<boolean>(ALLOW_ASSISTANT_ON_ADMIN_KEY, [
-        context.getHandler(),
-        context.getClass(),
-      ]) ?? true;
     const allowedStaffRolesOnAdminRoutes = this.reflector.getAllAndOverride<
       StaffRole[]
     >(ALLOW_STAFF_ROLES_ON_ADMIN_KEY, [
@@ -100,9 +94,10 @@ export class RolesGuard implements CanActivate {
         return true;
       }
 
-      const allowedStaffRoles =
-        allowedStaffRolesOnAdminRoutes ??
-        (allowAssistantOnAdminRoutes ? [StaffRole.assistant] : []);
+      // #267: route admin từ chối mặc định. Chỉ staff role được liệt kê tường
+      // minh qua @AllowStaffRolesOnAdminRoutes(...) mới vào được; không còn
+      // ngoại lệ ngầm cho Trợ lí / Trưởng phòng Sale & CSKH.
+      const allowedStaffRoles = allowedStaffRolesOnAdminRoutes ?? [];
 
       if (
         staffRoles.some((staffRole) => allowedStaffRoles.includes(staffRole))

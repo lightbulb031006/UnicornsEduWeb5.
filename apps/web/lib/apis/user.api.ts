@@ -1,11 +1,15 @@
 import type {
+  AccountHandleResult,
   AdminSetUserPasswordPayload,
+  CreateStaffUserPayload,
+  CreateStaffUserResponse,
   CreateStudentUserPayload,
   CreateUserPayload,
   CreateUserResponse,
   UserDetailWithStaff,
   UserListItem,
   UserListResponse,
+  SetAccountHandlePayload,
   UpdateUserPayload,
 } from "@/dtos/user.dto";
 import { api } from "../client";
@@ -58,6 +62,14 @@ export async function createStudentUser(
   return response.data;
 }
 
+/** 15/11: tạo nhân sự mới (tài khoản + hồ sơ) — Admin và 3 role trưởng. */
+export async function createStaffUser(
+  data: CreateStaffUserPayload,
+): Promise<CreateStaffUserResponse> {
+  const response = await api.post<CreateStaffUserResponse>("/users/staff", data);
+  return response.data;
+}
+
 /** Cập nhật user (roleType, status, ...). */
 export async function updateUser(data: UpdateUserPayload): Promise<UserDetailWithStaff> {
   const response = await api.patch<UserDetailWithStaff>("/users", data);
@@ -72,6 +84,18 @@ export async function setUserPassword(
   const safeId = encodeURIComponent(id);
   const response = await api.patch<{ message: string }>(
     `/users/${safeId}/password`,
+    data,
+  );
+  return response.data;
+}
+
+/** Đổi tên đăng nhập (Admin: mọi tài khoản; Trưởng phòng Sale & CSKH: học sinh). */
+export async function setUserAccountHandle(
+  id: string,
+  data: SetAccountHandlePayload,
+): Promise<AccountHandleResult> {
+  const response = await api.patch<AccountHandleResult>(
+    `/users/${encodeURIComponent(id)}/account-handle`,
     data,
   );
   return response.data;

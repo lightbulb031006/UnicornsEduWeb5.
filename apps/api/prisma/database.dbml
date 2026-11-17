@@ -45,7 +45,7 @@ Table staffInfo {
   specialization varchar
   bank_account varchar
   bank_qr_link varchar
-  roles varchar[] [note: 'StaffRole enum array: [admin, teacher, assistant, lesson_plan, lesson_plan_head, accountant, communication, customer_care]']
+  roles varchar[] [note: 'StaffRole enum array: [admin, teacher, lesson_plan, lesson_plan_head, accountant_income, accountant_expense, communication, technical, customer_care, training, training_head, sale_customer_care_head, sale] (sale_customer_care_head = Trưởng phòng Sale & CSKH, trước #268 là assistant)']
   status varchar [note: 'active , inactive']
   created_at timestamptz [default: `now()`]
   updated_at timestamptz [default: `now()`]

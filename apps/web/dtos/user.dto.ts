@@ -5,16 +5,16 @@ export type UserRoleType = "admin" | "staff" | "student" | "guest";
 export type StaffRole =
   | "admin"
   | "teacher"
-  | "assistant"
+  | "sale_customer_care_head"
   | "lesson_plan"
   | "lesson_plan_head"
-  | "accountant"
   | "accountant_income"
   | "accountant_expense"
   | "communication"
   | "technical"
   | "customer_care"
   | "training"
+  | "training_head"
   | "sale";
 
 export interface CreateUserPayload {
@@ -56,6 +56,36 @@ export interface CreateUserResponse {
   message: string;
 }
 
+/**
+ * 15/11: Admin + 3 role trưởng tạo nhân sự mới = tài khoản đăng nhập mới + hồ sơ
+ * nhân sự (`POST /users/staff`). Không gắn hồ sơ vào user có sẵn.
+ */
+export interface CreateStaffUserPayload {
+  email: string;
+  password: string;
+  accountHandle: string;
+  phone?: string;
+  full_name: string;
+  roles: string[];
+  cccd_number: string;
+  gender: StudentGender;
+  ethnicity?: string;
+  current_address?: string;
+  cccd_issued_date?: string;
+  cccd_issued_place?: string;
+  birth_date?: string;
+  university?: string;
+  high_school?: string;
+  bank_account?: string;
+  bank_qr_link?: string;
+  emailVerified?: boolean;
+}
+
+export interface CreateStaffUserResponse {
+  message: string;
+  staffId: string;
+}
+
 export type UserStatus = "active" | "inactive" | "pending";
 
 export interface UpdateUserPayload {
@@ -78,6 +108,21 @@ export interface UpdateUserPayload {
 /** Body `PATCH /users/:id/password` (admin/trợ lí đặt mật khẩu mới). */
 export interface AdminSetUserPasswordPayload {
   newPassword: string;
+}
+
+/**
+ * Đổi tên đăng nhập (16/11): `PATCH /users/:id/account-handle`,
+ * `PATCH /sale-cs-team/members/:staffId/account-handle`,
+ * `PATCH /training/tutors/:id/account-handle`.
+ */
+export interface SetAccountHandlePayload {
+  accountHandle: string;
+}
+
+export interface AccountHandleResult {
+  /** `users.id` (route `/users`) hoặc staff id (route của role trưởng). */
+  id: string;
+  accountHandle: string;
 }
 
 /** Một dòng user trong danh sách (admin). */

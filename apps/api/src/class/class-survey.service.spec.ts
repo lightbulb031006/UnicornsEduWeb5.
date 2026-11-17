@@ -10,7 +10,8 @@ jest.mock('../action-history/action-history.service', () => ({
   ActionHistoryService: class ActionHistoryServiceMock {},
 }));
 
-import { StaffRole, UserRole } from '../../generated/enums';
+import { ForbiddenException } from '@nestjs/common';
+import { UserRole } from '../../generated/enums';
 import { ClassSurveyService } from './class-survey.service';
 
 describe('ClassSurveyService', () => {
@@ -45,10 +46,7 @@ describe('ClassSurveyService', () => {
   };
 
   const mockStaffOperationsAccess = {
-    resolveActor: jest.fn(),
-    resolveClassViewerActor: jest.fn(),
-    resolveClassViewAccessMode: jest.fn(),
-    assertTeacherAssignedToClass: jest.fn(),
+    resolveClassWorkAccess: jest.fn(),
   };
 
   const mockActionHistoryService = {
@@ -117,23 +115,97 @@ describe('ClassSurveyService', () => {
     expect(mockTx.classSurvey.create).not.toHaveBeenCalled();
   });
 
+  const surveyDto = (teacherId: string) => ({
+    survey_id: 'survey-1',
+    report_date: '2026-05-18',
+    teacher_id: teacherId,
+    students: [{ student_id: 'student-1', comment: 'Ổn định' }],
+  });
+
   it('keeps teacher staff scoped to their own survey responsibility', async () => {
-    mockStaffOperationsAccess.resolveActor.mockResolvedValue({
-      id: 'teacher-1',
-      roles: [StaffRole.teacher],
+    mockStaffOperationsAccess.resolveClassWorkAccess.mockResolvedValue({
+      staffId: 'teacher-1',
+      isAdmin: false,
+      isClassTeacher: true,
+      isClassManager: false,
     });
 
     await expect(
-      service.createClassSurveyForStaff('user-1', UserRole.staff, 'class-1', {
-        survey_id: 'survey-1',
-        report_date: '2026-05-18',
-        teacher_id: 'teacher-2',
-        students: [{ student_id: 'student-1', comment: 'Ổn định' }],
-      }),
+      service.createClassSurveyForStaff(
+        'user-1',
+        UserRole.staff,
+        'class-1',
+        surveyDto('teacher-2'),
+      ),
     ).rejects.toThrow(
       'Teacher chỉ được tạo khảo sát với chính mình là người phụ trách.',
     );
 
     expect(mockTx.classSurvey.create).not.toHaveBeenCalled();
+  });
+
+  it('#275: Quản lý lớp tạo khảo sát cho gia sư khác của lớp', async () => {
+    mockStaffOperationsAccess.resolveClassWorkAccess.mockResolvedValue({
+      staffId: 'manager-1',
+      isAdmin: false,
+      isClassTeacher: false,
+      isClassManager: true,
+    });
+    const createSpy = jest
+      .spyOn(service, 'createClassSurvey')
+      .mockResolvedValue({ id: 'class-survey-1' } as never);
+
+    await service.createClassSurveyForStaff(
+      'user-1',
+      UserRole.staff,
+      'class-1',
+      surveyDto('teacher-2'),
+    );
+
+    expect(createSpy).toHaveBeenCalledWith(
+      'class-1',
+      surveyDto('teacher-2'),
+      undefined,
+    );
+  });
+
+  it('#275: kiêm gia sư + Quản lý lớp không bị khoá về khảo sát của mình', async () => {
+    mockStaffOperationsAccess.resolveClassWorkAccess.mockResolvedValue({
+      staffId: 'teacher-1',
+      isAdmin: false,
+      isClassTeacher: true,
+      isClassManager: true,
+    });
+    const createSpy = jest
+      .spyOn(service, 'createClassSurvey')
+      .mockResolvedValue({ id: 'class-survey-1' } as never);
+
+    await service.createClassSurveyForStaff(
+      'user-1',
+      UserRole.staff,
+      'class-1',
+      surveyDto('teacher-2'),
+    );
+
+    expect(createSpy).toHaveBeenCalled();
+  });
+
+  it('#275: lớp không được giao → 403, không tạo khảo sát', async () => {
+    mockStaffOperationsAccess.resolveClassWorkAccess.mockRejectedValue(
+      new ForbiddenException(
+        'Chỉ Admin, gia sư của lớp hoặc Quản lý lớp mới được thao tác trên lớp này.',
+      ),
+    );
+    const createSpy = jest.spyOn(service, 'createClassSurvey');
+
+    await expect(
+      service.createClassSurveyForStaff(
+        'user-1',
+        UserRole.staff,
+        'class-1',
+        surveyDto('teacher-2'),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(createSpy).not.toHaveBeenCalled();
   });
 });

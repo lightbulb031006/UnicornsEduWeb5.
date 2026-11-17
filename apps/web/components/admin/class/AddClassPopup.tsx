@@ -9,10 +9,18 @@ import { TimeInput } from "@/components/ui/TimeInput";
 import { DateInput } from "@/components/ui/DateInput";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import {
+  ResponsiveActionFooter,
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+} from "@/components/ui/ResponsiveDialog";
 import CourseSelect, { useCourseList } from "@/components/shared/class/CourseSelect";
 import * as classApi from "@/lib/apis/class.api";
 import * as staffApi from "@/lib/apis/staff.api";
 import * as studentApi from "@/lib/apis/student.api";
+import * as trainingManagerApi from "@/lib/apis/training-manager.api";
+import type { ClassWriteAccess } from "@/lib/class-write-access";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
 import { classKeys } from "@/lib/query-keys";
 import {
@@ -45,6 +53,14 @@ import {
 } from "@/lib/money-input.helpers";
 import { createClientId } from "@/lib/client-id";
 import ClassPricingModeField from "./ClassPricingModeField";
+import {
+  classEditorModalPrimaryButtonClassName,
+  classEditorModalSecondaryButtonClassName,
+} from "./classEditorModalStyles";
+
+const TITLE_ID = "add-class-title";
+const DESCRIPTION_ID = "add-class-description";
+const NO_TRAINING_MANAGER = "";
 
 type ScheduleRangeForm = {
   id: string;
@@ -61,6 +77,12 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onCreated?: (classId: string) => void;
+  /**
+   * #274: phần form theo role người tạo — Admin mọi phần; Trưởng ban Đào tạo
+   * thêm gia sư/Quản lý lớp/lương; Trưởng phòng thêm học phí/học sinh. Backend
+   * vẫn 403 nếu gửi trường ngoài quyền.
+   */
+  access: ClassWriteAccess;
 };
 
 const STATUS_OPTIONS: { value: ClassStatus; label: string }[] = [
@@ -116,14 +138,19 @@ function isFullClassDetail(classDetail: ClassDetail): boolean {
   );
 }
 
-export default function AddClassPopup({ open, onClose, onCreated }: Props) {
+export default function AddClassPopup({ open, onClose, onCreated, access }: Props) {
   if (!open) return null;
 
-  return <AddClassDialog onClose={onClose} onCreated={onCreated} />;
+  return <AddClassDialog onClose={onClose} onCreated={onCreated} access={access} />;
 }
 
-function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
+function AddClassDialog({ onClose, onCreated, access }: Omit<Props, "open">) {
   const queryClient = useQueryClient();
+  const showTeachersAndPay = access.canEditTeachersAndPay;
+  const showTuitionAndStudents = access.canEditTuitionAndStudents;
+  const showAdminOnly = access.canEditAdminOnlyFields;
+  const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
+  const [trainingManagerId, setTrainingManagerId] = useState(NO_TRAINING_MANAGER);
 
   const [name, setName] = useState("");
   const [courseId, setCourseId] = useState("");
@@ -152,19 +179,39 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
   const [debouncedSearch] = useDebounce(teacherSearchInput.trim(), 350);
   const [debouncedStudentSearch] = useDebounce(studentSearchInput.trim(), 350);
 
-  const { data: staffSearchResult } = useQuery({
-    queryKey: ["staff", "list", { page: 1, limit: 50, search: debouncedSearch }],
+  // #274: /staff/options (chỉ tên + role, không thông tin cá nhân) — mở cho
+  // Trưởng ban Đào tạo chọn gia sư.
+  const { data: staffSearchResult = [] } = useQuery({
+    queryKey: ["staff", "options", { limit: 50, search: debouncedSearch }],
     queryFn: () =>
-      staffApi.getStaff({
-        page: 1,
+      staffApi.searchStaffOptions({
         limit: 50,
         search: debouncedSearch || undefined,
       }),
-    enabled: true,
+    enabled: showTeachersAndPay,
   });
 
-  const filteredStaff = (staffSearchResult?.data ?? []).filter(
-    (s) => !selectedTeachers.some((t) => t.id === s.id),
+  // Không ai trừ Admin tự gán mình làm gia sư (lương của chính mình, #265).
+  const filteredStaff = staffSearchResult.filter(
+    (s) =>
+      !selectedTeachers.some((t) => t.id === s.id) &&
+      (access.isAdmin || s.id !== access.staffId),
+  );
+
+  const { data: trainingManagerOptions = [] } = useQuery({
+    queryKey: ["staff", "training-manager-options"],
+    queryFn: () => trainingManagerApi.getTrainingManagerOptions({ limit: 50 }),
+    enabled: showTeachersAndPay,
+  });
+  const trainingManagerSelectOptions = useMemo(
+    () => [
+      { value: NO_TRAINING_MANAGER, label: "Chưa giao" },
+      ...trainingManagerOptions.map((option) => ({
+        value: option.id,
+        label: option.fullName?.trim() || option.id,
+      })),
+    ],
+    [trainingManagerOptions],
   );
 
   const { data: studentSearchResult } = useQuery({
@@ -177,7 +224,7 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
         search: debouncedStudentSearch || undefined,
         status: "active",
       }),
-    enabled: true,
+    enabled: showTuitionAndStudents,
   });
 
   const filteredStudents = (studentSearchResult ?? []).filter(
@@ -278,9 +325,12 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
       toast.error(tuitionPkg.message);
       return;
     }
+    // Follow-up 13/11: lớp bán một lần mới tạo, chưa có học sinh được để trống
+    // Tổng gói; kèm học sinh thì gói phải > 0đ ngay.
     const oneTimePkgError = oneTimePackageError(
       pricingMode,
       tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total,
+      { allowEmpty: selectedStudents.length === 0 },
     );
     if (oneTimePkgError) {
       toast.error(oneTimePkgError);
@@ -304,39 +354,50 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
     const payload: CreateClassPayload = {
       name: trimmedName,
       ...(courseId ? { course_id: courseId } : {}),
-      status,
       max_students: parseOptionalInt(maxStudentsInput),
-      allowance_per_session_per_student: toPerSessionAmountForApi({
+    };
+    // #274: chỉ gửi phần thuộc quyền — backend 403 nếu gửi trường ngoài quyền.
+    if (showAdminOnly) {
+      payload.status = status;
+      payload.pricing_mode = pricingMode;
+      payload.schedule = normalizedSchedule;
+    }
+    if (showTeachersAndPay) {
+      payload.allowance_per_session_per_student = toPerSessionAmountForApi({
         mode: pricingMode,
         displayedAmount: parseOptionalMoneyInt(allowancePerSessionInput),
         standardBlockCount: submitBlockCount,
-      }),
-      max_allowance_per_session: toPerSessionMaxAllowanceForApi({
+      });
+      payload.max_allowance_per_session = toPerSessionMaxAllowanceForApi({
         mode: pricingMode,
         displayedAmount: parseMaxAllowancePerSessionInput(
           maxAllowancePerSessionInput.trim(),
           parseOptionalMoneyInt,
         ),
         standardBlockCount: submitBlockCount,
-      }),
-      scale_amount: parseOptionalMoneyInt(scaleAmountInput),
-      student_tuition_per_session: studentTuitionPerSession,
-      ...(studentTuitionPerBlock === undefined
-        ? {}
-        : { student_tuition_per_block: studentTuitionPerBlock }),
-      pricing_mode: pricingMode,
-      tuition_package_total: tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total,
-      tuition_package_session: tuitionPkg.mode === "empty" ? undefined : tuitionPkg.sessions,
-      schedule: normalizedSchedule,
-      teachers: selectedTeachers.map((t) => ({
+      });
+      payload.scale_amount = parseOptionalMoneyInt(scaleAmountInput);
+      payload.teachers = selectedTeachers.map((t) => ({
         teacher_id: t.id,
         ...(t.customAllowance != null ? { custom_allowance: t.customAllowance } : {}),
         operating_deduction_rate_percent: normalizeOperatingDeductionRatePercent(
           t.operatingDeductionRatePercent,
         ),
-      })),
-      student_ids: selectedStudents.map((s) => s.id),
-    };
+      }));
+      if (trainingManagerId) {
+        payload.training_manager_staff_id = trainingManagerId;
+      }
+    }
+    if (showTuitionAndStudents) {
+      payload.student_tuition_per_session = studentTuitionPerSession;
+      if (studentTuitionPerBlock !== undefined) {
+        payload.student_tuition_per_block = studentTuitionPerBlock;
+      }
+      payload.tuition_package_total = tuitionPkg.mode === "empty" ? undefined : tuitionPkg.total;
+      payload.tuition_package_session =
+        tuitionPkg.mode === "empty" ? undefined : tuitionPkg.sessions;
+      payload.student_ids = selectedStudents.map((s) => s.id);
+    }
 
     onClose();
     runBackgroundSave({
@@ -433,32 +494,57 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
     setPricingMode(next);
   };
 
+  const isDirty =
+    name.trim() !== "" ||
+    courseId !== "" ||
+    maxStudentsInput.trim() !== "" ||
+    allowancePerSessionInput.trim() !== "" ||
+    maxAllowancePerSessionInput.trim() !== "" ||
+    scaleAmountInput.trim() !== "" ||
+    tuitionPackageTotalInput.trim() !== "" ||
+    tuitionPackageSessionInput.trim() !== "" ||
+    tuitionPerBlockInput.trim() !== "" ||
+    selectedTeachers.length > 0 ||
+    selectedStudents.length > 0 ||
+    trainingManagerId !== NO_TRAINING_MANAGER ||
+    scheduleRanges.some((range) => range.from || range.to || range.effectiveFrom);
+
+  const requestClose = () => {
+    if (isDirty) {
+      setConfirmDiscardOpen(true);
+      return;
+    }
+    onClose();
+  };
+
+  const formDescription = showAdminOnly
+    ? "Thông tin lớp, gia sư, học sinh, học phí và lịch học."
+    : [
+        "Thông tin lớp",
+        showTeachersAndPay ? "gia sư, Quản lý lớp và lương gia sư" : null,
+        showTuitionAndStudents ? "học phí và học sinh" : null,
+      ]
+        .filter(Boolean)
+        .join(", ") + ". Lịch học và cách thu học phí do Admin thiết lập.";
+
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-bg-primary/75" aria-hidden onClick={onClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-class-title"
-        className="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-full max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border-default bg-bg-surface p-5 shadow-xl"
+      <ResponsiveDialog
+        size="3xl"
+        labelledBy={TITLE_ID}
+        describedBy={DESCRIPTION_ID}
+        onBackdropClick={requestClose}
       >
-        <div className="mb-4 flex shrink-0 items-center justify-between">
-          <h2 id="add-class-title" className="text-lg font-semibold text-text-primary">
-            Thêm lớp
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-text-muted transition-colors duration-200 hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-            aria-label="Đóng"
-          >
-            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="flex-1 space-y-4 overflow-y-auto pr-1">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col" noValidate>
+          <ResponsiveDialogBody className="space-y-4">
+          <div>
+            <h2 id={TITLE_ID} className="text-lg font-semibold text-text-primary">
+              Thêm lớp
+            </h2>
+            <p id={DESCRIPTION_ID} className="mt-1 text-sm text-text-secondary">
+              {formDescription}
+            </p>
+          </div>
           <section className="rounded-lg border border-border-default bg-bg-secondary/50 p-4">
             <div className="grid gap-3 md:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm text-text-secondary sm:col-span-2">
@@ -479,16 +565,18 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
                   buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
-              <label className="flex flex-col gap-1 text-sm text-text-secondary">
-                <span>Trạng thái</span>
-                <UpgradedSelect
-                  name="add-class-status"
-                  value={status}
-                  onValueChange={(nextValue) => setStatus(nextValue as ClassStatus)}
-                  options={STATUS_OPTIONS}
-                  buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                />
-              </label>
+              {showAdminOnly ? (
+                <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                  <span>Trạng thái</span>
+                  <UpgradedSelect
+                    name="add-class-status"
+                    value={status}
+                    onValueChange={(nextValue) => setStatus(nextValue as ClassStatus)}
+                    options={STATUS_OPTIONS}
+                    buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  />
+                </label>
+              ) : null}
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>Sĩ số tối đa</span>
                 <input
@@ -499,6 +587,8 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
                   className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                 />
               </label>
+              {showTeachersAndPay ? (
+              <>
               <label className="flex flex-col gap-1 text-sm text-text-secondary">
                 <span>{rateLabels.allowance}</span>
                 <MoneyInput
@@ -517,7 +607,9 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
                   placeholder="VNĐ"
                 />
               </label>
-              {pricingMode === "per_block" ? (
+              </>
+              ) : null}
+              {pricingMode === "per_block" && showTuitionAndStudents ? (
                 <label className="flex flex-col gap-1 text-sm text-text-secondary">
                   <span>{rateLabels.tuition}</span>
                   <MoneyInput
@@ -528,17 +620,20 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
                   />
                 </label>
               ) : null}
-              <label className="flex flex-col gap-1 text-sm text-text-secondary">
-                <span>Scales</span>
-                <MoneyInput
-                  value={scaleAmountInput}
-                  onValueChange={setScaleAmountInput}
-                  className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-                />
-              </label>
+              {showTeachersAndPay ? (
+                <label className="flex flex-col gap-1 text-sm text-text-secondary">
+                  <span>Scales</span>
+                  <MoneyInput
+                    value={scaleAmountInput}
+                    onValueChange={setScaleAmountInput}
+                    className="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                  />
+                </label>
+              ) : null}
             </div>
           </section>
 
+          {showTeachersAndPay ? (
           <section className="rounded-lg border border-border-default bg-bg-secondary/50 p-4">
             <h3 className="mb-2 text-xs font-medium text-text-muted">Gia sư</h3>
             <div className="space-y-3">
@@ -694,9 +789,25 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
                   </div>
                 )}
               </div>
+              <div className="flex flex-col gap-1 text-sm text-text-secondary">
+                <span>Quản lý lớp</span>
+                <UpgradedSelect
+                  name="add-class-training-manager"
+                  value={trainingManagerId}
+                  onValueChange={setTrainingManagerId}
+                  options={trainingManagerSelectOptions}
+                  buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+                />
+                <span className="text-xs text-text-muted">
+                  % trợ cấp quản lý lớp do Admin chỉnh sau khi tạo lớp.
+                </span>
+              </div>
             </div>
           </section>
+          ) : null}
 
+          {showTuitionAndStudents ? (
+          <>
           <section className="rounded-lg border border-border-default bg-bg-secondary/50 p-4">
             <h3 className="mb-2 text-xs font-medium text-text-muted">Học sinh</h3>
             <div className="space-y-3">
@@ -800,7 +911,11 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
               ) : null}
             </div>
           </section>
+          </>
+          ) : null}
 
+          {showAdminOnly ? (
+          <>
           <section className="rounded-lg border border-border-default bg-bg-secondary/50 p-4">
             <div className="mb-2 flex items-center justify-between gap-3">
               <h3 className="text-xs font-medium text-text-muted">Lịch</h3>
@@ -899,24 +1014,37 @@ function AddClassDialog({ onClose, onCreated }: Omit<Props, "open">) {
             missingReason={missingBlockReason}
             previewLines={previewLines}
           />
+          </>
+          ) : null}
+          </ResponsiveDialogBody>
 
-          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border-default pt-4">
+          <ResponsiveActionFooter>
             <button
               type="button"
-              onClick={onClose}
-              className="rounded-md border border-border-default bg-bg-surface px-4 py-2 text-sm font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+              onClick={requestClose}
+              className={classEditorModalSecondaryButtonClassName}
             >
               Hủy
             </button>
-            <button
-              type="submit"
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-text-inverse transition-colors duration-200 hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-            >
+            <button type="submit" className={classEditorModalPrimaryButtonClassName}>
               Thêm lớp
             </button>
-          </div>
+          </ResponsiveActionFooter>
         </form>
-      </div>
+      </ResponsiveDialog>
+      <ConfirmDialog
+        open={confirmDiscardOpen}
+        onOpenChange={setConfirmDiscardOpen}
+        title="Bỏ lớp đang tạo?"
+        description="Thông tin lớp vừa nhập chưa được lưu."
+        confirmLabel="Bỏ"
+        cancelLabel="Tiếp tục nhập"
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmDiscardOpen(false);
+          onClose();
+        }}
+      />
     </>
   );
 }

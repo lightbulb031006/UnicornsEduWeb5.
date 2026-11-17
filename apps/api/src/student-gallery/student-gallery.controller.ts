@@ -1,3 +1,4 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import {
   Body,
   Controller,
@@ -52,17 +53,16 @@ const imageUploadInterceptor = FileInterceptor('image', {
 @Roles(UserRole.admin)
 // Mutations (create/update/delete/upload/reorder) stay admin + assistant only;
 // customer_care/accountant/accountant_income can view (see the `list()` override) but not edit.
-@AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+@AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
 export class StudentGalleryController {
   constructor(private readonly galleryService: StudentGalleryService) {}
 
   @Get()
   // Viewing must match whoever can view the student profile itself
-  // (GET student/:id also allows accountant + accountant_income on admin routes).
+  // (GET student/:id also allows accountant_income on admin routes).
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
+    SALE_CS_HEAD_ROLE,
     StaffRole.customer_care,
-    StaffRole.accountant,
     StaffRole.accountant_income,
   )
   @ApiOperation({ summary: 'List student gallery items' })

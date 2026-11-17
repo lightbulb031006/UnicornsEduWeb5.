@@ -5,6 +5,7 @@ import type {
   TrainingManagerSessionAllowanceItem,
   TrainingManagerStaffOption,
   UpdateClassTrainingManagerPayload,
+  UpdateTrainingManagerSessionRatePayload,
 } from "@/dtos/training-manager.dto";
 import { api } from "../client";
 
@@ -13,7 +14,7 @@ export async function getTrainingManagerOptions(params?: {
   limit?: number;
 }): Promise<TrainingManagerStaffOption[]> {
   const res = await api.get<TrainingManagerStaffOption[]>(
-    "/staff/training-manager-options",
+    "/training-manager/options",
     { params },
   );
   return Array.isArray(res.data) ? res.data : [];
@@ -59,6 +60,19 @@ export async function getTrainingManagerSessionAllowances(
     { params: { month } },
   );
   return Array.isArray(res.data) ? res.data : [];
+}
+
+/** Sửa % QLL của một buổi chưa thanh toán; BE tính lại trợ cấp theo học phí buổi. */
+export async function updateTrainingManagerSessionRate(
+  staffId: string,
+  sessionId: string,
+  payload: UpdateTrainingManagerSessionRatePayload,
+): Promise<TrainingManagerSessionAllowanceItem> {
+  const res = await api.patch<TrainingManagerSessionAllowanceItem>(
+    `/training-manager/staff/${encodeURIComponent(staffId)}/sessions/${encodeURIComponent(sessionId)}/rate`,
+    payload,
+  );
+  return res.data;
 }
 
 export async function bulkUpdateTrainingManagerPaymentStatus(

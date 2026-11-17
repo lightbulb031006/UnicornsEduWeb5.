@@ -1,5 +1,6 @@
 "use client";
 
+import { hasTrainingAccess } from "@/lib/training-access";
 import { ArrowsRightLeftIcon } from "@heroicons/react/24/outline";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -76,7 +77,7 @@ const getWeekRange = (
 export default function StaffCalendarPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const isTraining = user.staffRoles?.includes("training") ?? false;
+  const isTraining = hasTrainingAccess(user.staffRoles);
 
   const [filters, setFilters] = useState<CalendarFilterState>({ classIds: [] });
   const [viewMode, setViewMode] = useState<CalendarViewMode>("calendar");

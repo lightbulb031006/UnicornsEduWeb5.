@@ -17,5 +17,6 @@ export function canViewCrossStaffRoleDetail(
   }
 
   const roles = profile.staffInfo?.roles ?? [];
-  return roles.includes("assistant") || roles.includes("accountant_expense");
+  // #267: Trợ lí không còn xem trợ cấp của nhân sự khác.
+  return roles.includes("accountant_expense");
 }

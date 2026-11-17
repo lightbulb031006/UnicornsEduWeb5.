@@ -176,6 +176,37 @@ describe('DashboardService staff training dashboard', () => {
     );
   });
 
+  it('hides staff payouts from accountant_income-only dashboard (#270)', async () => {
+    const dashboard = await service.getStaffDashboard({
+      staffId: 'income-accountant-1',
+      staffRoles: [StaffRole.accountant_income],
+      query: { month: '05', year: '2026' },
+    });
+
+    expect(dashboard.accountant?.staffPayoutsVisible).toBe(false);
+    expect(dashboard.accountant).not.toHaveProperty('unpaidStaff');
+    expect(dashboard.accountant?.financialOverview.summary).not.toHaveProperty(
+      'pendingPayrollTotal',
+    );
+    expect(
+      dashboard.accountant?.financialOverview.breakdown.map((item) => item.key),
+    ).toEqual(expect.not.arrayContaining(['teacherCost', 'fixedSalaryCost']));
+  });
+
+  it('shows staff payouts when accountant_income also holds accountant_expense (#270)', async () => {
+    const dashboard = await service.getStaffDashboard({
+      staffId: 'both-accountant-1',
+      staffRoles: [StaffRole.accountant_income, StaffRole.accountant_expense],
+      query: { month: '05', year: '2026' },
+    });
+
+    expect(dashboard.accountant?.staffPayoutsVisible).toBe(true);
+    expect(dashboard.accountant?.unpaidStaff).toEqual(expect.any(Array));
+    expect(dashboard.accountant?.financialOverview.summary).toHaveProperty(
+      'pendingPayrollTotal',
+    );
+  });
+
   it('returns paginated expiring action alerts with meta total', async () => {
     prisma.$queryRaw.mockResolvedValueOnce([
       {
@@ -225,6 +256,7 @@ describe('DashboardService staff training dashboard', () => {
         fixedSalaryAmount: 0,
         assistantAmount: 0,
         trainingManagerAmount: 0,
+        lessonPlanHeadAmount: 0,
         totalUnpaid: 400000,
         totalCount: 1,
         totalAmount: 400000,
@@ -503,7 +535,7 @@ describe('DashboardService CSKH dashboard clarity', () => {
 
     const dashboard = await service.getStaffDashboard({
       staffId: 'assistant-1',
-      staffRoles: [StaffRole.assistant, StaffRole.customer_care],
+      staffRoles: [StaffRole.sale_customer_care_head, StaffRole.customer_care],
       query: { month: '05', year: '2026' },
     });
 
@@ -839,6 +871,7 @@ describe('DashboardService financial export', () => {
       fixedSalaryAmount: number;
       assistantAmount: number;
       trainingManagerAmount: number;
+      lessonPlanHeadAmount: number;
       totalCost: number;
     }>;
     topupTotal?: number;
@@ -867,6 +900,7 @@ describe('DashboardService financial export', () => {
         fixedSalaryAmount: 0,
         assistantAmount: 0,
         trainingManagerAmount: 0,
+        lessonPlanHeadAmount: 0,
         totalCost: 400_000,
       },
     ];
@@ -904,6 +938,7 @@ describe('DashboardService financial export', () => {
               fixedSalaryCost: 0,
               assistantCost: 0,
               trainingManagerCost: 0,
+              lessonPlanHeadCost: 0,
               operatingCost: otherCost,
             },
           ];
@@ -921,6 +956,7 @@ describe('DashboardService financial export', () => {
               fixedSalaryCost: 0,
               assistantCost: 0,
               trainingManagerCost: 0,
+              lessonPlanHeadCost: 0,
               operatingCost: otherCost,
             },
           ];
@@ -1028,6 +1064,7 @@ describe('DashboardService financial export', () => {
               fixedSalaryAmount: 150_000,
               assistantAmount: 0,
               trainingManagerAmount: 0,
+              lessonPlanHeadAmount: 0,
               totalCost: 550_000,
             },
           ];
@@ -1045,6 +1082,7 @@ describe('DashboardService financial export', () => {
               fixedSalaryCost: 150_000,
               assistantCost: 0,
               trainingManagerCost: 0,
+              lessonPlanHeadCost: 0,
               operatingCost: 100_000,
             },
           ];
@@ -1174,6 +1212,7 @@ describe('buildPersonnelCostBreakdown', () => {
     fixedSalaryAmount: 0,
     assistantAmount: 0,
     trainingManagerAmount: 0,
+    lessonPlanHeadAmount: 0,
   };
 
   it('splits reward and penalty of the same month into separate sources', () => {
@@ -1225,6 +1264,7 @@ describe('buildStaffPendingPayrollSources', () => {
     fixedSalaryAmount: 0,
     assistantAmount: 0,
     trainingManagerAmount: 0,
+    lessonPlanHeadAmount: 0,
   };
 
   it('keys every pending source, fixed salary included', () => {
@@ -1234,6 +1274,7 @@ describe('buildStaffPendingPayrollSources', () => {
       fixedSalaryAmount: '5000000',
       assistantAmount: 100_000,
       trainingManagerAmount: 50_000,
+      lessonPlanHeadAmount: '88451',
     });
 
     expect(breakdown.sourceAmounts).toEqual({
@@ -1241,13 +1282,15 @@ describe('buildStaffPendingPayrollSources', () => {
       'pending-fixed-salary': 5_000_000,
       'pending-assistant': 100_000,
       'pending-training-manager': 50_000,
+      'pending-lesson-plan-head': 88_451,
     });
     expect(breakdown.note).toBe(
       [
         `Buổi dạy ${(300_000).toLocaleString('vi-VN')}đ`,
         `Lương cứng ${(5_000_000).toLocaleString('vi-VN')}đ`,
-        `Trợ lí ${(100_000).toLocaleString('vi-VN')}đ`,
+        `Hoa hồng trưởng phòng ${(100_000).toLocaleString('vi-VN')}đ`,
         `QL lớp ${(50_000).toLocaleString('vi-VN')}đ`,
+        `Hoa hồng TGA ${(88_451).toLocaleString('vi-VN')}đ`,
       ].join(' • '),
     );
   });

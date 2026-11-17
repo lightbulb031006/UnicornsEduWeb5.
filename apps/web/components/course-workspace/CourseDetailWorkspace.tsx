@@ -247,7 +247,7 @@ function CourseDetailWorkspaceInner({
                     : `${course.defaultDurationDays} ngày`}
                 </span>
                 {" · "}
-                Mức độ khó: {course.difficultyLevels?.length ?? 0} · Đội giáo án:{" "}
+                Mức độ khó: {course.difficultyLevels?.length ?? 0} · Đội chuyên môn:{" "}
                 {course.lessonPlanMembers?.length ?? 0} · Lớp học: {course._count?.classes ?? 0}
               </p>
             </div>

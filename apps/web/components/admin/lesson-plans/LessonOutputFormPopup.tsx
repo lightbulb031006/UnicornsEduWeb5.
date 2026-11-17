@@ -17,6 +17,8 @@ type Props = {
   forceSharedLayout?: boolean;
   allowTasklessOutput?: boolean;
   allowPaymentStatusEdit?: boolean;
+  /** #279: `false` = khoá bậc độ khó / level / hạng mục. */
+  allowCostEdit?: boolean;
   isSubmitting?: boolean;
   onClose: () => void;
   onSubmit: (payload: CreateLessonOutputPayload) => Promise<void> | void;
@@ -34,6 +36,7 @@ export default function LessonOutputFormPopup({
   forceSharedLayout = false,
   allowTasklessOutput = false,
   allowPaymentStatusEdit = true,
+  allowCostEdit = true,
   isSubmitting = false,
   onClose,
   onSubmit,
@@ -100,6 +103,7 @@ export default function LessonOutputFormPopup({
           forceSharedLayout={forceSharedLayout}
           allowTasklessOutput={allowTasklessOutput}
           allowPaymentStatusEdit={allowPaymentStatusEdit}
+          allowCostEdit={allowCostEdit}
           isSubmitting={isSubmitting}
           onCancel={onClose}
           onSubmit={onSubmit}

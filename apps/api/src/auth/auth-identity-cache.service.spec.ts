@@ -117,7 +117,7 @@ describe('AuthIdentityCacheService', () => {
       passwordHash: 'hashed-password',
     });
     prisma.staffInfo.findUnique.mockResolvedValue({
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
 
     await service.getAuthIdentity('user-1');

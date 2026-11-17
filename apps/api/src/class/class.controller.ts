@@ -1,3 +1,4 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import {
   Body,
   Controller,
@@ -42,6 +43,7 @@ import {
   UpdateClassStudentTuitionDto,
   UpdateClassTeacherCompensationDto,
   UpdateClassTeachersDto,
+  UpdateClassTuitionDto,
 } from 'src/dtos/class.dto';
 import {
   CreateClassSurveyDto,
@@ -60,18 +62,59 @@ import { ClassService } from './class.service';
 import { ClassSurveyService } from './class-survey.service';
 import type { RequestWithResolvedAuthContext } from 'src/auth/auth-request-context';
 import {
+  canSeeClassStudentContactsOnAdminRoutes,
+  canSeeClassStudentWalletOnAdminRoutes,
   redactClassForAccountantView,
   redactClassListForAccountantView,
+  redactClassStudentContacts,
+  redactClassStudentWalletBalances,
+  redactStudentClassRowsContacts,
   redactStudentClassRowsForAccountantView,
-  resolveAccountantFinanceView,
+  redactStudentClassRowsWalletBalance,
+  resolveAdminClassFinanceView,
 } from 'src/common/accountant-finance-redaction.util';
+import { StaffOperationsAccessService } from 'src/staff-ops/staff-operations-access.service';
+
+/**
+ * Response route admin của lớp theo người xem: bỏ học phí / lương gia sư
+ * (#272/#274) và bỏ số dư ví học sinh với role không được xem (follow-up grill
+ * 13/11 — Trưởng ban Đào tạo không xem; Kế toán chi vẫn xem), và bỏ liên hệ /
+ * hồ sơ học sinh với Trưởng ban Đào tạo thuần (quyết định 13/11).
+ */
+function redactAdminClassResponse<T>(
+  classRecord: T,
+  roleType: UserRole,
+  staffRoles: readonly StaffRole[],
+): T {
+  let redacted = redactClassForAccountantView(
+    classRecord,
+    resolveAdminClassFinanceView(roleType, staffRoles),
+  );
+  if (!canSeeClassStudentWalletOnAdminRoutes(roleType, staffRoles)) {
+    redacted = redactClassStudentWalletBalances(redacted, { mode: 'none' });
+  }
+  if (!canSeeClassStudentContactsOnAdminRoutes(roleType, staffRoles)) {
+    redacted = redactClassStudentContacts(redacted);
+  }
+  return redacted;
+}
+
+/**
+ * #272: role được XEM lớp ở route admin. Trưởng phòng Sale & CSKH thấy mọi
+ * lớp nhưng response bỏ lương gia sư (`resolveAdminClassFinanceView`).
+ * #274: Trưởng ban Đào tạo cũng xem được (bỏ học phí, giữ lương gia sư).
+ */
+const CLASS_VIEWER_STAFF_ROLES = [
+  SALE_CS_HEAD_ROLE,
+  StaffRole.training_head,
+  StaffRole.accountant_income,
+  StaffRole.accountant_expense,
+] as const;
 
 @Controller('class')
 @ApiTags('class')
 @ApiCookieAuth('access_token')
 @AllowStaffRolesOnAdminRoutes(
-  StaffRole.assistant,
-  StaffRole.accountant,
   StaffRole.accountant_income,
   StaffRole.accountant_expense,
 )
@@ -81,6 +124,7 @@ export class ClassController {
     private readonly classService: ClassService,
     private readonly classSurveyService: ClassSurveyService,
     private readonly calendarService: CalendarService,
+    private readonly staffOperationsAccess: StaffOperationsAccessService,
   ) {}
 
   @Get()
@@ -124,6 +168,9 @@ export class ClassController {
     status: 200,
     description: 'Paginated class list with data and meta.',
   })
+  // #272: TP Sale & CSKH xem mọi lớp (không lương gia sư); kế toán thu/chi
+  // xem theo góc nhìn tài chính của mình.
+  @AllowStaffRolesOnAdminRoutes(...CLASS_VIEWER_STAFF_ROLES)
   async getClasses(
     @CurrentUser() user: JwtPayload,
     @Req() req: RequestWithResolvedAuthContext,
@@ -140,7 +187,7 @@ export class ClassController {
     });
     return redactClassListForAccountantView(
       classes,
-      resolveAccountantFinanceView(user.roleType, req.resolvedStaffRoles ?? []),
+      resolveAdminClassFinanceView(user.roleType, req.resolvedStaffRoles ?? []),
     );
   }
 
@@ -150,17 +197,30 @@ export class ClassController {
     description: 'Get list of students enrolled in the class.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
-  @ApiResponse({ status: 200, description: 'List of students in the class.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'List of students in the class. Trưởng ban Đào tạo: không có số dư ví học sinh (`accountBalance`, kể cả `student.accountBalance`) và `student` chỉ còn `id`, `fullName`, `status` (không liên hệ / hồ sơ — quyết định 13/11); Admin, Trưởng phòng Sale & CSKH, Kế toán thu/chi giữ (follow-up grill 13/11).',
+  })
+  @ApiResponse({ status: 403, description: 'Role không được xem lớp.' })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  @AllowStaffRolesOnAdminRoutes(...CLASS_VIEWER_STAFF_ROLES)
   async getStudentsByClassId(
     @CurrentUser() user: JwtPayload,
     @Req() req: RequestWithResolvedAuthContext,
     @Param('id', new ParseClassIdPipe()) id: string,
   ) {
     const students = await this.classService.getStudentsByClassId(id);
-    return redactStudentClassRowsForAccountantView(
-      students,
-      resolveAccountantFinanceView(user.roleType, req.resolvedStaffRoles ?? []),
+    const staffRoles = req.resolvedStaffRoles ?? [];
+    return redactStudentClassRowsContacts(
+      redactStudentClassRowsWalletBalance(
+        redactStudentClassRowsForAccountantView(
+          students,
+          resolveAdminClassFinanceView(user.roleType, staffRoles),
+        ),
+        canSeeClassStudentWalletOnAdminRoutes(user.roleType, staffRoles),
+      ),
+      canSeeClassStudentContactsOnAdminRoutes(user.roleType, staffRoles),
     );
   }
 
@@ -182,31 +242,79 @@ export class ClassController {
   }
 
   @Patch(':id/basic-info')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
-    summary: 'Update class basic info',
+    summary: 'Cập nhật Thông tin lớp',
     description:
-      'Update basic info and tuition. Changing allowance_per_session_per_student updates only the class default; per-teacher class_teachers.custom_allowance overrides are not modified. student_tuition_per_block (optional): a number is stored as the class / 30 phút rate and is not overwritten by the package; null still derives ROUND(per-session ÷ standard blocks). Does not write student_tuition_per_session from the block field.',
+      'Thông tin lớp (tên, khoá, trạng thái, sĩ số, không điểm danh, hạn xem nội dung) + lương gia sư mặc định của lớp. KHÔNG nhận học phí (#272: dùng PATCH /class/:id/tuition; trường học phí gửi lên bị bỏ qua). Changing allowance_per_session_per_student updates only the class default; per-teacher class_teachers.custom_allowance overrides are not modified. #274: Admin sửa mọi trường; Trưởng ban Đào tạo và Trưởng phòng Sale & CSKH chỉ được gửi name, course_id (môn/loại lớp), max_students — gửi trường khác → 403 liệt kê trường bị từ chối. Kế toán thu/chi bị 403. Response bỏ học phí/lương gia sư theo role người xem.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassBasicInfoDto })
   @ApiResponse({ status: 200, description: 'Class updated.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Role không được sửa Thông tin lớp, hoặc role trưởng gửi trường ngoài tên/khoá học/sĩ số (#274).',
+  })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  // #274: Admin + Trưởng ban Đào tạo + Trưởng phòng; giới hạn trường ở service.
+  @AllowStaffRolesOnAdminRoutes(StaffRole.training_head, SALE_CS_HEAD_ROLE)
   async updateClassBasicInfo(
     @CurrentUser() user: JwtPayload,
+    @Req() req: RequestWithResolvedAuthContext,
     @Param('id', new ParseClassIdPipe()) id: string,
     @Body() dto: UpdateClassBasicInfoDto,
   ) {
-    return this.classService.updateClassBasicInfo(id, dto, {
+    const updated = await this.classService.updateClassBasicInfo(id, dto, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,
     });
+    return redactAdminClassResponse(
+      updated,
+      user.roleType,
+      req.resolvedStaffRoles ?? [],
+    );
+  }
+
+  @Patch(':id/tuition')
+  @ApiOperation({
+    summary: 'Cập nhật Học phí lớp',
+    description:
+      'Học phí chung của lớp (#272): student_tuition_per_session, student_tuition_per_block, tuition_package_total, tuition_package_session. student_tuition_per_block: số dương lưu nguyên đơn giá / 30 phút; null suy ROUND(học phí mỗi buổi ÷ số block chuẩn). Admin và Trưởng phòng Sale & CSKH sửa; Kế toán thu chỉ xem (403); Kế toán chi không thấy học phí (403). Response bỏ lương gia sư với Trưởng phòng.',
+  })
+  @ApiParam({ name: 'id', description: 'Class id' })
+  @ApiBody({ type: UpdateClassTuitionDto })
+  @ApiResponse({ status: 200, description: 'Học phí lớp đã cập nhật.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Payload không hợp lệ, hoặc xoá tổng gói của lớp bán một lần.',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Chỉ Admin và Trưởng phòng Sale & CSKH sửa Học phí lớp.',
+  })
+  @ApiResponse({ status: 404, description: 'Class not found.' })
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
+  async updateClassTuition(
+    @CurrentUser() user: JwtPayload,
+    @Req() req: RequestWithResolvedAuthContext,
+    @Param('id', new ParseClassIdPipe()) id: string,
+    @Body() dto: UpdateClassTuitionDto,
+  ) {
+    const classDetail = await this.classService.updateClassTuition(id, dto, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+    return redactAdminClassResponse(
+      classDetail,
+      user.roleType,
+      req.resolvedStaffRoles ?? [],
+    );
   }
 
   @Patch(':id/pricing-mode')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Đổi chế độ tính tiền của lớp',
     description:
@@ -220,6 +328,8 @@ export class ClassController {
     description: 'Không suy được số block chuẩn, hoặc payload không hợp lệ.',
   })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async updateClassPricingMode(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -233,7 +343,6 @@ export class ClassController {
   }
 
   @Patch(':id/teachers')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update class teachers',
     description:
@@ -244,6 +353,8 @@ export class ClassController {
   @ApiResponse({ status: 200, description: 'Class updated.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async updateClassTeachers(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -257,14 +368,14 @@ export class ClassController {
   }
 
   @Patch(':id/teacher-compensation')
-  @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
-    StaffRole.accountant_expense,
-  )
+  // Follow-up grill 13/11: Kế toán chi chỉ xem lương gia sư theo lớp. Route
+  // giữ allowlist để người kiêm Kế toán chi + Trưởng ban Đào tạo / Quản lý
+  // lớp của lớp vào được; quyền sửa kiểm ở handler (hợp quyền).
+  @AllowStaffRolesOnAdminRoutes(StaffRole.accountant_expense)
   @ApiOperation({
     summary: 'Update class teacher compensation',
     description:
-      'Update custom allowance and/or operating deduction rate for existing class teachers only. Send only teachers and fields that changed; omit a field to leave it unchanged; send custom_allowance null to inherit the class default.',
+      'Update custom allowance and/or operating deduction rate for existing class teachers only. Send only teachers and fields that changed; omit a field to leave it unchanged; send custom_allowance null to inherit the class default. Follow-up grill 13/11: Admin sửa; Kế toán chi chỉ xem (403), trừ khi kiêm Trưởng ban Đào tạo hoặc Quản lý lớp của lớp này. Không sửa lương của chính mình (#265). Response bỏ học phí / số dư ví theo người xem.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassTeacherCompensationDto })
@@ -273,21 +384,41 @@ export class ClassController {
     description: 'Class teacher compensation updated.',
   })
   @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Kế toán chi không kiêm Trưởng ban Đào tạo / Quản lý lớp của lớp (chỉ xem lương gia sư theo lớp), hoặc sửa lương của chính mình (#265).',
+  })
   @ApiResponse({ status: 404, description: 'Class not found.' })
   async updateClassTeacherCompensation(
     @CurrentUser() user: JwtPayload,
+    @Req() req: RequestWithResolvedAuthContext,
     @Param('id', new ParseClassIdPipe()) id: string,
     @Body() dto: UpdateClassTeacherCompensationDto,
   ) {
-    return this.classService.updateClassTeacherCompensation(id, dto, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    // Admin / Trưởng ban Đào tạo / Quản lý lớp của lớp; Kế toán chi thuần → 403.
+    await this.staffOperationsAccess.resolveClassTeacherManagerScope(
+      user.id,
+      user.roleType,
+      id,
+    );
+    const updated = await this.classService.updateClassTeacherCompensation(
+      id,
+      dto,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+    return redactAdminClassResponse(
+      updated,
+      user.roleType,
+      req.resolvedStaffRoles ?? [],
+    );
   }
 
   @Patch(':id/schedule')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update class schedule',
     description:
@@ -305,6 +436,8 @@ export class ClassController {
     description:
       'Lịch vừa bị người khác cập nhật (optimistic lock) hoặc đang có request khác xử lý cùng lớp.',
   })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async updateClassSchedule(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -320,14 +453,25 @@ export class ClassController {
   @Patch(':id/students')
   @ApiOperation({
     summary: 'Update class students',
-    description: 'Replace the list of students in the class.',
+    description:
+      'Replace the list of students in the class (thêm/bớt học sinh). Admin + Trưởng phòng Sale & CSKH (#273). ' +
+      'Lớp đang chưa có học sinh đang học mà chưa có Học phí lớp theo cách thu đang chọn → 400 (0đ tính là đã điền; học phí riêng của học sinh không thay được).',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassStudentsDto })
   @ApiResponse({ status: 200, description: 'Class updated.' })
-  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, hoặc «Lớp chưa có học phí. Hãy điền Học phí lớp trước khi thêm học sinh đầu tiên.»',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Chỉ Admin và Trưởng phòng Sale & CSKH.',
+  })
   @ApiResponse({ status: 404, description: 'Class not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  // #273: thêm/bớt học sinh trong lớp — Admin + Trưởng phòng Sale & CSKH.
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   async updateClassStudents(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -341,7 +485,6 @@ export class ClassController {
   }
 
   @Post(':id/end')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'End class operations',
     description:
@@ -360,6 +503,8 @@ export class ClassController {
       'Validation error (class already ended or teacher sessions not fully paid).',
   })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async endClass(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -373,7 +518,6 @@ export class ClassController {
   }
 
   @Post(':id/teachers/:teacherId/stop-teaching')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Mark a teacher as stopped teaching this class',
     description:
@@ -392,6 +536,8 @@ export class ClassController {
     status: 404,
     description: 'Class or teacher assignment not found.',
   })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async stopClassTeacher(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -406,33 +552,46 @@ export class ClassController {
   }
 
   @Patch(':id/student-tuition')
-  @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
-    StaffRole.accountant_income,
-  )
+  // #272: học phí riêng của học sinh — Admin, TP Sale & CSKH, Kế toán thu.
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.accountant_income)
   @ApiOperation({
     summary: 'Update one student tuition in class',
     description:
-      'Update tuition override/package fields for one existing student-class relation. Does not change roster.',
+      'Học phí riêng của học sinh trong lớp (override / gói riêng) cho một quan hệ học sinh–lớp đã có. Does not change roster. Admin, Trưởng phòng Sale & CSKH và Kế toán thu sửa (#272); Kế toán chi 403. Response bỏ lương gia sư với người không được xem.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiBody({ type: UpdateClassStudentTuitionDto })
   @ApiResponse({ status: 200, description: 'Student tuition updated.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({
+    status: 403,
+    description:
+      'Chỉ Admin, Trưởng phòng Sale & CSKH, Kế toán thu sửa học phí riêng.',
+  })
+  @ApiResponse({
     status: 404,
     description: 'Class or student-class relation not found.',
   })
   async updateClassStudentTuition(
     @CurrentUser() user: JwtPayload,
+    @Req() req: RequestWithResolvedAuthContext,
     @Param('id', new ParseClassIdPipe()) id: string,
     @Body() dto: UpdateClassStudentTuitionDto,
   ) {
-    return this.classService.updateClassStudentTuition(id, dto, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    const classDetail = await this.classService.updateClassStudentTuition(
+      id,
+      dto,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
+    return redactAdminClassResponse(
+      classDetail,
+      user.roleType,
+      req.resolvedStaffRoles ?? [],
+    );
   }
 
   @Get(':id/makeup-events')
@@ -458,6 +617,8 @@ export class ClassController {
       },
     },
   })
+  @ApiResponse({ status: 403, description: 'Role không được xem lớp.' })
+  @AllowStaffRolesOnAdminRoutes(...CLASS_VIEWER_STAFF_ROLES)
   async listMakeupEventsByClassId(
     @Param('id', new ParseClassIdPipe()) id: string,
     @Query() filters: ClassScheduleFilterDto,
@@ -470,7 +631,6 @@ export class ClassController {
   }
 
   @Post(':id/schedule/google-calendar/resync')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Resync class schedule to Google Calendar',
     description:
@@ -482,6 +642,8 @@ export class ClassController {
     description: 'Class schedule resynced to Google Calendar.',
     type: ClassScheduleGoogleCalendarResyncResponseDto,
   })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async resyncClassScheduleGoogleCalendar(
     @Param('id', new ParseClassIdPipe()) id: string,
   ): Promise<ClassScheduleGoogleCalendarResyncResponseDto> {
@@ -489,7 +651,6 @@ export class ClassController {
   }
 
   @Post(':id/makeup-events/:eventId/google-calendar/resync')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Resync one makeup event to Google Calendar',
     description:
@@ -502,6 +663,8 @@ export class ClassController {
     description: 'Makeup event resynced to Google Calendar.',
     type: MakeupGoogleCalendarResyncResponseDto,
   })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async resyncClassMakeupGoogleCalendar(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -540,43 +703,67 @@ export class ClassController {
     description: 'Get a single class record by id.',
   })
   @ApiParam({ name: 'id', description: 'Class id' })
-  @ApiResponse({ status: 200, description: 'Class found.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Class found. Trưởng phòng Sale & CSKH / Kế toán thu: không có lương gia sư; Kế toán chi: không có học phí nhưng giữ số dư ví học sinh (#272). Trưởng ban Đào tạo: không có học phí, không số dư ví học sinh (#274/#277); kiêm role xem được ví thì thấy ví (follow-up grill 13/11). Trưởng ban Đào tạo thuần: `students[]` chỉ còn tên, trạng thái, CSKH, số buổi (không email / SĐT / phụ huynh / hồ sơ — quyết định 13/11).',
+  })
+  @ApiResponse({ status: 403, description: 'Role không được xem lớp.' })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  @AllowStaffRolesOnAdminRoutes(...CLASS_VIEWER_STAFF_ROLES)
   async getClassById(
     @CurrentUser() user: JwtPayload,
     @Req() req: RequestWithResolvedAuthContext,
     @Param('id', new ParseClassIdPipe()) id: string,
   ) {
     const classDetail = await this.classService.getClassById(id);
-    return redactClassForAccountantView(
+    // #277 + follow-up grill 13/11: Trưởng ban Đào tạo không thấy số dư ví;
+    // kiêm Kế toán chi / Kế toán thu / Trưởng phòng thì thấy (hợp quyền).
+    return redactAdminClassResponse(
       classDetail,
-      resolveAccountantFinanceView(user.roleType, req.resolvedStaffRoles ?? []),
+      user.roleType,
+      req.resolvedStaffRoles ?? [],
     );
   }
 
   @Post()
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Create class',
     description:
-      'Create a new class record. Class id is auto-generated by backend. Optional student_tuition_per_block stores the class / 30 phút tuition rate as typed; omit or null to derive from student_tuition_per_session. The block field never writes student_tuition_per_session.',
+      'Create a new class record. Class id is auto-generated by backend. Optional student_tuition_per_block stores the class / 30 phút tuition rate as typed; omit or null to derive from student_tuition_per_session. The block field never writes student_tuition_per_session. #274: Admin gửi mọi trường. Trưởng ban Đào tạo: thông tin lớp (name, course_id, max_students) + gia sư (teacher_ids/teachers) + Quản lý lớp (training_manager_staff_id) + lương gia sư (allowance_per_session_per_student, max_allowance_per_session, scale_amount, trợ cấp riêng/scale riêng/% vận hành từng gia sư); không học phí, không học sinh, không tự gán mình làm gia sư. Trưởng phòng Sale & CSKH: thông tin lớp + học phí (tuỳ chọn) + student_ids. Mang cả hai role → hợp hai tập trường. schedule, pricing_mode, no_attendance và status khác running chỉ Admin. Gửi trường ngoài quyền → 403 liệt kê trường bị từ chối. Response bỏ học phí/lương gia sư theo role người xem.',
   })
   @ApiBody({ type: CreateClassDto, description: 'Class create payload' })
   @ApiResponse({ status: 201, description: 'Class created.' })
-  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, hoặc có student_ids mà lớp chưa có học phí theo cách thu (#273), hoặc Quản lý lớp không phải nhân sự Đào Tạo/gia sư đang hoạt động.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Role không được tạo lớp, gửi trường ngoài quyền, hoặc tự gán mình làm gia sư (#274/#265).',
+  })
+  // #274: Admin + Trưởng ban Đào tạo + Trưởng phòng; giới hạn trường ở service.
+  @AllowStaffRolesOnAdminRoutes(StaffRole.training_head, SALE_CS_HEAD_ROLE)
   async createClass(
     @CurrentUser() user: JwtPayload,
+    @Req() req: RequestWithResolvedAuthContext,
     @Body() data: CreateClassDto,
   ) {
-    return this.classService.createClass(data, {
+    const created = await this.classService.createClass(data, {
       userId: user.id,
       userEmail: user.email,
       roleType: user.roleType,
     });
+    return redactAdminClassResponse(
+      created,
+      user.roleType,
+      req.resolvedStaffRoles ?? [],
+    );
   }
 
   @Post(':id/surveys')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Create class survey',
     description:
@@ -587,6 +774,8 @@ export class ClassController {
   @ApiResponse({ status: 201, description: 'Class survey created.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async createClassSurvey(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -600,7 +789,6 @@ export class ClassController {
   }
 
   @Post(':id/makeup-events')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Create class makeup schedule event',
     description: 'Create one makeup event for the specified class.',
@@ -618,6 +806,8 @@ export class ClassController {
       },
     },
   })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async createMakeupEventByClassId(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -642,7 +832,11 @@ export class ClassController {
   })
   @ApiResponse({ status: 200, description: 'Class updated.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({ status: 403, description: 'Chỉ Admin.' })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  // #272: trước đây kế thừa danh sách kế toán cấp class → kế toán ghi được
+  // thông tin lớp. Nay chỉ Admin.
+  @AllowStaffRolesOnAdminRoutes()
   async updateClass(
     @CurrentUser() user: JwtPayload,
     @Body() data: UpdateClassDto,
@@ -655,7 +849,6 @@ export class ClassController {
   }
 
   @Patch(':id/surveys/:surveyId')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update class survey',
     description:
@@ -667,6 +860,8 @@ export class ClassController {
   @ApiResponse({ status: 200, description: 'Class survey updated.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'Class survey not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async updateClassSurvey(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -681,7 +876,6 @@ export class ClassController {
   }
 
   @Patch(':id/makeup-events/:eventId')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update class makeup schedule event',
     description: 'Update one makeup event that belongs to the specified class.',
@@ -700,6 +894,8 @@ export class ClassController {
       },
     },
   })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async updateMakeupEventByClassId(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -719,7 +915,6 @@ export class ClassController {
   }
 
   @Delete(':id')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Delete class',
     description: 'Delete a class record by id.',
@@ -727,6 +922,8 @@ export class ClassController {
   @ApiParam({ name: 'id', description: 'Class id' })
   @ApiResponse({ status: 200, description: 'Class deleted.' })
   @ApiResponse({ status: 404, description: 'Class not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async deleteClass(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -739,7 +936,6 @@ export class ClassController {
   }
 
   @Delete(':id/surveys/:surveyId')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Delete class survey',
     description: 'Delete one class survey report.',
@@ -748,6 +944,8 @@ export class ClassController {
   @ApiParam({ name: 'surveyId', description: 'Survey id' })
   @ApiResponse({ status: 200, description: 'Class survey deleted.' })
   @ApiResponse({ status: 404, description: 'Class survey not found.' })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async deleteClassSurvey(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,
@@ -761,7 +959,6 @@ export class ClassController {
   }
 
   @Delete(':id/makeup-events/:eventId')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Delete class makeup schedule event',
     description: 'Delete one makeup event that belongs to the specified class.',
@@ -778,6 +975,8 @@ export class ClassController {
       },
     },
   })
+  // #267: chỉ Admin (không kế thừa danh sách staff role cấp class).
+  @AllowStaffRolesOnAdminRoutes()
   async deleteMakeupEventByClassId(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) id: string,

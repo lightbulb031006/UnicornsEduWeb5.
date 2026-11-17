@@ -11,7 +11,7 @@ function AdminAssistantDetailPageContent() {
 
   return (
     <ExtraAllowanceRoleDetailPage
-      roleType="assistant"
+      roleType="sale_customer_care_head"
       staffId={getSearchParam("staffId")}
     />
   );

@@ -34,6 +34,7 @@ import {
   ResendVerificationDto,
   ResetPasswordDto,
   SetupPasswordDto,
+  StudentLoginDto,
   UserAuthDto,
 } from '../dtos/user.dto';
 import {
@@ -48,12 +49,20 @@ import {
 import { UserRole } from 'generated/enums';
 import { JwtService } from '@nestjs/jwt';
 import type { RequestWithResolvedAuthContext } from './auth-request-context';
-import { PUBLIC_REGISTRATION_DISABLED_MESSAGE } from './constants';
+import {
+  DEVICE_SUPERSEDED_ERROR_CODE,
+  PUBLIC_REGISTRATION_DISABLED_MESSAGE,
+  SIGNED_OUT_REASON_DEVICE_SUPERSEDED,
+} from './constants';
 import { GoogleAuthExceptionFilter } from './filters/google-auth.exception-filter';
 import { UserDeviceService } from './user-device.service';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { StudentDeviceGuard } from './guards/student-device.guard';
+import {
+  GOOGLE_FORCE_DEVICE_STATE,
+  GoogleOAuthGuard,
+} from './guards/google-oauth.guard';
 
 const ONE_MINUTE_IN_MS = 60_000;
 const THIRTY_MINUTES_IN_MS = 30 * ONE_MINUTE_IN_MS;
@@ -67,9 +76,22 @@ interface VerifiedTokenPayload {
   deviceId?: string;
 }
 
+function isDeviceSupersededException(error: unknown): boolean {
+  if (!(error instanceof UnauthorizedException)) {
+    return false;
+  }
+  const response = error.getResponse();
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    (response as { error?: unknown }).error === DEVICE_SUPERSEDED_ERROR_CODE
+  );
+}
+
 interface GoogleAuthRequest extends Request {
   user: {
     id: string;
+    email: string;
     accountHandle: string;
     roleType: UserRole;
     passwordHash?: string | null;
@@ -338,7 +360,15 @@ export class AuthController {
         req,
       );
       return profile ?? this.getGuestProfile();
-    } catch {
+    } catch (error) {
+      // Máy bị đá vì học sinh đăng nhập máy khác: guest kèm lý do để proxy FE
+      // chuyển về login với đúng thông báo.
+      if (isDeviceSupersededException(error)) {
+        return {
+          ...this.getGuestProfile(),
+          signedOutReason: SIGNED_OUT_REASON_DEVICE_SUPERSEDED,
+        };
+      }
       return this.getGuestProfile();
     }
   }
@@ -595,7 +625,13 @@ export class AuthController {
   @Public()
   @Get('google')
   @UseFilters(GoogleAuthExceptionFilter)
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleOAuthGuard)
+  @ApiOperation({
+    summary: 'Start Google OAuth',
+    description:
+      '`?force_device=1`: student blocked by `device_blocked` chose to log out every other device; carried to the callback via OAuth `state`.',
+  })
+  @ApiQuery({ name: 'force_device', required: false, enum: ['1'] })
   async googleAuth() {}
 
   // ─── Student single-device login ─────────────────────────────────────
@@ -610,8 +646,9 @@ export class AuthController {
       'Validates credentials and, when the email is verified, replaces any inactive device with the current one and sets auth cookies directly (no login magic link).',
   })
   @ApiBody({
-    type: UserAuthDto,
-    description: 'accountHandle, password, and optional rememberMe',
+    type: StudentLoginDto,
+    description:
+      'accountHandle, password, optional rememberMe, optional forceLogoutOthers',
   })
   @ApiResponse({
     status: 200,
@@ -625,11 +662,12 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Invalid credentials.' })
   @ApiResponse({
     status: 409,
-    description: 'Student already has an active device.',
+    description:
+      '`DEVICE_ACTIVE`: student already has an active device. Resend with `forceLogoutOthers: true` to log out every other device (they get `401 DEVICE_SUPERSEDED`).',
   })
   @ApiResponse({ status: 429, description: 'Too many requests.' })
   async studentLogin(
-    @Body() body: UserAuthDto,
+    @Body() body: StudentLoginDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -650,6 +688,7 @@ export class AuthController {
       ipAddress,
       readProxyPublicOrigin(req),
       rememberMe,
+      body.forceLogoutOthers ?? false,
     );
     this.setAuthCookies(res, tokenPair, rememberMe);
     return { message: 'Đăng nhập thành công' };
@@ -779,12 +818,15 @@ export class AuthController {
   @ApiOperation({
     summary: 'Force logout student',
     description:
-      'Admin or staff force-logouts a student, removing all active devices.',
+      'Removes every active device of a student. Admin and staff sale_customer_care_head (Trưởng phòng Sale & CSKH) may target any student; staff customer_care only students they are assigned to; other staff roles get 403.',
   })
   @ApiParam({ name: 'id', description: 'Student user ID' })
   @ApiResponse({ status: 200, description: 'Student force-logged out.' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions.' })
-  @ApiResponse({ status: 404, description: 'Student not found.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Student not found (or outside customer care scope).',
+  })
   async forceLogoutStudent(
     @Param('id') studentId: string,
     @CurrentUser() actor: JwtPayload,
@@ -801,9 +843,13 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const rememberMe = true;
+    const forceLogoutOthers = req.query.state === GOOGLE_FORCE_DEVICE_STATE;
     const tokenPair =
       req.user.roleType === UserRole.student
-        ? await this.authService.issueStudentGoogleSession(req.user)
+        ? await this.authService.issueStudentGoogleSession(
+            req.user,
+            forceLogoutOthers,
+          )
         : await this.authService.issueTokenPairForUser(
             req.user.id,
             req.user.accountHandle,

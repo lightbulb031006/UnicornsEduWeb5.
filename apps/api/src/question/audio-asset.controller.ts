@@ -52,7 +52,6 @@ const audioUploadInterceptor = FileInterceptor('file', {
 @Controller('audio-assets')
 @Roles(UserRole.admin)
 @AllowStaffRolesOnAdminRoutes(
-  StaffRole.assistant,
   StaffRole.teacher,
   StaffRole.lesson_plan,
   StaffRole.lesson_plan_head,

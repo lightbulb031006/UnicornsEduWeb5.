@@ -1,3 +1,4 @@
+import type { LmsProfile } from "@/dtos/app-config.dto";
 import type {
   AttendanceReviewFields,
   HomeworkQuality,
@@ -248,6 +249,8 @@ export type BuildSessionCommentZaloTextInput = {
   structured?: boolean;
   /** Buổi không điểm danh: bỏ hẳn phần nhận xét từng học sinh (mục 3️⃣). */
   noAttendance?: boolean;
+  /** Hồ sơ môn của instance (`appConfig.profile`) → chữ ký cuối tin. */
+  profile?: LmsProfile | null;
   students: SessionCommentZaloStudent[];
 };
 
@@ -355,6 +358,7 @@ export type SessionCommentZaloSource = SessionReviewFields & {
 
 export function buildSessionCommentZaloTextFromSession(
   session: SessionCommentZaloSource,
+  profile?: LmsProfile | null,
 ): string {
   return buildSessionCommentZaloText({
     className: session.className?.trim() || "—",
@@ -368,6 +372,7 @@ export function buildSessionCommentZaloTextFromSession(
     ordinal: session.ordinal ?? null,
     review: session,
     noAttendance: Boolean(session.snapshotNoAttendance),
+    profile,
     students: (session.attendance ?? []).map((attendanceItem) => ({
       ...attendanceItem,
       fullName: attendanceItem.student?.fullName?.trim() || "—",
@@ -414,11 +419,12 @@ export type SessionCommentDisplayContent = {
 
 export function resolveSessionCommentDisplayContent(
   session: SessionCommentZaloSource,
+  profile?: LmsProfile | null,
 ): SessionCommentDisplayContent {
   if (session.progressStatus) {
     return {
       mode: "plain",
-      text: buildSessionCommentZaloTextFromSession(session),
+      text: buildSessionCommentZaloTextFromSession(session, profile),
     };
   }
 
@@ -444,7 +450,7 @@ export function resolveSessionCommentDisplayContent(
   if (hasStructuredFields) {
     return {
       mode: "plain",
-      text: buildSessionCommentZaloTextFromSession(session),
+      text: buildSessionCommentZaloTextFromSession(session, profile),
     };
   }
 
@@ -469,7 +475,21 @@ export const HOMEWORK_QUALITY_LABELS: Record<HomeworkQuality, string> = {
 };
 
 const REVIEW_SECTION_DIVIDER = "━━━━━━━━━━━━━━━";
-const REVIEW_SIGNATURE = "— Gia sư Unicorns Edu";
+const REVIEW_SIGNATURE_BY_PROFILE: Record<LmsProfile, string> = {
+  it: "— Gia sư UniEdu Tin học",
+  jp: "— Gia sư UniEdu Tiếng Nhật",
+  eng: "— Gia sư UniEdu Tiếng Anh",
+  math: "— Gia sư Học Toán Cùng Chuyên Toán",
+};
+/** App-config chưa tải xong → chữ ký chung, không đoán môn. */
+const REVIEW_SIGNATURE_FALLBACK = "— Gia sư UniEdu";
+
+/** Chữ ký cuối tin Nhận xét buổi học copy ra Zalo, theo môn của instance. */
+export function sessionReviewSignature(profile?: LmsProfile | null): string {
+  return profile
+    ? REVIEW_SIGNATURE_BY_PROFILE[profile]
+    : REVIEW_SIGNATURE_FALLBACK;
+}
 const VN_TIME_ZONE = "Asia/Ho_Chi_Minh";
 
 /** Tách textarea "mỗi dòng một ý" thành danh sách ý (bỏ dòng trống, bỏ gạch đầu dòng gõ tay). */
@@ -639,7 +659,7 @@ function buildStructuredSessionReviewText(
     "📎 Tutorial:",
     richTextToPlainTextPreservingStructure(input.tutorial) || "—",
     "",
-    REVIEW_SIGNATURE,
+    sessionReviewSignature(input.profile),
   );
 
   return lines.join("\n");

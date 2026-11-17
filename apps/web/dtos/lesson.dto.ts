@@ -18,16 +18,16 @@ export type LessonStaffStatus = "active" | "inactive";
 export type LessonStaffRole =
   | "admin"
   | "teacher"
-  | "assistant"
+  | "sale_customer_care_head"
   | "lesson_plan"
   | "lesson_plan_head"
-  | "accountant"
   | "accountant_income"
   | "accountant_expense"
   | "communication"
   | "technical"
   | "customer_care"
   | "training"
+  | "training_head"
   | "sale";
 
 export interface LessonOverviewSummary {
@@ -164,6 +164,7 @@ export interface LessonWorkOutputItem extends LessonOutputListItem {
   link: string | null;
   /** Link gốc — fallback khi `link` trống (copy / mở ngoài) */
   originalLink: string | null;
+  /** Chi phí output — công khai với mọi nhân sự giáo án (glossary «Thu nhập cá nhân»). */
   cost: number;
 }
 
@@ -180,7 +181,11 @@ export interface LessonOutputStaffStatsSummary {
   pendingOutputCount: number;
   completedOutputCount: number;
   cancelledOutputCount: number;
-  unpaidCostTotal: number;
+  /**
+   * Tổng chi phí chưa thanh toán = thu nhập cá nhân (#270): `null` khi người
+   * xem không được xem thu nhập của nhân sự này.
+   */
+  unpaidCostTotal: number | null;
 }
 
 export interface LessonOutputStaffStatsResponse {
@@ -288,6 +293,7 @@ export interface LessonOutputItem {
   /** Link video bàn giao của Bài giảng lý thuyết. */
   theoryLectureLinks: string[];
   tags: string[];
+  /** Chi phí output — công khai với mọi nhân sự giáo án (glossary «Thu nhập cá nhân»). */
   cost: number;
   date: string;
   contestUploaded: string | null;

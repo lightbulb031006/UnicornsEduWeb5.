@@ -26,7 +26,7 @@ model StaffInfo {
   revenueSharePercent                    Decimal?                                @map("revenue_share_percent") @db.Decimal(5, 2)
   /// % mặc định của CSKH (phân số 0.00–0.99, cùng đơn vị `customer_care_service.profit_percent`); áp khi CSKH được gán vào học sinh.
   customerCareDefaultProfitPercent       Decimal                                 @default(0) @map("customer_care_default_profit_percent") @db.Decimal(2, 2)
-  assistantStudentSession                Attendance[]                            @relation("AttendanceAssistant")
+  saleCsHeadStudentSession               Attendance[]                            @relation("AttendanceSaleCsHead")
   customerCareStudentSession             Attendance[]                            @relation("AttendanceCustomerCare")
   bonuses                                Bonus[]
   classSurveys                           ClassSurvey[]
@@ -45,8 +45,8 @@ model StaffInfo {
   sessions                               Session[]                               @relation("SessionTeacher")
   trainingManagerSessions                Session[]                               @relation("SessionTrainingManager")
   managedTrainingClasses                 Class[]                                 @relation("ClassTrainingManager")
-  customerCareManagedBy                  StaffInfo?                              @relation("AssistantManagesCustomerCare", fields: [customerCareManagedByStaffId], references: [id])
-  managedCustomerCareStaff               StaffInfo[]                             @relation("AssistantManagesCustomerCare")
+  customerCareManagedBy                  StaffInfo?                              @relation("SaleCsHeadManagesCustomerCare", fields: [customerCareManagedByStaffId], references: [id])
+  managedCustomerCareStaff               StaffInfo[]                             @relation("SaleCsHeadManagesCustomerCare")
   user                                   User?                                   @relation(fields: [userId], references: [id])
   staffLessonTasks                       StaffLessonTask[]
   monthlyStats                           StaffMonthlyStat[]

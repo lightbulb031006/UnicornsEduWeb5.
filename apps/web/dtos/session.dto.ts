@@ -159,6 +159,20 @@ export interface SessionUpdatePayload extends SessionReviewFields {
   attendance?: SessionAttendanceItem[];
 }
 
+/**
+ * 14/11: `PATCH /staff-ops/sessions/:id/training-head` — Trưởng ban Đào tạo
+ * chỉnh tay trợ cấp, bật/tắt Dạy thử (hệ số 0/1), tick Học thử từng học sinh.
+ * Gửi field nào thì đổi field đó; `attendance` chỉ gồm học sinh có sẵn trong buổi.
+ */
+export interface TrainingHeadSessionUpdatePayload {
+  allowanceAmount?: number;
+  coefficient?: 0 | 1;
+  attendance?: Array<{
+    studentId: string;
+    status: SessionAttendanceStatus;
+  }>;
+}
+
 export interface SessionBulkPaymentStatusUpdatePayload {
   sessionIds: string[];
   teacherPaymentStatus: SessionPaymentStatus;

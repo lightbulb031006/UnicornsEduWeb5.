@@ -239,4 +239,11 @@ describe("khoá bán một lần", () => {
     expect(oneTimePackageError("one_time", 1_600_000)).toBeNull();
     expect(oneTimePackageError("per_session", undefined)).toBeNull();
   });
+
+  it("lớp bán một lần chưa có học sinh được để trống gói, nhưng không được 0đ (follow-up 13/11)", () => {
+    expect(oneTimePackageError("one_time", undefined, { allowEmpty: true })).toBeNull();
+    expect(oneTimePackageError("one_time", null, { allowEmpty: true })).toBeNull();
+    expect(oneTimePackageError("one_time", 0, { allowEmpty: true })).toMatch(/lớn hơn 0đ/);
+    expect(oneTimePackageError("one_time", null, { allowEmpty: false })).toMatch(/học sinh/);
+  });
 });

@@ -20,6 +20,9 @@ describe('JwtStrategy', () => {
   };
   const userDeviceService = {
     findLiveDeviceById: jest.fn(),
+    resolveNoLiveDeviceError: jest.fn().mockResolvedValue({
+      error: 'NO_ACTIVE_DEVICE',
+    }),
     touchDeviceIfStale: jest.fn(),
     hasActiveDevice: jest.fn(),
   };

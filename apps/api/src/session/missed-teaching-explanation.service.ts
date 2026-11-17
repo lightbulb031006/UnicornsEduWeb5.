@@ -221,6 +221,21 @@ export class MissedTeachingExplanationService {
     };
   }
 
+  /**
+   * Lớp của giải trình vắng — để kiểm quyền trên lớp trước khi sửa
+   * (follow-up grill 13/11). Không thấy → 404.
+   */
+  async getExplanationClassId(id: string): Promise<string> {
+    const explanation = await this.prisma.missedTeachingExplanation.findUnique({
+      where: { id },
+      select: { classId: true },
+    });
+    if (!explanation) {
+      throw new NotFoundException('Không tìm thấy giải trình vắng.');
+    }
+    return explanation.classId;
+  }
+
   async assertExplanationExists(
     classId: string,
     baselineScheduleEntryId: string,

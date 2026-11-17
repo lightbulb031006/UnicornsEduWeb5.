@@ -1,5 +1,7 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -23,9 +25,15 @@ import {
 import {
   SessionBulkPaymentStatusUpdateResult,
   SessionUpdateDto,
+  TrainingHeadSessionUpdateDto,
 } from '../dtos/session.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { StaffOperationsAccessService } from '../staff-ops/staff-operations-access.service';
+import {
+  StaffOperationsAccessService,
+  canEditClassSessionCoefficient,
+  canWorkOnClassSession,
+  isTrainingHeadActor,
+} from '../staff-ops/staff-operations-access.service';
 import { SessionLedgerService } from './session-ledger.service';
 import { SessionRosterService } from './session-roster.service';
 import { SessionSnapshotService } from './session-snapshot.service';
@@ -46,7 +54,10 @@ import {
   resolveTaxDeductionRate,
 } from '../payroll/deduction-rates';
 import { computeTrainingManagerSessionSnapshot } from '../training-manager/training-manager.utils';
-import { resolveAssistantManagerStaffIdForAttendance } from '../payroll/assistant-share.util';
+import {
+  resolveAssistantManagerStaffIdForAttendance,
+  resolveSaleCsHeadManagerId,
+} from '../payroll/assistant-share.util';
 import { syncLessonPlanHeadCommissions } from '../payroll/lesson-plan-head-commission.util';
 import { syncClassTimelineSortByTime } from '../class-timeline/append-timeline-item';
 import {
@@ -69,6 +80,13 @@ import {
   presentCustomAllowanceAsPerSession,
   standardBlockCountFromSlots,
 } from '../common/block-pricing.util';
+import {
+  assertActorNotEditingOwnCompensation,
+  assertNotEditingOwnCompensation,
+  resolveStaffPolicyActor,
+} from 'src/common/staff-role-policy';
+import { redactSessionForTrainingHeadView } from 'src/common/accountant-finance-redaction.util';
+import { resolveTrainingHeadAttendanceChanges } from './training-head-session-policy';
 
 const SESSION_UPDATE_TRANSACTION_MAX_WAIT_MS = 10_000;
 const SESSION_UPDATE_TRANSACTION_TIMEOUT_MS = 20_000;
@@ -127,6 +145,7 @@ function normalizeSessionPaymentStatus(
 
 type ClassTeacherAllowanceSource = {
   customAllowance: number | null;
+  customAllowancePerSession?: number | null;
   customScaleAmount: number | null;
   class: {
     name: string;
@@ -171,6 +190,7 @@ function liveAllowanceFromClassTeacher(
       classTeacher.customAllowance,
       reconstructionBlocks,
       storedAsPerBlock,
+      classTeacher.customAllowancePerSession,
     ),
   });
 }
@@ -359,6 +379,12 @@ export class SessionUpdateService {
           },
         });
 
+        await assertActorNotEditingOwnCompensation(
+          tx,
+          actor,
+          existingSessions.map((session) => session.teacherId),
+        );
+
         if (existingSessions.length !== uniqueSessionIds.length) {
           const existingIds = new Set(
             existingSessions.map((session) => session.id),
@@ -431,6 +457,39 @@ export class SessionUpdateService {
         timeout: SESSION_UPDATE_TRANSACTION_TIMEOUT_MS,
       },
     );
+  }
+
+  /**
+   * `PUT /sessions/:id` (Admin + Kế toán chi, #275): luật #265 — không ai trừ
+   * Admin tự sửa trợ cấp / hệ số / trạng thái thanh toán của buổi do chính mình
+   * dạy (hoặc gán buổi sang chính mình).
+   */
+  async assertAdminRouteUpdateAllowed(
+    data: SessionUpdateDto,
+    actor?: ActionHistoryActor,
+  ): Promise<void> {
+    const touchesCompensation =
+      data.allowanceAmount !== undefined ||
+      data.coefficient !== undefined ||
+      data.teacherPaymentStatus !== undefined ||
+      data.includeTeacherOperatingDeduction !== undefined ||
+      data.teacherId !== undefined;
+    if (!touchesCompensation || !data.id) {
+      return;
+    }
+
+    const session = await this.prisma.session.findUnique({
+      where: { id: data.id },
+      select: { teacherId: true },
+    });
+    if (!session) {
+      return;
+    }
+
+    await assertActorNotEditingOwnCompensation(this.prisma, actor, [
+      session.teacherId,
+      ...(data.teacherId ? [data.teacherId] : []),
+    ]);
   }
 
   async updateSession(
@@ -522,8 +581,8 @@ export class SessionUpdateService {
                 customerCareCoef: true,
                 customerCareStaffId: true,
                 customerCarePaymentStatus: true,
-                assistantManagerStaffId: true,
-                assistantPaymentStatus: true,
+                saleCsHeadStaffId: true,
+                saleCsHeadPaymentStatus: true,
                 transactionId: true,
                 transaction: {
                   select: {
@@ -713,6 +772,7 @@ export class SessionUpdateService {
         let snapshotScaleAmountUpdate: number | undefined;
         let classTeacherForAllowance: {
           customAllowance: number | null;
+          customAllowancePerSession?: number | null;
           customScaleAmount: number | null;
           operatingDeductionRatePercent?:
             | Prisma.Decimal
@@ -741,6 +801,7 @@ export class SessionUpdateService {
             },
             select: {
               customAllowance: true,
+              customAllowancePerSession: true,
               customScaleAmount: true,
               operatingDeductionRatePercent: true,
               class: {
@@ -806,6 +867,7 @@ export class SessionUpdateService {
                 },
                 select: {
                   customAllowance: true,
+                  customAllowancePerSession: true,
                   customScaleAmount: true,
                   operatingDeductionRatePercent: true,
                   class: {
@@ -968,6 +1030,7 @@ export class SessionUpdateService {
               },
               select: {
                 customAllowance: true,
+                customAllowancePerSession: true,
                 customScaleAmount: true,
                 class: {
                   select: {
@@ -982,6 +1045,8 @@ export class SessionUpdateService {
             if (classTeacher) {
               classTeacherForAllowance = {
                 customAllowance: classTeacher.customAllowance,
+                customAllowancePerSession:
+                  classTeacher.customAllowancePerSession,
                 customScaleAmount: classTeacher.customScaleAmount,
                 class: {
                   name: existingSession.class.name,
@@ -1172,12 +1237,16 @@ export class SessionUpdateService {
           if (uniqueCareStaffIds.length > 0) {
             const careStaff = await tx.staffInfo.findMany({
               where: { id: { in: uniqueCareStaffIds } },
-              select: { id: true, customerCareManagedByStaffId: true },
+              select: {
+                id: true,
+                customerCareManagedByStaffId: true,
+                customerCareManagedBy: { select: { roles: true } },
+              },
             });
             careStaff.forEach((s) =>
               assistantManagerByStaffId.set(
                 s.id,
-                s.customerCareManagedByStaffId,
+                resolveSaleCsHeadManagerId(s),
               ),
             );
           }
@@ -1222,12 +1291,26 @@ export class SessionUpdateService {
                         null,
                       );
 
-              const resolvedCareStaffId = shouldRefreshAttendanceAssignments
+              // Buổi đã ghi giữ nguyên người chăm sóc / trưởng phòng đã chụp
+              // (glossary «Người chăm sóc»): chỉ chụp lại khi dòng mới, đổi lớp
+              // hoặc đổi giữa trạng thái tính phí và không tính phí.
+              const refreshAssignments =
+                shouldRefreshAttendanceAssignments &&
+                (!existingAttendance ||
+                  nextClassId !== existingSession.classId ||
+                  this.sessionValidationService.isTuitionChargeableStatus(
+                    existingAttendance.status,
+                  ) !==
+                    this.sessionValidationService.isTuitionChargeableStatus(
+                      attendanceItem.status,
+                    ));
+
+              const resolvedCareStaffId = refreshAssignments
                 ? (customerCareByStudentId.get(attendanceItem.studentId)
                     ?.staffId ?? null)
                 : (existingAttendance?.customerCareStaffId ?? null);
 
-              const resolvedAssistantId = shouldRefreshAttendanceAssignments
+              const resolvedAssistantId = refreshAssignments
                 ? resolveAssistantManagerStaffIdForAttendance({
                     customerCareStaffId: resolvedCareStaffId,
                     customerCareManagedByStaffId: resolvedCareStaffId
@@ -1235,26 +1318,27 @@ export class SessionUpdateService {
                         null)
                       : null,
                   })
-                : (existingAttendance?.assistantManagerStaffId ?? null);
+                : (existingAttendance?.saleCsHeadStaffId ?? null);
 
               return {
                 studentId: attendanceItem.studentId,
                 status: attendanceItem.status,
                 notes: attendanceItem.notes ?? null,
                 tuitionFee: resolvedTuitionFee,
-                customerCareCoef: shouldRefreshAttendanceAssignments
+                customerCareCoef: refreshAssignments
                   ? (customerCareByStudentId.get(attendanceItem.studentId)
                       ?.profitPercent ?? null)
                   : (existingAttendance?.customerCareCoef ?? null),
                 customerCareStaffId: resolvedCareStaffId,
-                assistantManagerStaffId: resolvedAssistantId,
+                saleCsHeadStaffId: resolvedAssistantId,
+                refreshAssignments,
                 existingAttendanceId: existingAttendance?.id ?? null,
                 existingTransactionId:
                   existingAttendance?.transactionId ?? null,
                 existingCustomerCarePaymentStatus:
                   existingAttendance?.customerCarePaymentStatus ?? null,
                 existingAssistantPaymentStatus:
-                  existingAttendance?.assistantPaymentStatus ?? null,
+                  existingAttendance?.saleCsHeadPaymentStatus ?? null,
               };
             })
           : [];
@@ -1585,7 +1669,7 @@ export class SessionUpdateService {
 
           const resolveAssistantTaxRate = (staffId?: string | null) =>
             staffId
-              ? getTaxRate(staffId, StaffRole.assistant)
+              ? getTaxRate(staffId, SALE_CS_HEAD_ROLE)
               : Promise.resolve(0);
 
           await Promise.all(
@@ -1632,26 +1716,25 @@ export class SessionUpdateService {
                   tuitionFee: attendanceItem.tuitionFee,
                   trialCatchUpFee: null,
                   transactionId,
-                  assistantManagerStaffId:
-                    attendanceItem.assistantManagerStaffId,
-                  assistantPaymentStatus: attendanceItem.assistantManagerStaffId
+                  saleCsHeadStaffId: attendanceItem.saleCsHeadStaffId,
+                  saleCsHeadPaymentStatus: attendanceItem.saleCsHeadStaffId
                     ? PaymentStatus.pending
                     : null,
-                  assistantTaxDeductionRatePercent:
+                  saleCsHeadTaxDeductionRatePercent:
                     await resolveAssistantTaxRate(
-                      attendanceItem.assistantManagerStaffId,
+                      attendanceItem.saleCsHeadStaffId,
                     ),
                 },
                 update: {
                   status: attendanceItem.status,
                   notes: attendanceItem.notes,
-                  customerCareCoef: shouldRefreshAttendanceAssignments
+                  customerCareCoef: attendanceItem.refreshAssignments
                     ? attendanceItem.customerCareCoef
                     : undefined,
-                  customerCareStaffId: shouldRefreshAttendanceAssignments
+                  customerCareStaffId: attendanceItem.refreshAssignments
                     ? attendanceItem.customerCareStaffId
                     : undefined,
-                  customerCarePaymentStatus: shouldRefreshAttendanceAssignments
+                  customerCarePaymentStatus: attendanceItem.refreshAssignments
                     ? attendanceItem.customerCareStaffId
                       ? (attendanceItem.existingCustomerCarePaymentStatus ??
                         PaymentStatus.pending)
@@ -1664,18 +1747,18 @@ export class SessionUpdateService {
                   tuitionFee: attendanceItem.tuitionFee,
                   trialCatchUpFee: null,
                   transactionId,
-                  assistantManagerStaffId: shouldRefreshAttendanceAssignments
-                    ? attendanceItem.assistantManagerStaffId
+                  saleCsHeadStaffId: attendanceItem.refreshAssignments
+                    ? attendanceItem.saleCsHeadStaffId
                     : undefined,
-                  assistantPaymentStatus: shouldRefreshAttendanceAssignments
-                    ? attendanceItem.assistantManagerStaffId
+                  saleCsHeadPaymentStatus: attendanceItem.refreshAssignments
+                    ? attendanceItem.saleCsHeadStaffId
                       ? (attendanceItem.existingAssistantPaymentStatus ??
                         PaymentStatus.pending)
                       : null
                     : undefined,
-                  assistantTaxDeductionRatePercent:
+                  saleCsHeadTaxDeductionRatePercent:
                     await resolveAssistantTaxRate(
-                      attendanceItem.assistantManagerStaffId,
+                      attendanceItem.saleCsHeadStaffId,
                     ),
                 },
               });
@@ -1785,6 +1868,7 @@ export class SessionUpdateService {
       select: {
         id: true,
         classId: true,
+        teacherId: true,
         snapshotNoAttendance: true,
         snapshotBlockCount: true,
         coefficient: true,
@@ -1802,14 +1886,38 @@ export class SessionUpdateService {
       throw new NotFoundException('Session not found');
     }
 
-    // Trợ cấp = allowance_amount × coefficient: đổi Dạy thử sau khi đã chốt
-    // thanh toán/cọc sẽ làm lệch số đã chi, nên staff-ops không cho đổi.
+    // #275: gia sư chỉ buổi do mình dạy; Admin + Quản lý lớp mọi buổi của lớp
+    // (hợp quyền). Kế toán / Ban Đào tạo không quản lý lớp → 403.
+    const access = await this.staffOperationsAccess.resolveClassWorkAccess(
+      userId,
+      roleType,
+      existingSession.classId,
+    );
+    if (!canWorkOnClassSession(access, existingSession.teacherId)) {
+      throw new ForbiddenException(
+        'Bạn chỉ được sửa buổi học do chính mình dạy.',
+      );
+    }
+
     const nextCoefficient = this.sessionValidationService.normalizeCoefficient(
       data.coefficient,
     );
-    if (
+    const hasCoefficientChange =
       nextCoefficient !== undefined &&
-      nextCoefficient !== Number(existingSession.coefficient ?? 1) &&
+      nextCoefficient !== Number(existingSession.coefficient ?? 1);
+    if (
+      hasCoefficientChange &&
+      !canEditClassSessionCoefficient(access, existingSession.teacherId)
+    ) {
+      throw new ForbiddenException(
+        'Quản lý lớp không được đổi hệ số hay đánh dấu dạy thử của buổi gia sư khác.',
+      );
+    }
+
+    // Trợ cấp = allowance_amount × coefficient: đổi Dạy thử sau khi đã chốt
+    // thanh toán/cọc sẽ làm lệch số đã chi, nên staff-ops không cho đổi.
+    if (
+      hasCoefficientChange &&
       this.sessionValidationService.isSessionTimeEditLocked(
         existingSession.teacherPaymentStatus,
       )
@@ -1823,17 +1931,6 @@ export class SessionUpdateService {
       data,
       existingSession.snapshotNoAttendance,
     );
-
-    const actor = await this.staffOperationsAccess.resolveActor(
-      userId,
-      roleType,
-    );
-    if (actor.roles.includes(StaffRole.teacher)) {
-      await this.staffOperationsAccess.assertTeacherAssignedToClass(
-        actor.id,
-        existingSession.classId,
-      );
-    }
 
     let enrichedAttendance: SessionUpdateDto['attendance'] | undefined;
     if (data.attendance !== undefined) {
@@ -1876,11 +1973,159 @@ export class SessionUpdateService {
         tutorial: data.tutorial,
         ...pickSessionReviewInput(data),
         recordingUrl: data.recordingUrl,
-        // Dạy thử: mọi role staff-ops đều đổi được; FE chỉ gửi khi đổi toggle.
+        // Dạy thử: Admin hoặc gia sư trên buổi của mình (#275); FE chỉ gửi khi đổi toggle.
         coefficient: data.coefficient,
         attendance: enrichedAttendance,
       },
       auditActor,
     );
+  }
+
+  /**
+   * `PATCH /staff-ops/sessions/:id/training-head` (14/11): Trưởng ban Đào tạo
+   * (mọi lớp) chỉnh tay trợ cấp buổi, tick Dạy thử (hệ số 0/1) và tick Học
+   * thử từng học sinh. Không đụng nội dung / giờ / nhận xét.
+   * - Luật #265: không sửa buổi do chính mình dạy.
+   * - Buổi đã thanh toán / ghi cọc: không đổi trợ cấp hay Dạy thử.
+   * - Điểm danh: chỉ đổi sang / ra khỏi Học thử; học sinh khác giữ nguyên.
+   */
+  async updateSessionAsTrainingHead(
+    userId: string,
+    roleType: UserRole,
+    sessionId: string,
+    data: TrainingHeadSessionUpdateDto,
+    auditActor?: ActionHistoryActor,
+  ) {
+    const policyActor = await resolveStaffPolicyActor(this.prisma, {
+      userId,
+      roleType,
+    });
+    if (!policyActor.isAdmin && !isTrainingHeadActor(policyActor.roles)) {
+      throw new ForbiddenException(
+        'Chỉ Admin hoặc Trưởng ban Đào tạo được chỉnh tay trợ cấp và học thử của buổi.',
+      );
+    }
+
+    const existingSession = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        classId: true,
+        teacherId: true,
+        snapshotNoAttendance: true,
+        snapshotBlockCount: true,
+        coefficient: true,
+        allowanceAmount: true,
+        teacherPaymentStatus: true,
+        attendance: {
+          select: {
+            studentId: true,
+            status: true,
+            notes: true,
+            tuitionFee: true,
+            testCorrectCount: true,
+            testComment: true,
+            strengths: true,
+            improvements: true,
+            homeworkQuality: true,
+            homeworkComment: true,
+          },
+        },
+      },
+    });
+    if (!existingSession) {
+      throw new NotFoundException('Session not found');
+    }
+
+    assertNotEditingOwnCompensation(policyActor, [existingSession.teacherId]);
+
+    const nextCoefficient = this.sessionValidationService.normalizeCoefficient(
+      data.coefficient,
+    );
+    const hasCoefficientChange =
+      nextCoefficient !== undefined &&
+      nextCoefficient !== Number(existingSession.coefficient ?? 1);
+    const hasAllowanceChange =
+      data.allowanceAmount !== undefined &&
+      data.allowanceAmount !== existingSession.allowanceAmount;
+    if (
+      (hasCoefficientChange || hasAllowanceChange) &&
+      this.sessionValidationService.isSessionTimeEditLocked(
+        existingSession.teacherPaymentStatus,
+      )
+    ) {
+      throw new BadRequestException(
+        'Không thể đổi trợ cấp hoặc Dạy thử của buổi đã thanh toán hoặc ghi cọc.',
+      );
+    }
+
+    let attendance: SessionUpdateDto['attendance'] | undefined;
+    if (data.attendance?.length) {
+      if (existingSession.snapshotNoAttendance) {
+        throw new BadRequestException('Buổi này không có điểm danh học sinh.');
+      }
+      const changes = resolveTrainingHeadAttendanceChanges(
+        new Map(
+          existingSession.attendance.map((row) => [row.studentId, row.status]),
+        ),
+        data.attendance,
+      );
+      if (changes.length > 0) {
+        const nextStatusByStudentId = new Map(
+          changes.map((change) => [change.studentId, change.status]),
+        );
+        const defaultTuitionByStudentId =
+          await this.sessionRosterService.assertAttendanceStudentsBelongToClass(
+            existingSession.classId,
+            existingSession.attendance.map((row) => row.studentId),
+            { blockCount: existingSession.snapshotBlockCount },
+          );
+        // Payload attendance thay toàn bộ điểm danh → gửi lại đủ học sinh, giữ
+        // ghi chú + nhận xét; học phí tính lại theo trạng thái mới.
+        attendance = existingSession.attendance.map((row) => {
+          const status = nextStatusByStudentId.get(row.studentId) ?? row.status;
+          return {
+            studentId: row.studentId,
+            status,
+            notes: row.notes,
+            ...pickAttendanceReviewInput({
+              testCorrectCount: row.testCorrectCount,
+              testComment: row.testComment,
+              strengths: row.strengths,
+              improvements: row.improvements,
+              homeworkQuality: row.homeworkQuality,
+              homeworkComment: row.homeworkComment,
+            } as AttendanceReviewInput),
+            tuitionFee:
+              this.sessionValidationService.resolveChargeableAttendanceTuitionFee(
+                status,
+                row.tuitionFee ?? null,
+                defaultTuitionByStudentId.get(row.studentId) ?? null,
+              ),
+          };
+        });
+      }
+    }
+
+    if (!hasCoefficientChange && !hasAllowanceChange && !attendance) {
+      throw new BadRequestException('Không có thay đổi nào để lưu.');
+    }
+
+    const updated = await this.updateSession(
+      {
+        id: sessionId,
+        ...(hasCoefficientChange && { coefficient: nextCoefficient }),
+        // Đổi Học thử mà không nhập trợ cấp → updateSession tự tính lại trợ cấp
+        // theo số học sinh tính phí; nhập tay thì số nhập tay thắng.
+        ...(hasAllowanceChange && { allowanceAmount: data.allowanceAmount }),
+        attendance,
+      },
+      auditActor,
+      { skipRequired: true },
+    );
+
+    return policyActor.isAdmin
+      ? updated
+      : redactSessionForTrainingHeadView(updated);
   }
 }

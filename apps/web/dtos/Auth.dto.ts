@@ -53,7 +53,7 @@ export interface UserInfoDto {
   access?: {
     admin?: {
       canAccess: boolean;
-      tier: "full" | "assistant" | "accountant" | "lesson_plan_head" | null;
+      tier: "full" | "sale_customer_care_head" | "accountant" | "lesson_plan_head" | null;
     };
     staff?: {
       canAccess: boolean;
@@ -63,7 +63,13 @@ export interface UserInfoDto {
       canAccess: boolean;
     };
   };
+  /** Chỉ có ở guest: lý do phiên trước bị đăng xuất (máy bị đá). */
+  signedOutReason?: SignedOutReason;
 }
+
+/** Lý do `/auth/session` trả guest dù còn cookie refresh. */
+export const SIGNED_OUT_REASON_DEVICE_SUPERSEDED = "device_superseded";
+export type SignedOutReason = typeof SIGNED_OUT_REASON_DEVICE_SUPERSEDED;
 
 export function createGuestUser(): UserInfoDto {
   return {
@@ -104,6 +110,18 @@ export interface LoginResponseDto {
 export interface SetupPasswordDto {
   password: string;
 }
+
+/** Body `POST /auth/student/login`. */
+export interface StudentLoginDto extends LoginDto {
+  /** Học sinh bị chặn `DEVICE_ACTIVE` chọn đăng xuất mọi thiết bị khác rồi đăng nhập máy này. */
+  forceLogoutOthers?: boolean;
+}
+
+/**
+ * Mã lỗi 401 khi máy này bị đăng xuất vì học sinh vừa đăng nhập ở thiết bị
+ * khác (đăng xuất mọi thiết bị). FE chuyển về `/auth/login?error=device_superseded`.
+ */
+export const DEVICE_SUPERSEDED_ERROR_CODE = "DEVICE_SUPERSEDED";
 
 /** `POST /auth/student/login` thành công: server đã set cookie phiên. */
 export interface StudentLoginInitResponse {

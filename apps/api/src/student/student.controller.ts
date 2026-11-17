@@ -1,3 +1,4 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import {
   ForbiddenException,
   Body,
@@ -32,7 +33,6 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { StaffRole, UserRole } from 'generated/enums';
 import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
-import { AllowAssistantOnAdminRoutes } from 'src/auth/decorators/allow-assistant-on-admin.decorator';
 import { CurrentAuth } from 'src/auth/decorators/current-auth.decorator';
 import {
   CurrentUser,
@@ -64,6 +64,7 @@ import {
   UpdateStudentExamSchedulesDto,
   UpdateStudentDto,
   UpdateStudentStatusDto,
+  SetStudentEmailVerifiedDto,
 } from 'src/dtos/student.dto';
 import {
   StudentLandingAchievementsQueryDto,
@@ -109,7 +110,7 @@ export class StudentController {
     status: 200,
     description: 'Matching users with eligibility metadata.',
   })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   async searchAssignableUsers(@Query() query: SearchAssignableStudentUsersDto) {
     return this.studentService.searchAssignableUsersByEmail(query.email);
   }
@@ -126,7 +127,7 @@ export class StudentController {
   @ApiResponse({ status: 201, description: 'Created student.' })
   @ApiResponse({ status: 400, description: 'Validation or eligibility error.' })
   @ApiResponse({ status: 404, description: 'User not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   async createStudent(
     @CurrentUser() user: JwtPayload,
     @Body() data: CreateStudentDto,
@@ -142,17 +143,13 @@ export class StudentController {
   @ApiOperation({
     summary: 'List students',
     description:
-      'Get all students. Admin, assistant, legacy accountant, and income accountant only.',
+      'Get all students. Admin, sale_customer_care_head, and income accountant only.',
   })
   @ApiResponse({
     status: 200,
     description: 'Paginated students list with data and meta.',
   })
-  @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
-    StaffRole.accountant,
-    StaffRole.accountant_income,
-  )
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.accountant_income)
   @ApiQuery({
     name: 'page',
     required: false,
@@ -226,7 +223,7 @@ export class StudentController {
   @ApiResponse({ status: 200, description: 'Updated student.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'Student not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   async updateStudent(
     @CurrentUser() user: JwtPayload,
     @Body() data: UpdateStudentDto,
@@ -252,18 +249,23 @@ export class StudentController {
   @ApiResponse({
     status: 403,
     description:
-      'Assistant can only submit negative balance deltas (withdraw). Positive manual top-up remains admin-only.',
+      'Trưởng phòng Sale & CSKH chỉ được gửi số âm (rút tiền). Nạp thẳng số dương chỉ Admin (#267).',
   })
   @ApiResponse({ status: 404, description: 'Student not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   async updateStudentAccountBalance(
     @CurrentUser() user: JwtPayload,
     @CurrentAuth() auth: ResolvedAuthAccess | null,
     @Body() data: UpdateStudentAccountBalanceCreateDto,
   ) {
-    if (auth?.access.admin.tier === 'assistant' && data.amount > 0) {
+    // #267: nạp thẳng số dương chỉ Admin; Trưởng phòng Sale & CSKH chỉ được rút
+    // (số âm) và nạp qua yêu cầu nạp / QR SePay. Trưởng phòng được duyệt hàng
+    // chờ nạp thẳng (`wallet-direct-topup-requests/:id/approve`).
+    const isFullAdmin =
+      user.roleType === UserRole.admin || auth?.access.admin.tier === 'full';
+    if (!isFullAdmin && data.amount > 0) {
       throw new ForbiddenException(
-        'Assistant cannot top up student balance directly.',
+        'Chỉ Admin được nạp thẳng tiền vào ví học sinh. Trưởng phòng Sale & CSKH hãy tạo yêu cầu nạp hoặc dùng QR.',
       );
     }
 
@@ -275,11 +277,10 @@ export class StudentController {
   }
 
   @Get('wallet-direct-topup-requests')
-  @AllowAssistantOnAdminRoutes(false)
   @ApiOperation({
     summary: 'List direct wallet top-up approval requests',
     description:
-      'Admin-only queue for pending and historical direct wallet top-up approval requests.',
+      'Queue for pending and historical direct wallet top-up approval requests. Admin and Trưởng phòng Sale & CSKH.',
   })
   @ApiQuery({
     name: 'status',
@@ -294,7 +295,11 @@ export class StudentController {
     description: 'Paginated direct top-up approval requests.',
     type: StudentWalletDirectTopUpRequestListResponseDto,
   })
-  @ApiResponse({ status: 403, description: 'Admin-only.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Admin hoặc Trưởng phòng Sale & CSKH.',
+  })
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   async listStudentWalletDirectTopUpRequests(
     @Query() query: StudentWalletDirectTopUpRequestListQueryDto,
   ): Promise<StudentWalletDirectTopUpRequestListResponseDto> {
@@ -302,11 +307,10 @@ export class StudentController {
   }
 
   @Get('wallet-direct-topup-requests/:requestId')
-  @AllowAssistantOnAdminRoutes(false)
   @ApiOperation({
     summary: 'Get one direct wallet top-up approval request',
     description:
-      'Admin-only detail endpoint used by the notification approval popup.',
+      'Detail endpoint used by the notification approval popup. Admin and Trưởng phòng Sale & CSKH.',
   })
   @ApiParam({ name: 'requestId', description: 'Direct top-up request ID' })
   @ApiResponse({
@@ -314,7 +318,11 @@ export class StudentController {
     description: 'Direct top-up approval request.',
     type: StudentWalletDirectTopUpRequestResponseDto,
   })
-  @ApiResponse({ status: 403, description: 'Admin-only.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Admin hoặc Trưởng phòng Sale & CSKH.',
+  })
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   @ApiResponse({ status: 404, description: 'Request not found.' })
   async getStudentWalletDirectTopUpRequest(
     @Param('requestId', new ParseUUIDPipe()) requestId: string,
@@ -325,11 +333,10 @@ export class StudentController {
   }
 
   @Post('wallet-direct-topup-requests/:requestId/approve')
-  @AllowAssistantOnAdminRoutes(false)
   @ApiOperation({
-    summary: 'Approve a direct wallet top-up request from the admin queue',
+    summary: 'Approve a direct wallet top-up request from the approval queue',
     description:
-      'Admin-only approval endpoint. Credits the student wallet using the same transaction logic as the email approval flow.',
+      'Approval endpoint for Admin and Trưởng phòng Sale & CSKH (may approve any request, including their own). Credits the student wallet using the same transaction logic as the email approval flow.',
   })
   @ApiParam({ name: 'requestId', description: 'Direct top-up request ID' })
   @ApiResponse({
@@ -338,7 +345,11 @@ export class StudentController {
     type: StudentWalletDirectTopUpApprovalResultDto,
   })
   @ApiResponse({ status: 400, description: 'Invalid or expired request.' })
-  @ApiResponse({ status: 403, description: 'Admin-only.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Admin hoặc Trưởng phòng Sale & CSKH.',
+  })
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   async approveStudentWalletDirectTopUpRequestFromQueue(
     @CurrentUser() user: JwtPayload,
     @Param('requestId', new ParseUUIDPipe()) requestId: string,
@@ -526,7 +537,7 @@ export class StudentController {
   @ApiOperation({
     summary: 'Create a direct wallet top-up request for admin approval',
     description:
-      'Create a pending direct top-up request and send an approval email to ADMIN_EMAIL. Admin, assistant, and assigned customer care staff only.',
+      'Create a pending direct top-up request and send an approval email to ADMIN_EMAIL. Admin, sale_customer_care_head, and assigned customer care staff only.',
   })
   @ApiParam({ name: 'id', description: 'Student ID' })
   @ApiBody({ type: CreateStudentWalletDirectTopUpRequestDto })
@@ -541,7 +552,7 @@ export class StudentController {
     status: 503,
     description: 'ADMIN_EMAIL or SMTP is not configured.',
   })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   async createStudentWalletDirectTopUpRequest(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -558,7 +569,7 @@ export class StudentController {
   @ApiOperation({
     summary: 'Create SePay top-up order for a student',
     description:
-      'Create a SePay QR top-up order for a specific student. Admin, assistant, and assigned customer care staff only.',
+      'Create a SePay QR top-up order for a specific student. Admin, sale_customer_care_head, and assigned customer care staff only.',
   })
   @ApiParam({ name: 'id', description: 'Student ID' })
   @ApiBody({ type: CreateStudentSePayTopUpOrderDto })
@@ -570,7 +581,7 @@ export class StudentController {
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({ status: 404, description: 'Student not found.' })
   @ApiResponse({ status: 503, description: 'SePay is not configured.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   async createStudentSePayTopUpOrder(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -601,7 +612,7 @@ export class StudentController {
     status: 503,
     description: 'SePay static QR is not configured.',
   })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   async getStudentSePayStaticQr(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -625,9 +636,18 @@ export class StudentController {
     description: 'Student class membership payload',
   })
   @ApiResponse({ status: 200, description: 'Student classes updated.' })
-  @ApiResponse({ status: 400, description: 'Validation error.' })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, hoặc lớp đang trống chưa có Học phí lớp (#273): «Lớp chưa có học phí. Hãy điền Học phí lớp trước khi thêm học sinh đầu tiên.»',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Chỉ Admin và Trưởng phòng Sale & CSKH (#273).',
+  })
   @ApiResponse({ status: 404, description: 'Student or class not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  // #273: thêm/bớt học sinh trong lớp — Admin + Trưởng phòng Sale & CSKH.
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   async updateStudentClasses(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -653,7 +673,7 @@ export class StudentController {
   @ApiResponse({ status: 200, description: 'Updated student.' })
   @ApiResponse({ status: 400, description: 'Validation error.' })
   @ApiResponse({ status: 404, description: 'Student not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   async updateStudentById(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -667,11 +687,11 @@ export class StudentController {
   }
 
   @Patch(':id/status')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   @ApiOperation({
     summary: 'Update student operational status',
     description:
-      'Status transition for admin, assistant, and assigned customer care. Marking inactive closes active class memberships; reactivating does not restore old class memberships.',
+      'Status transition for admin, sale_customer_care_head, and assigned customer care. Marking inactive closes active class memberships; reactivating does not restore old class memberships.',
   })
   @ApiParam({ name: 'id', description: 'Student ID' })
   @ApiBody({
@@ -691,6 +711,49 @@ export class StudentController {
       userEmail: user.email,
       roleType: user.roleType,
     });
+  }
+
+  @Patch(':id/email-verified')
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
+  @ApiOperation({
+    summary: 'Set student account email verified flag',
+    description:
+      '16/11: bật/tắt «Email đã xác thực» trên tài khoản đăng nhập của học sinh (giống checkbox Admin ở popup Quản lý user). Admin, Trưởng phòng Sale & CSKH: mọi học sinh; CSKH: chỉ học sinh mình là Người chăm sóc.',
+  })
+  @ApiParam({ name: 'id', description: 'Student ID' })
+  @ApiBody({ type: SetStudentEmailVerifiedDto })
+  @ApiResponse({
+    status: 200,
+    description: '{ studentId, userId, emailVerified }.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Học sinh chưa gắn tài khoản đăng nhập.',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Forbidden. Không phải Admin / Trưởng phòng Sale & CSKH / CSKH.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Student not found (kể cả CSKH không phụ trách học sinh).',
+  })
+  async setStudentEmailVerified(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseStudentIdPipe()) id: string,
+    @Body() body: SetStudentEmailVerifiedDto,
+  ) {
+    return this.studentService.setStudentEmailVerified(
+      id,
+      body.email_verified,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+    );
   }
 
   @Get(':id/wallet-history')
@@ -719,7 +782,12 @@ export class StudentController {
   })
   @ApiResponse({ status: 403, description: 'Forbidden.' })
   @ApiResponse({ status: 404, description: 'Student not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  // Kế toán thu cần đối soát nạp ví với học phí (quyết định 13/11).
+  @AllowStaffRolesOnAdminRoutes(
+    SALE_CS_HEAD_ROLE,
+    StaffRole.accountant_income,
+    StaffRole.customer_care,
+  )
   async getStudentWalletHistory(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -740,8 +808,7 @@ export class StudentController {
   @ApiResponse({ status: 200, description: 'Student found.' })
   @ApiResponse({ status: 404, description: 'Student not found.' })
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
-    StaffRole.accountant,
+    SALE_CS_HEAD_ROLE,
     StaffRole.accountant_income,
     StaffRole.customer_care,
   )
@@ -778,7 +845,7 @@ export class StudentController {
     description: 'Missing linked user or invalid image.',
   })
   @ApiResponse({ status: 404, description: 'Student not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   async uploadStudentAvatar(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -802,7 +869,7 @@ export class StudentController {
   @ApiResponse({ status: 200, description: 'Student detail without avatar.' })
   @ApiResponse({ status: 400, description: 'Missing linked user.' })
   @ApiResponse({ status: 404, description: 'Student not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   async deleteStudentAvatar(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -827,8 +894,7 @@ export class StudentController {
   })
   @ApiResponse({ status: 404, description: 'Student not found.' })
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
-    StaffRole.accountant,
+    SALE_CS_HEAD_ROLE,
     StaffRole.accountant_income,
     StaffRole.customer_care,
   )
@@ -859,7 +925,7 @@ export class StudentController {
     type: [StudentExamScheduleItemDto],
   })
   @ApiResponse({ status: 404, description: 'Student not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   async updateStudentExamSchedules(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,
@@ -880,7 +946,7 @@ export class StudentController {
   @ApiParam({ name: 'id', description: 'Student ID' })
   @ApiResponse({ status: 200, description: 'Student deleted.' })
   @ApiResponse({ status: 404, description: 'Student not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   async deleteStudent(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseStudentIdPipe()) id: string,

@@ -183,12 +183,21 @@ describe('FixedSalaryCloseService', () => {
     staffRows.push({
       id: 'staff-a',
       status: StaffStatus.active,
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
       user: { first_name: 'An', last_name: 'Nguyen' },
     });
-    salaryDefaults.push({ roleType: StaffRole.assistant, amount: 1_000_000 });
-    operatingDefaults.push({ roleType: StaffRole.assistant, ratePercent: 10 });
-    roleTaxDefaults.push({ roleType: StaffRole.assistant, ratePercent: 10 });
+    salaryDefaults.push({
+      roleType: StaffRole.sale_customer_care_head,
+      amount: 1_000_000,
+    });
+    operatingDefaults.push({
+      roleType: StaffRole.sale_customer_care_head,
+      ratePercent: 10,
+    });
+    roleTaxDefaults.push({
+      roleType: StaffRole.sale_customer_care_head,
+      ratePercent: 10,
+    });
 
     const result = await service.closeMonth('2026-09');
     expect(result.createdCount).toBe(1);
@@ -196,7 +205,7 @@ describe('FixedSalaryCloseService', () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0]).toMatchObject({
       staffId: 'staff-a',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       month: '2026-09',
       status: 'pending',
       grossAmount: 1_000_000,
@@ -213,13 +222,13 @@ describe('FixedSalaryCloseService', () => {
       {
         id: 'inactive',
         status: StaffStatus.inactive,
-        roles: [StaffRole.assistant],
+        roles: [StaffRole.sale_customer_care_head],
         user: { first_name: 'Off', last_name: 'Staff' },
       },
       {
         id: 'zero',
         status: StaffStatus.active,
-        roles: [StaffRole.assistant],
+        roles: [StaffRole.sale_customer_care_head],
         user: { first_name: 'Zero', last_name: 'Staff' },
       },
       {
@@ -229,10 +238,13 @@ describe('FixedSalaryCloseService', () => {
         user: { first_name: 'None', last_name: 'Staff' },
       },
     );
-    salaryDefaults.push({ roleType: StaffRole.assistant, amount: 0 });
+    salaryDefaults.push({
+      roleType: StaffRole.sale_customer_care_head,
+      amount: 0,
+    });
     salaryOverrides.push({
       staffId: 'zero',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       amount: 0,
     });
 
@@ -245,35 +257,36 @@ describe('FixedSalaryCloseService', () => {
     staffRows.push({
       id: 'dual',
       status: StaffStatus.active,
-      roles: [StaffRole.communication, StaffRole.assistant],
+      roles: [StaffRole.communication, StaffRole.sale_customer_care_head],
       user: { first_name: 'Dual', last_name: 'Role' },
     });
     salaryDefaults.push(
       { roleType: StaffRole.communication, amount: 2_000_000 },
-      { roleType: StaffRole.assistant, amount: 500_000 },
+      { roleType: StaffRole.sale_customer_care_head, amount: 500_000 },
     );
     operatingDefaults.push(
       { roleType: StaffRole.communication, ratePercent: 10 },
-      { roleType: StaffRole.assistant, ratePercent: 0 },
+      { roleType: StaffRole.sale_customer_care_head, ratePercent: 0 },
     );
     roleTaxDefaults.push(
       { roleType: StaffRole.communication, ratePercent: 10 },
-      { roleType: StaffRole.assistant, ratePercent: 5 },
+      { roleType: StaffRole.sale_customer_care_head, ratePercent: 5 },
     );
 
     const result = await service.closeMonth('2026-09');
     expect(result.createdCount).toBe(2);
     expect(result.items.map((item) => item.roleType).sort()).toEqual([
-      StaffRole.assistant,
       StaffRole.communication,
+      StaffRole.sale_customer_care_head,
     ]);
     expect(
       result.items.find((item) => item.roleType === StaffRole.communication)
         ?.grossAmount,
     ).toBe(2_000_000);
     expect(
-      result.items.find((item) => item.roleType === StaffRole.assistant)
-        ?.grossAmount,
+      result.items.find(
+        (item) => item.roleType === StaffRole.sale_customer_care_head,
+      )?.grossAmount,
     ).toBe(500_000);
   });
 
@@ -281,26 +294,26 @@ describe('FixedSalaryCloseService', () => {
     staffRows.push({
       id: 'tutor',
       status: StaffStatus.active,
-      roles: [StaffRole.teacher, StaffRole.assistant],
+      roles: [StaffRole.teacher, StaffRole.sale_customer_care_head],
       user: { first_name: 'Tutor', last_name: 'Plus' },
     });
     salaryDefaults.push(
       { roleType: StaffRole.teacher, amount: 8_000_000 },
-      { roleType: StaffRole.assistant, amount: 500_000 },
+      { roleType: StaffRole.sale_customer_care_head, amount: 500_000 },
     );
     operatingDefaults.push(
       { roleType: StaffRole.teacher, ratePercent: 10 },
-      { roleType: StaffRole.assistant, ratePercent: 0 },
+      { roleType: StaffRole.sale_customer_care_head, ratePercent: 0 },
     );
     roleTaxDefaults.push(
       { roleType: StaffRole.teacher, ratePercent: 10 },
-      { roleType: StaffRole.assistant, ratePercent: 5 },
+      { roleType: StaffRole.sale_customer_care_head, ratePercent: 5 },
     );
 
     const result = await service.closeMonth('2026-09');
     expect(result.createdCount).toBe(1);
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].roleType).toBe(StaffRole.assistant);
+    expect(result.items[0].roleType).toBe(StaffRole.sale_customer_care_head);
     expect(result.items[0].grossAmount).toBe(500_000);
     expect(
       result.items.find((item) => item.roleType === StaffRole.teacher),
@@ -311,12 +324,21 @@ describe('FixedSalaryCloseService', () => {
     staffRows.push({
       id: 'staff-a',
       status: StaffStatus.active,
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
       user: { first_name: 'An', last_name: 'Nguyen' },
     });
-    salaryDefaults.push({ roleType: StaffRole.assistant, amount: 1_000_000 });
-    operatingDefaults.push({ roleType: StaffRole.assistant, ratePercent: 10 });
-    roleTaxDefaults.push({ roleType: StaffRole.assistant, ratePercent: 10 });
+    salaryDefaults.push({
+      roleType: StaffRole.sale_customer_care_head,
+      amount: 1_000_000,
+    });
+    operatingDefaults.push({
+      roleType: StaffRole.sale_customer_care_head,
+      ratePercent: 10,
+    });
+    roleTaxDefaults.push({
+      roleType: StaffRole.sale_customer_care_head,
+      ratePercent: 10,
+    });
 
     await service.closeMonth('2026-09');
     salaryDefaults[0].amount = 9_000_000;
@@ -336,7 +358,7 @@ describe('FixedSalaryCloseService', () => {
       {
         id: 'staff-a',
         status: StaffStatus.active,
-        roles: [StaffRole.assistant, StaffRole.communication],
+        roles: [StaffRole.sale_customer_care_head, StaffRole.communication],
         user: { first_name: 'An', last_name: 'Nguyen' },
       },
       {
@@ -347,13 +369,13 @@ describe('FixedSalaryCloseService', () => {
       },
     );
     salaryDefaults.push(
-      { roleType: StaffRole.assistant, amount: 1_000_000 },
+      { roleType: StaffRole.sale_customer_care_head, amount: 1_000_000 },
       { roleType: StaffRole.communication, amount: 2_000_000 },
     );
     payables.push({
       id: 'existing',
       staffId: 'staff-a',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       month: '2026-09',
       status: 'pending',
       grossAmount: 1_000_000,
@@ -371,7 +393,7 @@ describe('FixedSalaryCloseService', () => {
     expect(result.skippedCount).toBe(1);
     expect(
       payables.map((row) => `${row.staffId}:${row.roleType}`).sort(),
-    ).toEqual(['staff-a:assistant', 'staff-a:communication']);
+    ).toEqual(['staff-a:communication', 'staff-a:sale_customer_care_head']);
   });
 
   it('lists close candidates with closed and unclosed roles per staff', async () => {
@@ -380,7 +402,7 @@ describe('FixedSalaryCloseService', () => {
       {
         id: 'staff-a',
         status: StaffStatus.active,
-        roles: [StaffRole.assistant, StaffRole.communication],
+        roles: [StaffRole.sale_customer_care_head, StaffRole.communication],
         user: { first_name: 'An', last_name: 'Nguyen' },
       },
       {
@@ -397,13 +419,13 @@ describe('FixedSalaryCloseService', () => {
       },
     );
     salaryDefaults.push(
-      { roleType: StaffRole.assistant, amount: 9_000_000 },
+      { roleType: StaffRole.sale_customer_care_head, amount: 9_000_000 },
       { roleType: StaffRole.communication, amount: 2_000_000 },
     );
     payables.push({
       id: 'existing',
       staffId: 'staff-a',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       month,
       status: 'pending',
       grossAmount: 1_000_000,
@@ -426,11 +448,15 @@ describe('FixedSalaryCloseService', () => {
       closedRoleCount: 1,
       totalGrossAmount: 3_000_000,
       roles: [
-        { roleType: StaffRole.assistant, status: 'closed', grossAmount: 1_000_000 },
         {
           roleType: StaffRole.communication,
           status: 'unclosed',
           grossAmount: 2_000_000,
+        },
+        {
+          roleType: StaffRole.sale_customer_care_head,
+          status: 'closed',
+          grossAmount: 1_000_000,
         },
       ],
     });
@@ -446,7 +472,7 @@ describe('FixedSalaryCloseService', () => {
       {
         id: 'staff-a',
         status: StaffStatus.active,
-        roles: [StaffRole.assistant],
+        roles: [StaffRole.sale_customer_care_head],
         user: { first_name: 'An', last_name: 'Nguyen' },
       },
       {
@@ -457,13 +483,13 @@ describe('FixedSalaryCloseService', () => {
       },
     );
     salaryDefaults.push(
-      { roleType: StaffRole.assistant, amount: 1_000_000 },
+      { roleType: StaffRole.sale_customer_care_head, amount: 1_000_000 },
       { roleType: StaffRole.communication, amount: 2_000_000 },
     );
     payables.push({
       id: 'existing',
       staffId: 'staff-a',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       month: '2026-09',
       status: 'pending',
       grossAmount: 1_000_000,

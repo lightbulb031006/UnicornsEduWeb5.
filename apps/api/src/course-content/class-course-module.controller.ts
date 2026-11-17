@@ -39,7 +39,7 @@ export class ClassCourseModuleController {
 
   @Get()
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Danh sách chuyên đề của khoá, đánh dấu chuyên đề lớp đã thêm và số tiết lý thuyết/thực hành.',
@@ -60,7 +60,7 @@ export class ClassCourseModuleController {
 
   @Post()
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Thêm cả chuyên đề vào lớp (chốt một lần): chép mọi tiết lý thuyết + thực hành đang có còn thiếu (tiết thực hành thành lần giao, mở bài lúc thêm, hạn = hạn xem nội dung của lớp), hiện lại item bị ẩn do lần gỡ trước (item gia sư tự ẩn giữ nguyên). Chuyên đề mới vào lớp lên đầu nhóm; lớp đã có nhóm thì giữ vị trí. Tiết khoá thêm về sau không tự vào lớp.',
@@ -93,7 +93,7 @@ export class ClassCourseModuleController {
 
   @Put('order')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Sắp lại thứ tự nhóm chuyên đề của lớp (học sinh thấy cùng thứ tự). Không đổi thứ tự chuyên đề cấp khoá.',
@@ -123,7 +123,7 @@ export class ClassCourseModuleController {
 
   @Get(':moduleId/removal-impact')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Ảnh hưởng nếu gỡ chuyên đề: số câu tự luận chưa chấm và số học sinh đang làm dở lần giao của chuyên đề.',
@@ -145,7 +145,7 @@ export class ClassCourseModuleController {
 
   @Delete(':moduleId')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.teacher)
+  @AllowStaffRolesOnAdminRoutes(StaffRole.teacher)
   @ApiOperation({
     summary:
       'Gỡ chuyên đề khỏi lớp: mọi tiết của chuyên đề (kể cả tiết đang Ẩn) biến mất ở mọi phía. Bài làm, điểm, lượt xem giữ nguyên; thêm lại chuyên đề thì hiện lại, tiết từng Ẩn vẫn ẩn.',

@@ -37,8 +37,21 @@ export async function getCustomerCareStudents(
       total: payload?.meta?.total ?? 0,
       page: payload?.meta?.page ?? page,
       limit: payload?.meta?.limit ?? limit,
+      assignedTotal:
+        payload?.meta?.assignedTotal ?? payload?.meta?.total ?? 0,
     },
   };
+}
+
+/**
+ * Số học sinh sẽ mất Người chăm sóc khi tắt role CSKH: mọi học sinh đang gán,
+ * kể cả đã nghỉ (`meta.assignedTotal`, chỉ tải 1 dòng).
+ */
+export async function getCustomerCareAssignedStudentCount(
+  staffId: string,
+): Promise<number> {
+  const result = await getCustomerCareStudents(staffId, { page: 1, limit: 1 });
+  return result.meta.assignedTotal;
 }
 
 export async function getMyMissingDropOutReasons(): Promise<CustomerCareMissingDropOutReasonList> {
@@ -119,18 +132,25 @@ export async function getCustomerCareCommissions(
     );
     return { data, summary };
   }
+  // #270: backend ẩn số tiền → giữ `null` để UI hiện «—», không ép về 0.
+  const amountsVisible = payload?.amountsVisible !== false;
   return {
-    data: (payload?.data ?? []).map((item) => ({
-      ...item,
-      monthCommission: item.monthCommission ?? item.totalCommission ?? 0,
-      pendingCommission: item.pendingCommission ?? 0,
-      paidCommission: item.paidCommission ?? 0,
-    })),
+    data: (payload?.data ?? []).map((item) =>
+      amountsVisible
+        ? {
+            ...item,
+            monthCommission: item.monthCommission ?? item.totalCommission ?? 0,
+            pendingCommission: item.pendingCommission ?? 0,
+            paidCommission: item.paidCommission ?? 0,
+          }
+        : item,
+    ),
     summary: payload?.summary ?? {
       studentCount: 0,
-      totalPending: 0,
-      totalMonthCommission: 0,
+      totalPending: amountsVisible ? 0 : null,
+      totalMonthCommission: amountsVisible ? 0 : null,
     },
+    amountsVisible,
   };
 }
 

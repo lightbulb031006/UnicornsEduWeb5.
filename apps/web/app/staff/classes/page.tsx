@@ -1,5 +1,8 @@
 "use client";
 
+import { hasSaleCsHeadAccess } from "@/lib/sale-cs-head-access";
+import { hasTrainingAccess } from "@/lib/training-access";
+import { TRAINING_HEAD_ROLE } from "@/lib/class-write-access";
 import { useQuery } from "@tanstack/react-query";
 import AdminClassesPage from "@/app/admin/classes/page";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,7 +28,7 @@ function hasStaffClassOpsListAccess(roles: string[], roleType?: string): boolean
   return (
     roleType === "admin" ||
     roles.includes("admin") ||
-    roles.includes("assistant") ||
+    hasSaleCsHeadAccess(roles) ||
     roles.includes("accountant_income") ||
     roles.includes("accountant_expense")
   );
@@ -49,12 +52,19 @@ export default function StaffClassesPage() {
     return <AdminClassesPage />;
   }
 
-  if (staffRoles.includes("training")) {
+  if (hasTrainingAccess(staffRoles)) {
+    // #277: Trưởng ban Đào tạo thấy mọi lớp (BE không lọc, đã ẩn học phí).
+    const isTrainingHead = staffRoles.includes(TRAINING_HEAD_ROLE);
     return (
       <AdminClassesPage
         classListFetcher={staffOpsApi.getClasses}
         forceReadOnlyList
-        pageSubtitle="Danh sách các lớp bạn đang được gán quản lý."
+        allowCreateClass={isTrainingHead}
+        pageSubtitle={
+          isTrainingHead
+            ? "Tất cả lớp học (không hiển thị học phí)."
+            : "Danh sách các lớp bạn đang được gán quản lý."
+        }
       />
     );
   }

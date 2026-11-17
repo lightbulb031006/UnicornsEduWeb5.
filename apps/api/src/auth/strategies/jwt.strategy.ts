@@ -20,6 +20,7 @@ interface AccessTokenPayload {
   accountHandle: string;
   roleType: UserRole;
   deviceId?: string;
+  iat?: number;
 }
 
 @Injectable()
@@ -55,7 +56,12 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw new UnauthorizedException();
     }
 
-    await this.assertLiveLoginDevice(user.id, user.roleType, payload.deviceId);
+    await this.assertLiveLoginDevice(
+      user.id,
+      user.roleType,
+      payload.deviceId,
+      payload.iat,
+    );
 
     return {
       id: user.id,
@@ -71,11 +77,17 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     userId: string,
     roleType: UserRole,
     deviceId?: string,
+    issuedAt?: number,
   ) {
     if (deviceId) {
       const device = await this.userDeviceService.findLiveDeviceById(deviceId);
       if (!device || device.userId !== userId) {
-        throw new UnauthorizedException(NO_ACTIVE_DEVICE_ERROR);
+        throw new UnauthorizedException(
+          await this.userDeviceService.resolveNoLiveDeviceError(
+            userId,
+            issuedAt,
+          ),
+        );
       }
       await this.userDeviceService.touchDeviceIfStale(device);
       return;

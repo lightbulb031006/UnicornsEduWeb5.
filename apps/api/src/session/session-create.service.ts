@@ -1,3 +1,4 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import {
   BadRequestException,
   ForbiddenException,
@@ -22,7 +23,12 @@ import {
 } from '../action-history/action-history.service';
 import { SessionCreateDto } from '../dtos/session.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { StaffOperationsAccessService } from '../staff-ops/staff-operations-access.service';
+import {
+  StaffOperationsAccessService,
+  canEditClassSessionCoefficient,
+  canWorkOnAllClassSessions,
+  type StaffClassWorkAccess,
+} from '../staff-ops/staff-operations-access.service';
 import { SessionLedgerService } from './session-ledger.service';
 import { SessionRosterService } from './session-roster.service';
 import { SessionSnapshotService } from './session-snapshot.service';
@@ -39,7 +45,10 @@ import {
 import { SessionScheduleRulesService } from './session-schedule-rules.service';
 import { computeTrainingManagerSessionSnapshot } from '../training-manager/training-manager.utils';
 import { createMemoizedTaxDeductionResolver } from '../payroll/deduction-rates';
-import { resolveAssistantManagerStaffIdForAttendance } from '../payroll/assistant-share.util';
+import {
+  resolveAssistantManagerStaffIdForAttendance,
+  resolveSaleCsHeadManagerId,
+} from '../payroll/assistant-share.util';
 import { syncLessonPlanHeadCommissions } from '../payroll/lesson-plan-head-commission.util';
 import {
   resolveLiveSessionAllowanceSnapshots,
@@ -169,6 +178,7 @@ export class SessionCreateService {
             },
             select: {
               customAllowance: true,
+              customAllowancePerSession: true,
               customScaleAmount: true,
               operatingDeductionRatePercent: true,
               class: {
@@ -306,12 +316,16 @@ export class SessionCreateService {
           if (uniqueCareStaffIds.length > 0) {
             const careStaff = await tx.staffInfo.findMany({
               where: { id: { in: uniqueCareStaffIds } },
-              select: { id: true, customerCareManagedByStaffId: true },
+              select: {
+                id: true,
+                customerCareManagedByStaffId: true,
+                customerCareManagedBy: { select: { roles: true } },
+              },
             });
             careStaff.forEach((s) =>
               assistantManagerByStaffId.set(
                 s.id,
-                s.customerCareManagedByStaffId,
+                resolveSaleCsHeadManagerId(s),
               ),
             );
           }
@@ -397,6 +411,7 @@ export class SessionCreateService {
               classTeacher.customAllowance,
               reconstructionBlocks,
               storedAsPerBlock,
+              classTeacher.customAllowancePerSession,
             ),
           });
           const snapshotPerStudentAllowance =
@@ -595,12 +610,12 @@ export class SessionCreateService {
                 transactionId: studentTransactionAttendanceId.get(
                   attendanceItem.studentId,
                 ),
-                assistantManagerStaffId: assistantId,
-                assistantPaymentStatus: assistantId
+                saleCsHeadStaffId: assistantId,
+                saleCsHeadPaymentStatus: assistantId
                   ? PaymentStatus.pending
                   : null,
-                assistantTaxDeductionRatePercent: assistantId
-                  ? await getTaxRate(assistantId, StaffRole.assistant)
+                saleCsHeadTaxDeductionRatePercent: assistantId
+                  ? await getTaxRate(assistantId, SALE_CS_HEAD_ROLE)
                   : 0,
               };
             }),
@@ -740,6 +755,42 @@ export class SessionCreateService {
     );
   }
 
+  /**
+   * Gia sư của buổi tạo từ staff-ops (#275):
+   * - Admin / Quản lý lớp: chọn bất kỳ gia sư nào của lớp; không chọn thì lấy
+   *   chính mình nếu cũng là gia sư của lớp, hoặc gia sư duy nhất của lớp.
+   * - Gia sư: luôn là chính mình; chọn gia sư khác → 403.
+   */
+  private async resolveStaffSessionTeacherId(
+    access: StaffClassWorkAccess,
+    classId: string,
+    requestedTeacherId: string | undefined,
+  ): Promise<string> {
+    const requested = requestedTeacherId?.trim() || undefined;
+
+    if (requested) {
+      if (!canWorkOnAllClassSessions(access) && requested !== access.staffId) {
+        throw new ForbiddenException(
+          'Gia sư chỉ được tạo buổi học do chính mình dạy.',
+        );
+      }
+      const assignment = await this.prisma.classTeacher.findUnique({
+        where: { classId_teacherId: { classId, teacherId: requested } },
+        select: { teacherId: true },
+      });
+      if (!assignment) {
+        throw new BadRequestException('Gia sư được chọn không dạy lớp này.');
+      }
+      return requested;
+    }
+
+    if (access.isClassTeacher && access.staffId) {
+      return access.staffId;
+    }
+
+    return this.staffOperationsAccess.resolveSingleTeacherForClass(classId);
+  }
+
   async createSessionForStaff(
     userId: string,
     roleType: UserRole,
@@ -754,6 +805,8 @@ export class SessionCreateService {
       tutorial: string;
       recordingUrl?: string | null;
       coefficient?: number;
+      /** #275: Admin / Quản lý lớp chọn gia sư (phải là gia sư của lớp). */
+      teacherId?: string;
       attendance?: Array<
         AttendanceReviewInput & {
           studentId: string;
@@ -764,17 +817,33 @@ export class SessionCreateService {
     } & SessionReviewInput,
     auditActor?: ActionHistoryActor,
   ) {
-    const actor = await this.staffOperationsAccess.resolveActor(
+    // #275: Admin, gia sư của lớp hoặc Quản lý lớp (hợp quyền). Lớp khác → 403.
+    const access = await this.staffOperationsAccess.resolveClassWorkAccess(
       userId,
       roleType,
+      classId,
     );
-    const isTeacher = actor.roles.includes(StaffRole.teacher);
-    if (isTeacher) {
-      await this.staffOperationsAccess.assertTeacherAssignedToClass(
-        actor.id,
-        classId,
+    const teacherId = await this.resolveStaffSessionTeacherId(
+      access,
+      classId,
+      data.teacherId,
+    );
+
+    // Hệ số / Dạy thử: chỉ Admin hoặc gia sư tạo buổi của chính mình.
+    const requestedCoefficient =
+      this.sessionValidationService.normalizeCoefficient(data.coefficient);
+    if (
+      requestedCoefficient !== undefined &&
+      requestedCoefficient !== 1 &&
+      !canEditClassSessionCoefficient(access, teacherId)
+    ) {
+      throw new ForbiddenException(
+        'Quản lý lớp không được đặt hệ số hay đánh dấu dạy thử cho buổi của gia sư khác.',
       );
-      await this.assertNoSurveyDeadlineBlock(classId, actor.id);
+    }
+
+    if (!access.isAdmin) {
+      await this.assertNoSurveyDeadlineBlock(classId, teacherId);
     }
 
     if (data.attendance && data.attendance.length > 0) {
@@ -784,16 +853,12 @@ export class SessionCreateService {
       );
     }
 
-    const teacherId = isTeacher
-      ? actor.id
-      : await this.staffOperationsAccess.resolveSingleTeacherForClass(classId);
-
     return this.createSession(
       {
         classId,
         teacherId,
         date: data.date,
-        // Dạy thử (coefficient = 0): mọi role staff-ops (gia sư, trợ lí, …) đều bật được.
+        // Dạy thử (coefficient = 0): Admin hoặc gia sư trên buổi của mình (#275).
         coefficient: data.coefficient,
         startTime: data.startTime,
         endTime: data.endTime,

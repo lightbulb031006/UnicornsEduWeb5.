@@ -298,13 +298,23 @@ export function pricingModeForCourse(
   return current === "one_time" ? "per_session" : current;
 }
 
-/** Lớp bán một lần phải có Tổng gói > 0đ. Trả lỗi để toast, hoặc null nếu hợp lệ. */
+/**
+ * Lớp bán một lần: Tổng gói đã điền thì phải > 0đ. Được để trống khi lớp chưa có
+ * học sinh học (`allowEmpty`) — điều kiện > 0đ dời sang lúc nhận học sinh đầu tiên
+ * (follow-up grill 13/11). Trả lỗi để toast, hoặc null nếu hợp lệ.
+ */
 export function oneTimePackageError(
   mode: ClassPricingMode,
   packageTotal: number | null | undefined,
+  options: { allowEmpty?: boolean } = {},
 ): string | null {
   if (mode !== "one_time") return null;
-  if (packageTotal == null || !Number.isFinite(packageTotal) || packageTotal <= 0) {
+  if (packageTotal == null) {
+    return options.allowEmpty
+      ? null
+      : "Lớp bán một lần đang có hoặc sắp nhận học sinh, phải có Tổng gói lớn hơn 0đ.";
+  }
+  if (!Number.isFinite(packageTotal) || packageTotal <= 0) {
     return "Lớp thuộc khoá bán một lần phải có Tổng gói lớn hơn 0đ.";
   }
   return null;

@@ -28,6 +28,21 @@ function formatDuration(course: Course) {
   return `${course.defaultDurationDays} ngày`;
 }
 
+function CourseLockedBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded bg-bg-tertiary px-1.5 py-0.5 text-xs text-text-muted"
+      title="Bạn chưa được gán vào đội chuyên môn của khoá này nên không xem được nội dung."
+    >
+      <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <rect x="5" y="11" width="14" height="10" rx="2" strokeWidth={2} />
+        <path strokeLinecap="round" strokeWidth={2} d="M8 11V7a4 4 0 018 0v4" />
+      </svg>
+      Chưa được gán
+    </span>
+  );
+}
+
 export default function CourseListWorkspace({
   routeBase,
 }: {
@@ -192,27 +207,35 @@ export default function CourseListWorkspace({
               </button>
             </div>
           ) : courses.length === 0 ? (
-            <p className="p-4 text-sm text-text-secondary">
-              {capabilities.canViewAllCourses
-                ? "Chưa có khoá học nào."
-                : "Bạn chưa được gán vào đội giáo án của khoá nào."}
-            </p>
+            <p className="p-4 text-sm text-text-secondary">Chưa có khoá học nào.</p>
           ) : (
             <ul className="space-y-2">
-              {courses.map((course) => (
+              {courses.map((course) => {
+                // Mọi người thấy mọi khoá; chỉ khoá được gán (hoặc admin) mới vào được nội dung.
+                const canOpen = course.canAccessContent !== false;
+                return (
                 <li
                   key={course.id}
-                  {...rowLink(capabilities.detailHref(course.id), `Xem khoá ${course.name}`)}
-                  className={`flex flex-col gap-3 rounded-lg border border-border-default bg-bg-surface p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4 ${ROW_LINK_INTERACTION_CLASS}`}
+                  {...(canOpen
+                    ? rowLink(capabilities.detailHref(course.id), `Xem khoá ${course.name}`)
+                    : {})}
+                  className={`flex flex-col gap-3 rounded-lg border border-border-default p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4 ${
+                    canOpen ? `bg-bg-surface ${ROW_LINK_INTERACTION_CLASS}` : "bg-bg-secondary/60"
+                  }`}
                 >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        href={capabilities.detailHref(course.id)}
-                        className="font-medium text-text-primary hover:text-primary hover:underline"
-                      >
-                        {course.name}
-                      </Link>
+                      {canOpen ? (
+                        <Link
+                          href={capabilities.detailHref(course.id)}
+                          className="font-medium text-text-primary hover:text-primary hover:underline"
+                        >
+                          {course.name}
+                        </Link>
+                      ) : (
+                        <span className="font-medium text-text-secondary">{course.name}</span>
+                      )}
+                      {!canOpen ? <CourseLockedBadge /> : null}
                       {!course.isActive ? (
                         <span className="rounded bg-error/10 px-1.5 py-0.5 text-xs text-error">
                           Đã ẩn
@@ -227,7 +250,7 @@ export default function CourseListWorkspace({
                         <span>Mức độ khó: {course._count.difficultyLevels}</span>
                       ) : null}
                       {typeof course._count?.lessonPlanMembers === "number" ? (
-                        <span>Đội giáo án: {course._count.lessonPlanMembers}</span>
+                        <span>Đội chuyên môn: {course._count.lessonPlanMembers}</span>
                       ) : null}
                       {typeof course._count?.classes === "number" ? (
                         <span>Lớp học: {course._count.classes}</span>
@@ -235,7 +258,7 @@ export default function CourseListWorkspace({
                     </div>
                   </div>
 
-                  {capabilities.canMutateCourses ? (
+                  {capabilities.canMutateCourses && canOpen ? (
                     <div className="flex shrink-0 items-center gap-3 self-end sm:self-auto">
                       <label className="flex items-center gap-2 text-xs text-text-secondary">
                         <span>Hoạt động</span>
@@ -262,7 +285,8 @@ export default function CourseListWorkspace({
                     </div>
                   ) : null}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>

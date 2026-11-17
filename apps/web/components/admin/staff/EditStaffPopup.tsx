@@ -1,5 +1,6 @@
 "use client";
 
+import { SALE_CS_HEAD_ROLE } from "@/lib/sale-cs-head-access";
 import { useMemo, useState, type ReactNode, type SyntheticEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -31,8 +32,14 @@ import {
   type DisabledRoleOverrideWarning,
 } from "@/lib/fixed-salary-settings.helpers";
 import { moneyInputInitialFromNumber } from "@/lib/money-input.helpers";
-import { LESSON_PLAN_LABEL, ROLE_LABELS } from "@/lib/staff.constants";
+import {
+  LESSON_PLAN_HEAD_ROLE_LABEL,
+  LESSON_PLAN_ROLE_LABEL,
+  ROLE_LABELS,
+} from "@/lib/staff.constants";
 import { runBackgroundSave } from "@/lib/mutation-feedback";
+import { isRemovingCustomerCareRole } from "@/lib/customer-care-role-release";
+import { useConfirmCustomerCareRelease } from "@/components/customer-care/useConfirmCustomerCareRelease";
 
 type Props = {
   open: boolean;
@@ -67,15 +74,16 @@ const STATUS_OPTIONS: { value: StaffDetail["status"]; label: string; hint: strin
 const ROLE_OPTIONS: { value: string; label: string }[] = [
   { value: "admin", label: "Admin" },
   { value: "teacher", label: "Giáo viên" },
-  { value: "assistant", label: "Trợ lí" },
-  { value: "lesson_plan", label: LESSON_PLAN_LABEL },
-  { value: "lesson_plan_head", label: "Trưởng giáo án" },
+  { value: "sale_customer_care_head", label: "Trưởng phòng Sale & CSKH" },
+  { value: "lesson_plan", label: LESSON_PLAN_ROLE_LABEL },
+  { value: "lesson_plan_head", label: LESSON_PLAN_HEAD_ROLE_LABEL },
   { value: "accountant_income", label: "Kế toán thu" },
   { value: "accountant_expense", label: "Kế toán chi" },
   { value: "communication", label: "Truyền thông" },
   { value: "technical", label: "Kỹ thuật" },
   { value: "customer_care", label: "CSKH" },
-  { value: "training", label: "Đào Tạo" },
+  { value: "training", label: ROLE_LABELS.training },
+  { value: "training_head", label: ROLE_LABELS.training_head },
   { value: "sale", label: "Sale" },
 ];
 
@@ -101,6 +109,8 @@ export default function EditStaffPopup({
   canDeleteAvatar = false,
 }: Props) {
   const queryClient = useQueryClient();
+  const { confirmRelease, dialog: customerCareReleaseDialog } =
+    useConfirmCustomerCareRelease();
 
   const [fullName, setFullName] = useState(staff.fullName ?? "");
   const [cccdNumber, setCccdNumber] = useState(staff.cccdNumber ?? "");
@@ -161,7 +171,7 @@ export default function EditStaffPopup({
   });
 
   const hasCustomerCareRole = selectedRoles.has("customer_care");
-  const hasAssistantRole = selectedRoles.has("assistant");
+  const hasAssistantRole = selectedRoles.has(SALE_CS_HEAD_ROLE);
   const isDualRole = hasCustomerCareRole && hasAssistantRole;
   const showManagedByField = hasCustomerCareRole && !isDualRole;
   const showRevenueShareField = selectedRoles.has("lesson_plan_head");
@@ -372,7 +382,13 @@ export default function EditStaffPopup({
     }
   };
 
-  const submit = ({ inactiveConfirmed }: { inactiveConfirmed: boolean }) => {
+  const submit = ({
+    inactiveConfirmed,
+    customerCareReleaseConfirmed = false,
+  }: {
+    inactiveConfirmed: boolean;
+    customerCareReleaseConfirmed?: boolean;
+  }) => {
     if (overridesQuery.isLoading || overridesQuery.isError) {
       return;
     }
@@ -401,6 +417,22 @@ export default function EditStaffPopup({
 
     const roleFixedSalaryOverrides = buildRoleFixedSalaryOverrides();
     if (!roleFixedSalaryOverrides) return;
+
+    // Follow-up 13/11 mục 2.1: tắt CSKH → học sinh mất Người chăm sóc ngay.
+    if (
+      !customerCareReleaseConfirmed &&
+      isRemovingCustomerCareRole(staff.roles ?? [], selectedRoles)
+    ) {
+      void confirmRelease({
+        staffId: staff.id,
+        staffName: fullName.trim() || staff.fullName || "",
+      }).then((confirmed) => {
+        if (confirmed) {
+          submit({ inactiveConfirmed, customerCareReleaseConfirmed: true });
+        }
+      });
+      return;
+    }
 
     const warnings = collectDisabledRoleOverrideWarnings({
       originalRoles: staff.roles ?? [],
@@ -805,7 +837,7 @@ export default function EditStaffPopup({
                           opt.value === "customer_care" &&
                           showManagedByField ? (
                             <label className="mt-2 flex flex-col gap-1 text-sm text-text-secondary">
-                              <span>Trợ lí quản lí (3% học phí)</span>
+                              <span>Trưởng phòng Sale & CSKH quản lí (hoa hồng trưởng phòng 3% học phí)</span>
                               <UpgradedSelect
                                 name="staff-customer-care-managed-by"
                                 value={managedByStaffId ?? ""}
@@ -819,11 +851,11 @@ export default function EditStaffPopup({
                                     label: assistant.fullName,
                                   })),
                                 ]}
-                                ariaLabel="Trợ lí quản lí CSKH"
+                                ariaLabel="Trưởng phòng Sale & CSKH quản lí CSKH"
                                 buttonClassName="rounded-md border border-border-default bg-bg-surface px-3 py-2.5 text-text-primary focus:border-border-focus focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
                               />
                               <span className="text-xs leading-snug text-text-muted">
-                                Trợ lí được chọn sẽ nhận 3% học phí đã học từ học sinh
+                                Trưởng phòng được chọn sẽ nhận 3% học phí đã học từ học sinh
                                 do CSKH này phụ trách.
                               </span>
                             </label>
@@ -838,7 +870,7 @@ export default function EditStaffPopup({
                       <StaffFieldRow
                         id="staff-revenue-share"
                         label="% hoa hồng doanh thu"
-                        hint="Trưởng giáo án nhận % này trên tổng doanh thu hệ thống mỗi tháng."
+                        hint="Trưởng ban Chuyên môn nhận % này trên tổng doanh thu hệ thống mỗi tháng."
                       >
                         <input
                           id="staff-revenue-share"
@@ -908,6 +940,8 @@ export default function EditStaffPopup({
         variant="destructive"
         onConfirm={confirmOverrideRemoval}
       />
+
+      {customerCareReleaseDialog}
 
       <ConfirmDialog
         open={inactiveConfirmOpen}

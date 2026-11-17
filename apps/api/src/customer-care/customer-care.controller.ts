@@ -340,7 +340,7 @@ export class CustomerCareController {
   @ApiOperation({
     summary: 'Bulk overwrite CSKH profit percent for selected students',
     description:
-      'Ghi đè profitPercent cho các học sinh đã chọn (chỉ trong phạm vi staffId này). Chỉ admin hoặc staff có role trợ lí được gọi. Không hồi tố: chỉ áp dụng từ session tạo/sửa tiếp theo.',
+      'Ghi đè profitPercent cho các học sinh đã chọn (chỉ trong phạm vi staffId này). Chỉ admin hoặc staff có role Trưởng phòng Sale & CSKH được gọi. Không hồi tố: chỉ áp dụng từ session tạo/sửa tiếp theo.',
   })
   @ApiParam({ name: 'staffId', description: 'Staff ID' })
   @ApiBody({

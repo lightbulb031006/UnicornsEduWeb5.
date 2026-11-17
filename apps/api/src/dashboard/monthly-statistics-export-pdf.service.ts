@@ -17,8 +17,9 @@ const EXPENSE_SERIES: Array<{
   { key: 'bonusCost', name: 'Thưởng', color: '#8b5cf6' },
   { key: 'extraAllowanceCost', name: 'Trợ cấp khác', color: '#ea580c' },
   { key: 'fixedSalaryCost', name: 'Lương cứng', color: '#0d9488' },
-  { key: 'assistantCost', name: 'Trợ lí', color: '#0891b2' },
+  { key: 'assistantCost', name: 'Hoa hồng trưởng phòng', color: '#0891b2' },
   { key: 'trainingManagerCost', name: 'QL lớp', color: '#ca8a04' },
+  { key: 'lessonPlanHeadCost', name: 'HH TGA', color: '#9a5b2e' },
   { key: 'operatingCost', name: 'Vận hành', color: '#64748b' },
 ];
 
@@ -399,7 +400,11 @@ const EXPENSE_METRIC_GLOSSARY: Array<{ term: string; definition: string }> = [
     definition:
       'Lương cứng đã chốt cho tháng đó. Tháng chưa chốt thì khoản này bằng 0.',
   },
-  { term: 'Trợ lí', definition: 'Tiền hỗ trợ trả cho trợ lí lớp trong tháng.' },
+  {
+    term: 'Hoa hồng trưởng phòng',
+    definition:
+      'Hoa hồng 3% học phí trả cho Trưởng phòng Sale & CSKH trên nhóm CSKH mình quản lí trong tháng.',
+  },
   { term: 'QL lớp', definition: 'Tiền hỗ trợ người quản lý lớp trong tháng.' },
   {
     term: 'Vận hành',

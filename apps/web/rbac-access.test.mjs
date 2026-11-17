@@ -131,7 +131,7 @@ test("non-admin staff roles are blocked from staff shell until profile and data 
     ["technical", "/staff/technical-detail"],
     ["customer_care", "/staff/customer-care-detail"],
     ["training", "/staff/training-detail"],
-    ["assistant", "/staff/users"],
+    ["sale_customer_care_head", "/staff/users"],
   ];
 
   for (const [staffRole, pathname] of roleRoutes) {
@@ -317,7 +317,7 @@ test("notification composer opens for publisher staff roles, not teacher or cust
     ).isAllowed;
 
   for (const role of [
-    "assistant",
+    "sale_customer_care_head",
     "lesson_plan",
     "lesson_plan_head",
     "accountant_income",
@@ -484,7 +484,7 @@ test("admin extra allowance management is open to admin, assistant, and expense 
   });
   const assistant = adminShellAccess.resolveAdminShellAccess({
     roleType: "staff",
-    staffRoles: ["assistant"],
+    staffRoles: ["sale_customer_care_head"],
     hasStaffProfile: true,
   });
   const expenseAccountant = adminShellAccess.resolveAdminShellAccess({
@@ -714,7 +714,7 @@ test("student admin capabilities keep assistant on request-only direct-topup whi
   const assistantCapabilities = adminShellAccess.resolveStudentAdminCapabilities(
     {
       roleType: "staff",
-      staffRoles: ["assistant"],
+      staffRoles: ["sale_customer_care_head"],
       hasStaffProfile: true,
       ...completedStaffAccess,
     },
@@ -747,7 +747,7 @@ test("student admin capabilities keep assistant on request-only direct-topup whi
 test("assistant keeps admin shell access to deductions and notifications but not direct-topup queue", () => {
   const access = adminShellAccess.resolveAdminShellAccess({
     roleType: "staff",
-    staffRoles: ["assistant"],
+    staffRoles: ["sale_customer_care_head"],
     hasStaffProfile: true,
     ...completedStaffAccess,
   });
@@ -776,7 +776,7 @@ test("assistant keeps admin shell access to deductions and notifications but not
 test("assistant staff shell can open system settings and legacy deductions redirect path", () => {
   const assistant = {
     roleType: "staff",
-    staffRoles: ["assistant"],
+    staffRoles: ["sale_customer_care_head"],
     hasStaffProfile: true,
     ...completedStaffAccess,
   };

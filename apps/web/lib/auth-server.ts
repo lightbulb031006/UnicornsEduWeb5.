@@ -1,4 +1,9 @@
-import { createGuestUser, Role, UserInfoDto } from "@/dtos/Auth.dto";
+import {
+  createGuestUser,
+  Role,
+  SIGNED_OUT_REASON_DEVICE_SUPERSEDED,
+  UserInfoDto,
+} from "@/dtos/Auth.dto";
 import { getServerApiOrigin } from "@/lib/api-base-url";
 import { cookies } from "next/headers";
 
@@ -80,6 +85,7 @@ export async function getUser(cookieHeader?: string): Promise<UserInfoDto> {
       defaultWorkspace?: "admin" | "staff" | "student" | null;
       preferredRedirect?: string;
       access?: UserInfoDto["access"];
+      signedOutReason?: string;
     };
 
     const roleType = normalizeRole(data.roleType) ?? Role.guest;
@@ -122,6 +128,9 @@ export async function getUser(cookieHeader?: string): Promise<UserInfoDto> {
         },
         student: { canAccess: Boolean(data.hasStudentProfile) },
       },
+      ...(data.signedOutReason === SIGNED_OUT_REASON_DEVICE_SUPERSEDED
+        ? { signedOutReason: SIGNED_OUT_REASON_DEVICE_SUPERSEDED }
+        : {}),
     };
   } catch {
     return createGuestUser();

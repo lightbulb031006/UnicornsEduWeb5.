@@ -7,6 +7,7 @@ type GalleryLandingRow = {
   caption: string | null;
   imageWatermarkedPath: string | null;
   sortOrder: number;
+  createdAt: Date;
 };
 
 /** Map gallery rows to landing DTOs using watermarked public URLs only. */
@@ -22,5 +23,6 @@ export function mapLandingStudentGallery(
       path: row.imageWatermarkedPath,
     }),
     sortOrder: row.sortOrder,
+    createdAt: row.createdAt.toISOString(),
   }));
 }

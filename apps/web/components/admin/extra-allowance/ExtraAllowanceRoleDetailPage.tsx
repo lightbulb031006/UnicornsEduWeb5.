@@ -1,5 +1,6 @@
 "use client";
 
+import { SALE_CS_HEAD_ROLE } from "@/lib/sale-cs-head-access";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState, useEffect } from "react";
@@ -56,12 +57,12 @@ const EMPTY_ALLOWANCES: ExtraAllowanceListItem[] = [];
 
 type SupportedRoleType = Extract<
   ExtraAllowanceRoleType,
-  | "assistant"
+  | "sale_customer_care_head"
   | "communication"
   | "technical"
   | "training"
+  | "training_head"
   | "sale"
-  | "accountant"
   | "accountant_income"
   | "accountant_expense"
 >;
@@ -77,7 +78,7 @@ type RoleTheme = {
 };
 
 const ROLE_THEMES: Record<SupportedRoleType, RoleTheme> = {
-  assistant: {
+  sale_customer_care_head: {
     listGradientClassName: "bg-bg-surface",
     listGlowTopClassName: "bg-warning/12",
     listGlowBottomClassName: "bg-primary/10",
@@ -123,6 +124,18 @@ const ROLE_THEMES: Record<SupportedRoleType, RoleTheme> = {
       "border-secondary/15 bg-secondary/5 hover:bg-secondary/8",
     popupGlowClassName: "bg-secondary/10",
   },
+  training_head: {
+    listGradientClassName: "bg-bg-surface",
+    listGlowTopClassName: "bg-secondary/12",
+    listGlowBottomClassName: "bg-info/10",
+    selectionBadgeClassName:
+      "border-secondary/15 bg-secondary/8 text-secondary",
+    activeCardClassName:
+      "border-secondary/35 bg-secondary/5 shadow-[0_20px_36px_-26px_color-mix(in_srgb,var(--ue-secondary)_40%,transparent)]",
+    activeRowClassName:
+      "border-secondary/15 bg-secondary/5 hover:bg-secondary/8",
+    popupGlowClassName: "bg-secondary/10",
+  },
   sale: {
     listGradientClassName: "bg-bg-surface",
     listGlowTopClassName: "bg-success/12",
@@ -131,18 +144,6 @@ const ROLE_THEMES: Record<SupportedRoleType, RoleTheme> = {
     activeCardClassName:
       "border-success/35 bg-success/5 shadow-[0_20px_36px_-26px_color-mix(in_srgb,var(--ue-success)_40%,transparent)]",
     activeRowClassName: "border-success/15 bg-success/5 hover:bg-success/8",
-    popupGlowClassName: "bg-success/10",
-  },
-  accountant: {
-    listGradientClassName: "bg-bg-surface",
-    listGlowTopClassName: "bg-success/12",
-    listGlowBottomClassName: "bg-info/10",
-    selectionBadgeClassName:
-      "border-success/15 bg-success/8 text-success",
-    activeCardClassName:
-      "border-success/35 bg-success/5 shadow-[0_20px_36px_-26px_color-mix(in_srgb,var(--ue-success)_40%,transparent)]",
-    activeRowClassName:
-      "border-success/15 bg-success/5 hover:bg-success/8",
     popupGlowClassName: "bg-success/10",
   },
   accountant_income: {
@@ -302,9 +303,10 @@ export default function ExtraAllowanceRoleDetailPage({
   const monthQuery = toExtraAllowanceMonthQuery(selectedMonth);
   const selectedMonthLabel = formatMonthKeyLabel(monthQuery.monthKey);
   const showAssistantCommissionTab =
-    roleType === "assistant" && Boolean(normalizedStaffId);
+    roleType === SALE_CS_HEAD_ROLE && Boolean(normalizedStaffId);
   const showTrainingClassesTab =
-    roleType === "training" && Boolean(normalizedStaffId);
+    (roleType === "training" || roleType === "training_head") &&
+    Boolean(normalizedStaffId);
   const { data: fullProfile } = useQuery({
     queryKey: ["auth", "full-profile"],
     queryFn: getFullProfile,

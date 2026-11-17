@@ -16,12 +16,11 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { StaffRole, UserRole } from 'generated/enums';
+import { UserRole } from 'generated/enums';
 import {
   CurrentUser,
   type JwtPayload,
 } from 'src/auth/decorators/current-user.decorator';
-import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
   type RegulationItemDto,
@@ -41,7 +40,7 @@ export class RegulationController {
   @ApiOperation({
     summary: 'List regulations for the current actor',
     description:
-      'Admin and assistant receive the full list. Other staff only receive regulations matching their role tags.',
+      'Admin receives the full list. Other staff (including sale_customer_care_head) only receive regulations matching their role tags.',
   })
   @ApiResponse({
     status: 200,
@@ -55,7 +54,6 @@ export class RegulationController {
 
   @Post()
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Create a regulation',
     description:
@@ -82,7 +80,6 @@ export class RegulationController {
 
   @Patch(':id')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update a regulation',
     description:
@@ -114,7 +111,6 @@ export class RegulationController {
 
   @Delete(':id')
   @Roles(UserRole.admin)
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Delete a regulation',
     description:

@@ -3,7 +3,56 @@ import {
   isSelfManagedAssistantShareAttendance,
   isSelfManagedCustomerCareStaff,
   resolveAssistantManagerStaffIdForAttendance,
+  resolveSaleCsHeadManagerId,
 } from './assistant-share.util';
+import { StaffRole } from 'generated/enums';
+
+describe('resolveSaleCsHeadManagerId (#271)', () => {
+  it('trả manager khi người quản lý còn role Trưởng phòng', () => {
+    expect(
+      resolveSaleCsHeadManagerId({
+        customerCareManagedByStaffId: 'head-1',
+        customerCareManagedBy: {
+          roles: [StaffRole.sale_customer_care_head, StaffRole.customer_care],
+        },
+      }),
+    ).toBe('head-1');
+  });
+
+  it('không ai nhận hoa hồng khi người quản lý đã mất role Trưởng phòng', () => {
+    expect(
+      resolveSaleCsHeadManagerId({
+        customerCareManagedByStaffId: 'ex-head',
+        customerCareManagedBy: { roles: [StaffRole.customer_care] },
+      }),
+    ).toBeNull();
+  });
+
+  it('không có người quản lý → null', () => {
+    expect(
+      resolveSaleCsHeadManagerId({
+        customerCareManagedByStaffId: null,
+        customerCareManagedBy: null,
+      }),
+    ).toBeNull();
+  });
+
+  it('nhiều trưởng phòng: mỗi CSKH tính cho đúng người quản lý của mình', () => {
+    const headRoles = { roles: [StaffRole.sale_customer_care_head] };
+    expect(
+      [
+        {
+          customerCareManagedByStaffId: 'head-1',
+          customerCareManagedBy: headRoles,
+        },
+        {
+          customerCareManagedByStaffId: 'head-2',
+          customerCareManagedBy: headRoles,
+        },
+      ].map(resolveSaleCsHeadManagerId),
+    ).toEqual(['head-1', 'head-2']);
+  });
+});
 
 describe('assistant-share.util', () => {
   it('detects self-managed staff FK', () => {
@@ -30,13 +79,13 @@ describe('assistant-share.util', () => {
   it('detects self-managed attendance snapshot', () => {
     expect(
       isSelfManagedAssistantShareAttendance({
-        assistantManagerStaffId: 'x',
+        saleCsHeadStaffId: 'x',
         customerCareStaffId: 'x',
       }),
     ).toBe(true);
     expect(
       isSelfManagedAssistantShareAttendance({
-        assistantManagerStaffId: 'x',
+        saleCsHeadStaffId: 'x',
         customerCareStaffId: 'y',
       }),
     ).toBe(false);

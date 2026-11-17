@@ -15,6 +15,8 @@ export interface UpdateClassTrainingManagerDto {
 export interface TrainingManagerManagedClassDto {
   classId: string;
   className: string;
+  /** % QLL hiện hành của lớp — áp cho buổi tạo mới. */
+  trainingManagerRatePercent: number;
   monthTotal: number;
   pendingTotal: number;
 }
@@ -26,6 +28,10 @@ export interface TrainingManagerManagedClassListDto {
     totalMonth: number;
     totalPending: number;
   };
+}
+
+export interface UpdateTrainingManagerSessionRateDto {
+  trainingManagerRatePercent: number;
 }
 
 export interface TrainingManagerBulkPaymentStatusUpdateDto {

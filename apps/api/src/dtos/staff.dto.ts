@@ -183,7 +183,7 @@ export class CreateStaffDto {
 
   @ApiPropertyOptional({
     description:
-      'Staff id of the assistant who manages this CSKH staff (only valid when staff has customer_care role)',
+      'Staff id of the Sale & CSKH head (sale_customer_care_head) who manages this CSKH staff (only valid when staff has customer_care role)',
     example: 'UNISTAFF-c3d4e5f6a7',
   })
   @IsOptional()
@@ -202,7 +202,7 @@ export class CreateStaffDto {
   @ApiPropertyOptional({
     example: 3,
     description:
-      'Tỷ lệ % hoa hồng trên tổng doanh thu hệ thống, áp dụng cho nhân sự có vai trò lesson_plan_head (Trưởng giáo án). Đơn vị phần trăm (VD: 3 = 3%).',
+      'Tỷ lệ % hoa hồng trên tổng doanh thu hệ thống, áp dụng cho nhân sự có vai trò lesson_plan_head (Trưởng ban Chuyên môn). Đơn vị phần trăm (VD: 3 = 3%).',
   })
   @IsOptional()
   @IsNumber()
@@ -484,12 +484,20 @@ export interface StaffPaymentPreviewSectionDto extends StaffPaymentPreviewTotals
   sources: StaffPaymentPreviewSourceDto[];
 }
 
+/** Cảnh báo chưa dạy thử: một lớp còn trợ cấp buổi chờ trả mà gia sư chưa có buổi dạy thử. */
+export interface StaffTrialTeachingWarningDto {
+  classId: string;
+  className: string;
+}
+
 export interface StaffPaymentPreviewDto {
   staffId: string;
   month: string;
   taxAsOfDate: string;
   summary: StaffPaymentPreviewTotalsDto;
   sections: StaffPaymentPreviewSectionDto[];
+  /** Chỉ cảnh báo, không chặn thanh toán; lớp đã bỏ qua không có ở đây. */
+  trialTeachingWarnings: StaffTrialTeachingWarningDto[];
 }
 
 export class StaffPayAllPaymentsDto extends StaffPaymentMonthDto {}
@@ -679,4 +687,27 @@ export interface StaffPayDepositSessionsResultDto {
   requestedItemCount: number;
   updatedCount: number;
   updatedSessionIds: string[];
+}
+
+/**
+ * PATCH /staff/:id/training-roles — Trưởng ban Đào tạo bật/tắt role gia sư /
+ * chuyên môn / đào tạo của nhân sự khác. Role ngoài 3 role này → 403.
+ */
+export class UpdateStaffTrainingRolesDto {
+  @ApiProperty({
+    description:
+      'Trạng thái đích của các role quản lý được (teacher, lesson_plan, training). Role khác của nhân sự giữ nguyên; gửi role ngoài phạm vi → 403.',
+    enum: StaffRole,
+    isArray: true,
+    example: [StaffRole.teacher, StaffRole.lesson_plan],
+  })
+  @IsArray()
+  @IsEnum(StaffRole, { each: true })
+  roles: StaffRole[];
+}
+
+/** Không kèm tiền/PII — chỉ danh sách role sau khi lưu. */
+export interface StaffTrainingRolesResultDto {
+  id: string;
+  roles: StaffRole[];
 }

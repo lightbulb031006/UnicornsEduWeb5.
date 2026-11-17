@@ -28,6 +28,7 @@ import { MonthInput } from "@/components/ui/MonthInput";
 import { getDefaultMonthKey, parseMonthKey } from "@/lib/month-format";
 import { toast } from "sonner";
 import { formatVnNumber } from "@/lib/formatters";
+import { useGiftedLessonPlanEnabled } from "@/lib/gifted-lesson-plan";
 
 const RECENT_DAYS = 30;
 const EMPTY_OUTPUTS: LessonWorkOutputItem[] = [];
@@ -140,6 +141,9 @@ export default function AdminLessonPlanDetailPage() {
   const isLessonPlanHead =
     staffQuery.data?.roles?.includes("lesson_plan_head") ?? false;
   const rolesResolved = staffQuery.isSuccess || staffQuery.isError;
+  // Giáo án học sinh giỏi chỉ có trên IT — JP/ENG trưởng ban Chuyên môn chỉ có tab hoa hồng.
+  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
+  const showTabSwitcher = isLessonPlanHead && giftedLessonPlanEnabled !== false;
   const showRevenueTab =
     rolesResolved && isLessonPlanHead && activeTab === "revenue";
   const showOutputsTab =
@@ -364,7 +368,7 @@ export default function AdminLessonPlanDetailPage() {
 
       {staffQuery.isLoading ? (
         <div className="h-12 w-full max-w-md animate-pulse rounded-[1.35rem] border border-border-default bg-bg-secondary/70" />
-      ) : isLessonPlanHead ? (
+      ) : showTabSwitcher ? (
         <div
           className="inline-flex w-full rounded-[1.35rem] border border-border-default bg-gradient-to-b from-bg-surface to-bg-secondary/90 p-1 shadow-sm sm:w-fit"
           role="tablist"

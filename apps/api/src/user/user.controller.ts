@@ -1,3 +1,4 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import {
   Body,
   Controller,
@@ -28,15 +29,19 @@ import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-ro
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { StaffRole, UserRole } from 'generated/enums';
 import {
+  AdminCreateStaffUserDto,
   AdminCreateStudentUserDto,
   AdminSetUserPasswordDto,
   AdminCreateUserDto,
+  SetAccountHandleDto,
   GetUsersQueryDto,
   UpdateUserDto,
 } from 'src/dtos/user.dto';
 import { AuthService } from 'src/auth/auth.service';
 import { UserService } from './user.service';
 import { readProxyPublicOrigin } from 'src/mail/public-frontend-url';
+import { STAFF_CREATOR_HEAD_ROLES } from 'src/common/staff-role-policy';
+import { normalizeHttpHttpsUrl } from 'src/storage/supabase-storage';
 
 @ApiTags('users')
 @Controller('users')
@@ -51,7 +56,7 @@ export class UserController {
   @Get()
   @ApiOperation({
     summary: 'List users',
-    description: 'Get all users. Full admin and assistant read-only.',
+    description: 'Get all users. Admin only.',
   })
   @ApiResponse({ status: 200, description: 'List of users.' })
   @ApiQuery({
@@ -78,7 +83,6 @@ export class UserController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
   @ApiResponse({ status: 403, description: 'Forbidden. Admin only.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   async getUsers(
     @CurrentUser() user: JwtPayload,
     @Query() query: GetUsersQueryDto,
@@ -89,14 +93,13 @@ export class UserController {
   @Get(':id')
   @ApiOperation({
     summary: 'Get user by ID',
-    description: 'Get a user by ID. Full admin and assistant read-only.',
+    description: 'Get a user by ID. Admin only.',
   })
   @ApiParam({ name: 'id', description: 'User ID' })
   @ApiResponse({ status: 200, description: 'User found.' })
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
   @ApiResponse({ status: 403, description: 'Forbidden. Admin only.' })
   @ApiResponse({ status: 404, description: 'User not found.' })
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   async getUserById(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -105,11 +108,10 @@ export class UserController {
   }
 
   @Post()
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Create user',
     description:
-      'Create a new user. Admin and assistant can assign roleType/staffRoles immediately.',
+      'Create a new user. Admin only; can assign roleType/staffRoles immediately.',
   })
   @ApiBody({
     type: AdminCreateUserDto,
@@ -143,11 +145,11 @@ export class UserController {
   }
 
   @Post('student')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant, StaffRole.customer_care)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE, StaffRole.customer_care)
   @ApiOperation({
     summary: 'Create student user with profile and classes',
     description:
-      'Create pending user, assign student role, upsert student profile, and assign classes in a single admin flow. Customer care staff (without admin/assistant role) cannot assign classes and become the student customer care owner with their default profit percent.',
+      'Create pending user, assign student role, upsert student profile, and assign classes in a single admin flow. Customer care staff (without admin/sale_customer_care_head role) cannot assign classes and become the student customer care owner with their default profit percent.',
   })
   @ApiBody({
     type: AdminCreateStudentUserDto,
@@ -160,13 +162,14 @@ export class UserController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Validation error or email/handle exists.',
+    description:
+      'Validation error or email/handle exists, hoặc xếp vào lớp đang trống chưa có Học phí lớp (#273).',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
   @ApiResponse({
     status: 403,
     description:
-      'Forbidden. Admin, assistant or customer care only; customer care cannot assign classes.',
+      'Forbidden. Admin, sale_customer_care_head or customer care only; customer care cannot assign classes.',
   })
   @ApiResponse({ status: 404, description: 'One or more classes not found.' })
   async createStudentUser(
@@ -185,8 +188,53 @@ export class UserController {
     );
   }
 
+  @Post('staff')
+  // 15/11: Admin + 3 role trưởng tạo nhân sự mới (tài khoản + hồ sơ). Role
+  // trưởng không gán được Admin / role trưởng (`assertStaffRoleChangeAllowed`).
+  @AllowStaffRolesOnAdminRoutes(...STAFF_CREATOR_HEAD_ROLES)
+  @ApiOperation({
+    summary: 'Create staff user with profile',
+    description:
+      'Tạo tài khoản đăng nhập mới + hồ sơ nhân sự trong một bước. Email / tên đăng nhập phải chưa thuộc tài khoản nào (không gắn vào user có sẵn); số CCCD chưa tồn tại. Hồ sơ lỗi thì tài khoản vừa tạo bị xoá. Không nhận mức % thu nhập.',
+  })
+  @ApiBody({ type: AdminCreateStaffUserDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Đã tạo nhân sự: `{ message, staffId }`.',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Validation error, email / tên đăng nhập đã có tài khoản, hoặc CCCD đã tồn tại.',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Không phải Admin / role trưởng, hoặc role trưởng gán Admin / role trưởng.',
+  })
+  async createStaffUser(
+    @CurrentUser() user: JwtPayload,
+    @Body() data: AdminCreateStaffUserDto,
+    @Req() req: Request,
+  ) {
+    const normalizedBankQrLink = normalizeHttpHttpsUrl(
+      data.bank_qr_link,
+      'Link QR ngân hàng',
+    );
+
+    return this.userService.createStaffUser(
+      { ...data, bank_qr_link: normalizedBankQrLink ?? undefined },
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+      readProxyPublicOrigin(req),
+    );
+  }
+
   @Patch()
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Update user',
     description: 'Update a user. Admin only.',
@@ -215,11 +263,11 @@ export class UserController {
   }
 
   @Patch(':id/password')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
   @ApiOperation({
     summary: 'Set user password',
     description:
-      'Admin/assistant sets a new password for a user without the old one. Revokes all devices and refresh token of the target user. Assistants cannot change passwords of admin/assistant accounts.',
+      'Admin/sale_customer_care_head sets a new password for a user without the old one. Revokes all devices and refresh token of the target user. Sale & CSKH heads (#267, #268) may only set passwords of student accounts.',
   })
   @ApiParam({ name: 'id', description: 'User ID' })
   @ApiBody({ type: AdminSetUserPasswordDto })
@@ -228,7 +276,8 @@ export class UserController {
   @ApiResponse({ status: 401, description: 'Unauthorized.' })
   @ApiResponse({
     status: 403,
-    description: 'Forbidden. Assistant targeting an admin/assistant account.',
+    description:
+      'Forbidden. Non-admin staff, or sale_customer_care_head targeting a non-student account.',
   })
   @ApiResponse({ status: 404, description: 'User not found.' })
   async setUserPassword(
@@ -243,12 +292,44 @@ export class UserController {
     });
   }
 
+  @Patch(':id/account-handle')
+  @AllowStaffRolesOnAdminRoutes(SALE_CS_HEAD_ROLE)
+  @ApiOperation({
+    summary: 'Set user account handle',
+    description:
+      'Đổi tên đăng nhập (`account_handle`). Admin: mọi tài khoản. Trưởng phòng Sale & CSKH: chỉ tài khoản học sinh (nhân sự đội Sale/CSKH dùng `PATCH /sale-cs-team/members/:staffId/account-handle`). Handle mới 3–50 ký tự, không khoảng trắng, không `@`; kiểm trùng không phân biệt hoa thường. Không đăng xuất thiết bị.',
+  })
+  @ApiParam({ name: 'id', description: 'User ID' })
+  @ApiBody({ type: SetAccountHandleDto })
+  @ApiResponse({ status: 200, description: '{ id, accountHandle }.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Sai định dạng hoặc tên đăng nhập đã được dùng.',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Forbidden. Non-admin staff, or sale_customer_care_head targeting a non-student account.',
+  })
+  @ApiResponse({ status: 404, description: 'User not found.' })
+  async setUserAccountHandle(
+    @CurrentUser() user: JwtPayload,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body() data: SetAccountHandleDto,
+  ) {
+    return this.userService.setAccountHandle(id, data.accountHandle, {
+      userId: user.id,
+      userEmail: user.email,
+      roleType: user.roleType,
+    });
+  }
+
   @Delete(':id')
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Delete user',
     description:
-      'Soft-delete user account: unlinks staff_info/student_info (sets user_id null, keeps profiles), nulls other user FKs via DB constraints, then removes the user row. Admin/assistant only.',
+      'Soft-delete user account: unlinks staff_info/student_info (sets user_id null, keeps profiles), nulls other user FKs via DB constraints, then removes the user row. Admin only.',
   })
   @ApiParam({ name: 'id', description: 'User ID' })
   @ApiResponse({ status: 200, description: 'User deleted.' })

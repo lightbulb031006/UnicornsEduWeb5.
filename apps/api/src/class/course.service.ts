@@ -8,8 +8,10 @@ import {
   AttendanceStatus,
   ClassPricingMode,
   Prisma,
+  StudentClassStatus,
 } from '../../generated/client';
 import { assertCanEnableOneTimeCourse } from 'src/common/class-pricing-mode.util';
+import { lockOneTimePackagesForActiveStudents } from 'src/common/one-time-package-lock';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { getPreferredUserFullName } from 'src/common/user-name.util';
 import {
@@ -65,18 +67,18 @@ export class CourseService {
     private readonly courseAccess: CourseAccessService,
   ) {}
 
+  /**
+   * Danh sách khoá: MỌI người gọi thấy MỌI khoá (tên khoá không nhạy cảm).
+   * `contentCourseIds` = phạm vi được vào nội dung (`resolveViewableCourseIds`):
+   * `null` = mọi khoá, mảng = chỉ các id đó. Chỉ dùng để gắn cờ `canAccessContent`,
+   * không lọc danh sách.
+   */
   async list(
     includeInactive = false,
-    listableCourseIds: string[] | null = null,
+    contentCourseIds: string[] | null = null,
   ) {
-    if (listableCourseIds && listableCourseIds.length === 0) {
-      return [];
-    }
-    return this.prisma.course.findMany({
-      where: {
-        ...(includeInactive ? {} : { isActive: true }),
-        ...(listableCourseIds ? { id: { in: listableCourseIds } } : {}),
-      },
+    const courses = await this.prisma.course.findMany({
+      where: includeInactive ? {} : { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       include: {
         _count: {
@@ -88,6 +90,11 @@ export class CourseService {
         },
       },
     });
+    const accessible = contentCourseIds ? new Set(contentCourseIds) : null;
+    return courses.map((course) => ({
+      ...course,
+      canAccessContent: accessible ? accessible.has(course.id) : true,
+    }));
   }
 
   async getDetail(id: string) {
@@ -112,7 +119,7 @@ export class CourseService {
   }
 
   async create(actor: CourseActor, dto: CreateCourseDto) {
-    // Trưởng giáo án chỉ thấy khoá được gán: tự gán người tạo để khoá không "biến mất".
+    // Trưởng ban Chuyên môn chỉ thấy khoá được gán: tự gán người tạo để khoá không "biến mất".
     const creatorStaffId =
       !this.courseAccess.isManager(actor) && actor.staffId
         ? actor.staffId
@@ -158,18 +165,31 @@ export class CourseService {
           },
         });
         assertCanEnableOneTimeCourse(chargedAttendanceCount);
+        // Follow-up grill 13/11: chỉ lớp đang có học sinh học mới bắt buộc
+        // gói > 0đ; lớp còn trống được để trống (điền trước học sinh đầu tiên).
+        // Gói 0đ / âm luôn bị chặn vì không phải gói bán một lần hợp lệ.
         const missingPackageCount = await tx.class.count({
           where: {
             courseId: id,
             OR: [
-              { tuitionPackageTotal: null },
               { tuitionPackageTotal: { lte: 0 } },
+              {
+                tuitionPackageTotal: null,
+                students: {
+                  some: {
+                    OR: [
+                      { status: null },
+                      { status: StudentClassStatus.active },
+                    ],
+                  },
+                },
+              },
             ],
           },
         });
         if (missingPackageCount > 0) {
           throw new BadRequestException(
-            `Còn ${missingPackageCount} lớp của khoá chưa có Tổng gói > 0đ. Nhập gói cho các lớp đó trước khi bật bán một lần.`,
+            `Còn ${missingPackageCount} lớp của khoá đang có học sinh học hoặc có Tổng gói 0đ mà chưa có Tổng gói > 0đ. Nhập gói cho các lớp đó trước khi bật bán một lần.`,
           );
         }
       }
@@ -200,17 +220,42 @@ export class CourseService {
               : ClassPricingMode.per_session,
           },
         });
+
+        if (dto.is_one_time) {
+          // 16/11: học sinh đang học chưa có gói riêng được chốt theo gói lớp
+          // lúc chuyển sang bán một lần.
+          const classes = await tx.class.findMany({
+            where: { courseId: id },
+            select: { id: true },
+          });
+          await lockOneTimePackagesForActiveStudents(
+            tx,
+            classes.map((row) => row.id),
+          );
+        } else {
+          // 16/11: tắt bán một lần xoá học phí riêng (gói đã chốt + học phí
+          // riêng / buổi suy từ gói) để các buổi sau thu theo học phí lớp.
+          await tx.studentClass.updateMany({
+            where: { class: { courseId: id } },
+            data: {
+              customStudentTuitionPerSession: null,
+              customTuitionPerBlock: null,
+              customTuitionPackageTotal: null,
+              customTuitionPackageSession: null,
+            },
+          });
+        }
       }
 
       return updated;
     });
   }
 
-  /** Bán một lần đụng tới học phí: chỉ admin/trợ lí, không cho trưởng giáo án. */
+  /** Bán một lần đụng tới học phí: chỉ admin, không cho trưởng ban Chuyên môn. */
   private assertCanChangeSaleMode(actor: CourseActor) {
     if (!this.courseAccess.isManager(actor)) {
       throw new ForbiddenException(
-        'Chỉ admin hoặc trợ lí được đổi cài đặt bán một lần của khoá.',
+        'Chỉ admin được đổi cài đặt bán một lần của khoá.',
       );
     }
   }
@@ -374,7 +419,7 @@ export class CourseService {
     const invalidIds = staffIds.filter((id) => !validIdSet.has(id));
     if (invalidIds.length > 0) {
       throw new BadRequestException(
-        `Không thể gán: ${invalidIds.length} nhân sự không tồn tại, đang ngừng hoạt động, hoặc không có vai trò đội giáo án (lesson_plan/lesson_plan_head).`,
+        `Không thể gán: ${invalidIds.length} nhân sự không tồn tại, đang ngừng hoạt động, hoặc không có vai trò đội chuyên môn (lesson_plan/lesson_plan_head).`,
       );
     }
 

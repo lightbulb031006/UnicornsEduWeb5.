@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBody,
   ApiCookieAuth,
@@ -25,6 +33,7 @@ import type {
   TrainingManagerSessionAllowanceDto,
   TrainingManagerStaffOptionDto,
   UpdateClassTrainingManagerDto,
+  UpdateTrainingManagerSessionRateDto,
 } from 'src/dtos/training-manager.dto';
 import { TrainingManagerService } from './training-manager.service';
 
@@ -37,9 +46,14 @@ export class TrainingManagerController {
     private readonly trainingManagerService: TrainingManagerService,
   ) {}
 
-  @Get('staff/training-manager-options')
+  // Không đặt dưới `/staff/*`: `GET /staff/:id` (StaffModule, chỉ Admin) đăng
+  // ký trước và nuốt path cũ `/staff/training-manager-options` → Admin 400,
+  // Trưởng ban Đào tạo 403, dropdown Quản lý lớp không bao giờ có danh sách.
+  @Get('training-manager/options')
   @ApiOperation({
     summary: 'Search active training staff for class manager assignment',
+    description:
+      'Nhân sự Ban Đào Tạo đang hoạt động (`training` / `training_head`) để gán Quản lý lớp. Trước đây là `GET /staff/training-manager-options` (bị `GET /staff/:id` che).',
   })
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'limit', required: false, type: Number })
@@ -56,10 +70,19 @@ export class TrainingManagerController {
   }
 
   @Patch('class/:id/training-manager')
-  @ApiOperation({ summary: 'Assign class training manager and rate percent' })
+  @ApiOperation({
+    summary: 'Assign class training manager and rate percent',
+    description:
+      'Giao / gỡ Quản lý lớp: Admin và Trưởng ban Đào tạo trên mọi lớp (#277). Sửa % trợ cấp quản lý lớp: chỉ Admin (#276). Chỉ kiểm phần thật sự đổi so với giá trị hiện tại (gửi lại % cũ không bị chặn).',
+  })
   @ApiParam({ name: 'id', description: 'Class ID' })
   @ApiBody({ description: 'Training manager assignment payload' })
   @ApiResponse({ status: 200, description: 'Updated class training manager.' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Đổi % trợ cấp quản lý lớp khi không phải Admin («Chỉ Admin được sửa % trợ cấp quản lý lớp.»), hoặc giao / gỡ Quản lý lớp khi không phải Admin / Trưởng ban Đào tạo.',
+  })
   async updateClassTrainingManager(
     @CurrentUser() user: JwtPayload,
     @Param('id', new ParseClassIdPipe()) classId: string,
@@ -70,6 +93,7 @@ export class TrainingManagerController {
       body,
       {
         userId: user.id,
+        userEmail: user.email,
         roleType: user.roleType,
       },
     );
@@ -118,6 +142,36 @@ export class TrainingManagerController {
       staffId,
       classId,
       month,
+    );
+  }
+
+  @Patch('training-manager/staff/:staffId/sessions/:sessionId/rate')
+  @ApiOperation({
+    summary: 'Adjust training manager rate percent of one unpaid session',
+  })
+  @ApiParam({ name: 'staffId', description: 'Training staff ID' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiBody({ description: '{ trainingManagerRatePercent } (0 < % ≤ 100)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Session allowance recomputed with the new rate.',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid rate or session paid.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Chỉ Admin được sửa % trợ cấp quản lý lớp (#276).',
+  })
+  async updateSessionRatePercent(
+    @CurrentUser() user: JwtPayload,
+    @Param('staffId', new ParseStaffIdPipe()) staffId: string,
+    @Param('sessionId', new ParseUUIDPipe()) sessionId: string,
+    @Body() body: UpdateTrainingManagerSessionRateDto,
+  ): Promise<TrainingManagerSessionAllowanceDto> {
+    return this.trainingManagerService.updateSessionRatePercent(
+      { userId: user.id, userEmail: user.email, roleType: user.roleType },
+      staffId,
+      sessionId,
+      body?.trainingManagerRatePercent,
     );
   }
 

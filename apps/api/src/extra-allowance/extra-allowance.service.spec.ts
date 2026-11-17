@@ -38,6 +38,7 @@ describe('ExtraAllowanceService', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    user: { findUnique: jest.fn().mockResolvedValue(null) },
     $transaction: jest.fn(),
   };
 
@@ -64,6 +65,66 @@ describe('ExtraAllowanceService', () => {
     );
   });
 
+  describe('luật không tự sửa lương của chính mình (#265)', () => {
+    const selfActor = {
+      userId: 'user-head',
+      userEmail: 'head@example.com',
+      roleType: UserRole.staff,
+    };
+
+    beforeEach(() => {
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        roleType: UserRole.staff,
+        staffInfo: {
+          id: 'staff-1',
+          roles: [StaffRole.sale_customer_care_head],
+        },
+      });
+    });
+
+    it('chặn trưởng phòng tạo trợ cấp cho chính mình qua route quản lý', async () => {
+      await expect(
+        service.createExtraAllowance(
+          {
+            staffId: 'staff-1',
+            month: '2026-04',
+            amount: 200000,
+            status: PaymentStatus.paid,
+            roleType: StaffRole.sale_customer_care_head,
+          },
+          selfActor,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.extraAllowance.create).not.toHaveBeenCalled();
+    });
+
+    it('chặn xoá trợ cấp của chính mình qua route quản lý', async () => {
+      mockPrisma.extraAllowance.findUnique.mockResolvedValueOnce({
+        id: 'allowance-1',
+        staffId: 'staff-1',
+        status: PaymentStatus.pending,
+      });
+      await expect(
+        service.deleteExtraAllowance('allowance-1', selfActor),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(mockPrisma.extraAllowance.delete).not.toHaveBeenCalled();
+    });
+
+    it('vẫn cho sửa trợ cấp của người khác', async () => {
+      mockPrisma.extraAllowance.findUnique.mockResolvedValueOnce({
+        id: 'allowance-2',
+        staffId: 'staff-2',
+        status: PaymentStatus.pending,
+      });
+      mockPrisma.extraAllowance.delete.mockResolvedValueOnce({
+        id: 'allowance-2',
+      });
+      await expect(
+        service.deleteExtraAllowance('allowance-2', selfActor),
+      ).resolves.toEqual({ id: 'allowance-2' });
+    });
+  });
+
   it('creates admin extra allowances without requiring a client-provided id', async () => {
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-1',
@@ -76,7 +137,7 @@ describe('ExtraAllowanceService', () => {
       status: PaymentStatus.pending,
       note: 'Admin tạo trợ cấp',
       month: '2026-04',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       taxDeductionRatePercent: 7.5,
     });
     mockPrisma.extraAllowance.findUnique.mockResolvedValue({
@@ -86,12 +147,12 @@ describe('ExtraAllowanceService', () => {
       status: PaymentStatus.pending,
       note: 'Admin tạo trợ cấp',
       month: '2026-04',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       taxDeductionRatePercent: 7.5,
       staff: {
         id: 'staff-1',
         fullName: 'Assistant A',
-        roles: [StaffRole.assistant],
+        roles: [StaffRole.sale_customer_care_head],
         status: 'active',
       },
     });
@@ -103,7 +164,7 @@ describe('ExtraAllowanceService', () => {
         amount: 200000,
         status: PaymentStatus.pending,
         note: 'Admin tạo trợ cấp',
-        roleType: StaffRole.assistant,
+        roleType: StaffRole.sale_customer_care_head,
       },
       {
         userId: 'admin-1',
@@ -119,7 +180,7 @@ describe('ExtraAllowanceService', () => {
         amount: 200000,
         status: PaymentStatus.pending,
         note: 'Admin tạo trợ cấp',
-        roleType: StaffRole.assistant,
+        roleType: StaffRole.sale_customer_care_head,
         studentId: null,
         taxDeductionRatePercent: 7.5,
       },
@@ -131,7 +192,7 @@ describe('ExtraAllowanceService', () => {
       status: PaymentStatus.pending,
       note: 'Admin tạo trợ cấp',
       month: '2026-04',
-      roleType: StaffRole.assistant,
+      roleType: StaffRole.sale_customer_care_head,
       taxDeductionRatePercent: 7.5,
     });
   });
@@ -148,7 +209,7 @@ describe('ExtraAllowanceService', () => {
         month: '2026-04',
         amount: 200000,
         status: PaymentStatus.pending,
-        roleType: StaffRole.assistant,
+        roleType: StaffRole.sale_customer_care_head,
       }),
     ).rejects.toThrow('Nhân sự đang ở trạng thái ngừng hoạt động.');
 
@@ -294,6 +355,49 @@ describe('ExtraAllowanceService', () => {
       month: '2026-05',
       roleType: StaffRole.training,
       taxDeductionRatePercent: 7.5,
+    });
+  });
+
+  it('allows training_head (without training) to create own pending allowance under training_head', async () => {
+    mockPrisma.staffInfo.findFirst.mockResolvedValue({
+      id: 'staff-head-1',
+      roles: [StaffRole.training_head],
+    });
+    mockPrisma.extraAllowance.create.mockResolvedValue({
+      id: 'allowance-head-1',
+    });
+    mockPrisma.extraAllowance.findUnique.mockResolvedValue({
+      id: 'allowance-head-1',
+      staffId: 'staff-head-1',
+      amount: 300000,
+      status: PaymentStatus.pending,
+      note: null,
+      month: '2026-11',
+      roleType: StaffRole.training_head,
+      taxDeductionRatePercent: 7.5,
+      staff: {
+        id: 'staff-head-1',
+        fullName: 'Head A',
+        roles: [StaffRole.training_head],
+        status: 'active',
+      },
+    });
+
+    await service.createMyStaffExtraAllowance(
+      {
+        id: 'head-user-1',
+        email: 'head@example.com',
+        roleType: UserRole.staff,
+      },
+      { roleType: StaffRole.training_head, month: '2026-11', amount: 300000 },
+    );
+
+    expect(mockPrisma.extraAllowance.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        staffId: 'staff-head-1',
+        roleType: StaffRole.training_head,
+        status: PaymentStatus.pending,
+      }),
     });
   });
 
@@ -482,7 +586,7 @@ describe('ExtraAllowanceService', () => {
   it('rejects self updates when current staff lacks communication role', async () => {
     mockPrisma.staffInfo.findFirst.mockResolvedValue({
       id: 'staff-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
 
     await expect(
@@ -772,7 +876,7 @@ describe('ExtraAllowanceService', () => {
     it('rejects deleting a non self-managed allowance', async () => {
       mockPrisma.extraAllowance.findUnique.mockResolvedValue({
         ...ownAllowance,
-        roleType: StaffRole.assistant,
+        roleType: StaffRole.sale_customer_care_head,
       });
 
       await expect(

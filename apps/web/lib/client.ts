@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 import { getClientApiBaseUrl } from "@/lib/api-base-url";
+import { DEVICE_SUPERSEDED_ERROR_CODE } from "@/dtos/Auth.dto";
 import {
     localizeErrorMessage,
     markGenericLocalizedError,
@@ -189,6 +190,14 @@ const shouldAttemptRefresh = (config?: AxiosRequestConfig): boolean => {
     return true;
 };
 
+const isDeviceSupersededError = (error: AxiosError): boolean => {
+    const data = error.response?.data;
+    return (
+        Object.prototype.toString.call(data) === "[object Object]" &&
+        (data as { error?: unknown }).error === DEVICE_SUPERSEDED_ERROR_CODE
+    );
+};
+
 const refresh = async (): Promise<void> => {
     try {
         await api.post("/auth/refresh");
@@ -288,7 +297,11 @@ api.interceptors.response.use(
         if (typeof window !== "undefined" && (status === 401)) {
             const pathname = window.location.pathname;
             if (!isPublicRoute(pathname)) {
-                window.location.href = "/";
+                // Máy bị đá vì học sinh vừa đăng nhập máy khác: về login kèm lý do
+                // để hiện đúng thông báo, không phải «phiên hết hạn».
+                window.location.href = isDeviceSupersededError(error)
+                    ? "/auth/login?error=device_superseded"
+                    : "/";
             }
         }
 

@@ -46,6 +46,7 @@ export interface AdminDashboardPendingPayrollBreakdown {
   fixedSalaryAmount: number;
   assistantAmount: number;
   trainingManagerAmount: number;
+  lessonPlanHeadAmount: number;
 }
 
 export interface AdminDashboardTrendPoint {
@@ -66,6 +67,7 @@ export type AdminDashboardBreakdownKey =
   | "fixedSalaryCost"
   | "assistantCost"
   | "trainingManagerCost"
+  | "lessonPlanHeadCost"
   | "operatingCost";
 
 export interface AdminDashboardBreakdownItem {
@@ -133,6 +135,7 @@ export interface AdminDashboardMonthlyStatistic {
   fixedSalaryCost: number;
   assistantCost: number;
   trainingManagerCost: number;
+  lessonPlanHeadCost: number;
   operatingCost: number;
   totalTopup: number;
   totalUnpaid: number;
@@ -447,15 +450,34 @@ export interface StaffDashboardUnpaidStaffItem {
   totalUnpaid: number;
 }
 
+/** Trường tổng hợp khoản chi nhân sự trong summary dashboard (#270). */
+export type StaffDashboardPayrollSummaryField =
+  | "monthlyExpense"
+  | "monthlyProfit"
+  | "pendingPayrollTotal"
+  | "pendingPayrollBreakdown"
+  | "unpaidStaffCount";
+
+/** #270: các trường payroll vắng khi người xem chỉ có Kế toán thu. */
+export type StaffDashboardFinancialSummary = Omit<
+  AdminDashboardSummary,
+  StaffDashboardPayrollSummaryField
+> &
+  Partial<Pick<AdminDashboardSummary, StaffDashboardPayrollSummaryField>>;
+
 export interface StaffDashboardFinancialOverview {
   period: AdminDashboardPeriod;
-  summary: AdminDashboardSummary;
+  summary: StaffDashboardFinancialSummary;
+  /** #270: chỉ còn `revenue` + `operatingCost` khi ẩn khoản chi nhân sự. */
   breakdown: AdminDashboardBreakdownItem[];
 }
 
 export interface StaffDashboardAccountantSection {
-  unpaidStaff: StaffDashboardUnpaidStaffItem[];
+  /** #270: vắng khi người xem không được thấy khoản chi nhân sự. */
+  unpaidStaff?: StaffDashboardUnpaidStaffItem[];
   financialOverview: StaffDashboardFinancialOverview;
+  /** #270: `false` → Kế toán thu, đã bỏ mọi khoản chi nhân sự. Vắng → coi như `true`. */
+  staffPayoutsVisible?: boolean;
 }
 
 export interface StaffDashboardExpenseSummary {
@@ -610,3 +632,222 @@ export interface AdminMonthlyReport {
   newStudents: MonthlyReportNewStudent[];
   droppedStudents: MonthlyReportDroppedStudent[];
 }
+
+export interface StudentDemographicsCategoryItem {
+  courseId: string | null;
+  courseName: string;
+  studentCount: number;
+  classCount?: number;
+}
+
+export interface StudentDemographicsBirthYearGroup {
+  birthYear: number | null;
+  label: string;
+  studentCount: number;
+  totalTopup: number;
+  /** Doanh thu = học phí đã học (attendance.tuition_fee, buổi present/excused), toàn thời gian. */
+  totalRevenue: number;
+  categories: StudentDemographicsCategoryItem[];
+}
+
+export interface StudentDemographicsProvinceGroup {
+  province: string;
+  studentCount: number;
+  percentage: number;
+  totalTopup: number;
+  totalRevenue: number;
+  birthYears: StudentDemographicsBirthYearGroup[];
+  categories: StudentDemographicsCategoryItem[];
+}
+
+export interface StudentDemographicsBirthYearSummary {
+  birthYear: number | null;
+  label: string;
+  studentCount: number;
+  percentage: number;
+  totalTopup: number;
+  totalRevenue: number;
+  provinces: Array<{
+    province: string;
+    studentCount: number;
+  }>;
+  categories: StudentDemographicsCategoryItem[];
+}
+
+export interface StudentDemographicsSummary {
+  statusFilter?: 'all' | 'active' | 'inactive';
+  totalActiveStudents: number;
+  enrolledStudentsCount: number;
+  unenrolledStudentsCount: number;
+  totalProvincesCount: number;
+  totalCategoriesCount: number;
+  totalTopup: number;
+  averageTopup: number;
+  /** Tổng học phí đã học (toàn thời gian) của nhóm học sinh trong phạm vi lọc. */
+  totalRevenue: number;
+  /** Doanh thu TB / học sinh có doanh thu > 0. */
+  averageRevenue: number;
+  revenueStudentsCount: number;
+  /** Tổng lợi nhuận các khoá (học phí − gia sư − QL lớp − CSKH), toàn bộ học sinh, toàn thời gian. */
+  totalProfit: number;
+  topProvince: string | null;
+  topBirthYear: number | null;
+  topCategory: string | null;
+  /** Khoá có doanh thu cao nhất. */
+  topRevenueCategory: string | null;
+  /** Tuổi trung bình (chỉ tính học sinh có năm sinh hợp lệ). */
+  averageAge: number | null;
+  missingBirthYearCount: number;
+  unusualBirthYearCount: number;
+}
+
+export interface StudentDemographicsMatrixColumn {
+  key: string;
+  label: string;
+}
+
+export interface StudentDemographicsProvinceMatrixRow {
+  province: string;
+  totalStudents: number;
+  totalTopup: number;
+  totalRevenue: number;
+  cells: Record<string, number>;
+  /** Doanh thu theo khoá (key = cột), gán theo khoá của lớp có buổi học. */
+  revenueCells: Record<string, number>;
+}
+
+export interface StudentDemographicsBirthYearMatrixRow {
+  birthYear: number | null;
+  label: string;
+  totalStudents: number;
+  totalTopup: number;
+  totalRevenue: number;
+  cells: Record<string, number>;
+  revenueCells: Record<string, number>;
+}
+
+export interface StudentDemographicsCourseBirthYear {
+  birthYear: number | null;
+  label: string;
+  studentCount: number;
+  percentage: number;
+  totalRevenue: number;
+}
+
+/** Phân tích chi tiết theo từng khoá (Category): độ tuổi, khu vực, doanh thu. */
+export interface StudentDemographicsCourseBreakdown {
+  /** Khoá cột ma trận (courseId hoặc `__unassigned__`). */
+  key: string;
+  courseId: string | null;
+  courseName: string;
+  studentCount: number;
+  classCount: number;
+  percentage: number;
+  totalTopup: number;
+  /** Học phí đã học thuộc các lớp của khoá này. */
+  totalRevenue: number;
+  /** Doanh thu khoá / số học sinh của khoá có doanh thu > 0. */
+  averageRevenue: number;
+  revenueShare: number;
+  /** Học phí đã học của khoá trên toàn bộ học sinh (không theo bộ lọc trạng thái) — gốc tính lợi nhuận. */
+  profitRevenue: number;
+  /** Trợ cấp gia sư (sau khấu trừ vận hành, trước thuế). */
+  teacherCost: number;
+  /** Trợ cấp quản lý lớp. */
+  trainingManagerCost: number;
+  /** Hoa hồng CSKH. */
+  customerCareCost: number;
+  totalCost: number;
+  /** profitRevenue − teacherCost − trainingManagerCost − customerCareCost. */
+  profit: number;
+  /** % lợi nhuận / học phí của khoá. */
+  profitMargin: number;
+  /** % lợi nhuận khoá / tổng lợi nhuận. */
+  profitShare: number;
+  averageAge: number | null;
+  minBirthYear: number | null;
+  maxBirthYear: number | null;
+  topBirthYear: number | null;
+  missingBirthYearCount: number;
+  birthYears: StudentDemographicsCourseBirthYear[];
+  provinces: Array<{ province: string; studentCount: number }>;
+}
+
+export interface StudentDemographicsStudentRow {
+  studentId: string;
+  fullName: string;
+  status: string | null;
+  school: string | null;
+  province: string;
+  /** Năm sinh hợp lệ (null nếu trống hoặc ngoài khoảng hợp lệ). */
+  birthYear: number | null;
+  /** Giá trị gốc trong DB (để rà soát dữ liệu sai). */
+  rawBirthYear: number | null;
+  birthYearLabel: string;
+  age: number | null;
+  classNames: string[];
+  courseKeys: string[];
+  courseNames: string[];
+  totalTopup: number;
+  totalRevenue: number;
+  /** Doanh thu theo key khoá. */
+  revenueByCourse: Record<string, number>;
+  attendanceCount: number;
+}
+
+export interface StudentDemographicsDataQuality {
+  /** Năm sinh để trống hoặc không hợp lệ. */
+  missingBirthYear: StudentDemographicsStudentRow[];
+  /** Năm sinh hợp lệ nhưng ngoài độ tuổi phổ thông (6–19 tuổi). */
+  unusualBirthYear: StudentDemographicsStudentRow[];
+  normalAgeRange: { min: number; max: number };
+}
+
+export type StudentDemographicsStatus = "all" | "active" | "inactive";
+
+export type StudentDemographicsPeriodType = "all" | "month" | "year";
+
+/** Query `GET /dashboard/student-demographics`: month+year = tháng, chỉ year = năm, trống = toàn thời gian. */
+export interface StudentDemographicsQueryParams {
+  status?: StudentDemographicsStatus;
+  month?: string;
+  year?: string;
+}
+
+export interface StudentDemographicsPeriod {
+  type: StudentDemographicsPeriodType;
+  /** `YYYY-MM` | `YYYY` | null. */
+  key: string | null;
+  label: string;
+  from: string | null;
+  toExclusive: string | null;
+}
+
+export interface AdminDashboardStudentDemographics {
+  /** Kỳ đang xem; có kỳ thì chỉ tính học sinh có buổi học trong kỳ. */
+  period: StudentDemographicsPeriod;
+  summary: StudentDemographicsSummary;
+  categories: Array<{
+    courseId: string | null;
+    courseName: string;
+    studentCount: number;
+    classCount: number;
+    totalRevenue: number;
+  }>;
+  byProvince: StudentDemographicsProvinceGroup[];
+  byBirthYear: StudentDemographicsBirthYearSummary[];
+  byCourse: StudentDemographicsCourseBreakdown[];
+  provinceMatrix: {
+    columns: StudentDemographicsMatrixColumn[];
+    rows: StudentDemographicsProvinceMatrixRow[];
+  };
+  birthYearMatrix: {
+    columns: StudentDemographicsMatrixColumn[];
+    rows: StudentDemographicsBirthYearMatrixRow[];
+  };
+  /** Danh sách từng học sinh trong phạm vi lọc (sắp theo tên). */
+  students: StudentDemographicsStudentRow[];
+  dataQuality: StudentDemographicsDataQuality;
+  generatedAt: string;
+}
+

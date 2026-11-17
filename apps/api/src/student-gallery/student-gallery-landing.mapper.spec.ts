@@ -22,12 +22,14 @@ describe('mapLandingStudentGallery', () => {
         caption: null,
         imageWatermarkedPath: 'student/UNIST-1/g1.jpg',
         sortOrder: 0,
+        createdAt: new Date('2026-05-01T08:00:00.000Z'),
       },
       {
         id: 'g2',
         caption: null,
         imageWatermarkedPath: null,
         sortOrder: 1,
+        createdAt: new Date('2026-05-02T09:30:00.000Z'),
       },
     ]);
 
@@ -39,6 +41,7 @@ describe('mapLandingStudentGallery', () => {
         imageUrl:
           'https://example.supabase.co/storage/v1/object/public/student-gallery-public/student/UNIST-1/g1.jpg',
         sortOrder: 0,
+        createdAt: '2026-05-01T08:00:00.000Z',
       },
       {
         id: 'g2',
@@ -46,6 +49,7 @@ describe('mapLandingStudentGallery', () => {
         imagePath: null,
         imageUrl: null,
         sortOrder: 1,
+        createdAt: '2026-05-02T09:30:00.000Z',
       },
     ]);
   });

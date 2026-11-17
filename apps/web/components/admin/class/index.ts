@@ -9,6 +9,7 @@ export type { CourseFormValues } from "./CourseFormPopup";
 export { default as CourseOneTimeBadge } from "./CourseOneTimeBadge";
 export { default as EditClassPopup } from "./EditClassPopup";
 export { default as EditClassBasicInfoPopup } from "./EditClassBasicInfoPopup";
+export { default as EditClassTuitionPopup } from "./EditClassTuitionPopup";
 export { default as EditClassTeachersPopup } from "./EditClassTeachersPopup";
 export { default as EditClassTeacherCompensationPopup } from "./EditClassTeacherCompensationPopup";
 export { default as EditClassSchedulePopup } from "./EditClassSchedulePopup";

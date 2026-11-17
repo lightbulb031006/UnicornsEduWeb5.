@@ -3,12 +3,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDebounce } from "use-debounce";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { ClassDetail } from "@/dtos/class.dto";
+import type { StaffOpsClassTeacherPayItem } from "@/dtos/staff-ops.dto";
 import * as classApi from "@/lib/apis/class.api";
 import * as staffApi from "@/lib/apis/staff.api";
+import * as staffOpsApi from "@/lib/apis/staff-ops.api";
 import * as trainingManagerApi from "@/lib/apis/training-manager.api";
+import { listTrainingTutors, trainingTutorKeys } from "@/lib/apis/training-tutor.api";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import {
   moneyInputInitialFromNumber,
@@ -41,7 +44,31 @@ type Props = {
   open: boolean;
   onClose: () => void;
   classDetail: ClassDetail;
+  /**
+   * `trainingHead` (trang staff): cùng form admin nhưng lưu qua route staff-ops
+   * mà Trưởng ban Đào tạo được phép (#277) — `PATCH /class/:id/teachers` chỉ
+   * Admin (#267). % trợ cấp quản lý lớp chỉ đọc (#276), không thêm / sửa lương
+   * / bỏ chính mình (#265).
+   */
+  variant?: "admin" | "trainingHead";
+  /** Staff id người đang mở form — chỉ dùng ở `trainingHead`. */
+  actorStaffId?: string | null;
+  /** Làm mới dữ liệu sau khi lưu (mặc định: invalidate query lớp admin). */
+  onSaved?: () => Promise<unknown>;
 };
+
+type SelectedTeacher = {
+  id: string;
+  name: string;
+  customAllowance?: number;
+  allowanceTouched?: boolean;
+  /** Scale riêng (0 = không có scale; undefined = theo scale lớp). */
+  customScaleAmount?: number;
+  scaleTouched?: boolean;
+  operatingDeductionRatePercent?: number;
+};
+
+const TUTOR_SEARCH_LIMIT = 50;
 
 function normalizeOperatingDeductionRatePercent(value?: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -86,13 +113,23 @@ function getDropdownRect(el: HTMLElement | null): DropdownRect | null {
   };
 }
 
-export default function EditClassTeachersPopup({ open, onClose, classDetail }: Props) {
+export default function EditClassTeachersPopup({ open, ...rest }: Props) {
   if (!open) return null;
 
-  return <EditClassTeachersDialog onClose={onClose} classDetail={classDetail} />;
+  return <EditClassTeachersDialog {...rest} />;
 }
 
-function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) {
+function EditClassTeachersDialog({
+  onClose,
+  classDetail,
+  variant = "admin",
+  actorStaffId,
+  onSaved,
+}: Omit<Props, "open">) {
+  const isTrainingHead = variant === "trainingHead";
+  const lockedTeacherId = isTrainingHead ? actorStaffId || null : null;
+  // Lớp đã kết thúc: backend chặn thêm / bỏ gia sư → chỉ còn giao Quản lý lớp.
+  const rosterLocked = isTrainingHead && classDetail.status === "ended";
   const queryClient = useQueryClient();
   const teacherSearchRef = useRef<HTMLDivElement>(null);
   const scrollableRef = useRef<HTMLDivElement>(null);
@@ -106,20 +143,12 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
   const defaultAllowanceLabel =
     defaultAllowance != null ? `${defaultAllowance.toLocaleString("vi-VN")} VNĐ` : null;
 
-  const [selectedTeachers, setSelectedTeachers] = useState<
-    Array<{
-      id: string;
-      name: string;
-      customAllowance?: number;
-      allowanceTouched?: boolean;
-      /** Scale riêng (0 = không có scale; undefined = theo scale lớp). */
-      customScaleAmount?: number;
-      scaleTouched?: boolean;
-      operatingDeductionRatePercent?: number;
-    }>
-  >(() =>
+  // Ảnh chụp lúc mở form — `trainingHead` lưu theo diff (thêm / bỏ / đổi lương).
+  const [initialTeachers] = useState<SelectedTeacher[]>(() =>
     (classDetail.teachers ?? [])
       .filter((t) => t?.id)
+      // staff-ops thao tác theo phân công đang dạy; dòng đã nghỉ không hiện.
+      .filter((t) => !isTrainingHead || t.assignmentStatus !== "inactive")
       .map((t) => ({
         id: t.id,
         name: t.fullName?.trim() ?? "—",
@@ -131,6 +160,8 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
           t.operatingDeductionRatePercent ?? undefined,
       })),
   );
+  const [selectedTeachers, setSelectedTeachers] =
+    useState<SelectedTeacher[]>(initialTeachers);
   const [teacherSearchInput, setTeacherSearchInput] = useState("");
   const [teacherSearchFocused, setTeacherSearchFocused] = useState(false);
   const [debouncedTeacherSearch] = useDebounce(teacherSearchInput.trim(), 350);
@@ -151,22 +182,29 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
         limit: 50,
         search: debouncedTeacherSearch || undefined,
       }),
+    enabled: !isTrainingHead,
+  });
+
+  // `GET /staff` chỉ Admin → Trưởng ban tìm trong gia sư đang hoạt động.
+  const tutorSearchParams = {
+    page: 1,
+    limit: TUTOR_SEARCH_LIMIT,
+    search: debouncedTeacherSearch,
+    status: "active" as const,
+  };
+  const { data: tutorSearchResult } = useQuery({
+    queryKey: trainingTutorKeys.list(tutorSearchParams),
+    queryFn: () => listTrainingTutors(tutorSearchParams),
+    enabled: isTrainingHead && !rosterLocked,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
   });
 
   const { data: trainingManagerSearchResult, isLoading: isTrainingManagerLoading } =
     useQuery({
-      queryKey: [
-        "staff",
-        "training-manager-options",
-        { page: 1, limit: 50 },
-      ],
-      queryFn: () =>
-        staffApi.getStaff({
-          page: 1,
-          limit: 50,
-          role: "training",
-          status: "active",
-        }),
+      // Ban Đào Tạo đang active: `training` hoặc `training_head` (backend lọc).
+      queryKey: ["staff", "training-manager-options", { limit: 50 }],
+      queryFn: () => trainingManagerApi.getTrainingManagerOptions({ limit: 50 }),
       staleTime: 60_000,
     });
 
@@ -197,7 +235,99 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const refreshAfterSave = async () => {
+    if (onSaved) {
+      await onSaved();
+      return;
+    }
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["class", "detail", classDetail.id] }),
+      queryClient.invalidateQueries({ queryKey: ["class", "list"] }),
+      queryClient.invalidateQueries({
+        queryKey: ["staff-ops", "class", "detail", classDetail.id],
+      }),
+    ]);
+  };
+
+  /**
+   * Trưởng ban Đào tạo: không có route thay cả danh sách gia sư, nên tách diff
+   * thành các route staff-ops từng việc. Không atomic — lỗi giữa chừng thì
+   * bước trước đã lưu, vẫn làm mới dữ liệu để form sau thấy đúng hiện trạng.
+   */
+  const handleTrainingHeadSubmit = () => {
+    const initialById = new Map(initialTeachers.map((t) => [t.id, t]));
+    const selectedIds = new Set(selectedTeachers.map((t) => t.id));
+    const addedIds = selectedTeachers
+      .filter((t) => !initialById.has(t.id))
+      .map((t) => t.id);
+    const removedIds = initialTeachers
+      .filter((t) => !selectedIds.has(t.id))
+      .map((t) => t.id);
+
+    const payItems: StaffOpsClassTeacherPayItem[] = [];
+    for (const t of selectedTeachers) {
+      if (t.id === lockedTeacherId) continue;
+      const rate = normalizeOperatingDeductionRatePercent(t.operatingDeductionRatePercent);
+      const initial = initialById.get(t.id);
+      // Gia sư mới thêm: backend đặt % vận hành = 0.
+      const initialRate = initial
+        ? normalizeOperatingDeductionRatePercent(initial.operatingDeductionRatePercent)
+        : 0;
+      if (!t.allowanceTouched && !t.scaleTouched && rate === initialRate) continue;
+      const item: StaffOpsClassTeacherPayItem = {
+        teacher_id: t.id,
+        operating_deduction_rate_percent: rate,
+      };
+      if (t.allowanceTouched) item.custom_allowance = t.customAllowance ?? null;
+      if (t.scaleTouched) item.custom_scale_amount = t.customScaleAmount ?? null;
+      payItems.push(item);
+    }
+
+    const nextManagerId = trainingManagerStaffId.trim() || null;
+    const managerChanged = nextManagerId !== (classDetail.trainingManager?.id ?? null);
+
+    if (
+      addedIds.length === 0 &&
+      removedIds.length === 0 &&
+      payItems.length === 0 &&
+      !managerChanged
+    ) {
+      onClose();
+      return;
+    }
+
+    onClose();
+    runBackgroundSave({
+      loadingMessage: "Đang lưu gia sư và quản lý lớp...",
+      successMessage: "Đã lưu gia sư và quản lý lớp.",
+      errorMessage: "Không thể cập nhật gia sư hoặc quản lý lớp.",
+      action: async () => {
+        for (const teacherId of addedIds) {
+          await staffOpsApi.addClassTeacher(classDetail.id, { teacher_id: teacherId });
+        }
+        if (payItems.length > 0) {
+          await staffOpsApi.updateClassTeacherPay(classDetail.id, { teachers: payItems });
+        }
+        if (managerChanged) {
+          // Không gửi % — chỉ Admin sửa % trợ cấp quản lý lớp (#276).
+          await trainingManagerApi.updateClassTrainingManager(classDetail.id, {
+            trainingManagerStaffId: nextManagerId,
+          });
+        }
+        for (const teacherId of removedIds) {
+          await staffOpsApi.stopClassTeacher(classDetail.id, teacherId);
+        }
+      },
+      onSuccess: refreshAfterSave,
+      onError: refreshAfterSave,
+    });
+  };
+
   const handleSubmit = () => {
+    if (isTrainingHead) {
+      handleTrainingHeadSubmit();
+      return;
+    }
     const teachers = selectedTeachers.map((t) => {
       const payload: {
         teacher_id: string;
@@ -250,28 +380,23 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
           trainingManagerRatePercent: parsedTrainingManagerRate,
         });
       },
-      onSuccess: async () => {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["class", "detail", classDetail.id] }),
-          queryClient.invalidateQueries({ queryKey: ["class", "list"] }),
-          queryClient.invalidateQueries({
-            queryKey: ["staff-ops", "class", "detail", classDetail.id],
-          }),
-        ]);
-      },
+      onSuccess: refreshAfterSave,
     });
   };
 
-  const staffList = staffSearchResult?.data ?? [];
-  const availableStaff = staffList.filter((s) => !selectedTeachers.some((t) => t.id === s.id));
-  const trainingStaffOptions = (trainingManagerSearchResult?.data ?? []).map(
+  const staffList: ReadonlyArray<{ id: string; fullName?: string | null }> =
+    (isTrainingHead ? tutorSearchResult?.data : staffSearchResult?.data) ?? [];
+  const availableStaff = staffList.filter(
+    (s) => s.id !== lockedTeacherId && !selectedTeachers.some((t) => t.id === s.id),
+  );
+  const trainingStaffOptions = (trainingManagerSearchResult ?? []).map(
     (staff) => ({
       value: staff.id,
       label: staff.fullName?.trim() || staff.id,
     }),
   );
   // Gia sư kiêm quản lý: gia sư đang chọn của lớp chưa thuộc Ban Đào Tạo
-  // cũng được chọn; backend tự cấp role `training` khi lưu.
+  // cũng được chọn; backend tự cấp role `training` khi lưu (trừ Trưởng ban).
   const classTeacherOptions = selectedTeachers
     .filter((t) => !trainingStaffOptions.some((o) => o.value === t.id))
     .map((t) => ({ value: t.id, label: `${t.name} (gia sư lớp)` }));
@@ -330,12 +455,20 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
             Scale riêng để trống = theo scale lớp, nhập 0 = gia sư không có scale; chỉ áp dụng cho buổi tạo sau khi lưu.
             {" "}
             Tỷ lệ vận hành (%) được áp dụng theo từng quan hệ gia sư-lớp.
+            {isTrainingHead
+              ? rosterLocked
+                ? " Lớp đã kết thúc: chỉ đổi được Quản lý lớp."
+                : " Bỏ gia sư = cho nghỉ dạy lớp này (xoá lịch tương lai của gia sư đó)."
+              : null}
           </p>
           <div className="space-y-3">
-            {selectedTeachers.map((t) => (
-              <div
+            {selectedTeachers.map((t) => {
+              const rowLocked = rosterLocked || t.id === lockedTeacherId;
+              return (
+              <fieldset
                 key={t.id}
-                className="rounded-2xl border border-border-default bg-bg-surface p-3 shadow-sm"
+                disabled={rowLocked}
+                className="min-w-0 rounded-2xl border border-border-default bg-bg-surface p-3 shadow-sm disabled:opacity-80"
               >
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-start lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(6.5rem,7.5rem)_auto]">
                   <div className="col-span-full min-w-0">
@@ -490,6 +623,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                       </div>
                     </div>
                   </label>
+                  {rowLocked ? null : (
                   <button
                     type="button"
                     onClick={() => setSelectedTeachers((prev) => prev.filter((x) => x.id !== t.id))}
@@ -500,14 +634,18 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
+                  )}
                 </div>
                 <p className="mt-2 text-xs text-text-muted sm:text-right">
-                  {defaultAllowanceLabel
-                    ? `Để trống để dùng ${defaultAllowanceLabel}.`
-                    : "Để trống để dùng trợ cấp mặc định của lớp."}
+                  {t.id === lockedTeacherId
+                    ? "Không sửa được lương của chính mình."
+                    : defaultAllowanceLabel
+                      ? `Để trống để dùng ${defaultAllowanceLabel}.`
+                      : "Để trống để dùng trợ cấp mặc định của lớp."}
                 </p>
-              </div>
-            ))}
+              </fieldset>
+              );
+            })}
           </div>
           <div className="rounded-2xl border border-border-default bg-bg-surface p-4 shadow-sm">
             <div className="mb-4">
@@ -515,7 +653,9 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                 Quản lý lớp (Đào tạo)
               </p>
               <p className="mt-1 text-xs leading-5 text-text-muted">
-                Chọn nhân sự đào tạo phụ trách lớp và cấu hình tỷ lệ trợ cấp theo buổi.
+                {isTrainingHead
+                  ? "Chọn nhân sự đào tạo phụ trách lớp. Tỷ lệ trợ cấp do Admin đặt."
+                  : "Chọn nhân sự đào tạo phụ trách lớp và cấu hình tỷ lệ trợ cấp theo buổi."}
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-end">
@@ -543,7 +683,9 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                       inputMode="decimal"
                       value={trainingManagerRateInput}
                       onChange={(e) => setTrainingManagerRateInput(e.target.value)}
-                      placeholder="VD: 5"
+                      disabled={isTrainingHead}
+                      title={isTrainingHead ? "Chỉ Admin sửa % trợ cấp quản lý lớp." : undefined}
+                      placeholder={isTrainingHead ? "—" : "VD: 5"}
                       className="min-w-0 flex-1 bg-transparent text-right text-sm font-semibold tabular-nums text-text-primary outline-none placeholder:text-text-muted"
                     />
                     <span className="shrink-0 text-xs font-medium text-text-muted">%</span>
@@ -552,6 +694,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
               </label>
             </div>
           </div>
+          {rosterLocked ? null : (
           <div className="relative" ref={teacherSearchRef}>
             <input
               type="text"
@@ -638,6 +781,7 @@ function EditClassTeachersDialog({ onClose, classDetail }: Omit<Props, "open">) 
                 document.body,
               )}
           </div>
+          )}
         </div>
 
         <div className={classEditorModalFooterClassName}>

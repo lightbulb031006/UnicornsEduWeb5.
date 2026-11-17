@@ -594,9 +594,9 @@ function LessonPlanTeamCard({
   const replaceMembers = (staffIds: string[]) => {
     if (!canMutate || assignMutation.isPending) return;
     runBackgroundSave({
-      loadingMessage: "Đang cập nhật đội giáo án...",
-      successMessage: "Đã cập nhật đội giáo án.",
-      errorMessage: "Không thể cập nhật đội giáo án.",
+      loadingMessage: "Đang cập nhật đội chuyên môn...",
+      successMessage: "Đã cập nhật đội chuyên môn.",
+      errorMessage: "Không thể cập nhật đội chuyên môn.",
       action: () => assignMutation.mutateAsync(staffIds),
       onSuccess: async () => {
         setSelectedStaffId("");
@@ -620,10 +620,10 @@ function LessonPlanTeamCard({
 
   return (
     <section className="rounded-xl border border-border-default bg-bg-surface p-3 shadow-sm sm:rounded-lg sm:p-5">
-      <h2 className="text-base font-semibold text-text-primary">Đội giáo án</h2>
+      <h2 className="text-base font-semibold text-text-primary">Đội chuyên môn</h2>
       <p className="mt-0.5 text-sm text-text-secondary">
         Nhân sự soạn nội dung học thuật và ngân hàng câu hỏi của khoá. Thành viên lesson_plan chỉ
-        thấy khoá mình được gán; trưởng giáo án thấy mọi khoá.
+        thấy khoá mình được gán; trưởng ban Chuyên môn thấy mọi khoá.
       </p>
 
       {canMutate ? (
@@ -653,7 +653,7 @@ function LessonPlanTeamCard({
 
       {members.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-border-default p-4 text-sm text-text-secondary">
-          Chưa có thành viên nào trong đội giáo án.
+          Chưa có thành viên nào trong đội chuyên môn.
         </p>
       ) : (
         <ul className="mt-4 space-y-2">

@@ -6,14 +6,14 @@ export type NotificationTargetStaffRole =
   | "teacher"
   | "lesson_plan"
   | "lesson_plan_head"
-  | "accountant"
   | "accountant_income"
   | "accountant_expense"
   | "communication"
   | "technical"
   | "customer_care"
   | "training"
-  | "assistant"
+  | "training_head"
+  | "sale_customer_care_head"
   | "sale";
 
 export interface NotificationAuthor {

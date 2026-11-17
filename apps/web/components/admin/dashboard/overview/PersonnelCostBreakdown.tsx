@@ -16,6 +16,7 @@ export const PERSONNEL_SOURCE_KEYS: Partial<Record<AdminDashboardBreakdownKey, s
   fixedSalaryCost: ["fixed-salary-cost"],
   assistantCost: ["assistant-cost"],
   trainingManagerCost: ["training-manager-cost"],
+  lessonPlanHeadCost: ["lesson-plan-head-cost"],
 };
 
 /** Màu cố định theo khoản, khớp chart "Chi phí theo từng khoản" ở trang Thống kê năm. */
@@ -28,6 +29,7 @@ const PERSONNEL_COLORS: Partial<Record<AdminDashboardBreakdownKey, string>> = {
   fixedSalaryCost: "var(--ue-viz-9)",
   assistantCost: "var(--ue-viz-6)",
   trainingManagerCost: "var(--ue-viz-7)",
+  lessonPlanHeadCost: "var(--ue-viz-10)",
 };
 
 const colorOf = (key: AdminDashboardBreakdownKey) => PERSONNEL_COLORS[key] ?? "var(--ue-primary)";

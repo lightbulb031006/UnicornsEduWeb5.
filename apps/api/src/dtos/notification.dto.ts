@@ -1,3 +1,4 @@
+import { SALE_CS_HEAD_ROLE } from 'src/common/sale-cs-head-access';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -56,7 +57,7 @@ export class NotificationTargetingDto {
     description: 'Optional staff roles to include in the audience union.',
     enum: StaffRole,
     isArray: true,
-    example: [StaffRole.teacher, StaffRole.assistant],
+    example: [StaffRole.teacher, SALE_CS_HEAD_ROLE],
   })
   @IsOptional()
   @IsArray()

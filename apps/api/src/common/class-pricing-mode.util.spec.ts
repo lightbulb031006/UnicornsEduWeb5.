@@ -86,6 +86,44 @@ describe('class-pricing-mode.util', () => {
       }
     });
 
+    it('lets an empty one-time class leave the package blank, but never 0đ', () => {
+      for (const total of [null, undefined]) {
+        expect(() =>
+          assertOneTimePackageTotal({
+            isOneTime: true,
+            tuitionPackageTotal: total,
+            hasActiveStudents: false,
+          }),
+        ).not.toThrow();
+      }
+      for (const total of [0, -1]) {
+        expect(() =>
+          assertOneTimePackageTotal({
+            isOneTime: true,
+            tuitionPackageTotal: total,
+            hasActiveStudents: false,
+          }),
+        ).toThrow(BadRequestException);
+      }
+    });
+
+    it('blocks clearing the package of a one-time class that has active students', () => {
+      expect(() =>
+        assertOneTimePackageTotal({
+          isOneTime: true,
+          tuitionPackageTotal: null,
+          hasActiveStudents: true,
+        }),
+      ).toThrow(/đang có học sinh/);
+      expect(() =>
+        assertOneTimePackageTotal({
+          isOneTime: true,
+          tuitionPackageTotal: 1_600_000,
+          hasActiveStudents: true,
+        }),
+      ).not.toThrow();
+    });
+
     it('blocks enabling one-time on a course that already charged tuition', () => {
       expect(() => assertCanEnableOneTimeCourse(0)).not.toThrow();
       expect(() => assertCanEnableOneTimeCourse(1)).toThrow(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useGiftedLessonPlanEnabled } from "@/lib/gifted-lesson-plan";
+import { SALE_CS_HEAD_ROLE } from "@/lib/sale-cs-head-access";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -256,12 +256,11 @@ function getOtherRoleDetailHref(role: string) {
     return "/staff/customer-care-detail";
   }
 
-  if (role === "assistant") {
+  if (role === SALE_CS_HEAD_ROLE) {
     return "/staff/assistant-detail";
   }
 
   if (
-    role === "accountant" ||
     role === "accountant_income" ||
     role === "accountant_expense"
   ) {
@@ -278,6 +277,10 @@ function getOtherRoleDetailHref(role: string) {
 
   if (role === "training") {
     return "/staff/training-detail";
+  }
+
+  if (role === "training_head") {
+    return "/staff/training-head-detail";
   }
 
   if (role === "sale") {
@@ -319,7 +322,6 @@ function toStaffUpdateSessionPayload(payload: SessionUpdatePayload) {
 export default function StaffSelfDetailPage() {
   const { back, push } = useRouter();
   const queryClient = useQueryClient();
-  const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
   const { user: authUser } = useAuth();
   const [editPopupOpen, setEditPopupOpen] = useState(false);
   const [addBonusPopupOpen, setAddBonusPopupOpen] = useState(false);
@@ -355,14 +357,12 @@ export default function StaffSelfDetailPage() {
     profile?.roleType === "admin" ||
     (profile?.roleType === "staff" &&
       ((profile.staffInfo?.roles ?? []).includes("teacher") ||
-        (profile.staffInfo?.roles ?? []).includes("accountant") ||
         (profile.staffInfo?.roles ?? []).includes("accountant_income") ||
         (profile.staffInfo?.roles ?? []).includes("accountant_expense")));
   const canViewBeforeDeduction =
     profile?.roleType === "admin" ||
     (profile?.roleType === "staff" &&
-      ((profile.staffInfo?.roles ?? []).includes("accountant") ||
-        (profile.staffInfo?.roles ?? []).includes("accountant_expense")));
+      (profile.staffInfo?.roles ?? []).includes("accountant_expense"));
 
   const {
     data: staff,
@@ -831,16 +831,11 @@ export default function StaffSelfDetailPage() {
   const depositYearTotal = incomeSummary?.depositYearTotal ?? 0;
   const depositByClass = incomeSummary?.depositYearByClass ?? [];
   const bonusTotals = incomeSummary?.bonusMonthlyTotals ?? EMPTY_AMOUNT_SUMMARY;
-  // Giáo án học sinh giỏi chỉ có trên IT — JP/ENG không hiện thu nhập role giáo án.
-  const otherRoleSummaries = (incomeSummary?.otherRoleSummaries ?? []).filter(
-    (item) =>
-      giftedLessonPlanEnabled !== false ||
-      (item.role !== "lesson_plan" && item.role !== "lesson_plan_head"),
-  );
+  const otherRoleSummaries = incomeSummary?.otherRoleSummaries ?? [];
   const fixedSalaryPayables = incomeSummary?.fixedSalaryPayables ?? [];
   const showAssistantDualRoleHelper =
     hasAssistantAndCustomerCareRoles(staff?.roles) &&
-    otherRoleSummaries.some((item) => item.role === "assistant");
+    otherRoleSummaries.some((item) => item.role === SALE_CS_HEAD_ROLE);
   const staffDisplayName =
     resolveCanonicalUserName(profile, staff.user?.fullName || staff.fullName) ||
     profile.email ||

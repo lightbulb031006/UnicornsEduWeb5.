@@ -10,6 +10,8 @@ import {
   IsEnum,
   IsInt,
   IsOptional,
+  Matches,
+  Min,
   IsString,
   IsUUID,
 } from 'class-validator';
@@ -20,16 +22,17 @@ export class CreateCostDto {
   @IsString()
   month?: string;
 
-  @ApiPropertyOptional({ example: 'Marketing' })
-  @IsOptional()
+  // Bắt buộc như form web (CostFormPopup): body rỗng không được tạo khoản chi.
+  @ApiProperty({ example: 'Marketing', description: 'Danh mục, không rỗng.' })
   @IsString()
-  category?: string;
+  @Matches(/\S/, { message: 'Danh mục là bắt buộc.' })
+  category: string;
 
-  @ApiPropertyOptional({ example: 500000 })
-  @IsOptional()
+  @ApiProperty({ example: 500000, minimum: 0 })
   @Type(() => Number)
   @IsInt()
-  amount?: number;
+  @Min(0, { message: 'Số tiền phải lớn hơn hoặc bằng 0.' })
+  amount: number;
 
   @ApiPropertyOptional({ example: '2026-03-13', format: 'date' })
   @IsOptional()

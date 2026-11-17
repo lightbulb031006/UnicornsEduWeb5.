@@ -1,7 +1,6 @@
 export type StaffRoleType =
   | "teacher"
-  | "assistant"
-  | "accountant"
+  | "sale_customer_care_head"
   | "accountant_income"
   | "accountant_expense"
   | "customer_care"
@@ -10,6 +9,7 @@ export type StaffRoleType =
   | "communication"
   | "technical"
   | "training"
+  | "training_head"
   | "sale";
 
 export interface TaxDeductionSettingsQuery {

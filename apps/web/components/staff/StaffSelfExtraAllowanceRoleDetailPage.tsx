@@ -1,5 +1,6 @@
 "use client";
 
+import { SALE_CS_HEAD_ROLE } from "@/lib/sale-cs-head-access";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -49,12 +50,12 @@ const MAX_VISIBLE_ALLOWANCES = 20;
 
 type SupportedRoleType = Extract<
   ExtraAllowanceRoleType,
-  | "assistant"
+  | "sale_customer_care_head"
   | "communication"
   | "technical"
   | "training"
+  | "training_head"
   | "sale"
-  | "accountant"
   | "accountant_income"
   | "accountant_expense"
 >;
@@ -66,7 +67,7 @@ type RoleTheme = {
 };
 
 const ROLE_THEMES: Record<SupportedRoleType, RoleTheme> = {
-  assistant: {
+  sale_customer_care_head: {
     listGradientClassName: "bg-bg-surface",
     listGlowTopClassName: "bg-warning/12",
     listGlowBottomClassName: "bg-primary/10",
@@ -86,15 +87,15 @@ const ROLE_THEMES: Record<SupportedRoleType, RoleTheme> = {
     listGlowTopClassName: "bg-primary/12",
     listGlowBottomClassName: "bg-success/10",
   },
+  training_head: {
+    listGradientClassName: "bg-bg-surface",
+    listGlowTopClassName: "bg-secondary/12",
+    listGlowBottomClassName: "bg-info/10",
+  },
   sale: {
     listGradientClassName: "bg-bg-surface",
     listGlowTopClassName: "bg-success/12",
     listGlowBottomClassName: "bg-warning/10",
-  },
-  accountant: {
-    listGradientClassName: "bg-bg-surface",
-    listGlowTopClassName: "bg-success/12",
-    listGlowBottomClassName: "bg-info/10",
   },
   accountant_income: {
     listGradientClassName: "bg-bg-surface",
@@ -158,6 +159,7 @@ const SELF_MANAGED_ROLE_TYPES: readonly SelfManagedExtraAllowanceRoleType[] = [
   "communication",
   "technical",
   "training",
+  "training_head",
   "sale",
 ];
 
@@ -243,8 +245,9 @@ export default function StaffSelfExtraAllowanceRoleDetailPage({
   const [monthPopupOpen, setMonthPopupOpen] = useState(false);
   const monthQuery = toExtraAllowanceMonthQuery(selectedMonth);
   const selectedMonthLabel = formatMonthKeyLabel(monthQuery.monthKey);
-  const showAssistantCommissionTab = roleType === "assistant";
-  const showTrainingClassesTab = roleType === "training";
+  const showAssistantCommissionTab = roleType === SALE_CS_HEAD_ROLE;
+  const showTrainingClassesTab =
+    roleType === "training" || roleType === "training_head";
 
   const { data: meStaff, isLoading: isMeStaffLoading } = useQuery({
     queryKey: ["users", "me", "staff-detail"],

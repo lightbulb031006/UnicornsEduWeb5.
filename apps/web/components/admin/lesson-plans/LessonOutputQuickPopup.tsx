@@ -6,6 +6,11 @@ import { toast } from "sonner";
 import UpgradedSelect from "@/components/ui/UpgradedSelect";
 import type { CreateLessonOutputPayload, LessonPaymentStatus } from "@/dtos/lesson.dto";
 import * as lessonApi from "@/lib/apis/lesson.api";
+import { useStaffViewer } from "@/hooks/use-staff-viewer";
+import {
+  LESSON_OUTPUT_PRICING_LOCK_MESSAGES,
+  resolveLessonOutputPricingLock,
+} from "@/lib/lesson-output-pricing-access";
 import LessonDeleteConfirmPopup from "./LessonDeleteConfirmPopup";
 import LessonOutputEditorForm from "./LessonOutputEditorForm";
 import {
@@ -29,6 +34,11 @@ type Props = {
   forceSharedLayout?: boolean;
   allowDelete?: boolean;
   allowPaymentStatusEdit?: boolean;
+  /**
+   * Quyền quản lý (Admin / Trưởng ban Chuyên môn): sửa bậc độ khó / level /
+   * hạng mục của output người khác. Người nhận thanh toán vẫn tự khai output
+   * của mình khi chưa thanh toán; output đã thanh toán chỉ Admin sửa.
+   */
   allowCostEdit?: boolean;
   paymentStatusOnly?: boolean;
   relatedTaskIds?: string[];
@@ -86,6 +96,16 @@ export default function LessonOutputQuickPopup({
     queryFn: () => lessonApi.getLessonOutputById(outputId as string),
     enabled: open && Boolean(outputId),
   });
+  const viewer = useStaffViewer();
+  const pricingLock = outputDetail
+    ? resolveLessonOutputPricingLock({
+        isAdmin: viewer.isAdmin,
+        canManage: allowCostEdit,
+        viewerStaffId: viewer.staffId,
+        outputStaffId: outputDetail.staffId,
+        paymentStatus: outputDetail.paymentStatus,
+      })
+    : "not_owner";
 
   const invalidateRelatedQueries = async (currentTaskId?: string | null) => {
     const taskIds = Array.from(
@@ -361,7 +381,10 @@ export default function LessonOutputQuickPopup({
                 forceSharedLayout={forceSharedLayout}
                 allowTasklessOutput={allowTasklessOutput}
                 allowPaymentStatusEdit={allowPaymentStatusEdit}
-                allowCostEdit={allowCostEdit}
+                allowCostEdit={pricingLock === null}
+                pricingLockedMessage={
+                  pricingLock ? LESSON_OUTPUT_PRICING_LOCK_MESSAGES[pricingLock] : undefined
+                }
                 isSubmitting={updateMutation.isPending}
                 submitLabel="Lưu thay đổi"
                 footerLeadingActions={

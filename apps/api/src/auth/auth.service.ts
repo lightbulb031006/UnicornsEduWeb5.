@@ -35,6 +35,7 @@ import { STAFF_DATA_CONSENT_VERSION } from './constants';
 import { UserDeviceService } from './user-device.service';
 import type { DeviceInfo } from './user-device.service';
 import { maskEmailAddress } from 'src/common/mask-email.util';
+import { assertCanManageStudentAccount } from 'src/common/student-account-scope';
 
 type JwtSignOptions = Parameters<JwtService['signAsync']>[1];
 type UserAuditClient = Prisma.TransactionClient | PrismaService;
@@ -451,7 +452,14 @@ export class AuthService {
       deviceId: payload.deviceId,
     });
     if (!device) {
-      return null;
+      // Ném lỗi có mã để `/auth/session` báo được máy bị đá
+      // (`DEVICE_SUPERSEDED`) thay vì chỉ trả guest.
+      throw new UnauthorizedException(
+        await this.userDeviceService.resolveNoLiveDeviceError(
+          payload.id,
+          payload.iat,
+        ),
+      );
     }
 
     return this.getAuthProfile(payload.id, request);
@@ -947,8 +955,8 @@ export class AuthService {
   /**
    * Admin/trợ lí đặt mật khẩu mới cho user khác (không cần mật khẩu cũ).
    * Thu hồi mọi thiết bị + refresh token của user đích để buộc đăng nhập lại.
-   * Trợ lí (không phải admin đầy đủ) không được đặt mật khẩu cho tài khoản
-   * admin/trợ lí khác, tránh leo thang quyền qua chiếm tài khoản.
+   * #267: Trợ lí (không phải admin đầy đủ) chỉ được đặt mật khẩu cho tài khoản
+   * học sinh — quản lý tài khoản staff/admin là quyền chỉ Admin.
    */
   async adminSetUserPassword(
     targetUserId: string,
@@ -961,7 +969,6 @@ export class AuthService {
         select: {
           id: true,
           roleType: true,
-          staffInfo: { select: { roles: true } },
         },
       }),
       this.prisma.staffInfo.findUnique({
@@ -977,15 +984,10 @@ export class AuthService {
     const actorIsFullAdmin =
       actor.roleType === UserRole.admin ||
       (actorStaff?.roles ?? []).includes(StaffRole.admin);
-    const targetRoles = target.staffInfo?.roles ?? [];
-    const targetIsPrivileged =
-      target.roleType === UserRole.admin ||
-      targetRoles.includes(StaffRole.admin) ||
-      targetRoles.includes(StaffRole.assistant);
 
-    if (!actorIsFullAdmin && targetIsPrivileged && target.id !== actor.userId) {
+    if (!actorIsFullAdmin && target.roleType !== UserRole.student) {
       throw new ForbiddenException(
-        'Trợ lí không được đổi mật khẩu của tài khoản admin/trợ lí.',
+        'Trưởng phòng Sale & CSKH chỉ được đặt mật khẩu cho tài khoản học sinh.',
       );
     }
 
@@ -1134,6 +1136,7 @@ export class AuthService {
         accountHandle: string;
         roleType: UserRole;
         deviceId?: string;
+        iat?: number;
       }>(refreshToken, {
         secret: this.refreshTokenSecret,
       });
@@ -1227,6 +1230,7 @@ export class AuthService {
     ipAddress?: string,
     emailLinkOrigin?: PublicRequestOrigin,
     rememberMe = false,
+    forceLogoutOthers = false,
   ): Promise<TokenPair> {
     const user = await this.prisma.user.findFirst({
       where: {
@@ -1286,14 +1290,18 @@ export class AuthService {
     // Email đã xác minh (admin tick «Email đã xác thực» hoặc học sinh bấm link)
     // thì cấp phiên luôn, không gửi magic link xác minh đăng nhập nữa. Luật
     // một thiết bị kiểm tra trong cùng transaction với lúc tạo thiết bị.
+    // `forceLogoutOthers`: học sinh bị chặn chọn đăng xuất mọi thiết bị cũ
+    // (máy đăng nhập sau cùng thắng), mật khẩu vừa nhập là đủ chứng minh.
     const tokenPair = await this.issueStudentDeviceSession({
       userId: user.id,
+      email: user.email,
       accountHandle: user.accountHandle,
       roleType: user.roleType,
       deviceInfo,
       ipAddress,
       rememberMe,
-      rejectIfLiveDevice: true,
+      rejectIfLiveDevice: !forceLogoutOthers,
+      supersedeLiveDevices: forceLogoutOthers,
     });
     if (!tokenPair) {
       throw new ConflictException(STUDENT_DEVICE_ACTIVE_ERROR);
@@ -1443,24 +1451,50 @@ export class AuthService {
    */
   private async issueStudentDeviceSession(params: {
     userId: string;
+    email?: string;
     accountHandle: string;
     roleType: UserRole;
     deviceInfo?: DeviceInfo;
     ipAddress?: string;
     rememberMe: boolean;
     rejectIfLiveDevice: boolean;
+    supersedeLiveDevices?: boolean;
   }): Promise<TokenPair | null> {
     const device = await this.userDeviceService.replaceDevicesForUser({
       userId: params.userId,
       token: this.userDeviceService.generateDeviceToken(),
       refreshExpiresAt: this.computeRefreshExpiresAt(params.rememberMe),
       rejectIfLive: params.rejectIfLiveDevice,
+      markSuperseded: params.supersedeLiveDevices,
       deviceInfo: params.deviceInfo,
       ipAddress: params.ipAddress,
     });
     this.authIdentityCacheService.invalidateHasActiveDevice(params.userId);
     if (!device) {
       return null;
+    }
+
+    const supersededDevices = device.supersededDevices ?? [];
+    if (supersededDevices.length > 0 && params.email) {
+      await this.actionHistoryService.recordUpdate(this.prisma, {
+        actor: this.buildUserActor({
+          id: params.userId,
+          email: params.email,
+          roleType: params.roleType,
+        }),
+        entityType: 'user_device',
+        entityId: params.userId,
+        description: `Học sinh tự đăng xuất ${supersededDevices.length} thiết bị để đăng nhập thiết bị mới`,
+        beforeValue: { devices: supersededDevices },
+        afterValue: {
+          selfLogoutAllDevices: true,
+          newDevice: {
+            id: device.id,
+            deviceInfo: device.deviceInfo,
+            ipAddress: device.ipAddress,
+          },
+        },
+      });
     }
 
     return this.generateTokenPairAndSave(
@@ -1537,14 +1571,19 @@ export class AuthService {
   ): Promise<{ message: string }> {
     const student = await this.prisma.user.findUnique({
       where: { id: studentId },
-      select: { id: true, email: true, roleType: true },
+      select: {
+        id: true,
+        email: true,
+        roleType: true,
+        studentInfo: { select: { id: true } },
+      },
     });
 
     if (!student) {
       throw new NotFoundException('Student not found');
     }
 
-    if (student.roleType !== UserRole.student) {
+    if (student.roleType !== UserRole.student || !student.studentInfo) {
       throw new BadRequestException('Target must be a student account');
     }
 
@@ -1556,6 +1595,13 @@ export class AuthService {
     if (!actor) {
       throw new UnauthorizedException('Actor not found');
     }
+
+    // Admin/trợ lí: mọi học sinh; CSKH: chỉ học sinh mình chăm sóc; role khác: 403.
+    await assertCanManageStudentAccount(
+      this.prisma,
+      { userId: actor.id, roleType: actor.roleType },
+      student.studentInfo.id,
+    );
 
     // Remove all devices
     await this.userDeviceService.removeAllDevicesForUser(studentId);
@@ -1615,20 +1661,28 @@ export class AuthService {
    * Google đã chứng minh quyền sở hữu email (tương đương magic link), nhưng
    * luật một thiết bị vẫn phải áp: còn thiết bị sống → từ chối; không còn →
    * thay các row chết bằng đúng một UserDevice (nguyên tử, xem
-   * `UserDeviceService.replaceDevicesForUser`).
+   * `UserDeviceService.replaceDevicesForUser`). `forceLogoutOthers` (học sinh
+   * chọn đăng xuất mọi thiết bị trên màn bị chặn rồi xác thực lại Google):
+   * thay luôn thiết bị sống.
    * @returns `null` nếu học sinh đang đăng nhập ở thiết bị khác.
    */
-  async issueStudentGoogleSession(user: {
-    id: string;
-    accountHandle: string;
-    roleType: UserRole;
-  }): Promise<TokenPair | null> {
+  async issueStudentGoogleSession(
+    user: {
+      id: string;
+      email: string;
+      accountHandle: string;
+      roleType: UserRole;
+    },
+    forceLogoutOthers = false,
+  ): Promise<TokenPair | null> {
     return this.issueStudentDeviceSession({
       userId: user.id,
+      email: user.email,
       accountHandle: user.accountHandle,
       roleType: user.roleType,
       rememberMe: true,
-      rejectIfLiveDevice: true,
+      rejectIfLiveDevice: !forceLogoutOthers,
+      supersedeLiveDevices: forceLogoutOthers,
     });
   }
 

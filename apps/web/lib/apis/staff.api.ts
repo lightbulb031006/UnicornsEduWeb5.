@@ -4,6 +4,7 @@ import {
     CreateStaffPayload,
     StaffDepositPaymentPreview,
     StaffSurveyDeadlineBlockWarningItem,
+    StaffTrialTeachingWarningDismissResult,
     StaffAssignableUser,
     StaffDetail,
     StaffPayDepositSessionsPayload,
@@ -280,6 +281,17 @@ export async function getStaffPaymentPreview(
         },
     });
 
+    return response.data;
+}
+
+/** Bỏ qua Cảnh báo chưa dạy thử của gia sư ở một lớp (lưu theo cặp gia sư, lớp; không nhắc lại). */
+export async function dismissStaffTrialTeachingWarning(
+    staffId: string,
+    classId: string,
+): Promise<StaffTrialTeachingWarningDismissResult> {
+    const response = await api.post<StaffTrialTeachingWarningDismissResult>(
+        `/staff/${encodeURIComponent(staffId)}/trial-teaching-warnings/${encodeURIComponent(classId)}/dismiss`,
+    );
     return response.data;
 }
 

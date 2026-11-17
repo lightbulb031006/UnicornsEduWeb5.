@@ -12,12 +12,12 @@ function AdminAccountantDetailPageContent() {
   const roleTypeParam = getSearchParam("roleType");
   const roleType: Extract<
     ExtraAllowanceRoleType,
-    "accountant" | "accountant_income" | "accountant_expense"
+    "accountant_income" | "accountant_expense"
   > =
     roleTypeParam === "accountant_income" ||
     roleTypeParam === "accountant_expense"
       ? roleTypeParam
-      : "accountant";
+      : "accountant_income";
 
   return (
     <ExtraAllowanceRoleDetailPage

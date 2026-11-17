@@ -610,6 +610,11 @@ type QuickPickProps = {
   disabled?: boolean;
   /** `false` với lớp bán một lần — không có học thử. */
   allowTrial?: boolean;
+  /**
+   * Khoá từng trạng thái (vd. Trưởng ban Đào tạo chỉ đổi sang / ra Học thử).
+   * Trạng thái đang chọn luôn hiển thị active.
+   */
+  isStatusSelectable?: (status: SessionAttendanceStatus) => boolean;
 };
 
 export function AttendanceStatusQuickPick({
@@ -618,6 +623,7 @@ export function AttendanceStatusQuickPick({
   namePrefix,
   disabled = false,
   allowTrial = true,
+  isStatusSelectable,
 }: QuickPickProps) {
   const statuses = allowTrial ? STATUS_ORDER : STATUS_ORDER.filter((status) => status !== "trial");
   return (
@@ -630,19 +636,22 @@ export function AttendanceStatusQuickPick({
     >
       {statuses.map((status) => {
         const active = value === status;
+        const buttonDisabled =
+          disabled ||
+          (!active && isStatusSelectable != null && !isStatusSelectable(status));
         return (
           <button
             key={status}
             type="button"
             name={`${namePrefix}-${status}`}
-            disabled={disabled}
-            onClick={() => !disabled && onChange(status)}
+            disabled={buttonDisabled}
+            onClick={() => !buttonDisabled && onChange(status)}
             className={`flex size-9 items-center justify-center rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${
               active
-                ? disabled
+                ? buttonDisabled
                   ? "bg-bg-secondary text-text-secondary border border-border-default/60 shadow-sm"
                   : "bg-bg-surface text-text-primary shadow-sm ring-1 ring-border-default/80"
-                : disabled
+                : buttonDisabled
                 ? "text-text-muted cursor-not-allowed"
                 : "text-text-muted hover:bg-bg-tertiary/80"
             }`}
@@ -650,19 +659,19 @@ export function AttendanceStatusQuickPick({
             aria-pressed={active}
           >
             {status === "present" ? (
-              <svg className={`size-4 ${disabled ? "text-success/50" : "text-success"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+              <svg className={`size-4 ${buttonDisabled ? "text-success/50" : "text-success"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M5 13l4 4L19 7" />
               </svg>
             ) : status === "excused" ? (
-              <span className={`text-xs font-bold ${disabled ? "text-warning/50" : "text-warning"}`} aria-hidden>
+              <span className={`text-xs font-bold ${buttonDisabled ? "text-warning/50" : "text-warning"}`} aria-hidden>
                 p
               </span>
             ) : status === "trial" ? (
-              <span className={`text-xs font-bold ${disabled ? "text-primary/50" : "text-primary"}`} aria-hidden>
+              <span className={`text-xs font-bold ${buttonDisabled ? "text-primary/50" : "text-primary"}`} aria-hidden>
                 T
               </span>
             ) : (
-              <svg className={`size-4 ${disabled ? "text-error/50" : "text-error"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+              <svg className={`size-4 ${buttonDisabled ? "text-error/50" : "text-error"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M6 6l12 12M18 6L6 18" />
               </svg>
             )}
@@ -1119,6 +1128,14 @@ type SessionAttendanceEditorProps = {
   canEditTuition?: boolean;
   /** `false` với lớp bán một lần — ẩn nút Học thử. */
   allowTrial?: boolean;
+  /**
+   * Cho đổi trạng thái kể cả khi `disabled` (nhận xét vẫn khoá), giới hạn theo
+   * từng học sinh — 14/11: Trưởng ban Đào tạo tick Học thử.
+   */
+  isStatusSelectable?: (
+    studentId: string,
+    status: SessionAttendanceStatus,
+  ) => boolean;
   hasInClassTest: boolean;
   inClassTestTotal: number | null;
   onStatusChange: (studentId: string, status: SessionAttendanceStatus) => void;
@@ -1136,6 +1153,7 @@ export function SessionAttendanceEditor({
   disabled = false,
   canEditTuition = false,
   allowTrial = true,
+  isStatusSelectable,
   hasInClassTest,
   inClassTestTotal,
   onStatusChange,
@@ -1154,6 +1172,11 @@ export function SessionAttendanceEditor({
           namePrefix={`${namePrefix}-${item.studentId}`}
           disabled={disabled}
           allowTrial={allowTrial}
+          isStatusSelectable={
+            isStatusSelectable
+              ? (status) => isStatusSelectable(item.studentId, status)
+              : undefined
+          }
           hasInClassTest={hasInClassTest}
           inClassTestTotal={inClassTestTotal}
           onStatusChange={(next) => onStatusChange(item.studentId, next)}
@@ -1182,6 +1205,8 @@ type SessionStudentAttendanceCommentRowProps = {
   namePrefix: string;
   disabled?: boolean;
   allowTrial?: boolean;
+  /** Có thì quick-pick mở kể cả khi `disabled`, khoá theo từng trạng thái. */
+  isStatusSelectable?: (status: SessionAttendanceStatus) => boolean;
   hasInClassTest: boolean;
   inClassTestTotal: number | null;
   onStatusChange: (next: SessionAttendanceStatus) => void;
@@ -1206,6 +1231,7 @@ export function SessionStudentAttendanceCommentRow({
   namePrefix,
   disabled = false,
   allowTrial = true,
+  isStatusSelectable,
   hasInClassTest,
   inClassTestTotal,
   onStatusChange,
@@ -1240,8 +1266,9 @@ export function SessionStudentAttendanceCommentRow({
           <AttendanceStatusQuickPick
             namePrefix={namePrefix}
             value={status}
-            disabled={disabled}
+            disabled={disabled && !isStatusSelectable}
             allowTrial={allowTrial}
+            isStatusSelectable={isStatusSelectable}
             onChange={onStatusChange}
           />
         </div>

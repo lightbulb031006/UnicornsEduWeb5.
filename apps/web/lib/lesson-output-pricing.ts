@@ -28,6 +28,32 @@ export const LESSON_OUTPUT_THEORY_LECTURE_PRICES: Record<number, number> = {
 
 export const LESSON_OUTPUT_THEORY_LECTURE_MAX_LINKS = 20;
 
+export type LessonOutputFieldVisibility = {
+  /** Đã tick ít nhất 1 hạng mục. */
+  hasAnyItem: boolean;
+  /** Sinh test / Lời giải / Bài giảng video → Độ khó, nguồn, link gốc, link output, contest… */
+  showProblemFields: boolean;
+  /** Bài giảng lý thuyết → Level + danh sách link video. */
+  showTheoryFields: boolean;
+};
+
+/**
+ * Field nào của form output đang hiện theo hạng mục đã tick.
+ * `pricingLocked` = người xem không tick được hạng mục → hiện hết, không gate.
+ */
+export function getLessonOutputFieldVisibility(
+  items: LessonOutputPricingItems,
+  pricingLocked = false,
+): LessonOutputFieldVisibility {
+  const hasProblemItem =
+    items.includesTest || items.includesSolution || items.includesLectureVideo;
+  return {
+    hasAnyItem: hasProblemItem || items.includesTheoryLecture,
+    showProblemFields: pricingLocked || hasProblemItem,
+    showTheoryFields: pricingLocked || items.includesTheoryLecture,
+  };
+}
+
 /** Nhận `"Level 3"` hoặc `"3"`. */
 export function parseLessonOutputLevel(
   value: string | null | undefined,

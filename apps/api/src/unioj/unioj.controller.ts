@@ -8,6 +8,10 @@ import {
 } from '@nestjs/swagger';
 import { UserRole } from 'generated/enums';
 import { Roles } from '../auth/decorators/roles.decorator';
+import {
+  CurrentUser,
+  type JwtPayload,
+} from '../auth/decorators/current-user.decorator';
 import { UniojService } from './unioj.service';
 
 @Controller('unioj')
@@ -21,7 +25,7 @@ export class UniojController {
   @ApiOperation({
     summary: 'Get UNIOJ student progress report',
     description:
-      'Tra cứu báo cáo tiến độ học tập của học viên theo tên từ hệ thống UNIOJ.',
+      'Tra cứu báo cáo tiến độ học tập của học viên theo tên từ hệ thống UNIOJ. Học sinh chỉ xem được báo cáo của chính mình (tham số `name` bị bỏ qua).',
   })
   @ApiQuery({
     name: 'name',
@@ -34,19 +38,25 @@ export class UniojController {
     description: 'Số ngày thống kê (7-365)',
   })
   @ApiResponse({ status: 200, description: 'Dữ liệu báo cáo JSON.' })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy học viên/báo cáo.' })
   async getReport(
+    @CurrentUser() user: JwtPayload,
     @Query('name') name: string,
     @Query('days') days?: string,
   ): Promise<unknown> {
     const parsedDays = days ? Number.parseInt(days, 10) : undefined;
-    return this.uniojService.getStudentReport(name, parsedDays);
+    const reportName = await this.uniojService.resolveReportStudentName(
+      { userId: user.id, roleType: user.roleType },
+      name,
+    );
+    return this.uniojService.getStudentReport(reportName, parsedDays);
   }
 
   @Get('report/pdf')
   @ApiOperation({
     summary: 'Get UNIOJ student PDF report',
     description:
-      'Tải/Stream báo cáo PDF của học viên theo tên từ hệ thống UNIOJ.',
+      'Tải/Stream báo cáo PDF của học viên theo tên từ hệ thống UNIOJ. Học sinh chỉ tải được báo cáo của chính mình (tham số `name` bị bỏ qua).',
   })
   @ApiQuery({
     name: 'name',
@@ -59,13 +69,19 @@ export class UniojController {
     description: 'Số ngày thống kê (7-365)',
   })
   @ApiResponse({ status: 200, description: 'File PDF báo cáo.' })
+  @ApiResponse({ status: 404, description: 'Không tìm thấy học viên/báo cáo.' })
   async getReportPdf(
+    @CurrentUser() user: JwtPayload,
     @Query('name') name: string,
     @Query('days') days?: string,
   ): Promise<StreamableFile> {
     const parsedDays = days ? Number.parseInt(days, 10) : undefined;
-    const { data, headers } = await this.uniojService.getStudentReportPdf(
+    const reportName = await this.uniojService.resolveReportStudentName(
+      { userId: user.id, roleType: user.roleType },
       name,
+    );
+    const { data, headers } = await this.uniojService.getStudentReportPdf(
+      reportName,
       parsedDays,
     );
 

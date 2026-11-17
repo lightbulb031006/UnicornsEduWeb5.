@@ -58,19 +58,41 @@ export function assertCourseChangeKeepsSaleMode(params: {
   }
 }
 
-/** Lớp bán một lần phải có tổng gói > 0đ, vì gói là khoản thu ở buổi đầu. */
+export const ONE_TIME_PACKAGE_REQUIRED_MESSAGE =
+  'Lớp thuộc khoá bán một lần phải có Tổng gói lớn hơn 0đ.';
+
+export const ONE_TIME_PACKAGE_REQUIRED_WITH_STUDENTS_MESSAGE =
+  'Lớp bán một lần đang có học sinh học, không được để trống Tổng gói. Tổng gói phải lớn hơn 0đ.';
+
+/**
+ * Lớp bán một lần: gói là khoản thu ở buổi đầu nên phải > 0đ — nhưng chỉ bắt
+ * buộc khi lớp **đang có học sinh học** (follow-up grill 13/11). Lớp còn trống
+ * được để trống gói (Trưởng ban Đào tạo tạo lớp mà không thấy học phí,
+ * Trưởng phòng Sale & CSKH điền sau); điều kiện > 0đ được kiểm lúc nhận học
+ * sinh đầu tiên (`class-first-student-tuition.ts`). Đã gửi số thì số đó luôn
+ * phải > 0đ (`0đ` không phải gói bán một lần hợp lệ).
+ */
 export function assertOneTimePackageTotal(params: {
   isOneTime: boolean;
   tuitionPackageTotal?: number | null;
+  /** Lớp đang có học sinh học (status `active`/`null`). Mặc định `true`. */
+  hasActiveStudents?: boolean;
 }): void {
   if (!params.isOneTime) {
     return;
   }
   const total = params.tuitionPackageTotal;
-  if (total == null || !Number.isFinite(total) || total <= 0) {
+  const hasActiveStudents = params.hasActiveStudents ?? true;
+  if (total == null) {
+    if (!hasActiveStudents) {
+      return;
+    }
     throw new BadRequestException(
-      'Lớp thuộc khoá bán một lần phải có Tổng gói lớn hơn 0đ.',
+      ONE_TIME_PACKAGE_REQUIRED_WITH_STUDENTS_MESSAGE,
     );
+  }
+  if (!Number.isFinite(total) || total <= 0) {
+    throw new BadRequestException(ONE_TIME_PACKAGE_REQUIRED_MESSAGE);
   }
 }
 

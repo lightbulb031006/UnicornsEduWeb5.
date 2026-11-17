@@ -1,5 +1,7 @@
 "use client";
 
+import { hasSaleCsHeadAccess } from "@/lib/sale-cs-head-access";
+import { hasTrainingAccess } from "@/lib/training-access";
 import { useGiftedLessonPlanEnabled } from "@/lib/gifted-lesson-plan";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -1233,7 +1235,7 @@ function AssistantActionAlertsList({
     return (
       <EmptyState
         title="Không có cảnh báo mở"
-        description="Hiện chưa có mục nào cần trợ lí xử lý thêm."
+        description="Hiện chưa có mục nào cần Trưởng phòng Sale & CSKH xử lý thêm."
       />
     );
   }
@@ -1331,7 +1333,7 @@ function AssistantSection({
 
   return (
     <section className="space-y-2">
-      <SectionTitle staffRole="assistant" />
+      <SectionTitle staffRole="sale_customer_care_head" />
       <div className="grid gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
         <SurfaceCard eyebrow="Hành động" title="Cảnh báo">
           <AssistantActionAlertsList alerts={section.actionAlerts} />
@@ -1623,7 +1625,7 @@ function UnpaidStaffList({
         ? `Lương cứng ${formatCurrency(item.fixedSalaryAmount ?? 0)}`
         : null,
       (item.assistantAmount ?? 0) > 0
-        ? `Trợ lí ${formatCurrency(item.assistantAmount ?? 0)}`
+        ? `Hoa hồng trưởng phòng ${formatCurrency(item.assistantAmount ?? 0)}`
         : null,
     ].filter((value): value is string => value != null);
     const staffDetailHref = `/staff/staffs/${encodeURIComponent(item.staffId)}`;
@@ -1695,35 +1697,46 @@ function AccountantSection({
 }: {
   section: StaffDashboardAccountantSection;
 }) {
+  const { summary } = section.financialOverview;
+  // #270: Kế toán thu không thấy khoản chi nhân sự — backend đã bỏ các trường này.
+  const staffPayoutsVisible = section.staffPayoutsVisible !== false;
   const financialRows = [
     {
       label: "Tổng nạp tháng",
-      value: section.financialOverview.summary.monthlyTopupTotal,
+      value: summary.monthlyTopupTotal,
       tone: "primary" as const,
     },
     {
       label: "Học phí đã học",
-      value: section.financialOverview.summary.totalLearnedTuition,
+      value: summary.totalLearnedTuition,
       tone: "success" as const,
     },
     {
       label: "Chưa thu",
-      value: section.financialOverview.summary.pendingCollectionTotal,
+      value: summary.pendingCollectionTotal,
       tone: "warning" as const,
     },
-    {
-      label: "Chờ thanh toán",
-      value: section.financialOverview.summary.pendingPayrollTotal,
-      tone: "danger" as const,
-    },
-    {
-      label: "Lợi nhuận tháng",
-      value: section.financialOverview.summary.monthlyProfit,
-      tone:
-        section.financialOverview.summary.monthlyProfit >= 0
-          ? ("success" as const)
-          : ("danger" as const),
-    },
+    ...(staffPayoutsVisible && summary.pendingPayrollTotal != null
+      ? [
+          {
+            label: "Chờ thanh toán",
+            value: summary.pendingPayrollTotal,
+            tone: "danger" as const,
+          },
+        ]
+      : []),
+    ...(staffPayoutsVisible && summary.monthlyProfit != null
+      ? [
+          {
+            label: "Lợi nhuận tháng",
+            value: summary.monthlyProfit,
+            tone:
+              summary.monthlyProfit >= 0
+                ? ("success" as const)
+                : ("danger" as const),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -1771,9 +1784,11 @@ function AccountantSection({
           </div>
         </SurfaceCard>
 
-        <SurfaceCard eyebrow="Thanh toán" title="Pending theo nhân sự">
-          <UnpaidStaffList items={section.unpaidStaff} />
-        </SurfaceCard>
+        {staffPayoutsVisible && section.unpaidStaff ? (
+          <SurfaceCard eyebrow="Thanh toán" title="Pending theo nhân sự">
+            <UnpaidStaffList items={section.unpaidStaff} />
+          </SurfaceCard>
+        ) : null}
       </div>
     </section>
   );
@@ -2058,7 +2073,7 @@ export default function StaffDashboardPage() {
     profile?.roleType === "admin" && !linkedStaffId;
   const isAssistant =
     (profile?.roleType === "staff" || profile?.roleType === "admin") &&
-    staffRoles.includes("assistant");
+    hasSaleCsHeadAccess(staffRoles);
 
   const incomeQuery = useQuery({
     queryKey: ["staff", "self", "income-summary", year, month],
@@ -2155,11 +2170,11 @@ export default function StaffDashboardPage() {
     staffRoles.includes("teacher") ||
     hasLessonPlan ||
     hasLessonPlanHead ||
-    staffRoles.includes("assistant") ||
+    hasSaleCsHeadAccess(staffRoles) ||
     staffRoles.includes("customer_care") ||
     hasIncomeAccountantDashboard ||
     hasExpenseAccountantDashboard ||
-    staffRoles.includes("training");
+    hasTrainingAccess(staffRoles);
 
   const incomeDetailHref =
     isAssistant && linkedStaffId
@@ -2307,7 +2322,7 @@ export default function StaffDashboardPage() {
               />
             ) : null}
 
-            {staffRoles.includes("assistant") && dashboard?.assistant ? (
+            {hasSaleCsHeadAccess(staffRoles) && dashboard?.assistant ? (
               <AssistantSection
                 section={dashboard.assistant}
                 monthLabel={monthLabel}
@@ -2333,7 +2348,7 @@ export default function StaffDashboardPage() {
               <AccountantExpenseSection section={dashboard.accountantExpense} />
             ) : null}
 
-            {staffRoles.includes("training") && dashboard?.training ? (
+            {hasTrainingAccess(staffRoles) && dashboard?.training ? (
               <TrainingSection section={dashboard.training} />
             ) : null}
 

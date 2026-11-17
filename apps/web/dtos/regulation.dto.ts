@@ -3,16 +3,16 @@ export type RegulationAudience =
   | "student"
   | "staff_admin"
   | "staff_teacher"
-  | "staff_assistant"
+  | "staff_sale_customer_care_head"
   | "staff_lesson_plan"
   | "staff_lesson_plan_head"
-  | "staff_accountant"
   | "staff_accountant_income"
   | "staff_accountant_expense"
   | "staff_communication"
   | "staff_technical"
   | "staff_customer_care"
   | "staff_training"
+  | "staff_training_head"
   | "staff_sale";
 
 export interface RegulationAuthor {

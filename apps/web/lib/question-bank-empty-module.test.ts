@@ -11,6 +11,6 @@ describe("resolveQuestionBankEmptyModuleCopy", () => {
   it("asks lesson-plan members to contact an assistant", () => {
     const copy = resolveQuestionBankEmptyModuleCopy(false);
     expect(copy.actionLabel).toBeNull();
-    expect(copy.body).toMatch(/trợ lí/i);
+    expect(copy.body).toMatch(/admin/i);
   });
 });

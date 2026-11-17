@@ -9,7 +9,11 @@ import { getServerApiOrigin } from "./lib/api-base-url";
 import { shouldVerifySessionInProxy } from "./lib/proxy-auth-guard";
 import { resolveStaffShellRouteAccess } from "./lib/staff-shell-access";
 import { isMissingRequiredStaffAchievement } from "./lib/staff-achievement-requirement";
-import { Role } from "./dtos/Auth.dto";
+import {
+  Role,
+  SIGNED_OUT_REASON_DEVICE_SUPERSEDED,
+  type UserInfoDto,
+} from "./dtos/Auth.dto";
 
 const API_URL = getServerApiOrigin();
 
@@ -112,12 +116,19 @@ function canBypassStaffProfileGuard(user: Awaited<ReturnType<typeof getUser>>) {
   );
 }
 
-function redirectGuestToLogin(req: NextRequest) {
+function redirectGuestToLogin(
+  req: NextRequest,
+  signedOutReason?: UserInfoDto["signedOutReason"],
+) {
   const redirectUrl = new URL("/auth/login", req.url);
   redirectUrl.searchParams.set(
     "next",
     `${req.nextUrl.pathname}${req.nextUrl.search}`,
   );
+  // Máy bị đá (học sinh vừa đăng nhập máy khác): login hiện đúng thông báo.
+  if (signedOutReason === SIGNED_OUT_REASON_DEVICE_SUPERSEDED) {
+    redirectUrl.searchParams.set("error", SIGNED_OUT_REASON_DEVICE_SUPERSEDED);
+  }
   return NextResponse.redirect(redirectUrl);
 }
 
@@ -150,7 +161,7 @@ export async function proxy(req: NextRequest) {
 
   const user = await getUser(req.headers.get("cookie") ?? undefined);
   if (!hasAuthenticatedSession(user)) {
-    return redirectGuestToLogin(req);
+    return redirectGuestToLogin(req, user.signedOutReason);
   }
 
   if (pathname === "/") {

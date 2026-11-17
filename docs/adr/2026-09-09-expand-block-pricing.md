@@ -40,3 +40,4 @@ Làm tròn `ROUND` tới 1đ. Với lớp 1–3 block (30–90 phút), `giá_m�
 - **Contract expand-contract bị huỷ một phần:** ticket #138 (xoá cột `*_per_session`) đã bị huỷ. Cột per-session sống vĩnh viễn; per-block là cột song song cho lớp bật chế độ theo block.
 - Ticket sau (#135) đã đổi công thức payroll trợ cấp/SQL sang cột per-block × `snapshot_block_count` **chỉ khi** lớp `pricing_mode = per_block`. Lớp theo buổi giữ nguyên `max_allowance_per_session` và công thức per-session.
 - Admin phải nhập tay các lớp trong `GET /class/missing-standard-blocks` trước khi bật chế độ theo block.
+- **Bổ sung 2026-11-06:** quyết định không có cột song song cho override gia sư gây lệch làm tròn khi đọc ngược (`ROUND(70.000 / 3) × 3 = 69.999`). Thêm `class_teachers.custom_allowance_per_session` lưu đúng số admin nhập làm nguồn cho mức theo buổi; `custom_allowance` giữ đơn vị per-block cho lớp theo block.

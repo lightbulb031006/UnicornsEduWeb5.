@@ -10,6 +10,7 @@ export { default as QrLinkPopup } from "./QrLinkPopup";
 export { default as StaffBonusCard } from "./StaffBonusCard";
 export { default as StaffFixedSalaryIncomeCard } from "./StaffFixedSalaryIncomeCard";
 export { default as SurveyDeadlineBlockPaymentWarning } from "./SurveyDeadlineBlockPaymentWarning";
+export { default as TrialTeachingPaymentWarning } from "./TrialTeachingPaymentWarning";
 export type { MockBonus } from "./StaffBonusCard";
 export { default as SessionHistoryTable } from "../session/SessionHistoryTable";
 export { default as SessionHistoryTableSkeleton } from "../session/SessionHistoryTableSkeleton";

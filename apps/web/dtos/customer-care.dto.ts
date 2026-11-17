@@ -24,7 +24,10 @@ export interface CustomerCareStudentListMeta {
 
 export interface CustomerCareStudentListResponse {
   data: CustomerCareStudentItem[];
-  meta: CustomerCareStudentListMeta;
+  meta: CustomerCareStudentListMeta & {
+    /** Mọi học sinh đang gán, kể cả đã nghỉ — số bị gỡ khi tắt role CSKH. */
+    assignedTotal: number;
+  };
 }
 
 export interface CustomerCareTopUpHistoryItem {
@@ -55,25 +58,31 @@ export interface CustomerCareCommissionListParams {
   days?: number;
 }
 
-/** One row in GET /customer-care/staff/:staffId/commissions */
+/**
+ * One row in GET /customer-care/staff/:staffId/commissions.
+ * #270: số tiền là `null` khi người xem không được xem thu nhập cá nhân
+ * (Trưởng phòng Sale & CSKH, Kế toán thu) — hiển thị «—».
+ */
 export interface CustomerCareCommissionItem {
   studentId: string;
   fullName: string;
-  totalCommission: number;
-  pendingCommission: number;
-  paidCommission: number;
-  monthCommission: number;
+  totalCommission: number | null;
+  pendingCommission: number | null;
+  paidCommission: number | null;
+  monthCommission: number | null;
 }
 
 export interface CustomerCareCommissionSummary {
   studentCount: number;
-  totalPending: number;
-  totalMonthCommission: number;
+  totalPending: number | null;
+  totalMonthCommission: number | null;
 }
 
 export interface CustomerCareCommissionListResponse {
   data: CustomerCareCommissionItem[];
   summary: CustomerCareCommissionSummary;
+  /** #270: `false` → backend đã ẩn số tiền hoa hồng. Vắng → coi như `true`. */
+  amountsVisible?: boolean;
 }
 
 /** One session commission in GET .../students/:studentId/session-commissions */
@@ -84,7 +93,8 @@ export interface CustomerCareSessionCommissionItem {
   className: string | null;
   tuitionFee: number;
   customerCareCoef: number;
-  commission: number;
+  /** #270: `null` khi người xem không được xem thu nhập cá nhân. */
+  commission: number | null;
   paymentStatus: CustomerCarePaymentStatus;
 }
 

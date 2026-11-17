@@ -347,6 +347,7 @@ export class UserProfileController {
         userEmail: user.email,
         roleType: user.roleType,
       },
+      { allowSelf: true },
     );
   }
 
@@ -394,6 +395,7 @@ export class UserProfileController {
         userEmail: user.email,
         roleType: user.roleType,
       },
+      { allowSelf: true },
     );
   }
 
@@ -428,11 +430,15 @@ export class UserProfileController {
       throw new NotFoundException('Bonus not found');
     }
 
-    return this.bonusService.deleteBonus(id, {
-      userId: user.id,
-      userEmail: user.email,
-      roleType: user.roleType,
-    });
+    return this.bonusService.deleteBonus(
+      id,
+      {
+        userId: user.id,
+        userEmail: user.email,
+        roleType: user.roleType,
+      },
+      { allowSelf: true },
+    );
   }
 
   @Get('staff-sessions')
@@ -512,7 +518,7 @@ export class UserProfileController {
     required: false,
     type: String,
     description: 'Filter by staff role type.',
-    example: 'assistant',
+    example: 'sale_customer_care_head',
   })
   @ApiQuery({
     name: 'status',
@@ -1080,7 +1086,13 @@ export class UserProfileController {
         attendance: {
           where: { studentId },
         },
-        teacher: { include: { user: true } },
+        // Học sinh chỉ cần tên gia sư — không trả CCCD/ngân hàng/email (#270).
+        teacher: {
+          select: {
+            id: true,
+            user: { select: { first_name: true, last_name: true } },
+          },
+        },
       },
       orderBy: { date: 'desc' },
     });

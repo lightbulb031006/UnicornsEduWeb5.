@@ -97,7 +97,7 @@ export function LessonWorkspaceSkeleton() {
       aria-busy="true"
     >
       <span className="sr-only">Đang tải tiết học…</span>
-      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4">
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
         <div className="flex items-center gap-2">
           <Skeleton className="h-4 w-16 bg-bg-tertiary" />
           <Skeleton className="h-4 w-24 bg-bg-tertiary" />

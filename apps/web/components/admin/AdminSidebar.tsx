@@ -15,6 +15,7 @@ import {
   useGiftedLessonPlanEnabled,
 } from "@/lib/gifted-lesson-plan";
 import {
+  ASSISTANT_VISIBLE_HREFS,
   getAccountantVisibleAdminHrefs,
   resolveAdminShellAccess,
 } from "@/lib/admin-shell-access";
@@ -260,25 +261,25 @@ export default function AdminSidebar() {
   });
   const adminShellAccess =
     resolveAdminShellAccess(fullProfile);
-  const { isAdmin, isAssistant, isAccountant, isLessonPlanHead, staffId } =
+  const { isAdmin, isAssistant, isAccountant, isLessonPlanHead } =
     adminShellAccess;
-  const assistantDashboardHref =
-    isAssistant && staffId
-      ? `/admin/staffs/${encodeURIComponent(staffId)}`
-      : "/admin/dashboard";
-  const accountantVisibleHrefs = getAccountantVisibleAdminHrefs(adminShellAccess);
+  // #267: trang quản trị mặc định đóng — non-admin chỉ thấy mục được liệt kê
+  // tường minh cho role của mình (Trợ lí: Học sinh + Thông báo).
+  const nonAdminVisibleHrefs = new Set<string>([
+    ...(isAssistant ? ASSISTANT_VISIBLE_HREFS : []),
+    ...(isAccountant ? getAccountantVisibleAdminHrefs(adminShellAccess) : []),
+    ...(isLessonPlanHead ? ["/admin/lesson-plans"] : []),
+  ]);
 
   const giftedLessonPlanEnabled = useGiftedLessonPlanEnabled();
 
   const roleMenuItems = isProfileLoading || isProfileError || !fullProfile
     ? []
-    : isAssistant || isAdmin
-      ? MENU_ITEMS.filter((item) => isAdmin || !item.adminOnly)
-      : isAccountant
-        ? MENU_ITEMS.filter((item) => accountantVisibleHrefs.has(item.href))
-        : isLessonPlanHead
-          ? MENU_ITEMS.filter((item) => item.href === "/admin/lesson-plans")
-          : [];
+    : isAdmin
+      ? MENU_ITEMS
+      : MENU_ITEMS.filter(
+          (item) => !item.adminOnly && nonAdminVisibleHrefs.has(item.href),
+        );
   // Giáo án học sinh giỏi chỉ có trên IT.
   const menuItems = giftedLessonPlanEnabled === false
     ? roleMenuItems.filter((item) => !isGiftedLessonPlanRoute(item.href))
@@ -422,26 +423,13 @@ export default function AdminSidebar() {
               </li>
             )}
             {menuItems.map((item) => {
-              const resolvedHref =
-                item.href === "/admin/dashboard"
-                  ? assistantDashboardHref
-                  : item.href;
-              const isAssistantDashboardTarget =
-                isAssistant &&
-                item.href === "/admin/dashboard" &&
-                Boolean(fullProfile?.staffInfo?.id);
+              const resolvedHref = item.href;
               const isActive =
                 item.href === "/admin/dashboard"
-                  ? pathname === "/admin" ||
-                    pathname === "/admin/dashboard" ||
-                    (isAssistantDashboardTarget && pathname === assistantDashboardHref)
-                  : item.href === "/admin/staffs" &&
-                      isAssistantDashboardTarget &&
-                      pathname === assistantDashboardHref
-                    ? false
-                    : item.href === "/admin/system-settings"
-                      ? pathname.startsWith("/admin/system-settings") ||
-                        pathname.startsWith("/admin/deductions")
+                  ? pathname === "/admin" || pathname === "/admin/dashboard"
+                  : item.href === "/admin/system-settings"
+                    ? pathname.startsWith("/admin/system-settings") ||
+                      pathname.startsWith("/admin/deductions")
                     : pathname.startsWith(item.href);
               const isItemActive = activeHrefState
                 ? activeHrefState === resolvedHref

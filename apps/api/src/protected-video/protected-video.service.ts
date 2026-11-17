@@ -5,6 +5,7 @@ import type { ProtectedVideo } from 'generated/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 import type {
   ProtectedVideoPlaybackDto,
+  ProtectedVideoProcessingStage,
   ProtectedVideoStatusDto,
 } from 'src/dtos/protected-video.dto';
 import { buildMasterUrl, signPlaybackToken } from './playback-token';
@@ -133,7 +134,13 @@ export class ProtectedVideoService {
     if (!row) {
       // Link có trước khi bật tính năng mà backfill bỏ sót: tự xếp hàng.
       this.track(url);
-      return { state: 'processing', progress: null };
+      return {
+        state: 'processing',
+        stage: 'queued',
+        progress: null,
+        queuePosition: null,
+        queueTotal: null,
+      };
     }
     return this.toPlayback(row);
   }
@@ -156,15 +163,17 @@ export class ProtectedVideoService {
         expiresAt: new Date(exp * 1000).toISOString(),
       };
     }
-    // Lỗi (failed) vẫn hiện «đang xử lý»: staff thấy badge lỗi và bấm Thử lại.
+    // Lỗi → «Video không xem được»; staff bấm Thử lại thì dòng về `pending` → processing.
+    if (row.status === ProtectedVideoStatus.failed) return { state: 'failed' };
     // `progress` của UNIOJ là % tổng, chỉ tăng (tải về 0, chuyển mã 0→89, tải lên 90).
     // 0 (xếp hàng / đang tải về) → ẩn, tránh học sinh thấy «Đã xong 0%».
+    const stage = toProcessingStage(row.status);
     return {
       state: 'processing',
-      progress:
-        row.status === ProtectedVideoStatus.failed || row.progress <= 0
-          ? null
-          : row.progress,
+      stage,
+      progress: row.progress > 0 ? row.progress : null,
+      queuePosition: stage === 'queued' ? row.queuePosition : null,
+      queueTotal: stage === 'queued' ? row.queueTotal : null,
     };
   }
 
@@ -250,6 +259,23 @@ export class ProtectedVideoService {
 function clampProgress(value: unknown): number {
   const n = typeof value === 'number' ? Math.round(value) : 0;
   return Math.min(100, Math.max(0, n));
+}
+
+/** `pending` (chưa gửi UNIOJ) với học sinh cũng là đang xếp hàng; `ready` thiếu `video_id` coi như sắp xong. */
+function toProcessingStage(
+  status: ProtectedVideoStatus,
+): ProtectedVideoProcessingStage {
+  switch (status) {
+    case ProtectedVideoStatus.downloading:
+      return 'downloading';
+    case ProtectedVideoStatus.transcoding:
+      return 'transcoding';
+    case ProtectedVideoStatus.uploading:
+    case ProtectedVideoStatus.ready:
+      return 'uploading';
+    default:
+      return 'queued';
+  }
 }
 
 function toStatusDto(row: ProtectedVideo): ProtectedVideoStatusDto {

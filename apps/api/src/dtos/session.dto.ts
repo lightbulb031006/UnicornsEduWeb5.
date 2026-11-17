@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PartialType,
+} from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -7,6 +12,8 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -420,6 +427,15 @@ export class StaffOpsAttendanceDto extends AttendanceReviewFieldsDto {
 }
 
 export class CreateStaffOpsSessionDto extends SessionReviewFieldsDto {
+  @ApiPropertyOptional({
+    description:
+      'Gia sư dạy buổi (#275). Admin / Quản lý lớp chọn bất kỳ gia sư nào của lớp; gia sư chỉ được để trống hoặc gửi chính mình. Bỏ trống: gia sư = chính người tạo (nếu là gia sư của lớp) hoặc gia sư duy nhất của lớp.',
+    example: 'UNISTAFF-c3d4e5f6a7',
+  })
+  @IsOptional()
+  @IsStaffId()
+  teacherId?: string;
+
   @ApiProperty({
     description: 'Session date YYYY-MM-DD',
     example: '2026-03-18',
@@ -505,7 +521,7 @@ export class CreateStaffOpsSessionDto extends SessionReviewFieldsDto {
 
   @ApiPropertyOptional({
     description:
-      'Coefficient for this session, from 0.0 to 1.0. Staff ops may edit this, but not allowance or tuition overrides.',
+      'Coefficient for this session, from 0.0 to 1.0 (0 = Dạy thử). Chỉ Admin hoặc gia sư trên buổi do chính mình dạy được đổi; Quản lý lớp gửi giá trị khác hệ số hiện tại trên buổi của gia sư khác → 403 (#275). Không nhận allowance hay tuition override.',
     example: 1.0,
   })
   @IsOptional()
@@ -528,5 +544,64 @@ export class CreateStaffOpsSessionDto extends SessionReviewFieldsDto {
 }
 
 export class UpdateStaffOpsSessionDto extends PartialType(
-  CreateStaffOpsSessionDto,
+  OmitType(CreateStaffOpsSessionDto, ['teacherId'] as const),
 ) {}
+
+/** Một dòng đổi trạng thái học thử (Trưởng ban Đào tạo, 14/11). */
+export class TrainingHeadAttendanceStatusDto {
+  @ApiProperty({
+    description: 'Học sinh đã có trong điểm danh của buổi',
+    example: 'UNIST-a1b2c3d4e5',
+  })
+  @IsStudentId()
+  studentId: string;
+
+  @ApiProperty({
+    enum: AttendanceStatus,
+    example: AttendanceStatus.trial,
+    description:
+      'Trạng thái mới. Chỉ được đổi sang hoặc ra khỏi `trial` (Học thử).',
+  })
+  @IsEnum(AttendanceStatus)
+  status: AttendanceStatus;
+}
+
+/**
+ * `PATCH /staff-ops/sessions/:id/training-head` (14/11): Trưởng ban Đào tạo
+ * chỉnh tay trợ cấp buổi, tick Dạy thử của buổi, tick Học thử từng học sinh.
+ */
+export class TrainingHeadSessionUpdateDto {
+  @ApiPropertyOptional({
+    description:
+      'Trợ cấp gốc của buổi (VNĐ, trước hệ số / vận hành / thuế). Buổi đã thanh toán hoặc ghi cọc không đổi được.',
+    example: 150000,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000_000)
+  allowanceAmount?: number;
+
+  @ApiPropertyOptional({
+    description: 'Dạy thử: 0 = buổi dạy thử (không trợ cấp), 1 = buổi thường.',
+    enum: [0, 1],
+    example: 0,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn([0, 1])
+  coefficient?: number;
+
+  @ApiPropertyOptional({
+    type: [TrainingHeadAttendanceStatusDto],
+    description:
+      'Chỉ các học sinh cần đổi. Học sinh không gửi giữ nguyên trạng thái, ghi chú và nhận xét.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => TrainingHeadAttendanceStatusDto)
+  attendance?: TrainingHeadAttendanceStatusDto[];
+}

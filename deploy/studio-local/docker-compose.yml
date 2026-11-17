@@ -1,0 +1,53 @@
+# deploy/studio-local/docker-compose.yml
+#
+# Supabase Studio chạy trên máy dev (Mac), xem DB self-host trên VPS qua SSH tunnel
+# Tailscale. Không chạy gì thêm trên VPS. Dùng qua ./studio.sh, không gọi trực tiếp.
+#
+#   Studio (localhost:6432x) → meta → host.docker.internal:64322 → ssh -L → VPS 127.0.0.1:54322
+#
+# Mỗi instance (it/eng/jp) là một compose project riêng `uniedu-studio-<id>`, đăng nhập
+# bằng role của instance (`uniedu_<id>`, owner DB) thay vì superuser `postgres`.
+# Xem docs/ops/supabase-studio-local.md.
+name: uniedu-studio-${STUDIO_INSTANCE:?run via ./studio.sh}
+
+x-db-env: &db-env
+  POSTGRES_HOST: host.docker.internal
+  POSTGRES_PORT: ${TUNNEL_PORT:?}
+  POSTGRES_DB: uniedu_${STUDIO_INSTANCE}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+
+services:
+  meta:
+    image: supabase/postgres-meta:v0.100.0
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: host.docker.internal
+      PG_META_DB_PORT: ${TUNNEL_PORT}
+      PG_META_DB_NAME: uniedu_${STUDIO_INSTANCE}
+      PG_META_DB_USER: uniedu_${STUDIO_INSTANCE}
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      CRYPTO_KEY: ${PG_META_CRYPTO_KEY:?}
+
+  studio:
+    image: supabase/studio:2026.10.12-sha-3699278
+    restart: unless-stopped
+    depends_on:
+      - meta
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Chỉ loopback của Mac.
+      - "127.0.0.1:${STUDIO_PORT:?}:3000"
+    environment:
+      <<: *db-env
+      HOSTNAME: "0.0.0.0"
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_USER_READ_WRITE: uniedu_${STUDIO_INSTANCE}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+      DEFAULT_ORGANIZATION_NAME: UniEdu VPS
+      DEFAULT_PROJECT_NAME: uniedu_${STUDIO_INSTANCE}
+      SUPABASE_PUBLIC_URL: https://${STUDIO_INSTANCE}.uniedu.vn
+      ENABLED_FEATURES_LOGS_ALL: "false"

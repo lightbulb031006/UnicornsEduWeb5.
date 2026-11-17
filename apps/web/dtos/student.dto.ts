@@ -82,6 +82,10 @@ export interface StudentListResponse {
 /** Detail from GET /student/:id */
 export interface StudentDetail extends StudentListItem {
   userId?: string | null;
+  /** Tên đăng nhập của tài khoản học sinh; `null` khi chưa có tài khoản. */
+  accountHandle?: string | null;
+  /** Cờ «Email đã xác thực» của tài khoản; `null` khi chưa có tài khoản. */
+  emailVerified?: boolean | null;
   avatarUrl?: string | null;
   avatarPath?: string | null;
   birthYear?: number | null;
@@ -277,6 +281,13 @@ export interface UpdateStudentAccountBalancePayload {
 
 export interface UpdateStudentClassesPayload {
   class_ids: string[];
+}
+
+/** Response `PATCH /student/:id/email-verified`. */
+export interface SetStudentEmailVerifiedResult {
+  studentId: string;
+  userId: string;
+  emailVerified: boolean;
 }
 
 export interface UpdateStudentExamSchedulesPayload {

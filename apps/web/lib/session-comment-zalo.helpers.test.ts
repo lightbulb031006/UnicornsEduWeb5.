@@ -189,6 +189,7 @@ describe("buildSessionCommentZaloText — structured review", () => {
       ...baseInput,
       ordinal: 12,
       makeupOriginalDate: "2026-06-20",
+      profile: "jp",
       review,
       students: [
         presentStudent,
@@ -236,7 +237,7 @@ describe("buildSessionCommentZaloText — structured review", () => {
         "📎 Tutorial:",
         "Tutorial buổi",
         "",
-        "— Gia sư Unicorns Edu",
+        "— Gia sư UniEdu Tiếng Nhật",
       ].join("\n"),
     );
   });
@@ -253,6 +254,23 @@ describe("buildSessionCommentZaloText — structured review", () => {
     expect(text).not.toContain("🧪");
     expect(text).not.toContain("📝");
     expect(text).toContain("👤 Nguyễn Văn A (học thử)");
+  });
+
+  it("signs per instance subject profile", () => {
+    const signatureOf = (profile: "it" | "jp" | "eng" | "math" | null) =>
+      buildSessionCommentZaloText({
+        ...baseInput,
+        review,
+        profile,
+        students: [],
+      })
+        .split("\n")
+        .at(-1);
+    expect(signatureOf("it")).toBe("— Gia sư UniEdu Tin học");
+    expect(signatureOf("jp")).toBe("— Gia sư UniEdu Tiếng Nhật");
+    expect(signatureOf("eng")).toBe("— Gia sư UniEdu Tiếng Anh");
+    expect(signatureOf("math")).toBe("— Gia sư Học Toán Cùng Chuyên Toán");
+    expect(signatureOf(null)).toBe("— Gia sư UniEdu");
   });
 
   it("keeps the legacy format when progress status is missing", () => {

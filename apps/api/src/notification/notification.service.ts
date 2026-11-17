@@ -87,12 +87,12 @@ interface NotificationAudienceContext {
 
 /**
  * Người đang thao tác trên màn quản lý (CONTEXT.md "Người tạo thông báo").
- * `isAdmin` / `isAssistant` mở quyền kiểm duyệt thông báo đã đẩy của người khác.
+ * Chỉ `isAdmin` mở quyền kiểm duyệt (xem + xoá) thông báo đã đẩy của người khác
+ * (#269 — Trưởng phòng Sale & CSKH / Trợ lí cũ chỉ còn là người gửi thường).
  */
 interface NotificationManagerContext {
   userId: string;
   isAdmin: boolean;
-  isAssistant: boolean;
 }
 
 interface NotificationTargetingState {
@@ -119,16 +119,15 @@ export class NotificationService {
         ? Math.min(Math.max(query.limit, 1), 300)
         : 200;
     const manager = await this.resolveManagerContext(viewer);
-    // Nháp chỉ người tạo thấy; admin/trợ lí thấy thêm mọi thông báo đã đẩy.
-    const visibilityWhere: Prisma.NotificationWhereInput =
-      manager.isAdmin || manager.isAssistant
-        ? {
-            OR: [
-              { createdByUserId: manager.userId },
-              { status: NotificationStatus.published },
-            ],
-          }
-        : { createdByUserId: manager.userId };
+    // Nháp chỉ người tạo thấy; chỉ Admin thấy thêm mọi thông báo đã đẩy (kiểm duyệt).
+    const visibilityWhere: Prisma.NotificationWhereInput = manager.isAdmin
+      ? {
+          OR: [
+            { createdByUserId: manager.userId },
+            { status: NotificationStatus.published },
+          ],
+        }
+      : { createdByUserId: manager.userId };
     const where: Prisma.NotificationWhereInput = query.status
       ? { AND: [{ status: query.status }, visibilityWhere] }
       : visibilityWhere;
@@ -438,7 +437,7 @@ export class NotificationService {
     actor: JwtPayload,
   ): Promise<NotificationManagerContext> {
     if (actor.roleType === UserRole.admin) {
-      return { userId: actor.id, isAdmin: true, isAssistant: false };
+      return { userId: actor.id, isAdmin: true };
     }
 
     const staff = await this.prisma.staffInfo.findUnique({
@@ -450,7 +449,6 @@ export class NotificationService {
     return {
       userId: actor.id,
       isAdmin: roles.includes(StaffRole.admin),
-      isAssistant: roles.includes(StaffRole.assistant),
     };
   }
 
@@ -474,9 +472,9 @@ export class NotificationService {
   }
 
   /**
-   * Người tạo xoá được bài của mình. Kiểm duyệt chỉ áp cho bài đã đẩy:
-   * admin xoá bất kỳ; trợ lí xoá được trừ bài mà người tạo *hiện* là admin
-   * (người tạo không còn tài khoản thì coi như staff).
+   * Người tạo xoá được bài của mình. Kiểm duyệt chỉ áp cho bài đã đẩy và
+   * chỉ Admin được kiểm duyệt (#269): mọi staff role khác (kể cả Trưởng phòng
+   * Sale & CSKH) không xoá được bài của người khác.
    */
   private canDelete(
     notification: NotificationRecord,
@@ -488,20 +486,7 @@ export class NotificationService {
     if (notification.status !== NotificationStatus.published) {
       return false;
     }
-    if (manager.isAdmin) {
-      return true;
-    }
-    return manager.isAssistant && !this.isAdminAuthor(notification.createdBy);
-  }
-
-  private isAdminAuthor(author: NotificationRecord['createdBy']) {
-    if (!author) {
-      return false;
-    }
-    return (
-      author.roleType === UserRole.admin ||
-      (author.staffInfo?.roles ?? []).includes(StaffRole.admin)
-    );
+    return manager.isAdmin;
   }
 
   private buildEligibleRecipientWhere(): Prisma.UserWhereInput {

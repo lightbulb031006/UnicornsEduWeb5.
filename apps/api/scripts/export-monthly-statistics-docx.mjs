@@ -53,7 +53,7 @@ const EXPENSE_SERIES = [
   { key: 'lessonCost', name: 'Giáo án', color: COLORS.viz[2] },
   { key: 'bonusCost', name: 'Thưởng', color: COLORS.viz[3] },
   { key: 'extraAllowanceCost', name: 'Trợ cấp khác', color: COLORS.viz[4] },
-  { key: 'assistantCost', name: 'Trợ lí', color: COLORS.viz[5] },
+  { key: 'assistantCost', name: 'Hoa hồng trưởng phòng', color: COLORS.viz[5] },
   { key: 'trainingManagerCost', name: 'QL lớp', color: COLORS.viz[6] },
   { key: 'operatingCost', name: 'Vận hành', color: COLORS.viz[7] },
 ];
@@ -696,7 +696,7 @@ const EXPENSE_METRIC_GLOSSARY = [
     term: 'Trợ cấp khác',
     definition: 'Các khoản trợ cấp ngoài lương dạy và hoa hồng thông thường trong tháng.',
   },
-  { term: 'Trợ lí', definition: 'Tiền hỗ trợ trả cho trợ lí lớp trong tháng.' },
+  { term: 'Hoa hồng trưởng phòng', definition: 'Hoa hồng 3% học phí trả cho Trưởng phòng Sale & CSKH trên nhóm CSKH mình quản lí trong tháng.' },
   { term: 'QL lớp', definition: 'Tiền hỗ trợ người quản lý lớp trong tháng.' },
   {
     term: 'Vận hành',

@@ -47,16 +47,14 @@ function StaffAccountantDetailPageContent() {
   const selfRoles = profile?.staffInfo?.roles ?? [];
   const resolvedRoleType: Extract<
     ExtraAllowanceRoleType,
-    "accountant" | "accountant_income" | "accountant_expense"
+    "accountant_income" | "accountant_expense"
   > =
     roleTypeParam === "accountant_income" ||
     roleTypeParam === "accountant_expense"
       ? roleTypeParam
       : selfRoles.includes("accountant_expense")
         ? "accountant_expense"
-        : selfRoles.includes("accountant_income")
-          ? "accountant_income"
-          : "accountant";
+        : "accountant_income";
   if (isProfileLoading && !profile) {
     return <StaffRoleDetailLoadingShell />;
   }

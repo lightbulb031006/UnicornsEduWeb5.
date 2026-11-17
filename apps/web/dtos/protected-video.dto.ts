@@ -20,16 +20,31 @@ export interface ProtectedVideoStatusDto {
   syncedAt: string | null;
 }
 
+/** Giai đoạn đồng bộ học sinh thấy (`pending` gộp vào `queued`). */
+export type ProtectedVideoProcessingStage =
+  | "queued"
+  | "downloading"
+  | "transcoding"
+  | "uploading";
+
 /**
  * Link phát cho học sinh. Không bao giờ chứa link YouTube.
  * - `ready`: `masterUrl` HLS đã ký, hết hạn ở `expiresAt` (edge trả 403 sau đó).
- * - `processing`: chưa phát được (đang đồng bộ hoặc lỗi chờ staff thử lại).
+ * - `processing`: đang đồng bộ — `stage`, `progress` (% tổng, `null` khi 0), vị trí hàng đợi.
+ * - `failed`: đồng bộ lỗi, chờ staff Thử lại.
  * - `unavailable`: link không phải YouTube hoặc server chưa cấu hình kho video.
  * - `none`: tiết/buổi không có video.
  */
 export type ProtectedVideoPlaybackDto =
   | { state: "ready"; masterUrl: string; expiresAt: string }
-  | { state: "processing"; progress: number | null }
+  | {
+      state: "processing";
+      stage: ProtectedVideoProcessingStage;
+      progress: number | null;
+      queuePosition: number | null;
+      queueTotal: number | null;
+    }
+  | { state: "failed" }
   | { state: "unavailable" }
   | { state: "none" };
 

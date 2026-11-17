@@ -16,7 +16,7 @@ Cho phép người dùng đăng nhập bằng email/password hoặc Google OAuth
 - Redirect theo role:
   - `admin` -> `/admin/dashboard`
   - `student` -> `/student` khi đã có linked student profile; nếu chưa có profile -> `/user-profile`
-  - mọi staff role không phải `roleType=admin`, kể cả `staff.admin`, `staff.assistant`, `staff.accountant_income`, `staff.accountant_expense`, `staff.lesson_plan_head`, và multi-role như `teacher + lesson_plan`, -> `/staff` khi đã có linked staff profile; nếu chưa có profile -> `/user-profile`
+  - mọi staff role không phải `roleType=admin`, kể cả `staff.admin`, `staff.sale_customer_care_head`, `staff.accountant_income`, `staff.accountant_expense`, `staff.lesson_plan_head`, và multi-role như `teacher + lesson_plan`, -> `/staff` khi đã có linked staff profile; nếu chưa có profile -> `/user-profile`
   - linked `studentInfo` -> `/student` khi user không có linked staff profile
   - fallback -> `/`
 - Trường hợp query `error=google_no_user`: hiển thị `toast.error`.
@@ -48,5 +48,7 @@ Cho phép người dùng đăng nhập bằng email/password hoặc Google OAuth
 
 - Bấm Đăng nhập gọi `POST /auth/student/login` trước; tài khoản không phải học sinh (`NOT_STUDENT_ACCOUNT`) mới rơi về luồng staff/admin.
 - Email học sinh đã xác minh → server set cookie ngay, FE nạp session rồi chuyển trang (không còn màn «Kiểm tra email của bạn» / poll xác minh thiết bị).
+- Học sinh còn thiết bị sống (`409 DEVICE_ACTIVE`, hoặc Google `error=device_blocked`): màn `StudentDeviceBlockedCard` «Tài khoản đang đăng nhập ở thiết bị khác», giữ nguyên thông tin vừa nhập. Nút **Đăng xuất tất cả thiết bị và đăng nhập** mở `ConfirmDialog`; xác nhận → luồng mật khẩu gọi lại `student/login` kèm `forceLogoutOthers: true`, luồng Google chuyển tới `/auth/google?force_device=1`. Nút **Quay lại** về form trống.
+- `?error=device_superseded` (máy bị đá vì học sinh vừa đăng nhập máy khác): toast lỗi «Tài khoản vừa được đăng nhập ở thiết bị khác, bạn đã bị đăng xuất. Nếu không phải bạn, hãy đổi mật khẩu.» (10 giây).
 - Email học sinh **chưa xác minh** (`EMAIL_NOT_VERIFIED`): server gửi luôn mail xác minh email trong cùng lần bấm. Có `maskedEmail` → màn «Xác minh email để đăng nhập» hiện email đã che, nút **Gửi lại** (gọi lại `student/login`, chờ 60 giây) và **Quay lại đăng nhập**. Không có `maskedEmail` (gửi lỗi / không có email) → chỉ toast.
 - Google button dùng backend URL từ `NEXT_PUBLIC_BACKEND_URL` (fallback localhost:3001).

@@ -14,13 +14,46 @@ export function HighlightAchievementBadge() {
 
 /**
  * Hướng dẫn chọn thành tích nổi bật, đặt đầu danh sách thành tích nhân sự.
- * Chưa chọn → cảnh báo bắt buộc; đã chọn → ghi chú nhẹ cách đổi.
+ * Gắn sao trước, tải minh chứng sau (ADR 2026-11-11): chưa chọn → cảnh báo bắt
+ * buộc; đã chọn nhưng dòng sao chưa có ảnh → cảnh báo thiếu minh chứng; đủ → ghi
+ * chú nhẹ cách đổi. `audience="other"`: người khác (admin, Ban Đào Tạo) đang sửa.
  */
 export function HighlightAchievementGuide({
   hasHighlight,
+  highlightMissingProof = false,
+  audience = "self",
 }: {
   hasHighlight: boolean;
+  highlightMissingProof?: boolean;
+  audience?: "self" | "other";
 }) {
+  const isSelf = audience === "self";
+
+  if (hasHighlight && highlightMissingProof) {
+    return (
+      <Alert variant="warning">
+        <AlertTitle className="flex items-center gap-1.5 text-sm">
+          <Star className="size-4 shrink-0 fill-current" aria-hidden />
+          Thành tích nổi bật chưa có ảnh minh chứng
+        </AlertTitle>
+        <AlertDescription className="text-text-primary">
+          {isSelf ? (
+            <>
+              Tải ảnh minh chứng lên cho dòng gắn sao.{" "}
+              <strong>Bắt buộc với gia sư</strong> — chưa có ảnh thì chưa dùng
+              được hệ thống.
+            </>
+          ) : (
+            <>
+              Gia sư cần tải ảnh minh chứng cho dòng gắn sao mới dùng được hệ
+              thống.
+            </>
+          )}
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
   if (hasHighlight) {
     return (
       <p className="flex items-start gap-1.5 text-xs text-text-muted">
@@ -40,13 +73,16 @@ export function HighlightAchievementGuide({
     <Alert variant="warning">
       <AlertTitle className="flex items-center gap-1.5 text-sm">
         <Star className="size-4 shrink-0 fill-current" aria-hidden />
-        Chọn 1 thành tích cao nhất của bạn
+        {isSelf
+          ? "Chọn 1 thành tích cao nhất của bạn"
+          : "Chưa chọn thành tích nổi bật"}
       </AlertTitle>
       <AlertDescription className="text-text-primary">
-        Bấm <strong>ngôi sao</strong> ở thành tích quan trọng nhất. Thành tích
-        này sẽ hiện trên website Unicorns cạnh ảnh của bạn và luôn đứng đầu danh
-        sách. <strong>Bắt buộc với gia sư</strong> — chưa chọn thì chưa dùng
-        được hệ thống.
+        Bấm <strong>ngôi sao</strong> ở thành tích quan trọng nhất, rồi tải ảnh
+        minh chứng cho dòng đó. Thành tích này sẽ hiện trên website Unicorns
+        cạnh ảnh {isSelf ? "của bạn" : "nhân sự"} và luôn đứng đầu danh sách.{" "}
+        <strong>Bắt buộc với gia sư</strong> — chưa đủ thì chưa dùng được hệ
+        thống.
       </AlertDescription>
     </Alert>
   );

@@ -10,6 +10,7 @@ import * as staffApi from "@/lib/apis/staff.api";
 import { ROLE_LABELS } from "@/lib/staff.constants";
 import { StaffListTableSkeleton } from "@/components/admin/staff";
 import StaffListAvatar from "@/components/admin/staff/StaffListAvatar";
+import StaffListPagination from "@/components/admin/staff/StaffListPagination";
 import StaffAchievementsDialog, {
   StaffAchievementsButton,
 } from "@/components/shared/achievement/StaffAchievementsDialog";
@@ -239,7 +240,6 @@ function AdminStaffPageContent() {
   const staffRows = staffListResponse?.data ?? [];
   const total = staffListResponse?.meta?.total ?? 0;
   const currentPage = staffListResponse?.meta?.page ?? page;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const buildListParams = () => {
     const params = new URLSearchParams();
@@ -867,37 +867,13 @@ function AdminStaffPageContent() {
                   </table>
                 </div>
 
-                {totalPages > 1 ? (
-                  <nav
-                    className="mt-4 flex flex-col gap-3 border-t border-border-default pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between"
-                    aria-label="Phân trang"
-                  >
-                    <p className="text-sm text-text-muted" aria-live="polite">
-                      Hiển thị {(currentPage - 1) * PAGE_SIZE + 1}-{Math.min(currentPage * PAGE_SIZE, total)} trong {total} nhân sự
-                    </p>
-                    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:items-center">
-                      <button
-                        type="button"
-                        className="min-h-11 rounded-md border border-border-default bg-bg-surface px-3 py-2.5 text-sm font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface disabled:cursor-not-allowed disabled:opacity-50 sm:py-2"
-                        disabled={currentPage <= 1}
-                        aria-label="Trang trước"
-                        onClick={handlePreviousPage}
-                      >
-                        Trước
-                      </button>
-                      <span className="text-center tabular-nums text-sm text-text-secondary">{currentPage}/{totalPages}</span>
-                      <button
-                        type="button"
-                        className="min-h-11 rounded-md border border-border-default bg-bg-surface px-3 py-2.5 text-sm font-medium text-text-primary transition-colors duration-200 hover:bg-bg-tertiary focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg-surface disabled:cursor-not-allowed disabled:opacity-50 sm:py-2"
-                        disabled={currentPage >= totalPages}
-                        aria-label="Trang sau"
-                        onClick={handleNextPage}
-                      >
-                        Sau
-                      </button>
-                    </div>
-                  </nav>
-                ) : null}
+                <StaffListPagination
+                  page={currentPage}
+                  pageSize={PAGE_SIZE}
+                  total={total}
+                  onPrevious={handlePreviousPage}
+                  onNext={handleNextPage}
+                />
               </div>
             </>
           )}

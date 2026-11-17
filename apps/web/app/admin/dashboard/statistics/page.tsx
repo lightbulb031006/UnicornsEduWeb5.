@@ -144,8 +144,9 @@ const EXPENSE_BREAKDOWN_SERIES: Array<{
   { key: "bonusCost", name: "Thưởng", color: "var(--ue-viz-4)" },
   { key: "extraAllowanceCost", name: "Trợ cấp khác", color: "var(--ue-viz-5)" },
   { key: "fixedSalaryCost", name: "Lương cứng", color: "var(--ue-viz-9)" },
-  { key: "assistantCost", name: "Trợ lí", color: "var(--ue-viz-6)" },
+  { key: "assistantCost", name: "Hoa hồng trưởng phòng", color: "var(--ue-viz-6)" },
   { key: "trainingManagerCost", name: "QL lớp", color: "var(--ue-viz-7)" },
+  { key: "lessonPlanHeadCost", name: "HH TGA", color: "var(--ue-viz-10)" },
   { key: "operatingCost", name: "Vận hành", color: "var(--ue-viz-8)" },
 ];
 

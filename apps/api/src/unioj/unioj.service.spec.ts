@@ -9,6 +9,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Readable } from 'stream';
+import { UserRole } from 'generated/enums';
 
 describe('UniojService', () => {
   let service: UniojService;
@@ -268,6 +269,53 @@ describe('UniojService', () => {
         `https://oj.uniedu.vn/api/student-report/${username}/pdf/`,
         expect.anything(),
       );
+    });
+  });
+
+  describe('resolveReportStudentName', () => {
+    const prisma = { studentInfo: { findUnique: jest.fn() } };
+    const build = () =>
+      new UniojService(
+        { get: jest.fn((_key: string, val: unknown) => val) } as never,
+        { axiosRef: { get: jest.fn() } } as never,
+        prisma as never,
+      );
+
+    beforeEach(() => jest.clearAllMocks());
+
+    it('uses the requested name for staff and admin', async () => {
+      await expect(
+        build().resolveReportStudentName(
+          { userId: 'u', roleType: UserRole.staff },
+          'Nguyễn Văn A',
+        ),
+      ).resolves.toBe('Nguyễn Văn A');
+      expect(prisma.studentInfo.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('forces a student to their own profile name, ignoring the query', async () => {
+      prisma.studentInfo.findUnique.mockResolvedValueOnce({
+        fullName: ' Trần Thị B ',
+      });
+      await expect(
+        build().resolveReportStudentName(
+          { userId: 'student-user', roleType: UserRole.student },
+          'Nguyễn Văn A',
+        ),
+      ).resolves.toBe('Trần Thị B');
+      expect(prisma.studentInfo.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'student-user' } }),
+      );
+    });
+
+    it('404s a student account without a profile', async () => {
+      prisma.studentInfo.findUnique.mockResolvedValueOnce(null);
+      await expect(
+        build().resolveReportStudentName(
+          { userId: 'student-user', roleType: UserRole.student },
+          'Nguyễn Văn A',
+        ),
+      ).rejects.toThrow('Không tìm thấy hồ sơ học sinh.');
     });
   });
 });

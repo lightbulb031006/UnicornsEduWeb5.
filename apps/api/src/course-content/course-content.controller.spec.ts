@@ -50,8 +50,8 @@ describe('LessonQuizController.getLessonQuizzes', () => {
       ALLOW_STAFF_ROLES_ON_ADMIN_KEY,
       getHandler(LessonQuizController, 'getLessonQuizzes'),
     );
+    // #267: Trợ lí không còn trong nhóm soạn nội dung khoá.
     expect(staffRoles).toEqual([
-      StaffRole.assistant,
       StaffRole.teacher,
       StaffRole.lesson_plan,
       StaffRole.lesson_plan_head,
@@ -63,7 +63,7 @@ describe('LessonQuizController.getLessonQuizzes', () => {
       DECORATORS.API_RESPONSE,
       getHandler(LessonQuizController, 'getLessonQuizzes'),
     ) as Record<string, { description?: string }>;
-    expect(responses['403']?.description).toMatch(/đội giáo án/);
+    expect(responses['403']?.description).toMatch(/đội chuyên môn/);
   });
 
   it('returns the admin quiz payload and never the student (no-correctIndex) variant', async () => {
@@ -96,7 +96,7 @@ describe('PracticeLessonQuestionController.getQuestions', () => {
       DECORATORS.API_RESPONSE,
       getHandler(PracticeLessonQuestionController, 'getQuestions'),
     ) as Record<string, { description?: string }>;
-    expect(responses['403']?.description).toMatch(/đội giáo án/);
+    expect(responses['403']?.description).toMatch(/đội chuyên môn/);
   });
 
   it('forwards the current user so the service can assertCanManageCourse', async () => {
@@ -131,7 +131,7 @@ describe('CourseModuleController course-manage 403', () => {
       DECORATORS.API_RESPONSE,
       getHandler(CourseModuleController, methodName),
     ) as Record<string, { description?: string }>;
-    expect(responses['403']?.description).toMatch(/đội giáo án/);
+    expect(responses['403']?.description).toMatch(/đội chuyên môn/);
   });
 
   it('passes the actor into reorderModules', async () => {

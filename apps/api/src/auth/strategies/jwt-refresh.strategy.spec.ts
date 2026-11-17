@@ -1,6 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { UserRole } from 'generated/enums';
 import { JwtRefreshStrategy } from './jwt-refresh.strategy';
+import { DEVICE_SUPERSEDED_ERROR } from '../user-device.service';
 
 describe('JwtRefreshStrategy', () => {
   const configService = {
@@ -8,6 +9,9 @@ describe('JwtRefreshStrategy', () => {
   };
   const userDeviceService = {
     assertLiveRefreshDevice: jest.fn(),
+    resolveNoLiveDeviceError: jest.fn().mockResolvedValue({
+      error: 'NO_ACTIVE_DEVICE',
+    }),
   };
 
   let strategy: JwtRefreshStrategy;
@@ -39,6 +43,28 @@ describe('JwtRefreshStrategy', () => {
         payload,
       ),
     ).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('tells a device kicked by a newer login that it was superseded', async () => {
+    userDeviceService.assertLiveRefreshDevice.mockResolvedValue(null);
+    userDeviceService.resolveNoLiveDeviceError.mockResolvedValueOnce(
+      DEVICE_SUPERSEDED_ERROR,
+    );
+
+    await expect(
+      strategy.validate(
+        { cookies: { refresh_token: 'old-refresh' } } as never,
+        payload,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: 'DEVICE_SUPERSEDED',
+      }) as Record<string, unknown>,
+    });
+    expect(userDeviceService.resolveNoLiveDeviceError).toHaveBeenCalledWith(
+      'user-1',
+      payload.iat,
+    );
   });
 
   it('accepts a refresh cookie that still matches the stored device hash', async () => {

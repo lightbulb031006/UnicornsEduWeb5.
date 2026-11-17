@@ -37,7 +37,9 @@ import {
 } from '@nestjs/common';
 import {
   AchievementLevel,
+  ClassPricingMode,
   StaffRole,
+  StudentClassStatus,
   StudentWalletDirectTopUpRequestStatus,
   StudentCustomerSource,
   StudentStatus,
@@ -561,7 +563,7 @@ describe('StudentService', () => {
     sePayService.isWalletTopUpConfigured.mockReturnValue(true);
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
     mockPrisma.studentInfo.findUnique
       .mockResolvedValueOnce({
@@ -625,7 +627,7 @@ describe('StudentService', () => {
       createdByUserId: 'staff-user-1',
       createdByUserEmail: 'assistant@example.com',
       createdByRoleType: UserRole.staff,
-      createdByStaffRoles: [StaffRole.assistant],
+      createdByStaffRoles: [StaffRole.sale_customer_care_head],
       createdAt: new Date('2026-05-11T09:15:00.000Z'),
       updatedAt: new Date('2026-05-11T09:15:00.000Z'),
     });
@@ -667,7 +669,7 @@ describe('StudentService', () => {
     );
     expect(orderCreateArg?.data.createdByRoleType).toBe(UserRole.staff);
     expect(orderCreateArg?.data.createdByStaffRoles).toEqual([
-      StaffRole.assistant,
+      StaffRole.sale_customer_care_head,
     ]);
   });
 
@@ -841,7 +843,7 @@ describe('StudentService', () => {
     configService.get.mockReturnValue(undefined);
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
 
     await expect(
@@ -873,7 +875,7 @@ describe('StudentService', () => {
     );
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
     mockPrisma.studentInfo.findUnique.mockResolvedValue({
       id: 'student-1',
@@ -893,7 +895,7 @@ describe('StudentService', () => {
       requestedByUserId: 'staff-user-1',
       requestedByUserEmail: 'assistant@example.com',
       requestedByRoleType: UserRole.staff,
-      requestedByStaffRoles: [StaffRole.assistant],
+      requestedByStaffRoles: [StaffRole.sale_customer_care_head],
       createdAt: new Date('2026-05-16T03:00:00.000Z'),
       updatedAt: new Date('2026-05-16T03:00:00.000Z'),
       student: {
@@ -932,7 +934,7 @@ describe('StudentService', () => {
       .mockImplementation();
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
     mockPrisma.studentInfo.findUnique.mockResolvedValue({
       id: 'student-1',
@@ -952,7 +954,7 @@ describe('StudentService', () => {
       requestedByUserId: 'staff-user-1',
       requestedByUserEmail: 'assistant@example.com',
       requestedByRoleType: UserRole.staff,
-      requestedByStaffRoles: [StaffRole.assistant],
+      requestedByStaffRoles: [StaffRole.sale_customer_care_head],
       createdAt: new Date('2026-05-16T03:00:00.000Z'),
       updatedAt: new Date('2026-05-16T03:00:00.000Z'),
       student: {
@@ -1011,7 +1013,7 @@ describe('StudentService', () => {
         requestedByUserId: 'staff-user-1',
         requestedByUserEmail: 'accountant@example.com',
         requestedByRoleType: UserRole.staff,
-        requestedByStaffRoles: [StaffRole.accountant],
+        requestedByStaffRoles: [StaffRole.accountant_income],
         createdAt: new Date('2026-05-16T02:00:00.000Z'),
         updatedAt: new Date('2026-05-16T02:00:00.000Z'),
         student: {
@@ -1076,7 +1078,7 @@ describe('StudentService', () => {
         requestedByUserId: 'staff-user-1',
         requestedByUserEmail: 'accountant@example.com',
         requestedByRoleType: UserRole.staff,
-        requestedByStaffRoles: [StaffRole.accountant],
+        requestedByStaffRoles: [StaffRole.accountant_income],
         createdAt: new Date('2026-05-01T03:00:00.000Z'),
         updatedAt: new Date('2026-05-01T03:00:00.000Z'),
         student: {
@@ -1139,7 +1141,7 @@ describe('StudentService', () => {
       requestedByUserId: 'staff-user-1',
       requestedByUserEmail: 'accountant@example.com',
       requestedByRoleType: UserRole.staff,
-      requestedByStaffRoles: [StaffRole.accountant],
+      requestedByStaffRoles: [StaffRole.accountant_income],
       createdAt: new Date('2026-05-16T02:00:00.000Z'),
       updatedAt: new Date('2026-05-16T02:00:00.000Z'),
       student: {
@@ -1221,11 +1223,26 @@ describe('StudentService', () => {
     });
 
     await expect(
-      service.approveStudentWalletDirectTopUpRequestById('direct-request-1'),
+      service.approveStudentWalletDirectTopUpRequestById('direct-request-1', {
+        userId: 'head-user-1',
+        userEmail: 'head@example.com',
+        roleType: UserRole.staff,
+      }),
     ).resolves.toMatchObject({
       status: StudentWalletDirectTopUpRequestStatus.approved,
       balanceAfter: 600000,
     });
+
+    // Ghi chú giao dịch ghi đúng người duyệt (Trưởng phòng), không mặc định "admin".
+    expect(mockPrisma.walletTransactionsHistory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          note: expect.stringContaining(
+            'Nạp thẳng đã được head@example.com xác nhận.',
+          ),
+        }),
+      }),
+    );
 
     expect(
       mockPrisma.studentWalletDirectTopUpRequest.findUnique,
@@ -1587,7 +1604,7 @@ describe('StudentService', () => {
 
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-assistant-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
 
     await expect(
@@ -1667,7 +1684,7 @@ describe('StudentService', () => {
 
     mockPrisma.staffInfo.findUnique.mockResolvedValue({
       id: 'staff-assistant-1',
-      roles: [StaffRole.assistant],
+      roles: [StaffRole.sale_customer_care_head],
     });
 
     await expect(
@@ -1830,6 +1847,7 @@ describe('StudentService', () => {
             caption: null,
             imageWatermarkedPath: 'student/student-1/gal-1.jpg',
             sortOrder: 0,
+            createdAt: new Date('2026-05-01T08:00:00.000Z'),
           },
         ],
         user: {
@@ -1872,6 +1890,7 @@ describe('StudentService', () => {
               imageUrl:
                 'public:student-gallery-public:student/student-1/gal-1.jpg',
               sortOrder: 0,
+              createdAt: '2026-05-01T08:00:00.000Z',
             },
           ],
         },
@@ -1981,6 +2000,128 @@ describe('StudentService', () => {
     );
   });
 
+  describe('setStudentEmailVerified', () => {
+    const staffActor = {
+      userId: 'care-user-1',
+      userEmail: 'care@example.com',
+      roleType: UserRole.staff,
+    };
+
+    it('lets the assigned customer care verify the student email', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.customer_care],
+      });
+      mockPrisma.customerCareService.findUnique.mockResolvedValue({
+        staffId: 'staff-care-1',
+      });
+      mockPrisma.studentInfo.findUnique.mockResolvedValue({
+        userId: 'student-user-1',
+        user: { emailVerified: false },
+      });
+
+      await expect(
+        service.setStudentEmailVerified('student-1', true, staffActor),
+      ).resolves.toEqual({
+        studentId: 'student-1',
+        userId: 'student-user-1',
+        emailVerified: true,
+      });
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'student-user-1' },
+        data: { emailVerified: true },
+      });
+      expect(actionHistoryService.recordUpdate).toHaveBeenCalledWith(
+        mockPrisma,
+        expect.objectContaining({
+          entityType: 'user',
+          entityId: 'student-user-1',
+          beforeValue: { emailVerified: false },
+          afterValue: { emailVerified: true },
+        }),
+      );
+      expect(authIdentityCacheService.invalidateUser).toHaveBeenCalledWith(
+        'student-user-1',
+      );
+    });
+
+    it('hides students another customer care is responsible for', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.customer_care],
+      });
+      mockPrisma.customerCareService.findUnique.mockResolvedValue({
+        staffId: 'staff-care-2',
+      });
+
+      await expect(
+        service.setStudentEmailVerified('student-1', true, staffActor),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('lets the Sale & CSKH head toggle any student', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-head-1',
+        roles: [StaffRole.sale_customer_care_head],
+      });
+      mockPrisma.studentInfo.findUnique.mockResolvedValue({
+        userId: 'student-user-1',
+        user: { emailVerified: true },
+      });
+
+      await service.setStudentEmailVerified('student-1', false, staffActor);
+
+      expect(mockPrisma.customerCareService.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'student-user-1' },
+        data: { emailVerified: false },
+      });
+    });
+
+    it('rejects staff outside admin / Sale & CSKH / customer care', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-teacher-1',
+        roles: [StaffRole.teacher],
+      });
+
+      await expect(
+        service.setStudentEmailVerified('student-1', true, staffActor),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects a student profile without a login account', async () => {
+      mockPrisma.studentInfo.findUnique.mockResolvedValue({
+        userId: null,
+        user: null,
+      });
+
+      await expect(
+        service.setStudentEmailVerified('student-1', true, {
+          userId: 'admin-1',
+          userEmail: 'admin@example.com',
+          roleType: UserRole.admin,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('skips the write when the flag is unchanged', async () => {
+      mockPrisma.studentInfo.findUnique.mockResolvedValue({
+        userId: 'student-user-1',
+        user: { emailVerified: true },
+      });
+
+      await service.setStudentEmailVerified('student-1', true, {
+        userId: 'admin-1',
+        userEmail: 'admin@example.com',
+        roleType: UserRole.admin,
+      });
+
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+      expect(authIdentityCacheService.invalidateUser).not.toHaveBeenCalled();
+    });
+  });
+
   describe('customer care transfer permission', () => {
     const customerCareActor = {
       userId: 'care-user-1',
@@ -2059,7 +2200,7 @@ describe('StudentService', () => {
     it('lets an assistant transfer the student to another customer care staff', async () => {
       mockPrisma.staffInfo.findUnique.mockResolvedValue({
         id: 'staff-assistant-1',
-        roles: [StaffRole.assistant],
+        roles: [StaffRole.sale_customer_care_head],
       });
 
       await expect(
@@ -2069,6 +2210,75 @@ describe('StudentService', () => {
           customerCareActor,
         ),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('#271: cho Trưởng phòng giao CSKH kèm % cho học sinh', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-head-1',
+        roles: [StaffRole.sale_customer_care_head],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          {
+            customer_care_staff_id: 'staff-care-2',
+            customer_care_profit_percent: 0.2,
+          },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('#271: chặn CSKH kiêm Sale (không phải trưởng phòng) chuyển CSKH', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-care-1',
+        roles: [StaffRole.sale, StaffRole.customer_care],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          { customer_care_staff_id: 'staff-care-2' },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('#271: chặn Trưởng phòng tự đổi % khi CSKH của học sinh là chính mình', async () => {
+      mockPrisma.customerCareService.findUnique.mockResolvedValue({
+        staffId: 'staff-head-1',
+      });
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-head-1',
+        roles: [StaffRole.sale_customer_care_head, StaffRole.customer_care],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          { customer_care_profit_percent: 0.3 },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('#271: chặn Trưởng phòng tự giao học sinh cho mình kèm %', async () => {
+      mockPrisma.staffInfo.findUnique.mockResolvedValue({
+        id: 'staff-head-1',
+        roles: [StaffRole.sale_customer_care_head, StaffRole.customer_care],
+      });
+
+      await expect(
+        service.updateStudentById(
+          'student-1',
+          {
+            customer_care_staff_id: 'staff-head-1',
+            customer_care_profit_percent: 0.3,
+          },
+          customerCareActor,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 
@@ -2160,6 +2370,115 @@ describe('StudentService', () => {
           },
         }),
       );
+    });
+  });
+
+  describe('#273 updateStudentClasses: học phí lớp trước học sinh đầu tiên', () => {
+    const classRow = (overrides: Record<string, unknown> = {}) => ({
+      id: 'class-1',
+      name: 'Toán 10A',
+      pricingMode: ClassPricingMode.per_session,
+      studentTuitionPerSession: null,
+      studentTuitionPerBlock: null,
+      tuitionPackageTotal: null,
+      tuitionPackageSession: null,
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockPrisma.studentInfo.findUnique.mockResolvedValue({ id: 'student-1' });
+      jest
+        .spyOn(service as never, 'serializeStudentDetail' as never)
+        .mockImplementation(((value: unknown) => value) as never);
+      jest
+        .spyOn(service as never, 'withStudentAvatarUrl' as never)
+        .mockImplementation(((value: unknown) => value) as never);
+    });
+
+    /** `existing`: membership của học sinh; `activeClassIds`: lớp đang có học sinh. */
+    const mockRoster = (
+      existing: { classId: string; status: StudentClassStatus }[],
+      activeClassIds: string[],
+    ) => {
+      mockPrisma.studentClass.findMany.mockImplementation((args: any) =>
+        Promise.resolve(
+          args?.where?.OR
+            ? activeClassIds.map((classId) => ({ classId }))
+            : existing,
+        ),
+      );
+    };
+
+    it('xếp vào lớp trống chưa có học phí → 400, không ghi roster', async () => {
+      mockRoster([], []);
+      mockPrisma.class.findMany.mockResolvedValue([classRow()]);
+
+      await expect(
+        service.updateStudentClasses('student-1', { class_ids: ['class-1'] }),
+      ).rejects.toThrow(
+        'Lớp chưa có học phí. Hãy điền Học phí lớp trước khi thêm học sinh đầu tiên.',
+      );
+      expect(mockPrisma.studentClass.createMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('kích hoạt lại vào lớp trống chưa có học phí → 400', async () => {
+      mockRoster(
+        [{ classId: 'class-1', status: StudentClassStatus.inactive }],
+        [],
+      );
+      mockPrisma.class.findMany.mockResolvedValue([classRow()]);
+
+      await expect(
+        service.updateStudentClasses('student-1', { class_ids: ['class-1'] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mockPrisma.studentClass.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('lớp trống có học phí 0đ → xếp được', async () => {
+      mockRoster([], []);
+      mockPrisma.class.findMany.mockResolvedValue([
+        classRow({ studentTuitionPerSession: 0 }),
+      ]);
+
+      await service.updateStudentClasses('student-1', {
+        class_ids: ['class-1'],
+      });
+      expect(mockPrisma.studentClass.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            classId: 'class-1',
+            studentId: 'student-1',
+            status: StudentClassStatus.active,
+          },
+        ],
+      });
+    });
+
+    it('lớp đã có học sinh đang học → không áp quy tắc', async () => {
+      mockRoster([], ['class-1']);
+      mockPrisma.class.findMany.mockResolvedValue([classRow()]);
+
+      await service.updateStudentClasses('student-1', {
+        class_ids: ['class-1'],
+      });
+      expect(mockPrisma.studentClass.createMany).toHaveBeenCalledTimes(1);
+      // Chỉ lần kiểm lớp tồn tại; không đọc học phí.
+      expect(mockPrisma.class.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('gỡ lớp không cần học phí', async () => {
+      mockRoster(
+        [{ classId: 'class-1', status: StudentClassStatus.active }],
+        [],
+      );
+
+      await service.updateStudentClasses('student-1', { class_ids: [] });
+      expect(mockPrisma.class.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.studentClass.updateMany).toHaveBeenCalledWith({
+        where: { studentId: 'student-1', classId: { in: ['class-1'] } },
+        data: { status: StudentClassStatus.inactive },
+      });
     });
   });
 });

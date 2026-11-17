@@ -32,7 +32,7 @@ import {
 import { ExamLibraryService } from './exam-library.service';
 
 const COURSE_CONTENT_FORBIDDEN =
-  'Không thuộc đội giáo án của khoá. Dạy lớp không đồng nghĩa soạn giáo án.';
+  'Không thuộc đội chuyên môn của khoá. Dạy lớp không đồng nghĩa soạn giáo án.';
 
 @Controller('course/:courseId/exam-library')
 @ApiTags('exam-library')
@@ -43,7 +43,6 @@ export class CourseExamLibraryController {
   @Get()
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
     StaffRole.lesson_plan,
     StaffRole.lesson_plan_head,
   )
@@ -76,7 +75,6 @@ export class CourseExamLibraryController {
   @Post()
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
     StaffRole.lesson_plan,
     StaffRole.lesson_plan_head,
   )
@@ -103,7 +101,6 @@ export class CourseExamLibraryController {
   @Patch(':lessonId')
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
     StaffRole.lesson_plan,
     StaffRole.lesson_plan_head,
   )
@@ -130,7 +127,6 @@ export class CourseExamLibraryController {
   @Delete(':lessonId')
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
     StaffRole.lesson_plan,
     StaffRole.lesson_plan_head,
   )
@@ -159,7 +155,6 @@ export class CourseExamLibraryController {
   @Post('reorder')
   @Roles(UserRole.admin)
   @AllowStaffRolesOnAdminRoutes(
-    StaffRole.assistant,
     StaffRole.lesson_plan,
     StaffRole.lesson_plan_head,
   )

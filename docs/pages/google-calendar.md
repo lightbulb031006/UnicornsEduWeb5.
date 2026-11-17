@@ -96,9 +96,9 @@ Hành vi runtime hiện tại:
 | `GET`    | `/admin/calendar/classes/:classId/schedule`     | Lấy raw weekly schedule pattern của một lớp                                                                                                        |
 | `PUT`    | `/admin/calendar/classes/:classId/schedule`     | Cập nhật weekly schedule pattern của lớp và sync recurring event lên Google Calendar                                                               |
 | `GET`    | `/class/:classId/makeup-events`                 | Admin-like class workspace đọc danh sách buổi bù của lớp theo khoảng ngày                                                                          |
-| `POST`   | `/class/:classId/makeup-events`                 | Admin hoặc assistant tạo buổi bù từ trang chi tiết lớp                                                                                             |
-| `PATCH`  | `/class/:classId/makeup-events/:id`             | Admin hoặc assistant chỉnh sửa buổi bù từ trang chi tiết lớp                                                                                       |
-| `DELETE` | `/class/:classId/makeup-events/:id`             | Admin hoặc assistant xoá buổi bù từ trang chi tiết lớp                                                                                             |
+| `POST`   | `/class/:classId/makeup-events`                 | Admin hoặc Trưởng phòng Sale & CSKH tạo buổi bù từ trang chi tiết lớp                                                                                             |
+| `PATCH`  | `/class/:classId/makeup-events/:id`             | Admin hoặc Trưởng phòng Sale & CSKH chỉnh sửa buổi bù từ trang chi tiết lớp                                                                                       |
+| `DELETE` | `/class/:classId/makeup-events/:id`             | Admin hoặc Trưởng phòng Sale & CSKH xoá buổi bù từ trang chi tiết lớp                                                                                             |
 | `POST`   | `/class/:classId/schedule/google-calendar/resync` | Admin đầy đủ resync toàn bộ recurring Google Calendar event của lớp từ `class_schedule_entries` (slot active) hiện tại                             |
 | `POST`   | `/class/:classId/makeup-events/:id/google-calendar/resync` | Admin đầy đủ resync một buổi bù từ record `makeup_schedule_events` hiện tại                                                                        |
 | `GET`    | `/staff-ops/classes/:classId/makeup-events`     | Staff workspace đọc danh sách buổi bù của lớp theo khoảng ngày                                                                                     |
@@ -125,7 +125,7 @@ Các route session-oriented như `/admin/calendar/events/*` và `/calendar/event
 
 Trang `/admin/calendar` ưu tiên dùng `GET /admin/calendar/events` làm source of truth cho feed tổng hợp.
 
-- Route mở cho `admin` và `staff.assistant`.
+- Route mở cho `admin` và `staff.sale_customer_care_head`.
 - FE hiện ưu tiên aggregate feed `/admin/calendar/events`, chỉ fallback về `/admin/calendar/class-schedule` để tương thích contract cũ khi cần.
 - Có toggle **Tuần này / Tuần sau**, luôn giữ khung **Chủ Nhật đến Thứ Bảy**.
 - Filter gồm multi-select lớp (client-side), `teacherId`, và `studentId`; riêng `teacherId` / `studentId` được gửi thẳng lên aggregate API.

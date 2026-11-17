@@ -74,7 +74,7 @@ test("buildCreateUserPayload sends emailVerified when set", () => {
     password: "secret123",
     confirmPassword: "secret123",
     roleType: "staff",
-    staffRoles: ["assistant"],
+    staffRoles: ["sale_customer_care_head"],
     studentName: "",
     emailVerified: true,
   });
@@ -84,7 +84,7 @@ test("buildCreateUserPayload sends emailVerified when set", () => {
     email: "hien@example.com",
     password: "secret123",
     roleType: "staff",
-    staffRoles: ["assistant"],
+    staffRoles: ["sale_customer_care_head"],
     emailVerified: true,
   });
 });

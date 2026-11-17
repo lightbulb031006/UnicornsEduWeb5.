@@ -1,5 +1,7 @@
 # Assistant – `/assistant`
 
+> **Lỗi thời (#267):** trang này là kế hoạch cũ, route `/assistant` không tồn tại. Role này nay là **Trưởng phòng Sale & CSKH** (`sale_customer_care_head`, #268); quyền hiện hành xem `docs/adr/2026-11-12-admin-deny-by-default.md` và `docs/pages/staff.md`.
+
 ## Route and role
 
 - **Path:** `/assistant`

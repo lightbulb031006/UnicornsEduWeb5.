@@ -10,6 +10,7 @@ import { FinancialExportExcelService } from './financial-export-excel.service';
 import { FinancialExportPdfService } from './financial-export-pdf.service';
 import { MonthlyReportService } from './monthly-report.service';
 import { MonthlyStatisticsExportPdfService } from './monthly-statistics-export-pdf.service';
+import { StudentDemographicsExportPdfService } from './student-demographics-export-pdf.service';
 
 @Module({
   imports: [ConfigModule, PrismaModule, ClassModule, MailModule],
@@ -20,6 +21,7 @@ import { MonthlyStatisticsExportPdfService } from './monthly-statistics-export-p
     FinancialExportPdfService,
     FinancialExportExcelService,
     MonthlyStatisticsExportPdfService,
+    StudentDemographicsExportPdfService,
     MonthlyReportService,
   ],
   exports: [DashboardService],

@@ -7,8 +7,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { StaffRole, UserRole } from 'generated/enums';
-import { AllowAssistantOnAdminRoutes } from 'src/auth/decorators/allow-assistant-on-admin.decorator';
+import { UserRole } from 'generated/enums';
 import { AllowStaffRolesOnAdminRoutes } from 'src/auth/decorators/allow-staff-roles-on-admin.decorator';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import {
@@ -21,12 +20,14 @@ import {
   type AdminDashboardActiveClassBreakdownDto,
   type AdminDashboardStudentBalanceItemDto,
   type AdminDashboardStudentChurnItemDto,
+  type AdminDashboardStudentDemographicsDto,
   type AdminDashboardDto,
   GetAdminDashboardQueryDto,
   GetAdminDashboardActionAlertsQueryDto,
   GetAdminDashboardFinancialDetailQueryDto,
   GetAdminDashboardFinancialExportQueryDto,
   GetAdminMonthlyReportQueryDto,
+  GetStudentDemographicsQueryDto,
   GetAdminMonthlyStatisticsQueryDto,
   GetAdminStudentBalanceDetailsQueryDto,
   GetAdminStudentChurnDetailsQueryDto,
@@ -50,19 +51,29 @@ import { FinancialExportExcelService } from './financial-export-excel.service';
 import { FinancialExportPdfService } from './financial-export-pdf.service';
 import { MonthlyReportService } from './monthly-report.service';
 import { MonthlyStatisticsExportPdfService } from './monthly-statistics-export-pdf.service';
+import { StudentDemographicsExportPdfService } from './student-demographics-export-pdf.service';
 
 @Controller('dashboard')
 @ApiTags('dashboard')
 @ApiCookieAuth('access_token')
-@AllowAssistantOnAdminRoutes(false)
-@AllowStaffRolesOnAdminRoutes(StaffRole.accountant_income)
+// #269: Dashboard, Báo cáo tháng, Thống kê học sinh chỉ Admin (users.role_type
+// admin hoặc staff role admin). Mọi staff role khác — kể cả Trưởng phòng Sale &
+// CSKH (Trợ lí cũ) và Kế toán thu — bị 403. Route admin từ chối mặc định (#267);
+// danh sách staff role rỗng tường minh để ghi rõ ý định.
+@AllowStaffRolesOnAdminRoutes()
 @Roles(UserRole.admin)
+@ApiResponse({
+  status: 403,
+  description:
+    'Chỉ Admin được xem dashboard, báo cáo tháng và thống kê học sinh (#269).',
+})
 export class DashboardController {
   constructor(
     private readonly dashboardService: DashboardService,
     private readonly financialExportPdfService: FinancialExportPdfService,
     private readonly financialExportExcelService: FinancialExportExcelService,
     private readonly monthlyStatisticsExportPdfService: MonthlyStatisticsExportPdfService,
+    private readonly studentDemographicsExportPdfService: StudentDemographicsExportPdfService,
     private readonly monthlyReportService: MonthlyReportService,
   ) {}
 
@@ -370,12 +381,10 @@ export class DashboardController {
   }
 
   @Get('monthly-report')
-  // Báo cáo tháng: admin + trợ lí xem; CSKH và kế toán thu không xem.
-  @AllowStaffRolesOnAdminRoutes(StaffRole.assistant)
   @ApiOperation({
     summary: 'Get the monthly operations report (Báo cáo tháng)',
     description:
-      'Return KPI, new-student matrix (customer source × course of first class, with early drops and total top-up from first top-up to month end), dropped students by drop-out reason group, per customer-care staff table and appendix lists for one month. New student = first qualifying wallet top-up in the month. Computed live, not snapshotted. Admin and assistant only.',
+      'Return KPI, new-student matrix (customer source × course of first class, with early drops and total top-up from first top-up to month end), dropped students by drop-out reason group, per customer-care staff table and appendix lists for one month. New student = first qualifying wallet top-up in the month. Computed live, not snapshotted. Admin only (#269).',
   })
   @ApiQuery({
     name: 'month',
@@ -392,7 +401,7 @@ export class DashboardController {
     example: '2026',
   })
   @ApiResponse({ status: 200, description: 'Monthly report payload.' })
-  @ApiResponse({ status: 403, description: 'Not admin or assistant.' })
+  @ApiResponse({ status: 403, description: 'Not admin (#269).' })
   async getAdminMonthlyReport(
     @Query() query: GetAdminMonthlyReportQueryDto,
   ): Promise<AdminMonthlyReportDto> {
@@ -449,6 +458,88 @@ export class DashboardController {
     const filename = `thong-ke-thang-${toSafeFilenameSlug(
       `${payload.fromMonthKey}-${payload.toMonthKey}`,
     )}.pdf`;
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': pdfBuffer.length,
+    });
+
+    return new StreamableFile(pdfBuffer);
+  }
+
+  @Get('student-demographics')
+  @ApiOperation({
+    summary: 'Get student demographics aggregate',
+    description:
+      'Thống kê học sinh theo tỉnh, năm sinh, khoá học, doanh thu, lợi nhuận và tổng nạp. Lọc trạng thái (all / active / inactive) và kỳ: `month`+`year` = theo tháng, chỉ `year` = theo năm, bỏ trống = toàn thời gian. Có kỳ thì chỉ tính học sinh có buổi học (present/excused) trong kỳ; doanh thu, chi phí, tổng nạp chỉ tính phát sinh trong kỳ.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['all', 'active', 'inactive'],
+  })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    type: String,
+    example: '09',
+    description: 'Tháng 01-12, cần kèm year.',
+  })
+  @ApiQuery({
+    name: 'year',
+    required: false,
+    type: String,
+    example: '2026',
+    description: 'Năm YYYY.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Student demographic statistics.',
+  })
+  @ApiResponse({ status: 400, description: 'month/year sai định dạng.' })
+  async getStudentDemographics(
+    @Query() query: GetStudentDemographicsQueryDto,
+  ): Promise<AdminDashboardStudentDemographicsDto> {
+    return this.dashboardService.getStudentDemographics(query);
+  }
+
+  @Get('student-demographics/pdf')
+  @ApiOperation({
+    summary: 'Download student demographics report as PDF',
+    description:
+      'Landscape A4 PDF report with charts and matrices of students by province, birth year, class category, revenue/profit and wallet topup. Same filters as GET /dashboard/student-demographics.',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['all', 'active', 'inactive'],
+  })
+  @ApiQuery({ name: 'month', required: false, type: String, example: '09' })
+  @ApiQuery({ name: 'year', required: false, type: String, example: '2026' })
+  @ApiResponse({
+    status: 200,
+    description: 'PDF file (application/pdf).',
+  })
+  async getStudentDemographicsPdf(
+    @Res({ passthrough: true }) res: Response,
+    @Query() query: GetStudentDemographicsQueryDto,
+  ): Promise<StreamableFile> {
+    const payload = await this.dashboardService.getStudentDemographics(query);
+    const pdfBuffer =
+      await this.studentDemographicsExportPdfService.toPdfBuffer(payload);
+
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const status = query.status ?? 'all';
+    const suffix =
+      status === 'active'
+        ? 'dang-hoc'
+        : status === 'inactive'
+          ? 'da-nghi'
+          : 'toan-bo';
+    const periodSuffix = payload.period.key ? `-${payload.period.key}` : '';
+    const filename = `thong-ke-hoc-sinh-${suffix}${periodSuffix}-${dateStr}.pdf`;
 
     res.set({
       'Content-Type': 'application/pdf',
