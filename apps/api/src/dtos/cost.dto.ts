@@ -15,11 +15,19 @@ import {
   IsString,
   IsUUID,
 } from 'class-validator';
+import {
+  MONTH_KEY_FORMAT_MESSAGE,
+  MONTH_KEY_PATTERN,
+} from '../common/month-key';
 
 export class CreateCostDto {
-  @ApiPropertyOptional({ example: '2026-03' })
+  @ApiPropertyOptional({
+    example: '2026-03',
+    description: 'Month key in format YYYY-MM',
+  })
   @IsOptional()
   @IsString()
+  @Matches(MONTH_KEY_PATTERN, { message: MONTH_KEY_FORMAT_MESSAGE })
   month?: string;
 
   // Bắt buộc như form web (CostFormPopup): body rỗng không được tạo khoản chi.

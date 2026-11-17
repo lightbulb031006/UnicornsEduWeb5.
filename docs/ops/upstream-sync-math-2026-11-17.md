@@ -50,6 +50,22 @@ Preflight Toán vẫn chặn các migration nguy hiểm đã ghi trong runbook 0
 
 Ngày 17/11, kiểm tra trực tiếp `GET /api/dashboard?month=11&year=2026&alertLimit=6&topClassLimit=5` trên `math.uniedu.vn` xác nhận API trả HTTP 500; đây là lỗi backend, không phải lỗi render frontend. Máy local không có `apps/api/.env`, và alias SSH VPS không khả dụng trong phiên này nên chưa đọc được stack trace production. Bản sync có các sửa dashboard mới và đã qua test local, nhưng chưa được xem là đã sửa production cho tới khi chạy preflight, deploy có kiểm soát và xác minh endpoint trả 200.
 
+### Nguyên nhân nghi vấn và bản sửa
+
+- Dựng lại schema bằng toàn bộ 193 migration trên PostgreSQL tạm (PGlite) và gọi thẳng `getAdminDashboard` profile Toán: dữ liệu rỗng trả OK cả chế độ tháng lẫn khoảng ngày, nên SQL/schema của bản code hiện tại không lỗi.
+- Chỉ cần **một** dòng cột tháng text sai định dạng (ví dụ `cost_extend.month = '2026-Nov'`, `11/2026`, `Tháng 11`, `2026-13`) là `TO_DATE` trong `getMonthlyTrend` ném lỗi (`invalid value "No" for "MM"`) → `GET /dashboard?month=…` trả 500, còn chế độ khoảng ngày vẫn chạy. Ô **Tháng** của form Chi phí là text tự do, backend chỉ kiểm `IsString`, nên đây là nghi vấn số 1 (dữ liệu Toán từng được đồng bộ từ DB cũ).
+- Bản sửa: `prismaSqlSafeMonthStart` thay mọi `TO_DATE(CONCAT(month,'-01'))` trên dashboard; DTO cost/bonus và form Chi phí chặn tháng sai định dạng. Sau sửa, cùng dữ liệu xấu trả OK; dòng sai tháng không được cộng vào chuỗi tháng.
+- Kiểm tra read-only trên Supabase để xác nhận và dọn dữ liệu (sửa dữ liệu chỉ làm khi đã duyệt):
+
+```sql
+SELECT 'bonuses' AS t, month, count(*) FROM bonuses WHERE month !~ '^\d{4}-(0[1-9]|1[0-2])$' GROUP BY 2
+UNION ALL SELECT 'extra_allowances', month, count(*) FROM extra_allowances WHERE month !~ '^\d{4}-(0[1-9]|1[0-2])$' GROUP BY 2
+UNION ALL SELECT 'staff_fixed_salary_payables', month, count(*) FROM staff_fixed_salary_payables WHERE month !~ '^\d{4}-(0[1-9]|1[0-2])$' GROUP BY 2
+UNION ALL SELECT 'cost_extend', month, count(*) FROM cost_extend WHERE month IS NOT NULL AND btrim(month) <> '' AND month !~ '^\d{4}-(0[1-9]|1[0-2])$' GROUP BY 2;
+```
+
+Nếu query trả rỗng thì 500 production có nguyên nhân khác; khi đó vẫn cần log API (`docker compose -f docker-compose.prod.yml logs api --since 5m`) đúng lúc mở dashboard.
+
 ## Kiểm tra local
 
 - `pnpm --filter api check-types`: đạt.
@@ -57,6 +73,7 @@ Ngày 17/11, kiểm tra trực tiếp `GET /api/dashboard?month=11&year=2026&ale
 - Jest `dashboard.service`, `lms-profile`, `session-validation`: 93/93 test đạt.
 - Vitest `session-comment-zalo.helpers`: 28/28 test đạt.
 - Đã rà UI thay đổi theo Web Interface Guidelines; thay hai `window.confirm` mới ở trang chi tiết lớp bằng `ConfirmDialog` dùng chung.
+- Bản sửa tháng sai định dạng: Jest `src/dashboard` + DTO cost/bonus 198/198 đạt, Jest `cost`/`bonus`/`extra-allowance`/`staff` 237/237 đạt, check-types API/Web đạt; repro PGlite với `cost_extend.month = '2026-Nov'` chuyển từ 500 sang OK.
 
 ## Trước khi phát hành
 

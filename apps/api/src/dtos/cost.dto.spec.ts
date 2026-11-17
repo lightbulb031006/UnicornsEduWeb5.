@@ -33,9 +33,30 @@ describe('CreateCostDto', () => {
       }),
     ).toEqual([]);
   });
+
+  // Tháng sai định dạng từng làm TO_DATE trên dashboard ném lỗi và trả 500.
+  it.each(['2026-Nov', '11/2026', 'Tháng 11', '2026-13', '2026-1', ''])(
+    'chặn tháng sai định dạng YYYY-MM: %p',
+    async (month) => {
+      expect(
+        await errorFields(CreateCostDto, {
+          category: 'Marketing',
+          amount: 0,
+          month,
+        }),
+      ).toEqual(['month']);
+    },
+  );
 });
 
 describe('UpdateCostDto', () => {
+  it('chặn sửa tháng sang giá trị sai định dạng', async () => {
+    const errors = await validate(
+      plainToInstance(UpdateCostDto, { id: COST_ID, month: '2026-Nov' }),
+    );
+    expect(errors.map((error) => error.property)).toEqual(['month']);
+  });
+
   it('sửa một phần vẫn hợp lệ khi chỉ gửi id + trạng thái', async () => {
     const errors = await validate(
       plainToInstance(UpdateCostDto, { id: COST_ID, status: 'paid' }),

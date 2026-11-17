@@ -81,6 +81,12 @@ export default function CostFormPopup({
       return;
     }
 
+    const trimmedMonth = month.trim();
+    if (trimmedMonth && !/^\d{4}-(0[1-9]|1[0-2])$/.test(trimmedMonth)) {
+      toast.error("Tháng phải đúng định dạng YYYY-MM (ví dụ 2026-03).");
+      return;
+    }
+
     const trimmedAmount = amountInput.trim();
     const parsedAmount = parseMoneyInput(trimmedAmount);
     if (!trimmedAmount || parsedAmount == null || parsedAmount < 0) {
@@ -99,7 +105,7 @@ export default function CostFormPopup({
 
     await onSubmit({
       category: trimmedCategory,
-      month: month.trim() || undefined,
+      month: trimmedMonth || undefined,
       date: trimmedDate || undefined,
       status,
       amount: parsedAmount,

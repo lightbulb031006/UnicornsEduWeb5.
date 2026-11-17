@@ -16,8 +16,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { IsStaffId, IsStudentId } from '../common/entity-id.validators';
-
-const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+import { MONTH_KEY_PATTERN } from '../common/month-key';
 
 export class CreateExtraAllowanceDto {
   @ApiProperty({

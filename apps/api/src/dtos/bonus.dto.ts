@@ -6,8 +6,19 @@ import {
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { PaymentStatus } from 'generated/enums';
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+} from 'class-validator';
 import { IsStaffId } from '../common/entity-id.validators';
+import {
+  MONTH_KEY_FORMAT_MESSAGE,
+  MONTH_KEY_PATTERN,
+} from '../common/month-key';
 
 export class CreateBonusDto {
   @ApiProperty({
@@ -26,6 +37,7 @@ export class CreateBonusDto {
     example: '2026-03',
   })
   @IsString()
+  @Matches(MONTH_KEY_PATTERN, { message: MONTH_KEY_FORMAT_MESSAGE })
   month: string;
 
   @ApiPropertyOptional({ example: 500000 })

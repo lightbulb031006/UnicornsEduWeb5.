@@ -622,6 +622,27 @@ describe('DashboardService new students by first wallet top-up', () => {
     jest.useRealTimers();
   });
 
+  it('builds monthly trend month starts without raw TO_DATE on free-text month columns', async () => {
+    prisma.$queryRaw.mockResolvedValue([]);
+
+    await service['getMonthlyTrend']({ anchorMonthKey: '2026-11' });
+
+    const [sql] = prisma.$queryRaw.mock.calls[0] as [Prisma.Sql];
+    // Một dòng `2026-Nov` từng làm TO_DATE ném lỗi → cả dashboard tháng trả 500.
+    expect(sql.sql).not.toMatch(/TO_DATE\(CONCAT\(/);
+    for (const column of [
+      'bonuses.month',
+      'extra_allowances.month',
+      'staff_fixed_salary_payables.month',
+      'cost_extend.month',
+    ]) {
+      expect(sql.sql).toContain(
+        `CASE WHEN BTRIM(${column}::text) ~ '^[1-9][0-9]{3}-(0?[1-9]|1[0-2])$'`,
+      );
+    }
+    expect(sql.sql).toContain("date_trunc('month', cost_extend.date)::date");
+  });
+
   it('counts only qualifying top-ups and keeps the earliest one', () => {
     expect(FIRST_WALLET_TOP_UP_SQL.sql).toContain(
       'MIN(wallet_transactions_history.created_at) AS first_top_up_at',

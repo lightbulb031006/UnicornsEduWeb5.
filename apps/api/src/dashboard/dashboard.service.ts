@@ -649,6 +649,34 @@ function prismaSqlMonthKeyTextLiteral(monthKey: string): Prisma.Sql {
   return Prisma.raw(`'${monthKey}'`);
 }
 
+/**
+ * Chuyển cột tháng dạng text `YYYY-MM` thành ngày đầu tháng. Giá trị sai định
+ * dạng (vd. `2026-Nov`, `11/2026`) trả về NULL thay vì để TO_DATE ném lỗi làm
+ * sập toàn bộ query dashboard. `monthColumn` là tên cột cố định trong code,
+ * không bao giờ nhận dữ liệu người dùng.
+ */
+function prismaSqlSafeMonthStart(monthColumn: string): Prisma.Sql {
+  if (!/^[a-z_]+\.[a-z_]+$/.test(monthColumn)) {
+    throw new Error(`Invalid dashboard SQL month column: ${monthColumn}`);
+  }
+  const trimmed = `BTRIM(${monthColumn}::text)`;
+  return Prisma.raw(
+    `(CASE WHEN ${trimmed} ~ '^[1-9][0-9]{3}-(0?[1-9]|1[0-2])$' THEN TO_DATE(${trimmed} || '-01', 'YYYY-MM-DD') END)`,
+  );
+}
+
+const SAFE_BONUS_MONTH_START_SQL = prismaSqlSafeMonthStart('bonuses.month');
+const SAFE_EXTRA_ALLOWANCE_MONTH_START_SQL = prismaSqlSafeMonthStart(
+  'extra_allowances.month',
+);
+const SAFE_FIXED_SALARY_MONTH_START_SQL = prismaSqlSafeMonthStart(
+  'staff_fixed_salary_payables.month',
+);
+const SAFE_COST_EXTEND_MONTH_START_SQL = Prisma.sql`COALESCE(
+  ${prismaSqlSafeMonthStart('cost_extend.month')},
+  date_trunc('month', cost_extend.date)::date
+)`;
+
 function formatMonthLabel(month: string, year: string) {
   return `Tháng ${month} / ${year}`;
 }
@@ -1414,7 +1442,7 @@ export class DashboardService {
       ),
       monthly_bonus_cost AS (
         SELECT
-          TO_DATE(CONCAT(bonuses.month, '-01'), 'YYYY-MM-DD') AS month_start,
+          ${SAFE_BONUS_MONTH_START_SQL} AS month_start,
           COALESCE(SUM(COALESCE(bonuses.amount, 0)), 0) AS amount
         FROM bonuses
         WHERE bonuses.month::text >= ${yearStartKey}
@@ -1423,7 +1451,7 @@ export class DashboardService {
       ),
       monthly_extra_allowance_cost AS (
         SELECT
-          TO_DATE(CONCAT(extra_allowances.month, '-01'), 'YYYY-MM-DD') AS month_start,
+          ${SAFE_EXTRA_ALLOWANCE_MONTH_START_SQL} AS month_start,
           COALESCE(SUM(COALESCE(extra_allowances.amount, 0)), 0) AS amount
         FROM extra_allowances
         WHERE extra_allowances.month::text >= ${yearStartKey}
@@ -1432,7 +1460,7 @@ export class DashboardService {
       ),
       monthly_fixed_salary_cost AS (
         SELECT
-          TO_DATE(CONCAT(staff_fixed_salary_payables.month, '-01'), 'YYYY-MM-DD') AS month_start,
+          ${SAFE_FIXED_SALARY_MONTH_START_SQL} AS month_start,
           COALESCE(SUM(COALESCE(staff_fixed_salary_payables.gross_amount, 0) - COALESCE(staff_fixed_salary_payables.operating_deduction_amount, 0)), 0) AS amount
         FROM staff_fixed_salary_payables
         WHERE staff_fixed_salary_payables.month::text >= ${yearStartKey}
@@ -1485,16 +1513,7 @@ export class DashboardService {
       ),
       monthly_operating_cost AS (
         SELECT
-          TO_DATE(
-            CONCAT(
-              COALESCE(
-                NULLIF(BTRIM(cost_extend.month::text), ''),
-                TO_CHAR(cost_extend.date, 'YYYY-MM')
-              ),
-              '-01'
-            ),
-            'YYYY-MM-DD'
-          ) AS month_start,
+          ${SAFE_COST_EXTEND_MONTH_START_SQL} AS month_start,
           COALESCE(SUM(COALESCE(cost_extend.amount, 0)), 0) AS amount
         FROM cost_extend
         WHERE (
@@ -6561,7 +6580,7 @@ export class DashboardService {
             ),
             monthly_bonus_cost AS (
               SELECT
-                TO_DATE(CONCAT(bonuses.month, '-01'), 'YYYY-MM-DD') AS month_start,
+                ${SAFE_BONUS_MONTH_START_SQL} AS month_start,
                 COALESCE(SUM(COALESCE(bonuses.amount, 0)), 0) AS amount
               FROM bonuses
               WHERE bonuses.month::text >= ${fromKeyLiteral}
@@ -6570,7 +6589,7 @@ export class DashboardService {
             ),
             monthly_extra_allowance_cost AS (
               SELECT
-                TO_DATE(CONCAT(extra_allowances.month, '-01'), 'YYYY-MM-DD') AS month_start,
+                ${SAFE_EXTRA_ALLOWANCE_MONTH_START_SQL} AS month_start,
                 COALESCE(SUM(COALESCE(extra_allowances.amount, 0)), 0) AS amount
               FROM extra_allowances
               WHERE extra_allowances.month::text >= ${fromKeyLiteral}
@@ -6579,7 +6598,7 @@ export class DashboardService {
             ),
             monthly_fixed_salary_cost AS (
               SELECT
-                TO_DATE(CONCAT(staff_fixed_salary_payables.month, '-01'), 'YYYY-MM-DD') AS month_start,
+                ${SAFE_FIXED_SALARY_MONTH_START_SQL} AS month_start,
                 COALESCE(SUM(COALESCE(staff_fixed_salary_payables.gross_amount, 0) - COALESCE(staff_fixed_salary_payables.operating_deduction_amount, 0)), 0) AS amount
               FROM staff_fixed_salary_payables
               WHERE staff_fixed_salary_payables.month::text >= ${fromKeyLiteral}
@@ -6632,16 +6651,7 @@ export class DashboardService {
             ),
             monthly_operating_cost AS (
               SELECT
-                TO_DATE(
-                  CONCAT(
-                    COALESCE(
-                      NULLIF(BTRIM(cost_extend.month::text), ''),
-                      TO_CHAR(cost_extend.date, 'YYYY-MM')
-                    ),
-                    '-01'
-                  ),
-                  'YYYY-MM-DD'
-                ) AS month_start,
+                ${SAFE_COST_EXTEND_MONTH_START_SQL} AS month_start,
                 COALESCE(SUM(COALESCE(cost_extend.amount, 0)), 0) AS amount
               FROM cost_extend
               WHERE (

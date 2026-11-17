@@ -36,6 +36,8 @@ Mọi thay đổi đáng kể của dự án được ghi lại tại file này.
 - Dashboard Toán giữ dòng chi phí Giáo án học sinh giỏi thay vì bị lọc như JP/ENG.
 - Preflight Math không còn chạy migration Tin-only `20261025090000_reset_student_passwords`: sau khi backup và rehearsal đạt, CD đánh dấu migration đã áp dụng bằng `prisma migrate resolve`, giữ nguyên toàn bộ mật khẩu học sinh Toán; danh sách skip bị khóa cứng và migration khác vẫn chạy bình thường.
 - Compose production của fork Toán ghim `LMS_PROFILE=math` cho API, tránh VPS dùng `.env` cũ khiến container crash-loop ngay sau deploy.
+- **Dashboard «chưa tải được dữ liệu» (HTTP 500) khi có cột tháng sai định dạng:** `getMonthlyTrend` và thống kê theo tháng dùng `TO_DATE(CONCAT(month, '-01'))` trên cột text `bonuses` / `extra_allowances` / `staff_fixed_salary_payables` / `cost_extend.month`; chỉ một dòng như `2026-Nov`, `11/2026`, `Tháng 11` là Postgres ném lỗi và cả `GET /dashboard` chế độ tháng trả 500. Nay dựng ngày đầu tháng qua `prismaSqlSafeMonthStart` (regex trước `TO_DATE`, sai thì `NULL`; `cost_extend` rơi về tháng của `date`). Đã tái hiện và xác nhận sửa trên Postgres tạm (PGlite) với đủ 193 migration.
+- Chặn dữ liệu tháng sai từ nguồn: `CreateCostDto.month` (tuỳ chọn) và `CreateBonusDto.month` thêm `@Matches(MONTH_KEY_PATTERN)` (`apps/api/src/common/month-key.ts`, dùng chung với extra allowance); form **Chi phí** (`CostFormPopup`) kiểm tra `YYYY-MM` trước khi gửi và báo bằng toast.
 
 #### Operations
 
